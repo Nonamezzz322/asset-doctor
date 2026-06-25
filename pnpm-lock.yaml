@@ -57,6 +57,9 @@ importers:
       '@asset-doctor/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@asset-doctor/correlate':
+        specifier: workspace:*
+        version: link:../../packages/correlate
       '@asset-doctor/parsers':
         specifier: workspace:*
         version: link:../../packages/parsers
@@ -112,6 +115,15 @@ importers:
         version: link:../parsers
 
   packages/core: {}
+
+  packages/correlate:
+    dependencies:
+      '@asset-doctor/core':
+        specifier: workspace:*
+        version: link:../core
+      '@asset-doctor/probe':
+        specifier: workspace:*
+        version: link:../probe
 
   packages/parsers:
     dependencies:

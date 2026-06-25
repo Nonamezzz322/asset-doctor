@@ -56,6 +56,10 @@ const report = profiler.report();
   any page as a MAIN-world content script at `document_start` + a live on-page HUD. Verified loading
   the real extension in headless Chromium (`tools/verify/ext-run.mjs`). Next within it: messaging
   (MAIN ↔ isolated ↔ popup/devtools) to surface the full report + capture/export.
-- **Correlation layer** (linter → doctor): stitch these runtime numbers to the static findings, e.g.
-  "symbols 58% empty (static) AND 47 draw calls / 31 binds (runtime) → spread across 4 atlases, not
-  batching → merge to 2 ≈ 18 draw calls." This is where the two halves become one verdict.
+- **Correlation layer** (linter → doctor) — ✅ done: [`packages/correlate`](../packages/correlate)
+  `correlate(staticReport, runtimeReport)` stitches a static folder audit and a live capture into single
+  verdicts (R1 batching, R2 VRAM residency, R3/R4 upload/shader hitches, R5 redundant state) — each cites
+  evidence from BOTH + a fix + estimated effect. Verified live end-to-end (`apps/web/correlate.html` +
+  `tools/verify/correlate-run.mjs`): a fragmented 128-sprite scene → static `should-atlas` × runtime
+  `128 binds/frame` → one CRIT verdict "pack into one atlas → 1 draw". This is where the two halves
+  become one diagnosis. Next: surface it in the extension (capture runtime + load a static audit).
