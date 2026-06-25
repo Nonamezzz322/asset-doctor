@@ -40,7 +40,9 @@ runs:
     - name: Set up pnpm
       uses: pnpm/action-setup@v4
       with:
-        version: 10
+        # Read the pnpm version from THIS action's package.json (packageManager), so it works whether
+        # or not the caller repo pins pnpm — and never conflicts with a caller's own packageManager.
+        package_json_file: ${{ github.action_path }}/package.json
 
     - name: Set up Node
       uses: actions/setup-node@v4
