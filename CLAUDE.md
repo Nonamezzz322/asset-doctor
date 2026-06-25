@@ -20,7 +20,7 @@ TS · React · Vite · PixiJS v8 (render-probe/WebGL) · Web Workers (анали
 Бэкенд (Phase 2): Go или NestJS — решение фиксируем перед Phase 2.
 
 ## Раскладка монорепо (pnpm workspaces)
-`apps/{web,extension,cli}` · `apps/api`(P2) · `packages/{core,parsers,ingest,analysis,probe,correlate,budget,fix(P2)}`
+`apps/{web,extension,cli}` · `apps/api`(P2) · `packages/{core,parsers,ingest,analysis,probe,correlate,budget,i18n,fix(P2)}`
 · `action.yml`(composite GH Action) · `fixtures/sample-projects` + `fixtures/budgets`
 - `core` — общие TS-контракты (atlas + analysis модель). **Единственный источник правды**, без дрейфа.
 - `parsers` — TexturePacker JSON (Hash/Array) + Pixi + одиночные + Spine `.atlas` → норм. `Atlas`-модель. Pure, worker-safe.
@@ -29,6 +29,7 @@ TS · React · Vite · PixiJS v8 (render-probe/WebGL) · Web Workers (анали
   · folder-rules (dup-exact/similar, should-atlas, atlas-merge, integrity) · variants/VRAM. **Пороги — в конфиге.**
 - `probe` — render-probe + рантайм-профайлер (draw calls/VRAM из offscreen/live Pixi). `correlate` — линтер→доктор (static×runtime).
 - `budget` — Phase-3 чистое ядро гейта: metric-registry, JSON-конфиг (fail-closed), evaluate, serialize (json/sarif/summary). `apps/cli` — тонкий bin `asset-doctor`.
+- `i18n` — zero-dep локализация (Intl.PluralRules/NumberFormat), общий каталог для web+extension. Findings несут `messageKey`+`params`; en — источник (drift-тест воспроизводит baked); CLI остаётся EN. **9 языков:** en/ru/de/es/pt/fr/it/zh/hi.
 
 ## Фаза
 **Phase 1 (диагноз) — готов и задеплоен** (https://nonamezzz322.github.io/asset-doctor/, GH Pages). Полный

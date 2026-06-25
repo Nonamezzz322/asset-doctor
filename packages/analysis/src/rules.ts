@@ -46,6 +46,8 @@ export function occupancyFinding(atlas: Atlas, cfg: ThresholdConfig): Finding | 
       `Tighter packing shrinks the sheet and the VRAM it pins (${fmtBytes(vramBytes(atlas.size))}).`,
     fix: 'Repack with MaxRects + trim, or split into a smaller sheet.',
     estimate: { occupancyPct: occ },
+    messageKey: 'occupancy',
+    params: { occ, wasted: 1 - occ, frames: atlas.sprites.length, w: atlas.size.w, h: atlas.size.h, vram: vramBytes(atlas.size) },
   };
 }
 
@@ -65,6 +67,8 @@ export function dimensionFindings(ref: string, size: Size, cfg: ThresholdConfig)
         `Longest edge ${longest}px exceeds the ${budget}px ${severity} budget. ` +
         `It pins ${fmtBytes(vramBytes(size))} of VRAM and may exceed low-end GPU limits.`,
       fix: 'Downscale, split, or stream; verify the max texture size of your target GPUs.',
+      messageKey: 'oversize',
+      params: { w: size.w, h: size.h, edge: longest, budget, sev: severity, vram: vramBytes(size) },
     });
   }
   if (!isPowerOfTwo(size.w) || !isPowerOfTwo(size.h)) {
@@ -86,6 +90,8 @@ export function dimensionFindings(ref: string, size: Size, cfg: ThresholdConfig)
           `WebGL2/PixiJS upload NPOT natively (clamp+linear), so this is usually harmless.`,
         fix: 'Only act if your pipeline forces POT: trim/resize so the padding is minimal.',
         estimate: { vramBytesSaved: vramBytes({ w: potW, h: potH }) - vramBytes(size) },
+        messageKey: 'npot',
+        params: { w: size.w, h: size.h, potW, potH, waste: paddedWaste, vram: vramBytes({ w: potW, h: potH }) - vramBytes(size) },
       });
     }
   }
@@ -111,6 +117,8 @@ export function wastedRegions(
     title: `${rects.length} empty region${rects.length === 1 ? '' : 's'} mapped`,
     detail: `≈${pct1(emptyPx / atlasPx)}% of the atlas is contiguous empty space (grid-mapped).`,
     overlay: [{ kind: 'empty', rects }],
+    messageKey: 'wasted-regions',
+    params: { n: rects.length, pct: emptyPx / atlasPx },
   };
 }
 
@@ -159,5 +167,7 @@ export async function formatFinding(
       `~${fmtBytes(best.bytes)} (−${fmtBytes(saved)}). Canvas estimate; lossless parity needs wasm codecs.`,
     fix: 'Transcode to AVIF (or WebP) for delivery.',
     estimate: { diskBytesSaved: saved },
+    messageKey: 'format',
+    params: { target: FORMAT_LABEL[best.mime], frac, srcLabel: FORMAT_LABEL[image.mime], srcBytes: image.byteSize, bestBytes: best.bytes, saved },
   };
 }

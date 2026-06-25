@@ -101,6 +101,10 @@ export interface FindingEstimate {
   occupancyPct?: number;
 }
 
+/** Raw interpolation values for localized rendering of a finding (numbers stay raw — the presentation
+ *  layer formats bytes/percentages per locale). Strings (filenames, joined refs) are passed verbatim. */
+export type FindingParams = Record<string, string | number>;
+
 export interface Finding {
   id: string;
   rule: Rule;
@@ -111,12 +115,18 @@ export interface Finding {
   assetRef: string;
   /** All assets a folder finding spans (duplicate group, merge candidates, …). */
   relatedRefs?: string[];
-  /** Verdict, readout style. */
+  /** Verdict, readout style. The baked English string — also the i18n fallback. */
   title: string;
-  /** Explanation plus the proof (numbers). */
+  /** Explanation plus the proof (numbers). The baked English string. */
   detail: string;
   /** Suggested action. */
   fix?: string;
+  /** Stable i18n key for this finding's template family (e.g. 'occupancy', 'should-atlas'). When set
+   *  with `params`, the presentation layer renders title/detail/fix per locale; English is identical
+   *  to the baked strings above. Absent → render the baked English. */
+  messageKey?: string;
+  /** Raw interpolation values for the localized templates. */
+  params?: FindingParams;
   /** Quantified effect — only defensible numbers; leave sparse when uncertain. */
   estimate?: FindingEstimate;
   overlay?: OverlayZone[];

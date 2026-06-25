@@ -56,6 +56,8 @@ export function duplicateExactFindings(assets: Asset[], features: ImageFeatures[
         diskBytesSaved: perDisk * (refs.length - 1),
         vramBytesSaved: perVram * (refs.length - 1),
       },
+      messageKey: 'duplicate-exact',
+      params: { n: refs.length, refs: refs.join(', '), vram: perVram },
     });
   }
   return out;
@@ -89,6 +91,8 @@ export function duplicateSimilarFindings(features: ImageFeatures[], cfg: Thresho
         `Perceptually near-identical (dHash ≤ ${cfg.duplicates.similarHammingMax} bits): ` +
         `${refs.join(', ')}. Likely re-exports or near-dupes — consider reusing one.`,
       fix: 'Review for reuse / de-duplication.',
+      messageKey: 'duplicate-similar',
+      params: { n: refs.length, bits: cfg.duplicates.similarHammingMax, refs: refs.join(', ') },
     });
   }
   return out;
@@ -112,6 +116,8 @@ export function shouldAtlasFinding(assets: Asset[], cfg: ThresholdConfig): Findi
       `${small.length} standalone images (≤${cfg.shouldAtlas.maxSpriteEdgePx}px). Each is its own ` +
       `texture bind + draw call at runtime; packing them into one atlas batches the draws.`,
     fix: 'Pack loose sprites into a TexturePacker / Pixi atlas.',
+    messageKey: 'should-atlas',
+    params: { n: small.length, edge: cfg.shouldAtlas.maxSpriteEdgePx },
   };
 }
 
@@ -143,6 +149,8 @@ export function atlasMergeFinding(atlases: Atlas[], cfg: ThresholdConfig): Findi
       `texture binds, draw calls and VRAM.`,
     fix: 'Re-pack these atlases together.',
     estimate: { vramBytesSaved: Math.max(0, currentVram - mergedVram) },
+    messageKey: 'atlas-merge',
+    params: { n: under.length, merged: minAtlases, refs: refs.join(', '), pct: Math.round(cfg.atlasMerge.occupancyBelow * 100) },
   };
 }
 
@@ -157,6 +165,8 @@ export function integrityFindings(missing: { manifest: string; image: string }[]
     title: `Missing atlas image: ${m.image}`,
     detail: `Manifest ${m.manifest} references "${m.image}", which is not in the folder — the atlas can't load.`,
     fix: 'Add the missing image or fix the manifest path.',
+    messageKey: 'integrity',
+    params: { image: m.image, manifest: m.manifest },
   }));
 }
 
@@ -176,5 +186,7 @@ export function formatAggregateFinding(formatFindings: Finding[]): Finding | nul
     detail: `Transcoding ${formatFindings.length} images to AVIF/WebP saves ~${fmtBytes(totalSaved)} of download across the folder.`,
     fix: 'Batch-transcode to AVIF/WebP for delivery.',
     estimate: { diskBytesSaved: totalSaved },
+    messageKey: 'format-aggregate',
+    params: { n: formatFindings.length, saved: totalSaved },
   };
 }

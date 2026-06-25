@@ -9,6 +9,7 @@ import {
 } from './lib/import';
 import { runAnalysis, type Progress } from './lib/worker-client';
 import { fmtBytes, SEVERITY_TEXT } from './lib/format';
+import { LOCALES, NATIVE_NAME, useI18n } from './lib/i18n';
 import { FilmViewer } from './components/FilmViewer';
 import { Findings } from './components/Findings';
 import { FolderReport } from './components/FolderReport';
@@ -22,6 +23,7 @@ type Phase =
 const baseName = (p: string): string => p.split('/').pop() ?? p;
 
 export function App() {
+  const { t } = useI18n();
   const [phase, setPhase] = useState<Phase>({ t: 'idle' });
   const [files, setFiles] = useState<PickedFile[]>([]);
   const [report, setReport] = useState<AnalysisReport | null>(null);
@@ -41,7 +43,7 @@ export function App() {
 
   async function run(picked: PickedFile[]) {
     if (picked.length === 0) {
-      setPhase({ t: 'error', message: 'No .json or image files found there.' });
+      setPhase({ t: 'error', message: t('error.noFiles') });
       return;
     }
     setFiles(picked);
@@ -78,23 +80,26 @@ export function App() {
   return (
     <div className="min-h-full bg-bg text-ink">
       <header className="border-b border-line bg-panel">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-4">
           <div className="flex items-baseline gap-3">
             <span className="font-display text-xl font-semibold tracking-tight">Asset Doctor</span>
-            <span className="font-mono text-xs text-ink-soft">phase 1 · milestone 1</span>
+            <span className="font-mono text-xs text-ink-soft">{t('app.tag')}</span>
           </div>
-          {report ? (
-            <div className="flex items-center gap-5 font-mono text-xs">
-              <Metric label="disk" value={fmtBytes(totals?.diskBytes ?? 0)} />
-              <Metric
-                label="vram"
-                value={`${fmtBytes(totals?.vramBytes ?? 0)} → ~${fmtBytes(totals?.loadedVramBytes ?? 0)} loaded`}
-              />
-              <Metric label="saveable" value={`${fmtBytes(totals?.potentialDiskSaved ?? 0)} · ${savedPct}%`} accent />
-            </div>
-          ) : (
-            <span className="font-mono text-xs text-teal">x-ray room</span>
-          )}
+          <div className="flex items-center gap-5">
+            {report ? (
+              <div className="flex items-center gap-5 font-mono text-xs">
+                <Metric label={t('metric.disk')} value={fmtBytes(totals?.diskBytes ?? 0)} />
+                <Metric
+                  label={t('metric.vram')}
+                  value={`${fmtBytes(totals?.vramBytes ?? 0)} → ~${fmtBytes(totals?.loadedVramBytes ?? 0)} ${t('metric.loaded')}`}
+                />
+                <Metric label={t('metric.saveable')} value={`${fmtBytes(totals?.potentialDiskSaved ?? 0)} · ${savedPct}%`} accent />
+              </div>
+            ) : (
+              <span className="font-mono text-xs text-teal">{t('header.xray')}</span>
+            )}
+            <LanguageSwitcher />
+          </div>
         </div>
       </header>
 
@@ -119,49 +124,47 @@ export function App() {
               }}
             />
             {report.assets.length === 0 ? (
-              <p className="font-mono text-sm text-ink-soft">
-                No individual image or atlas assets to display.
-              </p>
+              <p className="font-mono text-sm text-ink-soft">{t('report.noAssets')}</p>
             ) : (
-            <section className="grid gap-6 lg:grid-cols-[1fr_minmax(320px,420px)]">
-            <div className="space-y-3">
-              <AssetSelector
-                report={report}
-                selected={selectedAsset}
-                onSelect={(a) => {
-                  setSelectedAsset(a);
-                  setSelectedFinding(undefined);
-                }}
-              />
-              {selectedBytes ? (
-                <FilmViewer bytes={selectedBytes} findings={assetFindings} highlightId={selectedFinding} />
-              ) : (
-                <p className="font-mono text-sm text-ink-soft">No image to display for this asset.</p>
-              )}
-            </div>
+              <section className="grid gap-6 lg:grid-cols-[1fr_minmax(320px,420px)]">
+                <div className="space-y-3">
+                  <AssetSelector
+                    report={report}
+                    selected={selectedAsset}
+                    onSelect={(a) => {
+                      setSelectedAsset(a);
+                      setSelectedFinding(undefined);
+                    }}
+                  />
+                  {selectedBytes ? (
+                    <FilmViewer bytes={selectedBytes} findings={assetFindings} highlightId={selectedFinding} />
+                  ) : (
+                    <p className="font-mono text-sm text-ink-soft">{t('report.noImage')}</p>
+                  )}
+                </div>
 
-            <aside className="space-y-3">
-              <h2 className="font-display text-lg font-semibold">Findings</h2>
-              <Findings findings={assetFindings} selectedId={selectedFinding} onSelect={setSelectedFinding} />
-              <div className="rounded-md border border-dashed border-line p-3 text-center">
-                <p className="font-mono text-xs text-ink-soft">Pro fix (repack + transcode) — Phase 2</p>
-                <button
-                  type="button"
-                  disabled
-                  className="mt-2 cursor-not-allowed rounded bg-cta px-3 py-1.5 font-mono text-xs text-white opacity-60"
-                >
-                  Download optimized folder
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={() => setPhase({ t: 'idle' })}
-                className="font-mono text-xs text-teal underline"
-              >
-                ← analyze another folder
-              </button>
-            </aside>
-            </section>
+                <aside className="space-y-3">
+                  <h2 className="font-display text-lg font-semibold">{t('findings.title')}</h2>
+                  <Findings findings={assetFindings} selectedId={selectedFinding} onSelect={setSelectedFinding} />
+                  <div className="rounded-md border border-dashed border-line p-3 text-center">
+                    <p className="font-mono text-xs text-ink-soft">{t('pro.note')}</p>
+                    <button
+                      type="button"
+                      disabled
+                      className="mt-2 cursor-not-allowed rounded bg-cta px-3 py-1.5 font-mono text-xs text-white opacity-60"
+                    >
+                      {t('pro.cta')}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPhase({ t: 'idle' })}
+                    className="font-mono text-xs text-teal underline"
+                  >
+                    {t('action.analyzeAnother')}
+                  </button>
+                </aside>
+              </section>
             )}
           </div>
         )}
@@ -172,6 +175,24 @@ export function App() {
         if (list) void filesFromInput(list).then(run);
       }} />
     </div>
+  );
+}
+
+function LanguageSwitcher() {
+  const { locale, setLocale, t } = useI18n();
+  return (
+    <select
+      aria-label={t('ui.language')}
+      value={locale}
+      onChange={(e) => setLocale(e.target.value as typeof locale)}
+      className="rounded border border-line bg-panel px-2 py-1 font-mono text-xs text-ink-soft hover:border-ink-soft"
+    >
+      {LOCALES.map((l) => (
+        <option key={l} value={l}>
+          {NATIVE_NAME[l]}
+        </option>
+      ))}
+    </select>
   );
 }
 
@@ -193,6 +214,7 @@ function Dropzone({
   onOpen: () => void;
   onDrop: (dt: DataTransferItemList) => void;
 }) {
+  const { t } = useI18n();
   const analyzing = phase.t === 'analyzing';
   return (
     <div
@@ -203,17 +225,14 @@ function Dropzone({
       }}
       className="rounded-lg border border-dashed border-line bg-film p-12 text-center"
     >
-      <h1 className="font-display text-2xl font-semibold tracking-tight text-white">
-        Drop an asset folder to diagnose
-      </h1>
-      <p className="mx-auto mt-2 max-w-xl font-mono text-xs text-line">
-        TexturePacker / Pixi atlases + loose images. Analysis runs locally — nothing leaves your device.
-      </p>
+      <h1 className="font-display text-2xl font-semibold tracking-tight text-white">{t('dropzone.title')}</h1>
+      <p className="mx-auto mt-2 max-w-xl font-mono text-xs text-line">{t('dropzone.subtitle')}</p>
 
       {analyzing ? (
         <div className="mt-6">
           <p className="font-mono text-sm text-teal">
-            analyzing… {phase.progress ? `${phase.progress.done}/${phase.progress.total} · ${phase.progress.label}` : ''}
+            {t('dropzone.analyzing')}{' '}
+            {phase.progress ? t('dropzone.progress', { done: phase.progress.done, total: phase.progress.total, label: phase.progress.label }) : ''}
           </p>
         </div>
       ) : (
@@ -222,12 +241,12 @@ function Dropzone({
           onClick={onOpen}
           className="mt-6 rounded bg-cta px-4 py-2 font-mono text-sm text-white"
         >
-          Open folder
+          {t('dropzone.open')}
         </button>
       )}
 
       {phase.t === 'error' && <p className="mt-4 font-mono text-xs text-crit">{phase.message}</p>}
-      <p className="mt-6 font-mono text-[11px] text-ink-soft">disk weight ≠ GPU footprint · VRAM = w × h × 4</p>
+      <p className="mt-6 font-mono text-[11px] text-ink-soft">{t('dropzone.footnote')}</p>
     </div>
   );
 }

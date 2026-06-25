@@ -3,7 +3,7 @@
 // evidence from BOTH sources, names the diagnosis, and gives a fix + estimated effect. This is where
 // the two halves of the moat become one diagnosis — neither static nor runtime alone could say it.
 
-import type { AnalysisReport, Severity } from '@asset-doctor/core';
+import type { AnalysisReport, FindingParams, Severity } from '@asset-doctor/core';
 import type { RuntimeReport } from '@asset-doctor/probe/runtime';
 
 export interface CorrelatedFinding {
@@ -18,6 +18,9 @@ export interface CorrelatedFinding {
   diagnosis: string;
   fix: string;
   estimate?: { drawCallsAfter?: number; vramBytesSaved?: number; hitchMsSaved?: number };
+  /** i18n: the `rule` doubles as the message family; `params` + a per-field `variant` drive localized
+   *  templates. English is identical to the baked strings above. */
+  params?: FindingParams & { variant?: string };
 }
 
 export interface CorrelationReport {
@@ -61,6 +64,14 @@ export function correlate(stat: AnalysisReport, rt: RuntimeReport): CorrelationR
         ? 'Pack the loose sprites into one atlas so they batch into a single draw.'
         : 'Re-pack the atlases together so sprites share a texture and batch.',
       estimate: { drawCallsAfter: idealDraws },
+      params: {
+        drawCalls: rt.drawCalls.max,
+        binds: rt.textureBinds.avg,
+        looseN,
+        atlasCount,
+        staticVariant: shouldAtlas ? 'loose' : atlasMerge ? 'merge' : 'atlases',
+        subjectVariant: shouldAtlas ? 'loose' : 'atlases',
+      },
     });
   }
 
@@ -76,6 +87,7 @@ export function correlate(stat: AnalysisReport, rt: RuntimeReport): CorrelationR
       diagnosis: `More textures are on the GPU than the loaded set implies — textures not freed, or extra variants/atlases resident at once.`,
       fix: 'Free off-screen textures; keep one resolution/format tier per device.',
       estimate: { vramBytesSaved: rt.vramBytes - stat.totals.loadedVramBytes },
+      params: { live: rt.vramBytes, loaded: stat.totals.loadedVramBytes },
     });
   }
 
@@ -92,6 +104,7 @@ export function correlate(stat: AnalysisReport, rt: RuntimeReport): CorrelationR
       diagnosis: `Uploading textures to the GPU during play stalls the frame.`,
       fix: 'Pre-upload these textures on the loading screen (GPU pre-warm).',
       ...(uploadHitchMs ? { estimate: { hitchMsSaved: uploadHitchMs } } : {}),
+      params: { uploads: rt.uploadsDuringGameplay, hitchMs: uploadHitchMs, staticVariant: find('dimensions-oversize') ? 'oversize' : 'large' },
     });
   }
 
@@ -108,6 +121,7 @@ export function correlate(stat: AnalysisReport, rt: RuntimeReport): CorrelationR
       diagnosis: `Shader compilation mid-game causes a one-time hitch.`,
       fix: 'Pre-compile / warm shaders at boot.',
       ...(shaderHitchMs ? { estimate: { hitchMsSaved: shaderHitchMs } } : {}),
+      params: { compiles: rt.shaderCompilesDuringGameplay, hitchMs: shaderHitchMs },
     });
   }
 
@@ -123,6 +137,7 @@ export function correlate(stat: AnalysisReport, rt: RuntimeReport): CorrelationR
       runtimeEvidence: `${rt.redundantBinds} redundant texture/program binds over ${rt.frames} frames`,
       diagnosis: `Re-binding the already-bound texture/program wastes GPU state changes.`,
       fix: 'Sort draws by texture/material so the batcher can dedupe binds.',
+      params: { perFrame: Math.round(redundantPerFrame), redundant: rt.redundantBinds, frames: rt.frames },
     });
   }
 

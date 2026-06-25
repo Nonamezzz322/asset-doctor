@@ -72,6 +72,9 @@ importers:
       '@asset-doctor/correlate':
         specifier: workspace:*
         version: link:../../packages/correlate
+      '@asset-doctor/i18n':
+        specifier: workspace:*
+        version: link:../../packages/i18n
       '@asset-doctor/ingest':
         specifier: workspace:*
         version: link:../../packages/ingest
@@ -97,6 +100,9 @@ importers:
       '@asset-doctor/correlate':
         specifier: workspace:*
         version: link:../../packages/correlate
+      '@asset-doctor/i18n':
+        specifier: workspace:*
+        version: link:../../packages/i18n
       '@asset-doctor/ingest':
         specifier: workspace:*
         version: link:../../packages/ingest
@@ -170,6 +176,22 @@ importers:
       '@asset-doctor/core':
         specifier: workspace:*
         version: link:../core
+      '@asset-doctor/probe':
+        specifier: workspace:*
+        version: link:../probe
+
+  packages/i18n:
+    dependencies:
+      '@asset-doctor/core':
+        specifier: workspace:*
+        version: link:../core
+      '@asset-doctor/correlate':
+        specifier: workspace:*
+        version: link:../correlate
+    devDependencies:
+      '@asset-doctor/analysis':
+        specifier: workspace:*
+        version: link:../analysis
       '@asset-doctor/probe':
         specifier: workspace:*
         version: link:../probe

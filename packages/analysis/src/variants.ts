@@ -88,5 +88,7 @@ export function variantsFinding(v: VariantGroups): Finding | null {
       `identical in VRAM — ship one per platform; resolution variants load one tier per device.`,
     fix: 'Serve one format per platform and one resolution tier per device; don’t treat all variants as concurrent VRAM.',
     estimate: { vramBytesSaved: inflation },
+    messageKey: 'variants',
+    params: { variantFiles: v.variantFiles, groups: v.groups.length, loadedMin: v.loadedVramMin, loadedMax: v.loadedVramMax, summed: v.summedVram },
   };
 }

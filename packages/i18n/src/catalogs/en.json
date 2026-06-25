@@ -1,0 +1,131 @@
+{
+  "app.tag": "phase 1 · milestone 1",
+  "header.xray": "x-ray room",
+  "ui.language": "Language",
+
+  "metric.disk": "disk",
+  "metric.vram": "vram",
+  "metric.saveable": "saveable",
+  "metric.loaded": "loaded",
+
+  "dropzone.title": "Drop an asset folder to diagnose",
+  "dropzone.subtitle": "TexturePacker / Pixi atlases + loose images. Analysis runs locally — nothing leaves your device.",
+  "dropzone.open": "Open folder",
+  "dropzone.analyzing": "analyzing…",
+  "dropzone.progress": "{done}/{total} · {label}",
+  "dropzone.footnote": "disk weight ≠ GPU footprint · VRAM = w × h × 4",
+
+  "error.noFiles": "No .json or image files found there.",
+
+  "folder.title": "Folder report",
+  "folder.issues": { "$count": "n", "one": "{n} whole-folder issue", "other": "{n} whole-folder issues" },
+  "report.noAssets": "No individual image or atlas assets to display.",
+  "report.noImage": "No image to display for this asset.",
+  "findings.title": "Findings",
+  "findings.none": "✓ no issues for this asset",
+  "pro.note": "Pro fix (repack + transcode) — Phase 2",
+  "pro.cta": "Download optimized folder",
+  "action.analyzeAnother": "← analyze another folder",
+
+  "severity.crit": "crit",
+  "severity.warn": "warn",
+  "severity.ok": "ok",
+  "severity.info": "info",
+
+  "find.occupancy.title": "Atlas {occ:pct} packed — {wasted:pct} wasted",
+  "find.occupancy.detail": "{frames} frames cover {occ:pct} of {w}×{h}. Tighter packing shrinks the sheet and the VRAM it pins ({vram:bytes}).",
+  "find.occupancy.fix": "Repack with MaxRects + trim, or split into a smaller sheet.",
+
+  "find.oversize.title": "Oversized {w}×{h} (edge {edge}px)",
+  "find.oversize.detail": "Longest edge {edge}px exceeds the {budget}px {sev:sev} budget. It pins {vram:bytes} of VRAM and may exceed low-end GPU limits.",
+  "find.oversize.fix": "Downscale, split, or stream; verify the max texture size of your target GPUs.",
+
+  "find.npot.title": "Non-power-of-two {w}×{h}",
+  "find.npot.detail": "Padding to {potW}×{potH} would waste {waste:pct} ({vram:bytes}) IF your toolchain pads to POT. WebGL2/PixiJS upload NPOT natively (clamp+linear), so this is usually harmless.",
+  "find.npot.fix": "Only act if your pipeline forces POT: trim/resize so the padding is minimal.",
+
+  "find.wasted-regions.title": { "$count": "n", "one": "{n} empty region mapped", "other": "{n} empty regions mapped" },
+  "find.wasted-regions.detail": "≈{pct:pct} of the atlas is contiguous empty space (grid-mapped).",
+
+  "find.format.title": "{target} would cut {frac:pct}",
+  "find.format.detail": "{srcLabel} {srcBytes:bytes} → {target} ~{bestBytes:bytes} (−{saved:bytes}). Canvas estimate; lossless parity needs wasm codecs.",
+  "find.format.fix": "Transcode to AVIF (or WebP) for delivery.",
+
+  "find.duplicate-exact.title": "{n}× identical file",
+  "find.duplicate-exact.detail": "Byte-identical copies: {refs}. Keep one and reference it — each copy is also a separate texture upload ({vram:bytes} VRAM each).",
+  "find.duplicate-exact.fix": "De-duplicate: keep a single copy and update references.",
+
+  "find.duplicate-similar.title": "{n} near-identical images",
+  "find.duplicate-similar.detail": "Perceptually near-identical (dHash ≤ {bits} bits): {refs}. Likely re-exports or near-dupes — consider reusing one.",
+  "find.duplicate-similar.fix": "Review for reuse / de-duplication.",
+
+  "find.should-atlas.title": "{n} loose sprites — pack into an atlas",
+  "find.should-atlas.detail": "{n} standalone images (≤{edge}px). Each is its own texture bind + draw call at runtime; packing them into one atlas batches the draws.",
+  "find.should-atlas.fix": "Pack loose sprites into a TexturePacker / Pixi atlas.",
+
+  "find.atlas-merge.title": "{n} under-filled atlases → merge into ~{merged}",
+  "find.atlas-merge.detail": { "$count": "merged", "one": "{refs} are each under {pct}% full. Their content fits in ~{merged} sheet — merging cuts texture binds, draw calls and VRAM.", "other": "{refs} are each under {pct}% full. Their content fits in ~{merged} sheets — merging cuts texture binds, draw calls and VRAM." },
+  "find.atlas-merge.fix": "Re-pack these atlases together.",
+
+  "find.integrity.title": "Missing atlas image: {image}",
+  "find.integrity.detail": "Manifest {manifest} references \"{image}\", which is not in the folder — the atlas can't load.",
+  "find.integrity.fix": "Add the missing image or fix the manifest path.",
+
+  "find.format-aggregate.title": "{n} images could shrink — {saved:bytes} total",
+  "find.format-aggregate.detail": "Transcoding {n} images to AVIF/WebP saves ~{saved:bytes} of download across the folder.",
+  "find.format-aggregate.fix": "Batch-transcode to AVIF/WebP for delivery.",
+
+  "find.variants.title": "Format/resolution variants inflate VRAM",
+  "find.variants.detail": "{variantFiles} variant files across {groups} logical images. At runtime one variant loads per image, so GPU VRAM is ~{loadedMin:bytes}–{loadedMax:bytes} (one resolution tier), not {summed:bytes}. Format variants (png/webp/avif) are identical in VRAM — ship one per platform; resolution variants load one tier per device.",
+  "find.variants.fix": "Serve one format per platform and one resolution tier per device; don’t treat all variants as concurrent VRAM.",
+
+  "corr.batching.title": "{drawCalls} draw calls/frame — sprites aren't batching",
+  "corr.batching.static_loose": "{looseN} loose sprites not packed into an atlas",
+  "corr.batching.static_merge": "under-filled atlases that could merge",
+  "corr.batching.static_atlases": "{atlasCount} separate atlases",
+  "corr.batching.runtime": "{drawCalls} draw calls + ~{binds} texture binds/frame",
+  "corr.batching.diag_loose": "Each texture forces its own draw call — the renderer can't batch across the loose sprites.",
+  "corr.batching.diag_atlases": "Each texture forces its own draw call — the renderer can't batch across the separate atlases.",
+  "corr.batching.fix_loose": "Pack the loose sprites into one atlas so they batch into a single draw.",
+  "corr.batching.fix_atlases": "Re-pack the atlases together so sprites share a texture and batch.",
+
+  "corr.vram.title": "Live VRAM {live:mb} exceeds the loaded estimate",
+  "corr.vram.static": "loaded-VRAM estimate ~{loaded:mb} (one variant/asset)",
+  "corr.vram.runtime": "{live:mb} resident during play",
+  "corr.vram.diag": "More textures are on the GPU than the loaded set implies — textures not freed, or extra variants/atlases resident at once.",
+  "corr.vram.fix": "Free off-screen textures; keep one resolution/format tier per device.",
+
+  "corr.upload-hitch.title": "{uploads} texture uploads during gameplay",
+  "corr.upload-hitch.static_oversize": "the build has oversized textures",
+  "corr.upload-hitch.static_large": "large textures in the build",
+  "corr.upload-hitch.runtime": "{uploads} uploads mid-game",
+  "corr.upload-hitch.runtime_hitch": "{uploads} uploads mid-game, ~{hitchMs}ms of hitches",
+  "corr.upload-hitch.diag": "Uploading textures to the GPU during play stalls the frame.",
+  "corr.upload-hitch.fix": "Pre-upload these textures on the loading screen (GPU pre-warm).",
+
+  "corr.shader-hitch.title": "{compiles} shaders compiled during gameplay",
+  "corr.shader-hitch.static": "—",
+  "corr.shader-hitch.runtime": "{compiles} compiles mid-game",
+  "corr.shader-hitch.runtime_hitch": "{compiles} compiles mid-game, ~{hitchMs}ms",
+  "corr.shader-hitch.diag": "Shader compilation mid-game causes a one-time hitch.",
+  "corr.shader-hitch.fix": "Pre-compile / warm shaders at boot.",
+
+  "corr.redundant-state.title": "~{perFrame} redundant binds/frame",
+  "corr.redundant-state.static": "—",
+  "corr.redundant-state.runtime": "{redundant} redundant texture/program binds over {frames} frames",
+  "corr.redundant-state.diag": "Re-binding the already-bound texture/program wastes GPU state changes.",
+  "corr.redundant-state.fix": "Sort draws by texture/material so the batcher can dedupe binds.",
+
+  "corr.summaryNone": "No static↔runtime issues correlated — folder structure and live workload look consistent.",
+
+  "ext.btn.load": "load folder",
+  "ext.btn.recorrelate": "re-correlate",
+  "ext.btn.export": "export",
+  "ext.corr.header": "doctor · static × runtime",
+  "ext.corr.auditing": "auditing folder…",
+  "ext.hud.drawCalls": "draw calls/frame  {avg}  (max {max})",
+  "ext.hud.binds": "texture binds/frame {avg} · redundant {redundant}",
+  "ext.hud.vram": "VRAM ~{vram} · textures {textures}",
+  "ext.hud.hitches": "hitch uploads {uploads} · shaders {shaders}",
+  "ext.hud.fps": "fps {fps} · {ms}ms (device-dep)"
+}
