@@ -7,6 +7,7 @@ import type { Asset, ImageFeatures, ImageMime } from '@asset-doctor/core';
 import { parseAtlas, parseImage } from '@asset-doctor/parsers';
 import { analyze, type EncodeSizer } from '@asset-doctor/analysis';
 import { groupFiles, type RawFile } from '../lib/group';
+import { dHashFromGray, isFlat, luma } from '../lib/perceptual';
 import type { WorkerRequest, WorkerResponse } from './protocol';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
@@ -66,36 +67,22 @@ async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** 64-bit difference hash (dHash) of the image, as 16 hex chars. Null if it can't decode. */
+/** 64-bit difference hash (dHash) of the image, as 16 hex chars. Null if it can't decode or is
+ *  too featureless (flat fills collapse to one hash → false near-dup matches). */
 async function dHashHex(bytes: ArrayBuffer): Promise<string | null> {
   if (typeof OffscreenCanvas === 'undefined') return null;
   try {
     const bmp = await createImageBitmap(new Blob([bytes]));
-    const W = 9;
-    const H = 8;
-    const canvas = new OffscreenCanvas(W, H);
+    const canvas = new OffscreenCanvas(9, 8);
     const c2d = canvas.getContext('2d');
     if (!c2d) return null;
-    c2d.drawImage(bmp, 0, 0, W, H);
+    c2d.drawImage(bmp, 0, 0, 9, 8);
     bmp.close();
-    const data = c2d.getImageData(0, 0, W, H).data;
-    const gray = (i: number): number =>
-      0.299 * data[i]! + 0.587 * data[i + 1]! + 0.114 * data[i + 2]!;
-    let hex = '';
-    let nibble = 0;
-    let bits = 0;
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W - 1; x++) {
-        const i = (y * W + x) * 4;
-        nibble = (nibble << 1) | (gray(i) < gray(i + 4) ? 1 : 0);
-        if (++bits === 4) {
-          hex += nibble.toString(16);
-          nibble = 0;
-          bits = 0;
-        }
-      }
-    }
-    return hex.padStart(16, '0');
+    const data = c2d.getImageData(0, 0, 9, 8).data;
+    const gray: number[] = [];
+    for (let p = 0; p < 9 * 8; p++) gray.push(luma(data, p * 4));
+    if (isFlat(gray)) return null; // featureless → would false-match; skip perceptual matching
+    return dHashFromGray(gray);
   } catch {
     return null;
   }

@@ -115,6 +115,11 @@ export function App() {
                 }
               }}
             />
+            {report.assets.length === 0 ? (
+              <p className="font-mono text-sm text-ink-soft">
+                No individual image or atlas assets to display.
+              </p>
+            ) : (
             <section className="grid gap-6 lg:grid-cols-[1fr_minmax(320px,420px)]">
             <div className="space-y-3">
               <AssetSelector
@@ -154,6 +159,7 @@ export function App() {
               </button>
             </aside>
             </section>
+            )}
           </div>
         )}
       </main>
