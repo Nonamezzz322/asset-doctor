@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>WebGL demo (extension target)</title>
+  </head>
+  <body style="margin: 0; background: #111">
+    <!-- A bare WebGL page (no profiler of its own). The extension injects its profiler at
+         document_start, so its HUD should appear once this scene starts drawing. -->
+    <canvas id="c" width="400" height="300"></canvas>
+    <script>
+      const gl = document.getElementById('c').getContext('webgl');
+      const sh = (t, src) => {
+        const s = gl.createShader(t);
+        gl.shaderSource(s, src);
+        gl.compileShader(s);
+        return s;
+      };
+      const vs = sh(gl.VERTEX_SHADER, 'attribute vec2 p;uniform float t;void main(){float c=cos(t),s=sin(t);gl_Position=vec4(mat2(c,-s,s,c)*p,0.,1.);}');
+      const fs = sh(gl.FRAGMENT_SHADER, 'precision mediump float;void main(){gl_FragColor=vec4(0.05,0.55,0.55,1.);}');
+      const pr = gl.createProgram();
+      gl.attachShader(pr, vs);
+      gl.attachShader(pr, fs);
+      gl.linkProgram(pr);
+      gl.useProgram(pr);
+      const buf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0.6, -0.6, -0.4, 0.6, -0.4]), gl.STATIC_DRAW);
+      const loc = gl.getAttribLocation(pr, 'p');
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+      const tl = gl.getUniformLocation(pr, 't');
+      function frame(ms) {
+        gl.uniform1f(tl, ms * 0.001);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+    </script>
+  </body>
+</html>

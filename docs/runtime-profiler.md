@@ -52,8 +52,10 @@ const report = profiler.report();
 
 ## Next slices
 
-- **Chrome extension (MV3)** wrapper: a content script that injects this SDK into any page at
-  `document_start` (bypassing the need for the dev to add it) + a devtools panel / on-page HUD.
+- **Chrome extension (MV3)** — ✅ done: [`apps/extension`](../apps/extension) injects this SDK into
+  any page as a MAIN-world content script at `document_start` + a live on-page HUD. Verified loading
+  the real extension in headless Chromium (`tools/verify/ext-run.mjs`). Next within it: messaging
+  (MAIN ↔ isolated ↔ popup/devtools) to surface the full report + capture/export.
 - **Correlation layer** (linter → doctor): stitch these runtime numbers to the static findings, e.g.
   "symbols 58% empty (static) AND 47 draw calls / 31 binds (runtime) → spread across 4 atlases, not
   batching → merge to 2 ≈ 18 draw calls." This is where the two halves become one verdict.

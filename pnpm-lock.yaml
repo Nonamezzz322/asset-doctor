@@ -39,6 +39,16 @@ importers:
         specifier: ^3
         version: 3.2.6(@types/node@22.20.0)(jiti@2.7.0)(lightningcss@1.32.0)
 
+  apps/extension:
+    dependencies:
+      '@asset-doctor/probe':
+        specifier: workspace:*
+        version: link:../../packages/probe
+    devDependencies:
+      esbuild:
+        specifier: ^0.25
+        version: 0.25.12
+
   apps/web:
     dependencies:
       '@asset-doctor/analysis':

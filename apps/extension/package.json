@@ -1,0 +1,16 @@
+{
+  "name": "@asset-doctor/extension",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@asset-doctor/probe": "workspace:*"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25"
+  }
+}

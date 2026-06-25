@@ -84,8 +84,11 @@ type GetContext = (this: HTMLCanvasElement, type: string, ...args: unknown[]) =>
 const now = (): number => performance.now();
 const round1 = (n: number): number => Math.round(n * 10) / 10;
 
-export function installRuntimeProfiler(opts: { warmupFrames?: number } = {}): RuntimeProfiler {
+export function installRuntimeProfiler(
+  opts: { warmupFrames?: number; maxFrames?: number } = {},
+): RuntimeProfiler {
   const warmup = opts.warmupFrames ?? 30;
+  const maxFrames = opts.maxFrames ?? 1800; // rolling window (~30s @60fps) so a long session stays bounded
   const probes: InstrumentHandle[] = [];
   const seen = new Set<unknown>();
   let stopped = false;
@@ -120,6 +123,7 @@ export function installRuntimeProfiler(opts: { warmupFrames?: number } = {}): Ru
           uploads: s.textureUploads,
           compiles: s.shaderCompiles,
         });
+        if (recs.length > maxFrames) recs.shift();
         lastT = t2;
         for (const p of probes) p.reset();
       }
