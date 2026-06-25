@@ -37,19 +37,16 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Set up pnpm
-      uses: pnpm/action-setup@v4
-      with:
-        # Read the pnpm version from THIS action's package.json (packageManager), so it works whether
-        # or not the caller repo pins pnpm — and never conflicts with a caller's own packageManager.
-        package_json_file: ${{ github.action_path }}/package.json
-
     - name: Set up Node
       uses: actions/setup-node@v4
       with:
         node-version: 20
-        cache: pnpm
-        cache-dependency-path: ${{ github.action_path }}/pnpm-lock.yaml
+
+    - name: Install pnpm
+      shell: bash
+      # Install directly (not pnpm/action-setup) so it works for ANY caller repo, regardless of whether
+      # they pin pnpm via packageManager — action-setup errors if version is set AND packageManager exists.
+      run: npm install -g pnpm@10
 
     - name: Build the asset-doctor CLI (from the action checkout)
       shell: bash

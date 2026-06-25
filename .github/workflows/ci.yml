@@ -46,5 +46,6 @@ jobs:
       - name: fail-closed on a browser-only metric (exit 2)
         run: |
           echo '{"version":1,"budgets":{"findings.format":{"error":{"max":0}}}}' > "$RUNNER_TEMP/bo.json"
-          node apps/cli/dist/cli.js budget fixtures/sample-projects/folder-waste --config "$RUNNER_TEMP/bo.json"; code=$?
+          code=0
+          node apps/cli/dist/cli.js budget fixtures/sample-projects/folder-waste --config "$RUNNER_TEMP/bo.json" || code=$?
           if [ "$code" = "2" ]; then echo "fail-closed (exit 2) ok"; else echo "::error::expected exit 2, got $code"; exit 1; fi
