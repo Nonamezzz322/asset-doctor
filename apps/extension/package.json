@@ -8,6 +8,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@asset-doctor/analysis": "workspace:*",
+    "@asset-doctor/core": "workspace:*",
+    "@asset-doctor/correlate": "workspace:*",
+    "@asset-doctor/ingest": "workspace:*",
+    "@asset-doctor/parsers": "workspace:*",
     "@asset-doctor/probe": "workspace:*"
   },
   "devDependencies": {

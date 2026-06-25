@@ -1,9 +1,16 @@
 # Asset Doctor — Runtime Profiler (Chrome MV3 extension)
 
-Injects the runtime profiler ([`@asset-doctor/probe`](../../packages/probe)) into every page as a
-**MAIN-world content script at `document_start`** — so it patches the game's WebGL context before the
-renderer initialises — and draws a live on-page HUD (draw calls/frame, redundant binds, VRAM, hitch
-causes, FPS) that appears only once a WebGL context is detected.
+Closes the moat **in the page**. As a **MAIN-world content script at `document_start`** it patches the
+game's WebGL context before the renderer initialises, then:
+
+1. **Live HUD** — draw calls/frame, texture binds, redundant binds, VRAM, hitch causes, FPS (shown once
+   a WebGL context is detected).
+2. **Load asset folder & correlate** — a button in the overlay loads the game's asset folder, runs the
+   full static audit in-page, and **correlates static structure × live GPU workload into one verdict**
+   (e.g. "11 loose sprites (static) + 60 draw calls (runtime) → pack into one atlas → 1 draw").
+
+The whole pipeline (runtime profiler + folder audit + correlation) is bundled into one ~50 KB content
+script (no pixi).
 
 ## Build & load
 

@@ -41,6 +41,21 @@ importers:
 
   apps/extension:
     dependencies:
+      '@asset-doctor/analysis':
+        specifier: workspace:*
+        version: link:../../packages/analysis
+      '@asset-doctor/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@asset-doctor/correlate':
+        specifier: workspace:*
+        version: link:../../packages/correlate
+      '@asset-doctor/ingest':
+        specifier: workspace:*
+        version: link:../../packages/ingest
+      '@asset-doctor/parsers':
+        specifier: workspace:*
+        version: link:../../packages/parsers
       '@asset-doctor/probe':
         specifier: workspace:*
         version: link:../../packages/probe
@@ -60,6 +75,9 @@ importers:
       '@asset-doctor/correlate':
         specifier: workspace:*
         version: link:../../packages/correlate
+      '@asset-doctor/ingest':
+        specifier: workspace:*
+        version: link:../../packages/ingest
       '@asset-doctor/parsers':
         specifier: workspace:*
         version: link:../../packages/parsers
@@ -124,6 +142,12 @@ importers:
       '@asset-doctor/probe':
         specifier: workspace:*
         version: link:../probe
+
+  packages/ingest:
+    dependencies:
+      '@asset-doctor/parsers':
+        specifier: workspace:*
+        version: link:../parsers
 
   packages/parsers:
     dependencies:
