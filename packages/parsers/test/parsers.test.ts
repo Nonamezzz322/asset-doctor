@@ -104,6 +104,16 @@ describe('readImageInfo — header readers', () => {
     expect(readImageInfo(b)).toEqual({ mime: 'image/webp', size: { w: 300, h: 200 } });
   });
 
+  it('reads an AVIF canvas size from the ispe box', () => {
+    // ftyp 'avif', then an ispe box with width 320 / height 240.
+    const avif = new Uint8Array([
+      0x00, 0x00, 0x00, 0x0c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66, // ftyp 'avif'
+      0x00, 0x00, 0x00, 0x14, 0x69, 0x73, 0x70, 0x65, 0x00, 0x00, 0x00, 0x00, // ispe + version/flags
+      0x00, 0x00, 0x01, 0x40, 0x00, 0x00, 0x00, 0xf0, // width 320, height 240
+    ]);
+    expect(readImageInfo(avif)).toEqual({ mime: 'image/avif', size: { w: 320, h: 240 } });
+  });
+
   it('returns null for unrecognized bytes', () => {
     expect(readImageInfo(new Uint8Array([1, 2, 3, 4]))).toBeNull();
   });

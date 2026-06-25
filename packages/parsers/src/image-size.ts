@@ -80,12 +80,45 @@ function readJpeg(b: Uint8Array): Size | null {
   return null;
 }
 
+function indexOfFourcc(b: Uint8Array, cc: string, from = 0): number {
+  const a = cc.charCodeAt(0);
+  const c = cc.charCodeAt(1);
+  const d = cc.charCodeAt(2);
+  const e = cc.charCodeAt(3);
+  for (let i = from; i + 4 <= b.length; i++) {
+    if (b[i] === a && b[i + 1] === c && b[i + 2] === d && b[i + 3] === e) return i;
+  }
+  return -1;
+}
+
+function readAvif(b: Uint8Array): Size | null {
+  // ISOBMFF: [size:4]['ftyp'] then brands. Must declare an avif/avis brand.
+  if (b.length < 16 || !startsWith(b, [0x66, 0x74, 0x79, 0x70], 4)) return null; // 'ftyp' @4
+  const ftypSize = u32be(b, 0);
+  const brandEnd = Math.min(b.length, ftypSize >= 12 ? ftypSize : b.length);
+  let isAvif = false;
+  for (let i = 8; i + 4 <= brandEnd; i += 4) {
+    const brand = String.fromCharCode(b[i]!, b[i + 1]!, b[i + 2]!, b[i + 3]!);
+    if (brand === 'avif' || brand === 'avis') {
+      isAvif = true;
+      break;
+    }
+  }
+  if (!isAvif) return null;
+  // Image size lives in the 'ispe' (ImageSpatialExtents) box: ['ispe'][version+flags:4][w:4][h:4].
+  const idx = indexOfFourcc(b, 'ispe');
+  if (idx < 0 || idx + 16 > b.length) return null;
+  return { w: u32be(b, idx + 8), h: u32be(b, idx + 12) };
+}
+
 /** Detect format from magic bytes and return its mime + pixel size, or null. */
 export function readImageInfo(bytes: Uint8Array): ImageInfo | null {
   const png = readPng(bytes);
   if (png) return { mime: 'image/png', size: png };
   const webp = readWebp(bytes);
   if (webp) return { mime: 'image/webp', size: webp };
+  const avif = readAvif(bytes);
+  if (avif) return { mime: 'image/avif', size: avif };
   const jpeg = readJpeg(bytes);
   if (jpeg) return { mime: 'image/jpeg', size: jpeg };
   return null;
