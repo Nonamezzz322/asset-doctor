@@ -81,6 +81,10 @@ importers:
       '@asset-doctor/core':
         specifier: workspace:*
         version: link:../core
+    devDependencies:
+      '@asset-doctor/parsers':
+        specifier: workspace:*
+        version: link:../parsers
 
   packages/core: {}
 
