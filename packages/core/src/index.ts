@@ -144,6 +144,8 @@ export interface ThresholdConfig {
   occupancy: { warn: number; crit: number };
   oversizePx: { warn: number; crit: number };
   formatSaving: { warn: number };
+  /** Fraction of the POT-padded area wasted before flagging an NPOT info finding. */
+  npotPadding: { warn: number };
   /** Folder-level checks. */
   duplicates: { similarHammingMax: number };
   shouldAtlas: { minLooseImages: number; maxSpriteEdgePx: number };

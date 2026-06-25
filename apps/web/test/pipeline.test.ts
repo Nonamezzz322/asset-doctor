@@ -47,9 +47,9 @@ describe('end-to-end pipeline over the real fixtures folder', () => {
       report.findings.filter((f) => f.assetRef === ref).map((f) => `${f.rule}:${f.severity}`).sort();
 
     expect(verdicts('symbols.png')).toEqual(['occupancy:crit', 'wasted-regions:info']);
-    expect(verdicts('sheet.png')).toEqual(['dimensions-npot:warn', 'dimensions-oversize:crit']);
+    expect(verdicts('sheet.png')).toEqual(['dimensions-npot:info', 'dimensions-oversize:crit']);
     expect(verdicts('packed.png')).toEqual([]);
-    expect(verdicts('hero.png')).toEqual(['dimensions-npot:warn', 'dimensions-oversize:warn']);
+    expect(verdicts('hero.png')).toEqual(['dimensions-npot:info', 'dimensions-oversize:warn']);
     expect(report.totals.vramBytes).toBeGreaterThan(0);
     expect(report.assets).toHaveLength(5);
   });

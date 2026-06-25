@@ -14,7 +14,7 @@
     },
     {
       "rule": "dimensions-npot",
-      "severity": "warn"
+      "severity": "info"
     }
   ],
   "note": "Occupancy ~86% (ok). Atlas 4100×1024: edge 4100 > 4096 (oversize crit) and NPOT (warn)."

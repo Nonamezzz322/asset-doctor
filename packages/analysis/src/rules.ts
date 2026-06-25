@@ -68,17 +68,26 @@ export function dimensionFindings(ref: string, size: Size, cfg: ThresholdConfig)
     });
   }
   if (!isPowerOfTwo(size.w) || !isPowerOfTwo(size.h)) {
-    out.push({
-      id: `${ref}:npot`,
-      rule: 'dimensions-npot',
-      severity: 'warn',
-      assetRef: ref,
-      title: `Non-power-of-two ${size.w}×${size.h}`,
-      detail:
-        `NPOT textures can disable mipmaps/repeat-wrap on some GPUs and waste memory once padded. ` +
-        `Nearest power-of-two: ${nextPot(size.w)}×${nextPot(size.h)}.`,
-      fix: 'Resize or pad to a power-of-two (trim first so the padding is not wasted).',
-    });
+    // NPOT is fine on WebGL2/PixiJS (clamp+linear, uploaded at native size). The only real cost is
+    // VRAM lost IF the toolchain pads to POT — so flag (info) only when that padding waste is large.
+    const potW = nextPot(size.w);
+    const potH = nextPot(size.h);
+    const paddedWaste = (potW * potH - size.w * size.h) / (potW * potH);
+    if (paddedWaste > cfg.npotPadding.warn) {
+      out.push({
+        id: `${ref}:npot`,
+        rule: 'dimensions-npot',
+        severity: 'info',
+        assetRef: ref,
+        title: `Non-power-of-two ${size.w}×${size.h}`,
+        detail:
+          `Padding to ${potW}×${potH} would waste ${pct1(paddedWaste)}% ` +
+          `(${fmtBytes(vramBytes({ w: potW, h: potH }) - vramBytes(size))}) IF your toolchain pads to POT. ` +
+          `WebGL2/PixiJS upload NPOT natively (clamp+linear), so this is usually harmless.`,
+        fix: 'Only act if your pipeline forces POT: trim/resize so the padding is minimal.',
+        estimate: { vramBytesSaved: vramBytes({ w: potW, h: potH }) - vramBytes(size) },
+      });
+    }
   }
   return out;
 }

@@ -14,7 +14,7 @@
         },
         {
           "rule": "dimensions-npot",
-          "severity": "warn"
+          "severity": "info"
         }
       ]
     },

@@ -175,7 +175,7 @@ parser fidelity (the packed frame stays as-placed; source size is preserved).
         occupancy: occupancyOf(size, frames),
         findings: [
           { rule: 'dimensions-oversize', severity: 'crit' },
-          { rule: 'dimensions-npot', severity: 'warn' },
+          { rule: 'dimensions-npot', severity: 'info' },
         ],
         note: 'Occupancy ~86% (ok). Atlas 4100×1024: edge 4100 > 4096 (oversize crit) and NPOT (warn).',
       },
@@ -247,7 +247,7 @@ the baseline that proves a clean atlas stays clean.
             vramBytes: hero.w * hero.h * 4,
             findings: [
               { rule: 'dimensions-oversize', severity: 'warn' },
-              { rule: 'dimensions-npot', severity: 'warn' },
+              { rule: 'dimensions-npot', severity: 'info' },
             ],
           },
           {
