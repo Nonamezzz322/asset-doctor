@@ -1,0 +1,19 @@
+sheet.png
+size: 256,256
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+regionA
+  rotate: 0
+  xy: 0, 0
+  size: 100, 80
+  orig: 100, 80
+  offset: 0, 0
+  index: -1
+regionB
+  rotate: 90
+  xy: 110, 0
+  size: 60, 40
+  orig: 60, 40
+  offset: 0, 0
+  index: -1

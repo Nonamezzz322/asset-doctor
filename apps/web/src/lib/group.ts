@@ -1,7 +1,10 @@
-// Group imported files into atlases (manifest + its image) and standalone images.
-// Pure and env-agnostic (TextDecoder only) so it unit-tests headless and runs in the worker.
-// Manifest→image is resolved within the manifest's OWN directory (via path) to avoid cross-folder
-// basename collisions in deeply-nested real projects; falls back to global basename for flat uploads.
+// Group imported files into atlases (manifest/spine + its image) and standalone images.
+// Pure and env-agnostic so it unit-tests headless and runs in the worker. Manifest→image is
+// resolved within the manifest's OWN directory (via path) — this also lets Spine `.atlas` sheets
+// reference page images across directories (../) correctly. Falls back to global basename for flat
+// uploads. Supports TexturePacker/Pixi JSON manifests and Spine/libGDX `.atlas` text sheets.
+
+import { parseSpineAtlasText, type SpinePage } from '@asset-doctor/parsers';
 
 export interface RawFile {
   name: string;
@@ -11,6 +14,8 @@ export interface RawFile {
 }
 
 export interface GroupedAtlas {
+  /** 'manifest' = TexturePacker/Pixi JSON; 'spine' = a parsed Spine page. */
+  kind: 'manifest' | 'spine';
   manifest: unknown;
   image: RawFile;
   name: string;
@@ -65,7 +70,35 @@ export function groupFiles(files: RawFile[]): Grouped {
   const atlases: GroupedAtlas[] = [];
   const missing: { manifest: string; image: string }[] = [];
 
+  // Resolve an image referenced by a manifest at `manifestPath`, dir-relative first then basename.
+  const resolve = (manifestPath: string | undefined, imageName: string): RawFile | undefined => {
+    const dirHit = manifestPath ? byPath.get(normalizePath(`${dirOf(manifestPath)}/${imageName}`)) : undefined;
+    return dirHit ?? byBase.get(baseName(imageName));
+  };
+  const atlasName = (image: RawFile): string => (image.path ? keyOf(image) : baseName(image.name));
+
   for (const f of files) {
+    // Spine / libGDX .atlas text sheets (one or more pages).
+    if (/\.atlas$/i.test(f.name)) {
+      let pages: SpinePage[];
+      try {
+        pages = parseSpineAtlasText(new TextDecoder().decode(f.bytes));
+      } catch {
+        continue;
+      }
+      for (const page of pages) {
+        const image = resolve(f.path, page.image);
+        if (!image) {
+          missing.push({ manifest: baseName(f.name), image: baseName(page.image) });
+          continue;
+        }
+        referenced.add(keyOf(image));
+        atlases.push({ kind: 'spine', manifest: page, image, name: atlasName(image) });
+      }
+      continue;
+    }
+
+    // TexturePacker / Pixi JSON manifests.
     if (!/\.json$/i.test(f.name)) continue;
     let json: unknown;
     try {
@@ -76,17 +109,13 @@ export function groupFiles(files: RawFile[]): Grouped {
     if (!looksLikeManifest(json)) continue;
     const imageName = manifestImage(json);
     if (!imageName) continue;
-
-    // Resolve the image within the manifest's own directory first, then fall back to basename.
-    let image: RawFile | undefined;
-    if (f.path) image = byPath.get(normalizePath(`${dirOf(f.path)}/${imageName}`));
-    image = image ?? byBase.get(baseName(imageName));
+    const image = resolve(f.path, imageName);
     if (!image) {
       missing.push({ manifest: baseName(f.name), image: baseName(imageName) });
       continue;
     }
     referenced.add(keyOf(image));
-    atlases.push({ manifest: json, image, name: image.path ? keyOf(image) : baseName(image.name) });
+    atlases.push({ kind: 'manifest', manifest: json, image, name: atlasName(image) });
   }
 
   const images = files.filter((f) => IMAGE_RE.test(f.name) && !referenced.has(keyOf(f)));

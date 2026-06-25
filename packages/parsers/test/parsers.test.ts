@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { parseAtlas, parseImage, readImageInfo } from '../src/index';
+import { parseAtlas, parseImage, readImageInfo, parseSpineAtlasText } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const json = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -116,5 +116,59 @@ describe('readImageInfo — header readers', () => {
 
   it('returns null for unrecognized bytes', () => {
     expect(readImageInfo(new Uint8Array([1, 2, 3, 4]))).toBeNull();
+  });
+});
+
+describe('parseSpineAtlasText — Spine .atlas', () => {
+  const ATLAS = `sheet.png
+size: 256,256
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+regionA
+  rotate: 0
+  xy: 0, 0
+  size: 100, 80
+  orig: 100, 80
+  offset: 0, 0
+  index: -1
+regionB
+  rotate: 90
+  xy: 110, 0
+  size: 60, 40
+  orig: 80, 50
+  offset: 0, 0
+  index: -1
+`;
+
+  it('parses page header + regions, handling rotation and trim', () => {
+    const pages = parseSpineAtlasText(ATLAS);
+    expect(pages).toHaveLength(1);
+    const p = pages[0]!;
+    expect(p.image).toBe('sheet.png');
+    expect(p.size).toEqual({ w: 256, h: 256 });
+    expect(p.sprites).toHaveLength(2);
+
+    const a = p.sprites.find((s) => s.name === 'regionA')!;
+    expect(a.rotated).toBe(false);
+    expect(a.frame).toEqual({ x: 0, y: 0, w: 100, h: 80 });
+    expect(a.trimmed).toBe(false);
+
+    const b = p.sprites.find((s) => s.name === 'regionB')!;
+    expect(b.rotated).toBe(true);
+    expect(b.frame).toEqual({ x: 110, y: 0, w: 40, h: 60 }); // size 60×40 placed rotated → 40×60
+    expect(b.trimmed).toBe(true);
+    expect(b.sourceSize).toEqual({ w: 80, h: 50 });
+  });
+
+  it('parses multiple pages', () => {
+    const multi =
+      ATLAS +
+      `\nsheet2.png\nsize: 64,64\nformat: RGBA8888\nrgn\n  rotate: 0\n  xy: 0,0\n  size: 10,10\n  orig: 10,10\n  index: -1\n`;
+    const pages = parseSpineAtlasText(multi);
+    expect(pages).toHaveLength(2);
+    expect(pages[1]!.image).toBe('sheet2.png');
+    expect(pages[1]!.size).toEqual({ w: 64, h: 64 });
+    expect(pages[1]!.sprites).toHaveLength(1);
   });
 });

@@ -4,7 +4,7 @@
 // folder-level duplicate detection, and format sizing (OffscreenCanvas → WebP/AVIF).
 
 import type { Asset, ImageFeatures, ImageMime } from '@asset-doctor/core';
-import { parseAtlas, parseImage } from '@asset-doctor/parsers';
+import { parseAtlas, parseImage, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
 import { analyze, type EncodeSizer } from '@asset-doctor/analysis';
 import { groupFiles, type RawFile } from '../lib/group';
 import { dHashFromGray, isFlat, luma } from '../lib/perceptual';
@@ -26,7 +26,9 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
     let done = 0;
 
     for (const a of grouped.atlases) {
-      const res = parseAtlas(a.manifest, { ref: a.name, bytes: new Uint8Array(a.image.bytes) });
+      const image = { ref: a.name, bytes: new Uint8Array(a.image.bytes) };
+      const res =
+        a.kind === 'spine' ? parseSpinePage(a.manifest as SpinePage, image) : parseAtlas(a.manifest, image);
       post({ type: 'progress', done: ++done, total, label: a.name });
       if (res.ok && res.asset.kind === 'atlas') {
         assets.push(res.asset);

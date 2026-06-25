@@ -1,0 +1,10 @@
+{
+  "kind": "spine",
+  "atlas": {
+    "w": 256,
+    "h": 256
+  },
+  "frameCount": 2,
+  "occupancy": 0.1587,
+  "note": "Single-page Spine .atlas with 2 regions (one rotated 90°)."
+}

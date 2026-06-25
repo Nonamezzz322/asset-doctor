@@ -27,7 +27,7 @@ export interface Rect {
  * `spriteSourceSize` must survive parsing — occupancy and the grid coverage map
  * depend on them. Absent source fields stay `undefined`, never fabricated. */
 
-export type AtlasSourceKind = 'texturepacker-hash' | 'texturepacker-array' | 'pixi';
+export type AtlasSourceKind = 'texturepacker-hash' | 'texturepacker-array' | 'pixi' | 'spine';
 
 export interface Sprite {
   name: string;

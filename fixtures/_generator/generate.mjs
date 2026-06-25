@@ -98,7 +98,11 @@ function writeCase(name, files, readme) {
   mkdirSync(dir, { recursive: true });
   for (const [file, content] of Object.entries(files)) {
     const p = join(dir, file);
-    writeFileSync(p, Buffer.isBuffer(content) ? content : JSON.stringify(content, null, 2) + '\n');
+    const out =
+      Buffer.isBuffer(content) || typeof content === 'string'
+        ? content
+        : JSON.stringify(content, null, 2) + '\n';
+    writeFileSync(p, out);
   }
   writeFileSync(join(dir, 'README.md'), readme.trimStart());
   const occ = files['expected.json']?.occupancy;
@@ -301,6 +305,54 @@ Standalone PNGs, no atlas/manifest. \`hero.png\` is 2050×2050 → oversize **wa
 Cross-asset problems for the whole-folder checks: 9 loose sprites (→ should-atlas), a
 byte-identical pair \`dup_a.png\`/\`dup_b.png\` (→ duplicate-exact), and \`broken.json\`
 referencing a missing image (→ integrity-missing-image).
+`,
+  );
+}
+
+/* ── Case 6: Spine .atlas (libGDX text format) — exercises the Spine parser ── */
+{
+  const size = { w: 256, h: 256 };
+  const frames = [
+    fr('regionA', 0, 0, 100, 80),
+    fr('regionB', 110, 0, 40, 60, { rotated: true }), // a 60×40 region placed rotated 90° → 40×60
+  ];
+  const atlasText = `sheet.png
+size: ${size.w},${size.h}
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+regionA
+  rotate: 0
+  xy: 0, 0
+  size: 100, 80
+  orig: 100, 80
+  offset: 0, 0
+  index: -1
+regionB
+  rotate: 90
+  xy: 110, 0
+  size: 60, 40
+  orig: 60, 40
+  offset: 0, 0
+  index: -1
+`;
+  writeCase(
+    'spine-basic',
+    {
+      'sheet.png': atlasPng(size, frames),
+      'sheet.atlas': atlasText,
+      'expected.json': {
+        kind: 'spine',
+        atlas: size,
+        frameCount: 2,
+        occupancy: occupancyOf(size, frames),
+        note: 'Single-page Spine .atlas with 2 regions (one rotated 90°).',
+      },
+    },
+    `# spine-basic
+
+A single-page Spine \`.atlas\` (libGDX text format) with 2 regions (one rotated 90°). Exercises
+the Spine parser end-to-end (group → parseSpinePage → analyze).
 `,
   );
 }

@@ -7,3 +7,5 @@ export { readImageInfo } from './image-size';
 export type { ImageInfo } from './image-size';
 export { parseAtlasManifest, parseAtlas, parseImage } from './atlas';
 export type { AtlasParseResult } from './atlas';
+export { parseSpineAtlasText, parseSpinePage } from './spine-atlas';
+export type { SpinePage } from './spine-atlas';
