@@ -25,3 +25,6 @@ Thumbs.db
 
 # claude code local settings (personal, not shared)
 .claude/settings.local.json
+
+# verification screenshots (regenerable)
+tools/verify/out/
