@@ -1,10 +1,11 @@
 /// <reference lib="webworker" />
-// Runs parsing + analysis off the main thread. WebP size estimation uses OffscreenCanvas —
-// that's the one impure dependency, injected into the pure analysis core via encodeWebp.
+// Runs parsing + analysis off the main thread. Two impure bits live here (injected into the
+// pure analysis core): per-image features (SHA-256 content hash + perceptual dHash) for
+// folder-level duplicate detection, and format sizing (OffscreenCanvas → WebP/AVIF).
 
-import type { Asset, ImageMime } from '@asset-doctor/core';
+import type { Asset, ImageFeatures, ImageMime } from '@asset-doctor/core';
 import { parseAtlas, parseImage } from '@asset-doctor/parsers';
-import { analyze, type WebpSizer } from '@asset-doctor/analysis';
+import { analyze, type EncodeSizer } from '@asset-doctor/analysis';
 import { groupFiles, type RawFile } from '../lib/group';
 import type { WorkerRequest, WorkerResponse } from './protocol';
 
@@ -41,16 +42,68 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       }
     }
 
-    const report = await analyze(assets, undefined, { encodeWebp: makeWebpSizer(imageBytes) });
+    // Per-image features for folder-level duplicate detection.
+    const features: ImageFeatures[] = [];
+    for (const [assetRef, bytes] of imageBytes) {
+      const contentHash = await sha256Hex(bytes);
+      const dHash = await dHashHex(bytes);
+      features.push(dHash ? { assetRef, contentHash, dHash } : { assetRef, contentHash });
+    }
+
+    const report = await analyze(assets, undefined, {
+      encodeImage: makeEncoder(imageBytes),
+      features,
+      missingImages: grouped.missing,
+    });
     post({ type: 'done', report });
   } catch (err) {
     post({ type: 'error', error: err instanceof Error ? err.message : String(err) });
   }
 };
 
-function makeWebpSizer(imageBytes: Map<string, ArrayBuffer>): WebpSizer {
-  return async (assetRef: string, mime: ImageMime): Promise<number | null> => {
-    if (mime === 'image/webp' || typeof OffscreenCanvas === 'undefined') return null;
+async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** 64-bit difference hash (dHash) of the image, as 16 hex chars. Null if it can't decode. */
+async function dHashHex(bytes: ArrayBuffer): Promise<string | null> {
+  if (typeof OffscreenCanvas === 'undefined') return null;
+  try {
+    const bmp = await createImageBitmap(new Blob([bytes]));
+    const W = 9;
+    const H = 8;
+    const canvas = new OffscreenCanvas(W, H);
+    const c2d = canvas.getContext('2d');
+    if (!c2d) return null;
+    c2d.drawImage(bmp, 0, 0, W, H);
+    bmp.close();
+    const data = c2d.getImageData(0, 0, W, H).data;
+    const gray = (i: number): number =>
+      0.299 * data[i]! + 0.587 * data[i + 1]! + 0.114 * data[i + 2]!;
+    let hex = '';
+    let nibble = 0;
+    let bits = 0;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W - 1; x++) {
+        const i = (y * W + x) * 4;
+        nibble = (nibble << 1) | (gray(i) < gray(i + 4) ? 1 : 0);
+        if (++bits === 4) {
+          hex += nibble.toString(16);
+          nibble = 0;
+          bits = 0;
+        }
+      }
+    }
+    return hex.padStart(16, '0');
+  } catch {
+    return null;
+  }
+}
+
+function makeEncoder(imageBytes: Map<string, ArrayBuffer>): EncodeSizer {
+  return async (assetRef: string, _sourceMime: ImageMime, targetMime: ImageMime) => {
+    if (typeof OffscreenCanvas === 'undefined') return null;
     const bytes = imageBytes.get(assetRef);
     if (!bytes) return null;
     try {
@@ -60,9 +113,9 @@ function makeWebpSizer(imageBytes: Map<string, ArrayBuffer>): WebpSizer {
       if (!c2d) return null;
       c2d.drawImage(bmp, 0, 0);
       bmp.close();
-      const blob = await canvas.convertToBlob({ type: 'image/webp', quality: 0.9 });
-      // convertToBlob falls back to PNG where WebP is unsupported — don't count that.
-      return blob.type === 'image/webp' ? blob.size : null;
+      const blob = await canvas.convertToBlob({ type: targetMime, quality: 0.9 });
+      // convertToBlob falls back to PNG where the target codec is unavailable — don't count that.
+      return blob.type === targetMime ? blob.size : null;
     } catch {
       return null;
     }

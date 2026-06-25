@@ -15,6 +15,8 @@ export interface GroupedAtlas {
 export interface Grouped {
   atlases: GroupedAtlas[];
   images: RawFile[];
+  /** Manifests whose referenced image is missing from the folder. */
+  missing: { manifest: string; image: string }[];
 }
 
 const IMAGE_RE = /\.(png|webp|jpe?g)$/i;
@@ -39,6 +41,7 @@ export function groupFiles(files: RawFile[]): Grouped {
 
   const referenced = new Set<string>();
   const atlases: GroupedAtlas[] = [];
+  const missing: { manifest: string; image: string }[] = [];
 
   for (const f of files) {
     if (!/\.json$/i.test(f.name)) continue;
@@ -52,11 +55,14 @@ export function groupFiles(files: RawFile[]): Grouped {
     const imageName = manifestImage(json);
     if (!imageName) continue;
     const image = byBase.get(baseName(imageName));
-    if (!image) continue;
+    if (!image) {
+      missing.push({ manifest: baseName(f.name), image: baseName(imageName) });
+      continue;
+    }
     referenced.add(baseName(image.name));
     atlases.push({ manifest: json, image, name: baseName(image.name) });
   }
 
   const images = files.filter((f) => IMAGE_RE.test(f.name) && !referenced.has(baseName(f.name)));
-  return { atlases, images };
+  return { atlases, images, missing };
 }

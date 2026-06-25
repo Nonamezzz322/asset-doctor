@@ -11,6 +11,7 @@ import { runAnalysis, type Progress } from './lib/worker-client';
 import { fmtBytes, SEVERITY_TEXT } from './lib/format';
 import { FilmViewer } from './components/FilmViewer';
 import { Findings } from './components/Findings';
+import { FolderReport } from './components/FolderReport';
 
 type Phase =
   | { t: 'idle' }
@@ -69,7 +70,9 @@ export function App() {
 
   const totals = report?.totals;
   const savedPct = totals && totals.diskBytes > 0 ? Math.round((totals.potentialDiskSaved / totals.diskBytes) * 100) : 0;
-  const assetFindings = report?.findings.filter((f) => f.assetRef === selectedAsset) ?? [];
+  const folderFindings = report?.findings.filter((f) => f.scope === 'folder') ?? [];
+  const assetFindings =
+    report?.findings.filter((f) => f.scope !== 'folder' && f.assetRef === selectedAsset) ?? [];
   const selectedBytes = selectedAsset ? fileMap.get(selectedAsset) : undefined;
 
   return (
@@ -102,7 +105,17 @@ export function App() {
         )}
 
         {report && phase.t === 'done' && (
-          <section className="grid gap-6 lg:grid-cols-[1fr_minmax(320px,420px)]">
+          <div className="space-y-6">
+            <FolderReport
+              findings={folderFindings}
+              onPick={(ref) => {
+                if (report.assets.some((a) => a.assetRef === ref)) {
+                  setSelectedAsset(ref);
+                  setSelectedFinding(undefined);
+                }
+              }}
+            />
+            <section className="grid gap-6 lg:grid-cols-[1fr_minmax(320px,420px)]">
             <div className="space-y-3">
               <AssetSelector
                 report={report}
@@ -140,7 +153,8 @@ export function App() {
                 ← analyze another folder
               </button>
             </aside>
-          </section>
+            </section>
+          </div>
         )}
       </main>
 
