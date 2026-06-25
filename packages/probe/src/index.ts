@@ -5,3 +5,5 @@ export { instrument } from './gl-instrument';
 export type { GlStats, InstrumentHandle } from './gl-instrument';
 export { probeAtlas } from './probe';
 export type { ProbeReading } from './probe';
+export { installRuntimeProfiler } from './runtime';
+export type { RuntimeReport, RuntimeProfiler } from './runtime';

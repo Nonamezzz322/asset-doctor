@@ -71,6 +71,27 @@ describe('GL instrument', () => {
     expect(probe.stats().drawCalls).toBe(0);
   });
 
+  it('counts redundant texture and program binds (wasted state changes)', () => {
+    const gl = fakeGl();
+    const probe = instrument(gl as unknown as WebGL2RenderingContext);
+
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.bindTexture(gl.TEXTURE_2D, tex); // redundant — already bound
+    gl.bindTexture(gl.TEXTURE_2D, gl.createTexture()); // a real change
+
+    const prog = { id: 'p' };
+    gl.useProgram(prog);
+    gl.useProgram(prog); // redundant — already active
+    gl.useProgram({ id: 'q' }); // a real change
+
+    const s = probe.stats();
+    expect(s.textureBinds).toBe(3);
+    expect(s.redundantTexBinds).toBe(1);
+    expect(s.programBinds).toBe(3);
+    expect(s.redundantProgBinds).toBe(1);
+  });
+
   it('restore() unpatches the context', () => {
     const gl = fakeGl();
     const probe = instrument(gl as unknown as WebGL2RenderingContext);

@@ -62,6 +62,9 @@ importers:
       '@fontsource/space-grotesk':
         specifier: ^5
         version: 5.2.10
+      pixi.js:
+        specifier: ^8
+        version: 8.19.0
       react:
         specifier: ^19
         version: 19.2.7
