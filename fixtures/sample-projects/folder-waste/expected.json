@@ -1,0 +1,17 @@
+{
+  "kind": "folder",
+  "looseSprites": 11,
+  "duplicateGroups": [
+    [
+      "dup_a.png",
+      "dup_b.png"
+    ]
+  ],
+  "missingImages": [
+    {
+      "manifest": "broken.json",
+      "image": "missing.png"
+    }
+  ],
+  "note": "9 loose sprites + an exact-duplicate pair + a manifest with a missing image."
+}

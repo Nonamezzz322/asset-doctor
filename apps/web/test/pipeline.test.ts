@@ -24,7 +24,9 @@ function walk(dir: string, prefix: string, out: RawFile[]): void {
 describe('end-to-end pipeline over the real fixtures folder', () => {
   it('groups atlases + images and produces the expected verdicts', async () => {
     const files: RawFile[] = [];
-    walk(ROOT, '', files);
+    for (const dir of ['tp-hash-symbols', 'tp-array-oversize', 'pixi-packed-ok', 'single-images']) {
+      walk(join(ROOT, dir), dir, files);
+    }
 
     const grouped = groupFiles(files);
     expect(grouped.atlases.map((a) => a.name).sort()).toEqual(['packed.png', 'sheet.png', 'symbols.png']);

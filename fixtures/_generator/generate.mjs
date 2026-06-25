@@ -271,4 +271,38 @@ Standalone PNGs, no atlas/manifest. \`hero.png\` is 2050×2050 → oversize **wa
   );
 }
 
+/* ── Case 5: folder-waste — cross-asset problems for the whole-folder checks ──
+ * 9 loose sprites (→ should-atlas), a byte-identical pair (→ duplicate-exact),
+ * and a manifest referencing a missing image (→ integrity). */
+{
+  const files = {};
+  // distinct color per sprite (avoid accidental duplicates from cycling COLORS)
+  for (let i = 0; i < 9; i++) {
+    files[`s${i}.png`] = solidPng(32, 32, [(40 + i * 23) % 256, (90 + i * 41) % 256, (150 + i * 29) % 256]);
+  }
+  files['dup_a.png'] = solidPng(48, 48, COLORS[2]); // identical bytes …
+  files['dup_b.png'] = solidPng(48, 48, COLORS[2]); // … to dup_a (deterministic PNG)
+  files['broken.json'] = {
+    frames: { 'x.png': { frame: { x: 0, y: 0, w: 10, h: 10 } } },
+    meta: { image: 'missing.png', size: { w: 64, h: 64 } },
+  };
+  files['expected.json'] = {
+    kind: 'folder',
+    looseSprites: 11,
+    duplicateGroups: [['dup_a.png', 'dup_b.png']],
+    missingImages: [{ manifest: 'broken.json', image: 'missing.png' }],
+    note: '9 loose sprites + an exact-duplicate pair + a manifest with a missing image.',
+  };
+  writeCase(
+    'folder-waste',
+    files,
+    `# folder-waste
+
+Cross-asset problems for the whole-folder checks: 9 loose sprites (→ should-atlas), a
+byte-identical pair \`dup_a.png\`/\`dup_b.png\` (→ duplicate-exact), and \`broken.json\`
+referencing a missing image (→ integrity-missing-image).
+`,
+  );
+}
+
 console.log('Done.');
