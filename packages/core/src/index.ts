@@ -55,7 +55,7 @@ export interface Atlas {
   source: { kind: AtlasSourceKind };
 }
 
-export type ImageMime = 'image/png' | 'image/webp' | 'image/jpeg';
+export type ImageMime = 'image/png' | 'image/webp' | 'image/jpeg' | 'image/avif';
 
 export interface ImageAsset {
   name: string;
@@ -75,11 +75,18 @@ export type Asset =
 export type Severity = 'crit' | 'warn' | 'ok' | 'info';
 
 export type Rule =
+  // per-asset
   | 'occupancy'
   | 'wasted-regions'
   | 'format'
   | 'dimensions-npot'
-  | 'dimensions-oversize';
+  | 'dimensions-oversize'
+  // whole-folder (scope: 'folder')
+  | 'duplicate-exact'
+  | 'duplicate-similar'
+  | 'should-atlas'
+  | 'atlas-merge'
+  | 'integrity-missing-image';
 
 /** Highlight zones drawn on the film-viewer snapshot, in atlas pixel coords. */
 export interface OverlayZone {
@@ -97,8 +104,12 @@ export interface Finding {
   id: string;
   rule: Rule;
   severity: Severity;
-  /** Asset this finding refers to (Atlas.name / ImageAsset.name). */
+  /** 'asset' (default) for a single-asset finding, 'folder' for a whole-folder one. */
+  scope?: 'asset' | 'folder';
+  /** Asset this finding refers to (Atlas.name / ImageAsset.name); the primary one for folder findings. */
   assetRef: string;
+  /** All assets a folder finding spans (duplicate group, merge candidates, …). */
+  relatedRefs?: string[];
   /** Verdict, readout style. */
   title: string;
   /** Explanation plus the proof (numbers). */
@@ -108,6 +119,15 @@ export interface Finding {
   /** Quantified effect — only defensible numbers; leave sparse when uncertain. */
   estimate?: FindingEstimate;
   overlay?: OverlayZone[];
+}
+
+/** Per-image features computed by the host (worker) and fed to analysis for folder-level checks. */
+export interface ImageFeatures {
+  assetRef: string;
+  /** Hex digest of the raw file bytes — exact-duplicate detection. */
+  contentHash: string;
+  /** 64-bit perceptual hash as 16 hex chars — near-duplicate detection. Absent if decode failed. */
+  dHash?: string;
 }
 
 export interface AssetMetrics {
@@ -124,6 +144,10 @@ export interface ThresholdConfig {
   occupancy: { warn: number; crit: number };
   oversizePx: { warn: number; crit: number };
   formatSaving: { warn: number };
+  /** Folder-level checks. */
+  duplicates: { similarHammingMax: number };
+  shouldAtlas: { minLooseImages: number; maxSpriteEdgePx: number };
+  atlasMerge: { occupancyBelow: number; minAtlases: number };
 }
 
 export interface AnalysisReport {
