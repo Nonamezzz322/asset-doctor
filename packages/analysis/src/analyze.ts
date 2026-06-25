@@ -1,12 +1,16 @@
-// Orchestrator: normalized assets + thresholds → AnalysisReport. The one impure dependency
-// (WebP encoding, which needs a canvas) is injected via deps so the core stays headless-testable.
+// Orchestrator: normalized assets + thresholds → AnalysisReport. Produces per-asset findings
+// AND whole-folder findings (scope: 'folder'). The two impure dependencies — WebP/AVIF encoding
+// (canvas) and per-image features (hash/dHash) — are injected via deps so the core stays
+// headless-testable.
 
 import type {
   AnalysisReport,
   Asset,
   AssetMetrics,
+  Atlas,
   Finding,
   ImageAsset,
+  ImageFeatures,
   Severity,
   ThresholdConfig,
 } from '@asset-doctor/core';
@@ -18,13 +22,25 @@ import {
   occupancyValue,
   vramBytes,
   wastedRegions,
-  type WebpSizer,
+  type EncodeSizer,
 } from './rules';
+import {
+  atlasMergeFinding,
+  duplicateExactFindings,
+  duplicateSimilarFindings,
+  formatAggregateFinding,
+  integrityFindings,
+  shouldAtlasFinding,
+} from './folder';
 
 export interface AnalyzeDeps {
-  /** Encode an asset's image to WebP and return its byte size (or null). Browser/worker
-   *  supplies this via canvas.toBlob('image/webp'); headless tests mock it. */
-  encodeWebp?: WebpSizer;
+  /** Encode an asset's image to a target format → byte size (or null). Browser/worker supplies
+   *  this via canvas.convertToBlob; headless tests mock it. */
+  encodeImage?: EncodeSizer;
+  /** Per-image features (content hash + dHash) for folder-level duplicate detection. */
+  features?: ImageFeatures[];
+  /** Manifests whose referenced image is missing from the folder. */
+  missingImages?: { manifest: string; image: string }[];
 }
 
 const RANK: Record<Severity, number> = { crit: 0, warn: 1, info: 2, ok: 3 };
@@ -36,12 +52,15 @@ export async function analyze(
 ): Promise<AnalysisReport> {
   const findings: Finding[] = [];
   const metrics: AssetMetrics[] = [];
+  const formatFindings: Finding[] = [];
+  const atlases: Atlas[] = [];
   let potentialDiskSaved = 0;
 
   const addFormat = async (ref: string, image: ImageAsset) => {
-    const fmt = await formatFinding(ref, image, cfg, deps.encodeWebp);
+    const fmt = await formatFinding(ref, image, cfg, deps.encodeImage);
     if (fmt) {
       findings.push(fmt);
+      formatFindings.push(fmt);
       potentialDiskSaved += fmt.estimate?.diskBytesSaved ?? 0;
     }
   };
@@ -49,6 +68,7 @@ export async function analyze(
   for (const asset of assets) {
     if (asset.kind === 'atlas') {
       const { atlas, image } = asset;
+      atlases.push(atlas);
       metrics.push({
         assetRef: atlas.name,
         diskBytes: image.byteSize,
@@ -72,6 +92,25 @@ export async function analyze(
       await addFormat(image.name, image);
     }
   }
+
+  // ── whole-folder findings ──────────────────────────────────────────────
+  const folder: Finding[] = [];
+  if (deps.features && deps.features.length > 0) {
+    const exact = duplicateExactFindings(assets, deps.features);
+    folder.push(...exact);
+    potentialDiskSaved += exact.reduce((s, f) => s + (f.estimate?.diskBytesSaved ?? 0), 0);
+    folder.push(...duplicateSimilarFindings(deps.features, cfg));
+  }
+  const sa = shouldAtlasFinding(assets, cfg);
+  if (sa) folder.push(sa);
+  const am = atlasMergeFinding(atlases, cfg);
+  if (am) folder.push(am);
+  if (deps.missingImages && deps.missingImages.length > 0) {
+    folder.push(...integrityFindings(deps.missingImages));
+  }
+  const fa = formatAggregateFinding(formatFindings);
+  if (fa) folder.push(fa);
+  findings.push(...folder);
 
   findings.sort((a, b) => RANK[a.severity] - RANK[b.severity] || a.id.localeCompare(b.id));
 

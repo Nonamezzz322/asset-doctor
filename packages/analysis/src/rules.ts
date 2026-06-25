@@ -18,7 +18,7 @@ const nextPot = (n: number): number => {
 };
 const pct1 = (frac: number): number => Math.round(frac * 1000) / 10;
 
-function fmtBytes(n: number): string {
+export function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
@@ -105,19 +105,38 @@ export function wastedRegions(
   };
 }
 
-/** Encode an asset's image to WebP and return its byte size (or null if unavailable). */
-export type WebpSizer = (assetRef: string, mime: ImageMime) => Promise<number | null>;
+/** Encode an asset's image to a target format and return its byte size (or null if unavailable). */
+export type EncodeSizer = (
+  assetRef: string,
+  sourceMime: ImageMime,
+  targetMime: ImageMime,
+) => Promise<number | null>;
+
+// Candidate delivery formats, best-first. AVIF is usually smallest; WebP is the reliable fallback.
+const FORMAT_TARGETS: ImageMime[] = ['image/avif', 'image/webp'];
+const FORMAT_LABEL: Record<ImageMime, string> = {
+  'image/avif': 'AVIF',
+  'image/webp': 'WebP',
+  'image/png': 'PNG',
+  'image/jpeg': 'JPEG',
+};
 
 export async function formatFinding(
   ref: string,
   image: ImageAsset,
   cfg: ThresholdConfig,
-  encodeWebp?: WebpSizer,
+  encode?: EncodeSizer,
 ): Promise<Finding | null> {
-  if (image.mime === 'image/webp' || !encodeWebp || image.byteSize <= 0) return null;
-  const webpBytes = await encodeWebp(ref, image.mime);
-  if (webpBytes == null) return null;
-  const saved = image.byteSize - webpBytes;
+  // AVIF is already the best target — nothing to suggest.
+  if (image.mime === 'image/avif' || !encode || image.byteSize <= 0) return null;
+  let best: { mime: ImageMime; bytes: number } | null = null;
+  for (const target of FORMAT_TARGETS) {
+    if (target === image.mime) continue;
+    const bytes = await encode(ref, image.mime, target);
+    if (bytes != null && bytes > 0 && (best === null || bytes < best.bytes)) best = { mime: target, bytes };
+  }
+  if (!best) return null;
+  const saved = image.byteSize - best.bytes;
   const frac = saved / image.byteSize;
   if (frac < cfg.formatSaving.warn) return null;
   return {
@@ -125,11 +144,11 @@ export async function formatFinding(
     rule: 'format',
     severity: 'warn',
     assetRef: ref,
-    title: `WebP would cut ${pct1(frac)}%`,
+    title: `${FORMAT_LABEL[best.mime]} would cut ${pct1(frac)}%`,
     detail:
-      `${image.mime} ${fmtBytes(image.byteSize)} → WebP ~${fmtBytes(webpBytes)} (−${fmtBytes(saved)}). ` +
-      `Quick canvas estimate; lossless parity needs wasm-libwebp.`,
-    fix: 'Transcode to WebP (or AVIF) for delivery.',
+      `${FORMAT_LABEL[image.mime]} ${fmtBytes(image.byteSize)} → ${FORMAT_LABEL[best.mime]} ` +
+      `~${fmtBytes(best.bytes)} (−${fmtBytes(saved)}). Canvas estimate; lossless parity needs wasm codecs.`,
+    fix: 'Transcode to AVIF (or WebP) for delivery.',
     estimate: { diskBytesSaved: saved },
   };
 }

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import type { Atlas, Rect } from '@asset-doctor/core';
+import type { Asset, Atlas, Rect } from '@asset-doctor/core';
 import { parseAtlas, parseImage } from '@asset-doctor/parsers';
 import { analyze, buildCoverage, mergeEmptyRects } from '../src/index';
 
@@ -64,7 +64,7 @@ describe('analyze — single images', () => {
     const report = await analyze(assets);
 
     for (const im of expected.images) {
-      const got = report.findings.filter((f) => f.assetRef === im.name);
+      const got = report.findings.filter((f) => f.assetRef === im.name && f.scope !== 'folder');
       expect(sig(got)).toEqual(sig(im.findings));
       expect(report.assets.find((a) => a.assetRef === im.name)?.vramBytes).toBe(im.vramBytes);
     }
@@ -118,11 +118,83 @@ describe('format audit — injected encoder', () => {
     if (!r.ok || r.asset.kind !== 'image') throw new Error('parse failed');
     const disk = r.asset.image.byteSize;
 
-    const big = await analyze([r.asset], undefined, { encodeWebp: async () => Math.round(disk * 0.5) });
+    const big = await analyze([r.asset], undefined, { encodeImage: async () => Math.round(disk * 0.5) });
     expect(big.findings.some((f) => f.rule === 'format' && f.severity === 'warn')).toBe(true);
     expect(big.totals.potentialDiskSaved).toBeGreaterThan(0);
 
-    const small = await analyze([r.asset], undefined, { encodeWebp: async () => Math.round(disk * 0.95) });
+    const small = await analyze([r.asset], undefined, { encodeImage: async () => Math.round(disk * 0.95) });
     expect(small.findings.some((f) => f.rule === 'format')).toBe(false);
+  });
+});
+
+describe('folder-level findings', () => {
+  const img = (name: string, w: number, h: number, byteSize = 100): Asset => ({
+    kind: 'image',
+    image: { name, imageRef: name, size: { w, h }, mime: 'image/png', byteSize },
+  });
+  const atlasOf = (name: string, w: number, h: number, frames: Rect[]): Asset => ({
+    kind: 'atlas',
+    atlas: {
+      name,
+      imageRef: name,
+      size: { w, h },
+      sprites: frames.map((f, i) => ({
+        name: `f${i}`,
+        frame: f,
+        rotated: false,
+        trimmed: false,
+        sourceSize: { w: f.w, h: f.h },
+      })),
+      source: { kind: 'pixi' },
+    },
+    image: { name, imageRef: name, size: { w, h }, mime: 'image/png', byteSize: 1000 },
+  });
+
+  it('flags exact duplicate files and counts the wasted bytes', async () => {
+    const assets = [img('a.png', 64, 64, 500), img('b.png', 64, 64, 500)];
+    const features = [
+      { assetRef: 'a.png', contentHash: 'deadbeefdead' },
+      { assetRef: 'b.png', contentHash: 'deadbeefdead' },
+    ];
+    const rep = await analyze(assets, undefined, { features });
+    const dup = rep.findings.find((f) => f.rule === 'duplicate-exact');
+    expect(dup?.scope).toBe('folder');
+    expect(dup?.relatedRefs).toEqual(['a.png', 'b.png']);
+    expect(dup?.estimate?.diskBytesSaved).toBe(500);
+    expect(rep.totals.potentialDiskSaved).toBeGreaterThanOrEqual(500);
+  });
+
+  it('flags near-duplicate images via dHash but not exact ones', async () => {
+    const assets = [img('a.png', 64, 64), img('b.png', 64, 64)];
+    const features = [
+      { assetRef: 'a.png', contentHash: 'h1', dHash: 'ffffffffffffffff' },
+      { assetRef: 'b.png', contentHash: 'h2', dHash: 'ffffffffffffff3f' }, // 2 bits differ
+    ];
+    const rep = await analyze(assets, undefined, { features });
+    const sim = rep.findings.find((f) => f.rule === 'duplicate-similar');
+    expect(sim?.relatedRefs).toEqual(['a.png', 'b.png']);
+    expect(rep.findings.some((f) => f.rule === 'duplicate-exact')).toBe(false);
+  });
+
+  it('suggests atlasing many loose sprites', async () => {
+    const assets = Array.from({ length: 8 }, (_, i) => img(`s${i}.png`, 32, 32));
+    const rep = await analyze(assets);
+    expect(rep.findings.some((f) => f.rule === 'should-atlas' && f.scope === 'folder')).toBe(true);
+  });
+
+  it('suggests merging under-filled atlases', async () => {
+    const frame: Rect[] = [{ x: 0, y: 0, w: 300, h: 300 }]; // ~8.6% of 1024²
+    const rep = await analyze([atlasOf('a1.png', 1024, 1024, frame), atlasOf('a2.png', 1024, 1024, frame)]);
+    const m = rep.findings.find((f) => f.rule === 'atlas-merge');
+    expect(m?.relatedRefs).toEqual(['a1.png', 'a2.png']);
+  });
+
+  it('flags a manifest referencing a missing image', async () => {
+    const rep = await analyze([], undefined, {
+      missingImages: [{ manifest: 'broken.json', image: 'nope.png' }],
+    });
+    const ig = rep.findings.find((f) => f.rule === 'integrity-missing-image');
+    expect(ig?.severity).toBe('crit');
+    expect(ig?.relatedRefs).toContain('nope.png');
   });
 });
