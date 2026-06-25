@@ -1,0 +1,21 @@
+{
+  "kind": "atlas",
+  "format": "texturepacker-hash",
+  "atlas": {
+    "w": 512,
+    "h": 512
+  },
+  "frameCount": 5,
+  "occupancy": 0.1884,
+  "findings": [
+    {
+      "rule": "occupancy",
+      "severity": "crit"
+    },
+    {
+      "rule": "wasted-regions",
+      "severity": "info"
+    }
+  ],
+  "note": "Sparse symbol sheet: ~19% occupancy. Includes 1 trimmed + 1 rotated sprite."
+}

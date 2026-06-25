@@ -1,0 +1,31 @@
+{
+  "kind": "images",
+  "images": [
+    {
+      "name": "hero.png",
+      "w": 2050,
+      "h": 2050,
+      "mime": "image/png",
+      "vramBytes": 16810000,
+      "findings": [
+        {
+          "rule": "dimensions-oversize",
+          "severity": "warn"
+        },
+        {
+          "rule": "dimensions-npot",
+          "severity": "warn"
+        }
+      ]
+    },
+    {
+      "name": "icon.png",
+      "w": 256,
+      "h": 256,
+      "mime": "image/png",
+      "vramBytes": 262144,
+      "findings": []
+    }
+  ],
+  "note": "hero.png 2050² → oversize warn (>2048) + NPOT warn. icon.png 256² → clean."
+}

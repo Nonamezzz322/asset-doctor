@@ -1,0 +1,12 @@
+{
+  "kind": "atlas",
+  "format": "pixi",
+  "atlas": {
+    "w": 1024,
+    "h": 1024
+  },
+  "frameCount": 4,
+  "occupancy": 0.906,
+  "findings": [],
+  "note": "Healthy: ~91% occupancy, 1024² POT, not oversize. Pixi format (no TexturePacker meta.app)."
+}
