@@ -86,7 +86,8 @@ export type Rule =
   | 'duplicate-similar'
   | 'should-atlas'
   | 'atlas-merge'
-  | 'integrity-missing-image';
+  | 'integrity-missing-image'
+  | 'variants';
 
 /** Highlight zones drawn on the film-viewer snapshot, in atlas pixel coords. */
 export interface OverlayZone {
@@ -155,7 +156,14 @@ export interface ThresholdConfig {
 export interface AnalysisReport {
   assets: AssetMetrics[];
   findings: Finding[];
-  totals: { diskBytes: number; vramBytes: number; potentialDiskSaved: number };
+  totals: {
+    diskBytes: number;
+    /** Σ w×h×4 over every asset (variants summed — the naive footprint). */
+    vramBytes: number;
+    /** Realistic upper bound: one variant per logical asset (format-deduped, highest resolution tier). */
+    loadedVramBytes: number;
+    potentialDiskSaved: number;
+  };
   /** The thresholds actually applied (for transparency in the UI). */
   thresholds: ThresholdConfig;
 }

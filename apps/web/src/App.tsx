@@ -86,7 +86,10 @@ export function App() {
           {report ? (
             <div className="flex items-center gap-5 font-mono text-xs">
               <Metric label="disk" value={fmtBytes(totals?.diskBytes ?? 0)} />
-              <Metric label="vram" value={fmtBytes(totals?.vramBytes ?? 0)} />
+              <Metric
+                label="vram"
+                value={`${fmtBytes(totals?.vramBytes ?? 0)} → ~${fmtBytes(totals?.loadedVramBytes ?? 0)} loaded`}
+              />
               <Metric label="saveable" value={`${fmtBytes(totals?.potentialDiskSaved ?? 0)} · ${savedPct}%`} accent />
             </div>
           ) : (

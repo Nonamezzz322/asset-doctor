@@ -32,6 +32,7 @@ import {
   integrityFindings,
   shouldAtlasFinding,
 } from './folder';
+import { groupVariants, variantsFinding } from './variants';
 
 export interface AnalyzeDeps {
   /** Encode an asset's image to a target format → byte size (or null). Browser/worker supplies
@@ -110,6 +111,9 @@ export async function analyze(
   }
   const fa = formatAggregateFinding(formatFindings);
   if (fa) folder.push(fa);
+  const variants = groupVariants(assets);
+  const vf = variantsFinding(variants);
+  if (vf) folder.push(vf);
   findings.push(...folder);
 
   findings.sort((a, b) => RANK[a.severity] - RANK[b.severity] || a.id.localeCompare(b.id));
@@ -120,6 +124,7 @@ export async function analyze(
     totals: {
       diskBytes: metrics.reduce((s, m) => s + m.diskBytes, 0),
       vramBytes: metrics.reduce((s, m) => s + m.vramBytes, 0),
+      loadedVramBytes: variants.loadedVramMax,
       potentialDiskSaved,
     },
     thresholds: cfg,

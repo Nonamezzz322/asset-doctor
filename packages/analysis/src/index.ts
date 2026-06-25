@@ -6,6 +6,8 @@ export { DEFAULT_THRESHOLDS } from './config';
 export { analyze } from './analyze';
 export type { AnalyzeDeps } from './analyze';
 export { mergeSharedAtlases } from './merge';
+export { groupVariants, variantsFinding, stemOf } from './variants';
+export type { VariantGroups } from './variants';
 export {
   vramBytes,
   occupancyValue,

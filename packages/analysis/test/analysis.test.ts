@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { Asset, Atlas, Rect } from '@asset-doctor/core';
 import { parseAtlas, parseImage } from '@asset-doctor/parsers';
-import { analyze, buildCoverage, mergeEmptyRects, mergeSharedAtlases } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, mergeSharedAtlases, groupVariants, stemOf } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -225,5 +225,47 @@ describe('mergeSharedAtlases', () => {
     const first = atlases[0];
     if (!first || first.kind !== 'atlas') throw new Error('expected atlas');
     expect(first.atlas.sprites.map((s) => s.name).sort()).toEqual(['a', 'b', 'c', 'd']);
+  });
+});
+
+describe('variant grouping (VRAM inflation)', () => {
+  const img = (name: string, w: number, h: number): Asset => ({
+    kind: 'image',
+    image: { name, imageRef: name, size: { w, h }, mime: 'image/png', byteSize: 1 },
+  });
+
+  it('strips resolution + format tokens to a stem', () => {
+    expect(stemOf('bonus_background_1080p_webp.webp')).toBe('bonus_background');
+    expect(stemOf('bonus_background_540p.png')).toBe('bonus_background');
+    expect(stemOf('icon.png')).toBe('icon');
+  });
+
+  it('groups format+resolution variants and computes the loaded VRAM range', () => {
+    const v540 = 540 * 540 * 4;
+    const v1080 = 1080 * 1080 * 4;
+    const v100 = 100 * 100 * 4;
+    const v = groupVariants([
+      img('hero_540p.png', 540, 540),
+      img('hero_540p_webp.webp', 540, 540),
+      img('hero_1080p.png', 1080, 1080),
+      img('hero_1080p_avif.avif', 1080, 1080),
+      img('other.png', 100, 100),
+    ]);
+    expect(v.groups).toHaveLength(1); // hero variant set; 'other' is a singleton
+    expect(v.groups[0]?.members).toHaveLength(4);
+    expect(v.summedVram).toBe(2 * v540 + 2 * v1080 + v100);
+    expect(v.loadedVramMax).toBe(v1080 + v100); // one tier (largest) per group
+    expect(v.loadedVramMin).toBe(v540 + v100);
+  });
+
+  it('surfaces a folder finding + loadedVramBytes < vramBytes in totals', async () => {
+    const rep = await analyze([
+      img('a_540p.png', 540, 540),
+      img('a_1080p.png', 1080, 1080),
+      img('b_540p.png', 540, 540),
+      img('b_1080p.png', 1080, 1080),
+    ]);
+    expect(rep.findings.some((f) => f.rule === 'variants' && f.scope === 'folder')).toBe(true);
+    expect(rep.totals.loadedVramBytes).toBeLessThan(rep.totals.vramBytes);
   });
 });
