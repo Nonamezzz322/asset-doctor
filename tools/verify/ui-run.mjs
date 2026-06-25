@@ -82,6 +82,16 @@ try {
   console.log('OUTCOME ' + outcome);
   console.log('CANVAS ' + JSON.stringify(canvas));
   console.log('BODY ' + JSON.stringify(bodyText));
+
+  const pass =
+    outcome === 'rendered' &&
+    !!canvas &&
+    !canvas.error &&
+    canvas.w >= 256 &&
+    canvas.nonBlankPx > 0 &&
+    /wasted|empty region/i.test(bodyText);
+  console.log(pass ? 'UI_E2E PASS' : 'UI_E2E FAIL');
+  if (!pass) process.exitCode = 1;
 } finally {
   console.log('LOGS ' + JSON.stringify(logs.slice(0, 25)));
   await browser.close();

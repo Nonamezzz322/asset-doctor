@@ -45,6 +45,14 @@ try {
   console.log('INTEGRITY ' + /Missing atlas image/i.test(text));
   console.log('NEAR_DUP ' + /near-identical/i.test(text));
   console.log('SNIPPET ' + JSON.stringify(text.slice(0, 760)));
+
+  const pass =
+    /Folder report/i.test(text) &&
+    /identical file/i.test(text) &&
+    /loose sprites/i.test(text) &&
+    /Missing atlas image/i.test(text);
+  console.log(pass ? 'FOLDER_E2E PASS' : 'FOLDER_E2E FAIL');
+  if (!pass) process.exitCode = 1;
 } finally {
   console.log('LOGS ' + JSON.stringify(logs.slice(0, 10)));
   await browser.close();

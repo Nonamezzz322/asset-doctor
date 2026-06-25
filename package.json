@@ -11,6 +11,7 @@
     "dev": "pnpm --filter @asset-doctor/web dev",
     "build": "pnpm --filter @asset-doctor/web build",
     "test": "pnpm -r run test",
+    "e2e": "node tools/verify/e2e.mjs",
     "typecheck": "pnpm -r run typecheck",
     "lint": "eslint .",
     "format": "prettier --write ."
