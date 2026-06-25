@@ -21,17 +21,25 @@ pnpm --filter @asset-doctor/extension build      # → apps/extension/dist/
 Then in Chrome (111+): `chrome://extensions` → enable **Developer mode** → **Load unpacked** →
 select `apps/extension/dist/`. Open any PixiJS / Phaser / WebGL game — the HUD appears top-right.
 
+The overlay has a header (minimise `–` / close `×`), severity-coloured correlation cards (crit/warn/
+info), a **re-correlate** button (re-runs the verdict against the *current* runtime as gameplay evolves),
+and **export** (downloads the session — runtime report + correlation + static findings — as JSON).
+
 ## How it works
 
 - `manifest.json` — MV3, one `content_scripts` entry with `"world": "MAIN"`, `"run_at":
   "document_start"`, matching `<all_urls>`.
-- `src/inject.ts` — bundled by `build.mjs` (esbuild → single IIFE, ~11 KB, no pixi). Installs the
-  profiler and renders the HUD.
-- Verified headless: `tools/verify/ext-run.mjs` loads the built extension in Chromium and confirms the
-  HUD injects into a bare WebGL page.
+- `src/inject.ts` — bundled by `build.mjs` (esbuild → single IIFE, ~55 KB, no pixi). Installs the
+  profiler, renders the overlay, and runs the in-page folder audit + `correlate()`.
+- Automation hooks on `window.__assetDoctor`: `audit(FileList)`, `recorrelate()`, `export()` (JSON
+  string), `runtime()`.
+- Verified headless:
+  - `tools/verify/ext-run.mjs` — HUD injects into a bare WebGL page.
+  - `tools/verify/ext-correlate-run.mjs` — loads the real extension on a fragmented page
+    (`apps/web/webgl-busy.html`, 60 draws/frame), loads an asset folder via the overlay, and asserts the
+    correlated verdict + export JSON + severity colours + close-teardown.
 
 ## Next
 
-- Messaging (MAIN ↔ isolated content script ↔ popup/devtools) to show the full `RuntimeReport` and
-  capture/export sessions.
-- Correlation: pair runtime numbers with a static folder audit into one verdict.
+- A popup / devtools panel (MAIN ↔ isolated content script ↔ popup messaging) mirroring the overlay, so
+  the report is reachable without the on-page HUD.

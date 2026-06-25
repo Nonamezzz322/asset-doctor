@@ -32,6 +32,20 @@ try {
   await page.waitForFunction(() => !!window.__assetDoctorCorrelation, { timeout: 20000 });
   const c = await page.evaluate(() => window.__assetDoctorCorrelation);
   console.log('EXT_CORR ' + JSON.stringify(c));
+
+  // polish: export session JSON, severity-coloured cards, and close → teardown
+  const exp = JSON.parse(await page.evaluate(() => window.__assetDoctor.export()));
+  console.log('EXPORT ' + JSON.stringify({ url: !!exp.url, runtime: !!exp.runtime, correlationFindings: exp.correlation?.findings?.length ?? null, staticFindings: exp.staticFindings?.length ?? null }));
+  const sevColor = await page.evaluate(() => {
+    const t = document.querySelector('#__asset_doctor_hud [data-sev="crit"]');
+    return t ? getComputedStyle(t).color : null;
+  });
+  console.log('SEV_COLOR ' + sevColor);
+  const closed = await page.evaluate(() => {
+    [...document.querySelectorAll('#__asset_doctor_hud button')].find((b) => b.textContent === '×')?.click();
+    return !document.getElementById('__asset_doctor_hud');
+  });
+  console.log('CLOSE_TEARDOWN ' + closed);
 } finally {
   await browser.close();
 }
