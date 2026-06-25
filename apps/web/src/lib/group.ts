@@ -1,9 +1,13 @@
 // Group imported files into atlases (manifest + its image) and standalone images.
 // Pure and env-agnostic (TextDecoder only) so it unit-tests headless and runs in the worker.
+// Manifest→image is resolved within the manifest's OWN directory (via path) to avoid cross-folder
+// basename collisions in deeply-nested real projects; falls back to global basename for flat uploads.
 
 export interface RawFile {
   name: string;
   bytes: ArrayBuffer;
+  /** Relative path within the imported folder, if known — enables directory-aware matching. */
+  path?: string;
 }
 
 export interface GroupedAtlas {
@@ -19,8 +23,22 @@ export interface Grouped {
   missing: { manifest: string; image: string }[];
 }
 
-const IMAGE_RE = /\.(png|webp|jpe?g)$/i;
+const IMAGE_RE = /\.(png|webp|jpe?g|avif)$/i;
 const baseName = (p: string): string => p.split('/').pop() ?? p;
+const dirOf = (p: string): string => {
+  const i = p.lastIndexOf('/');
+  return i < 0 ? '' : p.slice(0, i);
+};
+function normalizePath(p: string): string {
+  const out: string[] = [];
+  for (const seg of p.split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') out.pop();
+    else out.push(seg);
+  }
+  return out.join('/');
+}
+const keyOf = (f: RawFile): string => normalizePath(f.path ?? f.name);
 
 function looksLikeManifest(json: unknown): boolean {
   if (typeof json !== 'object' || json === null) return false;
@@ -37,7 +55,11 @@ function manifestImage(json: unknown): string | undefined {
 
 export function groupFiles(files: RawFile[]): Grouped {
   const byBase = new Map<string, RawFile>();
-  for (const f of files) byBase.set(baseName(f.name), f);
+  const byPath = new Map<string, RawFile>();
+  for (const f of files) {
+    byBase.set(baseName(f.name), f);
+    byPath.set(keyOf(f), f);
+  }
 
   const referenced = new Set<string>();
   const atlases: GroupedAtlas[] = [];
@@ -54,15 +76,19 @@ export function groupFiles(files: RawFile[]): Grouped {
     if (!looksLikeManifest(json)) continue;
     const imageName = manifestImage(json);
     if (!imageName) continue;
-    const image = byBase.get(baseName(imageName));
+
+    // Resolve the image within the manifest's own directory first, then fall back to basename.
+    let image: RawFile | undefined;
+    if (f.path) image = byPath.get(normalizePath(`${dirOf(f.path)}/${imageName}`));
+    image = image ?? byBase.get(baseName(imageName));
     if (!image) {
       missing.push({ manifest: baseName(f.name), image: baseName(imageName) });
       continue;
     }
-    referenced.add(baseName(image.name));
-    atlases.push({ manifest: json, image, name: baseName(image.name) });
+    referenced.add(keyOf(image));
+    atlases.push({ manifest: json, image, name: image.path ? keyOf(image) : baseName(image.name) });
   }
 
-  const images = files.filter((f) => IMAGE_RE.test(f.name) && !referenced.has(baseName(f.name)));
+  const images = files.filter((f) => IMAGE_RE.test(f.name) && !referenced.has(keyOf(f)));
   return { atlases, images, missing };
 }

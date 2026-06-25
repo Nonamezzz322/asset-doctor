@@ -18,7 +18,7 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
   const msg = e.data;
   if (msg.type !== 'analyze') return;
   try {
-    const files: RawFile[] = msg.files.map((f) => ({ name: f.name, bytes: f.bytes }));
+    const files: RawFile[] = msg.files.map((f) => ({ name: f.name, path: f.path, bytes: f.bytes }));
     const grouped = groupFiles(files);
     const assets: Asset[] = [];
     const imageBytes = new Map<string, ArrayBuffer>();

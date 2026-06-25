@@ -23,6 +23,22 @@ describe('groupFiles', () => {
     expect(g.images.map((i) => i.name)).toEqual(['loose.png']);
   });
 
+  it('resolves a manifest image within its own directory, not by global basename', () => {
+    const manifest = (image: string) => ({
+      frames: { a: { frame: { x: 0, y: 0, w: 1, h: 1 } } },
+      meta: { image, size: { w: 2, h: 2 } },
+    });
+    const g = groupFiles([
+      { name: 'sheet.json', path: 'a/sheet.json', bytes: enc(manifest('sheet.png')) },
+      { name: 'sheet.png', path: 'a/sheet.png', bytes: empty },
+      { name: 'sheet.json', path: 'b/sheet.json', bytes: enc(manifest('sheet.png')) },
+      { name: 'sheet.png', path: 'b/sheet.png', bytes: empty },
+    ]);
+    expect(g.atlases).toHaveLength(2);
+    // each manifest paired with its OWN directory's image (global-basename would pair both to b/)
+    expect(g.atlases.map((a) => a.image.path).sort()).toEqual(['a/sheet.png', 'b/sheet.png']);
+  });
+
   it('ignores json without frames and never throws on bad json', () => {
     const g = groupFiles([
       file('config.json', enc({ hello: 1 })),
