@@ -28,3 +28,11 @@ Thumbs.db
 
 # verification screenshots (regenerable)
 tools/verify/out/
+
+# calibration reports (may contain proprietary asset names/sizes)
+tools/calibrate/out/
+
+# local calibration assets (proprietary — NOT for the public repo)
+/assets/
+/raw/
+**/__MACOSX/
