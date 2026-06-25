@@ -29,9 +29,13 @@ TS · React · Vite · PixiJS v8 (render-probe/WebGL) · Web Workers (анали
 - `probe` — render-probe POC: draw calls + VRAM (Σ w×h×4) из offscreen Pixi.
 
 ## Фаза
-Phase 1 (бесплатный диагноз / MVP). **Milestone 0 — готов** (скелет). **Активно: Milestone 1** —
-вертикальный срез (локальная папка → реальный диагноз → film-viewer), всё клиентски, ноль сети.
-Параллельно: спайк render-probe (go/no-go → `docs/render-probe-decision.md`).
+Phase 1 (бесплатный диагноз / MVP). **Milestone 0 — готов** (скелет). **Milestone 1 — реализован**:
+вертикальный срез работает клиентски, ноль сети — parsers (TP Hash/Array + Pixi + одиночные),
+analysis (occupancy / wasted-regions / dimensions / format), Web Worker, film-viewer; 22 теста зелёные,
+build ок. Render-probe — **GO (conditional)**: GL-инструмент покрыт тестами, live-чтение в Pixi ждёт
+одного прогона в браузере (`docs/render-probe-decision.md`).
+**Дальше:** прогнать UI/probe в реальном браузере (`pnpm dev`); калибровка порогов на реальных itch.io-ассетах;
+затем Phase 2 (фикс/биллинг).
 
 ## UI — рентген-кабинет
 Герой — **film-viewer** (атлас-снимок с подсвеченными аномалиями), НЕ большая цифра экономии.
