@@ -1,0 +1,9 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+  - 'workers/*'
+
+# pnpm 10 blocks dependency build scripts by default; allow only the ones we need.
+onlyBuiltDependencies:
+  - esbuild
+  - '@tailwindcss/oxide'
