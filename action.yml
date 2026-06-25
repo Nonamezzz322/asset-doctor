@@ -1,0 +1,89 @@
+name: 'Asset Doctor budget'
+description: 'Gate a PR on an HTML5-game asset budget (disk, VRAM, atlasing) — measured locally on the runner, never uploaded.'
+branding:
+  icon: 'activity'
+  color: 'green'
+
+inputs:
+  dir:
+    description: 'Assets directory to audit.'
+    required: false
+    default: 'assets'
+  config:
+    description: 'Path to asset-doctor.budget.json (else auto-discovered; no config = advisory).'
+    required: false
+    default: ''
+  base-ref:
+    description: 'Base git ref for the before/after baseline. Defaults to the PR base SHA.'
+    required: false
+    default: ''
+  fail-on:
+    description: 'error | warn | none — which level flips the build red.'
+    required: false
+    default: 'error'
+  warn-only:
+    description: 'true to never fail the build (report only).'
+    required: false
+    default: 'false'
+  annotate:
+    description: 'true to emit inline file annotations.'
+    required: false
+    default: 'true'
+  summary:
+    description: 'true to write the budget table to the job summary.'
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Set up pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 10
+
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: pnpm
+        cache-dependency-path: ${{ github.action_path }}/pnpm-lock.yaml
+
+    - name: Build the asset-doctor CLI (from the action checkout)
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: |
+        pnpm install --frozen-lockfile
+        pnpm --filter @asset-doctor/cli build
+
+    - name: Baseline (base ref) — best effort, never fails
+      shell: bash
+      run: |
+        BIN="node ${{ github.action_path }}/apps/cli/dist/cli.js"
+        BASE="${{ inputs.base-ref }}"
+        [ -z "$BASE" ] && BASE="${{ github.event.pull_request.base.sha }}"
+        if [ -n "$BASE" ] && git rev-parse --verify "$BASE" >/dev/null 2>&1; then
+          if git worktree add "$RUNNER_TEMP/ad-base" "$BASE" >/dev/null 2>&1; then
+            $BIN audit "$RUNNER_TEMP/ad-base/${{ inputs.dir }}" --json --out "$RUNNER_TEMP/ad-base.json" --quiet 2>/dev/null \
+              && echo "baseline captured at $BASE" || echo "baseline scan skipped (no assets at base)"
+            git worktree remove --force "$RUNNER_TEMP/ad-base" 2>/dev/null || true
+          else
+            echo "baseline worktree failed (fork/shallow PR?) — gating absolute budgets only"
+          fi
+        else
+          echo "no base ref — gating absolute budgets only"
+        fi
+
+    - name: Gate
+      shell: bash
+      run: |
+        BIN="node ${{ github.action_path }}/apps/cli/dist/cli.js"
+        ARGS=(budget "${{ inputs.dir }}")
+        [ -n "${{ inputs.config }}" ] && ARGS+=(--config "${{ inputs.config }}")
+        [ -f "$RUNNER_TEMP/ad-base.json" ] && ARGS+=(--baseline "$RUNNER_TEMP/ad-base.json")
+        ARGS+=(--fail-on "${{ inputs.fail-on }}")
+        [ "${{ inputs.warn-only }}" = "true" ] && ARGS+=(--warn-only)
+        [ "${{ inputs.annotate }}" = "true" ] && ARGS+=(--annotate)
+        [ "${{ inputs.summary }}" = "true" ] && ARGS+=(--summary "$GITHUB_STEP_SUMMARY")
+        echo "+ asset-doctor ${ARGS[*]}"
+        $BIN "${ARGS[@]}"

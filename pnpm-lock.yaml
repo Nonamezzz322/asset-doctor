@@ -39,6 +39,28 @@ importers:
         specifier: ^3
         version: 3.2.6(@types/node@22.20.0)(jiti@2.7.0)(lightningcss@1.32.0)
 
+  apps/cli:
+    dependencies:
+      '@asset-doctor/analysis':
+        specifier: workspace:*
+        version: link:../../packages/analysis
+      '@asset-doctor/budget':
+        specifier: workspace:*
+        version: link:../../packages/budget
+      '@asset-doctor/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@asset-doctor/ingest':
+        specifier: workspace:*
+        version: link:../../packages/ingest
+      '@asset-doctor/parsers':
+        specifier: workspace:*
+        version: link:../../packages/parsers
+    devDependencies:
+      esbuild:
+        specifier: ^0.25
+        version: 0.25.12
+
   apps/extension:
     dependencies:
       '@asset-doctor/analysis':
@@ -131,6 +153,15 @@ importers:
       '@asset-doctor/parsers':
         specifier: workspace:*
         version: link:../parsers
+
+  packages/budget:
+    dependencies:
+      '@asset-doctor/analysis':
+        specifier: workspace:*
+        version: link:../analysis
+      '@asset-doctor/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/core: {}
 

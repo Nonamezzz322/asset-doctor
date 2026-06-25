@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "budgets": {
+    "findings.crit": { "error": { "max": 0 } },
+    "totals.loadedVramBytes": { "error": { "max": "64MB" } },
+    "drawCallsLowerBound": { "warn": { "max": 10 } }
+  }
+}

@@ -20,23 +20,25 @@ TS · React · Vite · PixiJS v8 (render-probe/WebGL) · Web Workers (анали
 Бэкенд (Phase 2): Go или NestJS — решение фиксируем перед Phase 2.
 
 ## Раскладка монорепо (pnpm workspaces)
-`apps/web` · `apps/api`(P2) · `packages/{core,parsers,analysis,probe,fix(P2)}` · `workers/fix-worker`(P2)
-· `fixtures/sample-projects`
+`apps/{web,extension,cli}` · `apps/api`(P2) · `packages/{core,parsers,ingest,analysis,probe,correlate,budget,fix(P2)}`
+· `action.yml`(composite GH Action) · `fixtures/sample-projects` + `fixtures/budgets`
 - `core` — общие TS-контракты (atlas + analysis модель). **Единственный источник правды**, без дрейфа.
-- `parsers` — TexturePacker JSON (Hash/Array) + Pixi + одиночные → норм. `Atlas`-модель. Pure, worker-safe.
-- `analysis` — occupancy · wasted-regions (грид-карта покрытия) · format-audit (canvas→webp)
-  · dimensions (NPOT/oversize). **Пороги — в конфиге.** Тесты на fixtures обязательны.
-- `probe` — render-probe POC: draw calls + VRAM (Σ w×h×4) из offscreen Pixi.
+- `parsers` — TexturePacker JSON (Hash/Array) + Pixi + одиночные + Spine `.atlas` → норм. `Atlas`-модель. Pure, worker-safe.
+- `ingest` — группировка файлов (manifest/spine + image, dir-aware) → `Asset`. Pure; web и extension реюзают.
+- `analysis` — occupancy · wasted-regions (грид) · format-audit (canvas→webp) · dimensions (NPOT/oversize)
+  · folder-rules (dup-exact/similar, should-atlas, atlas-merge, integrity) · variants/VRAM. **Пороги — в конфиге.**
+- `probe` — render-probe + рантайм-профайлер (draw calls/VRAM из offscreen/live Pixi). `correlate` — линтер→доктор (static×runtime).
+- `budget` — Phase-3 чистое ядро гейта: metric-registry, JSON-конфиг (fail-closed), evaluate, serialize (json/sarif/summary). `apps/cli` — тонкий bin `asset-doctor`.
 
 ## Фаза
-Phase 1 (бесплатный диагноз / MVP). **Milestone 0 — готов** (скелет). **Milestone 1 — реализован**:
-вертикальный срез работает клиентски, ноль сети — parsers (TP Hash/Array + Pixi + одиночные),
-analysis (occupancy / wasted-regions / dimensions / format), Web Worker, film-viewer; 22 теста зелёные,
-build ок. **Проверено в реальном браузере** (headless Chromium/SwiftShader, `tools/verify/`): полный UI
-(аплоад fixture → worker → film-viewer со снимком + красные оверлеи пустоты) и render-probe.
-Render-probe — **GO (confirmed)**: live Pixi v8 даёт `drawCalls=1, vramBytes=1048576 (512²×4)` —
-5 спрайтов на одной текстуре = 1 draw call и 1 МБ VRAM (`docs/render-probe-decision.md`).
-**Дальше:** калибровка порогов на реальных itch.io-ассетах; затем Phase 2 (фикс/биллинг).
+**Phase 1 (диагноз) — готов и задеплоен** (https://nonamezzz322.github.io/asset-doctor/, GH Pages). Полный
+клиентский срез (ноль сети): parsers+ingest+analysis, Web Worker, film-viewer; AVIF + whole-folder + Spine;
+пороги откалиброваны на реальном слот-гейме. Render-probe **GO**. Поверх: рантайм-профайлер + MV3-расширение
+(моат замкнут в странице: live-рантайм + загрузка папки → корреляция в оверлее) + слой `correlate`.
+**Phase 3 (CLI + GitHub Action budget-gate) — реализован**: `asset-doctor audit|budget|init` реюзает ядро в
+Node (assets не покидают машину), VRAM=Σw×h×4, exact-dup через node:crypto; JSON-конфиг fail-closed на
+browser-only метрики; composite `action.yml` с before/after через git worktree. Verified: 88 тестов + live CLI.
+**Дальше:** Phase 2 (платный фикс: MaxRects-репак + транскод + Stripe + Go/Nest бэкенд — решить перед стартом).
 
 ## UI — рентген-кабинет
 Герой — **film-viewer** (атлас-снимок с подсвеченными аномалиями), НЕ большая цифра экономии.
@@ -49,6 +51,8 @@ Severity: crit #E5484D · warn #D98A00 · ok #1F9D63 · info #2B8FC9.
 ## Команды
 `pnpm install` · `pnpm dev` (web) · `pnpm build` · `pnpm test` (vitest) · `pnpm typecheck` · `pnpm lint`
 · `pnpm format`. pnpm 10 через corepack (Node ≥20.19; pnpm 11 требует Node 22+).
+CLI (Phase 3): `pnpm --filter @asset-doctor/cli build` → `node apps/cli/dist/cli.js audit|budget|init <dir>`
+(exit: 0 pass/advisory · 1 over-budget · 2 config/fail-closed · 3 input · 4 internal).
 
 ## Агенты и скиллы проекта (`.claude/`)
 Агенты: `parsers-engineer` · `analysis-engineer` · `probe-engineer` · `film-viewer-engineer`.

@@ -1,0 +1,28 @@
+name: Asset budget
+
+# Dogfoods the composite Action on the repo's own fixtures. In your game repo this whole job is just:
+#   - uses: actions/checkout@v4
+#     with: { fetch-depth: 0 }
+#   - uses: Nonamezzz322/asset-doctor@v1
+#     with: { dir: assets, config: asset-doctor.budget.json }
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  budget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so the before/after baseline can check out the base ref
+      - name: Asset Doctor budget gate
+        uses: ./ # external repos: uses: Nonamezzz322/asset-doctor@v1
+        with:
+          dir: fixtures/sample-projects/pixi-packed-ok
+          config: fixtures/budgets/pass.json

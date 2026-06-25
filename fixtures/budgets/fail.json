@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "budgets": {
+    "findings.crit": { "error": { "max": 0 } },
+    "totals.vramBytes": { "error": { "max": "8MB" } }
+  }
+}

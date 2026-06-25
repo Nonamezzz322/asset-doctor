@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+
+  gate-dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @asset-doctor/cli build
+      - name: gate FAILS on an over-budget fixture (exit 1)
+        run: |
+          if node apps/cli/dist/cli.js budget fixtures/sample-projects/tp-array-oversize --config fixtures/budgets/fail.json --no-color; then
+            echo "::error::expected the gate to FAIL"; exit 1
+          else
+            echo "gate failed as expected"
+          fi
+      - name: gate PASSES on a within-budget fixture (exit 0)
+        run: node apps/cli/dist/cli.js budget fixtures/sample-projects/pixi-packed-ok --config fixtures/budgets/pass.json --no-color
+      - name: fail-closed on a browser-only metric (exit 2)
+        run: |
+          echo '{"version":1,"budgets":{"findings.format":{"error":{"max":0}}}}' > "$RUNNER_TEMP/bo.json"
+          node apps/cli/dist/cli.js budget fixtures/sample-projects/folder-waste --config "$RUNNER_TEMP/bo.json"; code=$?
+          if [ "$code" = "2" ]; then echo "fail-closed (exit 2) ok"; else echo "::error::expected exit 2, got $code"; exit 1; fi
