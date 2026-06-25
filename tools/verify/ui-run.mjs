@@ -22,7 +22,8 @@ try {
   page.on('console', (m) => logs.push(`${m.type().toUpperCase()} ${m.text()}`));
   page.on('workercreated', (w) => logs.push('WORKER ' + w.url()));
 
-  await page.goto('http://localhost:5173/', { waitUntil: 'load', timeout: 60000 });
+  const appUrl = process.env.APP_URL || 'http://localhost:5173/';
+  await page.goto(appUrl, { waitUntil: 'load', timeout: 60000 });
   const input = await page.$('input[type=file]');
   if (!input) throw new Error('file input not found');
   // webkitdirectory makes Chromium reject programmatic single-file uploads — drop it for the test.
