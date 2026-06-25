@@ -1,0 +1,32 @@
+@import 'tailwindcss';
+
+/* Asset Doctor design tokens — the X-ray room (§5). Keep consistent across the app. */
+@theme {
+  --color-bg: #e7ecf1;
+  --color-panel: #ffffff;
+  --color-line: #dce3ea;
+  --color-ink: #16202a;
+  --color-ink-soft: #566472;
+  --color-film: #0c1116;
+  --color-teal: #0e8c8c;
+  --color-cta: #15a06a;
+
+  --color-crit: #e5484d;
+  --color-warn: #d98a00;
+  --color-ok: #1f9d63;
+  --color-info: #2b8fc9;
+
+  --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+}
