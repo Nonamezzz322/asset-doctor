@@ -5,6 +5,7 @@
 export { DEFAULT_THRESHOLDS } from './config';
 export { analyze } from './analyze';
 export type { AnalyzeDeps } from './analyze';
+export { mergeSharedAtlases } from './merge';
 export {
   vramBytes,
   occupancyValue,

@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, basename } from 'node:path';
 import type { Asset, ImageFeatures } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
-import { analyze, occupancyValue, DEFAULT_THRESHOLDS } from '@asset-doctor/analysis';
+import { analyze, occupancyValue, mergeSharedAtlases, DEFAULT_THRESHOLDS } from '@asset-doctor/analysis';
 import { groupFiles, type RawFile } from '../src/lib/group';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -67,6 +67,7 @@ describe.runIf(process.env.CALIBRATE)('calibration audit (real assets)', () => {
       const occ: number[] = [], edges: number[] = [];
       let parsedManifest = 0, parsedSpine = 0, parseErrors = 0, npot = 0;
       const big: { name: string; w: number; h: number }[] = [];
+      const lowOcc: any[] = [];
 
       for (const a of g.atlases) {
         const full = a.image.path ? toFull.get(a.image.path) : undefined;
@@ -78,11 +79,6 @@ describe.runIf(process.env.CALIBRATE)('calibration audit (real assets)', () => {
           else parsedManifest++;
           assets.push(r.asset);
           features.push({ assetRef: r.asset.atlas.name, contentHash: sha(bytes) });
-          occ.push(occupancyValue(r.asset.atlas));
-          const e = Math.max(r.asset.atlas.size.w, r.asset.atlas.size.h);
-          edges.push(e);
-          if (!pot(r.asset.atlas.size.w) || !pot(r.asset.atlas.size.h)) npot++;
-          big.push({ name: a.name, w: r.asset.atlas.size.w, h: r.asset.atlas.size.h });
         } else parseErrors++;
       }
       for (const im of g.images) {
@@ -93,13 +89,28 @@ describe.runIf(process.env.CALIBRATE)('calibration audit (real assets)', () => {
         if (r.ok && r.asset.kind === 'image') {
           assets.push(r.asset);
           features.push({ assetRef: r.asset.image.name, contentHash: sha(bytes) });
-          const e = Math.max(r.asset.image.size.w, r.asset.image.size.h);
-          edges.push(e);
-          if (!pot(r.asset.image.size.w) || !pot(r.asset.image.size.h)) npot++;
         } else parseErrors++;
       }
 
-      const rep = await analyze(assets, DEFAULT_THRESHOLDS, { features, missingImages: g.missing });
+      // Merge atlases that share a page image (Spine cross-page sharing, variant references),
+      // then compute stats + analyze from the de-duplicated set.
+      const merged = mergeSharedAtlases(assets);
+      let mergedAtlases = 0;
+      for (const a of merged) {
+        if (a.kind === 'atlas') {
+          mergedAtlases++;
+          const o = occupancyValue(a.atlas);
+          occ.push(o);
+          if (o < 0.02) lowOcc.push({ name: a.atlas.name, size: a.atlas.size, sprites: a.atlas.sprites.length });
+          edges.push(Math.max(a.atlas.size.w, a.atlas.size.h));
+          if (!pot(a.atlas.size.w) || !pot(a.atlas.size.h)) npot++;
+          big.push({ name: a.atlas.name, w: a.atlas.size.w, h: a.atlas.size.h });
+        } else {
+          edges.push(Math.max(a.image.size.w, a.image.size.h));
+          if (!pot(a.image.size.w) || !pot(a.image.size.h)) npot++;
+        }
+      }
+      const rep = await analyze(merged, DEFAULT_THRESHOLDS, { features, missingImages: g.missing });
       const byRule: Record<string, number> = {};
       for (const f of rep.findings) byRule[f.rule] = (byRule[f.rule] ?? 0) + 1;
       big.sort((a, b) => b.w * b.h - a.w * a.h);
@@ -107,7 +118,7 @@ describe.runIf(process.env.CALIBRATE)('calibration audit (real assets)', () => {
       report.roots.push({
         root: basename(root),
         fileExt: byExt,
-        coverage: { atlasesParsed: parsedManifest + parsedSpine, fromManifest: parsedManifest, fromSpine: parsedSpine, looseImages: g.images.length, parseErrors, missingImages: g.missing.length },
+        coverage: { atlasesParsed: parsedManifest + parsedSpine, fromManifest: parsedManifest, fromSpine: parsedSpine, mergedAtlases, looseImages: g.images.length, parseErrors, missingImages: g.missing.length },
         occupancy: quantiles(occ),
         occBelowWarn: occ.filter((o) => o < DEFAULT_THRESHOLDS.occupancy.warn).length,
         longestEdge: quantiles(edges),
@@ -117,6 +128,7 @@ describe.runIf(process.env.CALIBRATE)('calibration audit (real assets)', () => {
         findingsByRule: byRule,
         totals: rep.totals,
         top10Largest: big.slice(0, 10),
+        lowOcc,
       });
     }
 

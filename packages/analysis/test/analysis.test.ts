@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { Asset, Atlas, Rect } from '@asset-doctor/core';
 import { parseAtlas, parseImage } from '@asset-doctor/parsers';
-import { analyze, buildCoverage, mergeEmptyRects } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, mergeSharedAtlases } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -196,5 +196,34 @@ describe('folder-level findings', () => {
     const ig = rep.findings.find((f) => f.rule === 'integrity-missing-image');
     expect(ig?.severity).toBe('crit');
     expect(ig?.relatedRefs).toContain('nope.png');
+  });
+});
+
+describe('mergeSharedAtlases', () => {
+  const atlasWith = (names: string[]): Asset => ({
+    kind: 'atlas',
+    atlas: {
+      name: 'page.png',
+      imageRef: 'page.png',
+      size: { w: 100, h: 100 },
+      sprites: names.map((n, i) => ({
+        name: n,
+        frame: { x: i * 10, y: 0, w: 10, h: 10 },
+        rotated: false,
+        trimmed: false,
+        sourceSize: { w: 10, h: 10 },
+      })),
+      source: { kind: 'spine' },
+    },
+    image: { name: 'page.png', imageRef: 'page.png', size: { w: 100, h: 100 }, mime: 'image/png', byteSize: 1 },
+  });
+
+  it('unions regions of atlases sharing one image and counts it once', () => {
+    const merged = mergeSharedAtlases([atlasWith(['a', 'b', 'c']), atlasWith(['c', 'd'])]);
+    const atlases = merged.filter((x) => x.kind === 'atlas');
+    expect(atlases).toHaveLength(1);
+    const first = atlases[0];
+    if (!first || first.kind !== 'atlas') throw new Error('expected atlas');
+    expect(first.atlas.sprites.map((s) => s.name).sort()).toEqual(['a', 'b', 'c', 'd']);
   });
 });

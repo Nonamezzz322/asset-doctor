@@ -5,7 +5,7 @@
 
 import type { Asset, ImageFeatures, ImageMime } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
-import { analyze, type EncodeSizer } from '@asset-doctor/analysis';
+import { analyze, mergeSharedAtlases, type EncodeSizer } from '@asset-doctor/analysis';
 import { groupFiles, type RawFile } from '../lib/group';
 import { dHashFromGray, isFlat, luma } from '../lib/perceptual';
 import type { WorkerRequest, WorkerResponse } from './protocol';
@@ -53,7 +53,7 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       features.push(dHash ? { assetRef, contentHash, dHash } : { assetRef, contentHash });
     }
 
-    const report = await analyze(assets, undefined, {
+    const report = await analyze(mergeSharedAtlases(assets), undefined, {
       encodeImage: makeEncoder(imageBytes),
       features,
       missingImages: grouped.missing,
