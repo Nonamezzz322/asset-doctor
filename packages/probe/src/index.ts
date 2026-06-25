@@ -1,14 +1,7 @@
-// @asset-doctor/probe — render-probe. Loads an asset into offscreen PixiJS v8 (WebGL) and
-// measures its ACTUAL footprint via a GL-context wrapper: draw calls + VRAM
-// (Σ baseTexture w×h×4). The go/no-go spike writes docs/render-probe-decision.md.
+// @asset-doctor/probe — render-probe. Reusable GL instrument (device-independent, headless-
+// testable) + a PixiJS v8 probe that drives it. The differentiator static analyzers can't give.
 
-import type { Size } from '@asset-doctor/core';
-
-export interface ProbeResult {
-  drawCalls: number;
-  /** Σ w×h×4 over live base textures. Device-independent (structural) metric. */
-  vramBytes: number;
-  textures: Size[];
-}
-
-// The POC lands during the render-probe spike (see the probe-engineer agent).
+export { instrument } from './gl-instrument';
+export type { GlStats, InstrumentHandle } from './gl-instrument';
+export { probeAtlas } from './probe';
+export type { ProbeReading } from './probe';
