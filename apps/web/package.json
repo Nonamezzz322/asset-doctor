@@ -11,7 +11,9 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@asset-doctor/analysis": "workspace:*",
     "@asset-doctor/core": "workspace:*",
+    "@asset-doctor/parsers": "workspace:*",
     "@fontsource/ibm-plex-mono": "^5",
     "@fontsource/ibm-plex-sans": "^5",
     "@fontsource/space-grotesk": "^5",

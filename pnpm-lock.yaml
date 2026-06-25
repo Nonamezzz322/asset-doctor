@@ -38,9 +38,15 @@ importers:
 
   apps/web:
     dependencies:
+      '@asset-doctor/analysis':
+        specifier: workspace:*
+        version: link:../../packages/analysis
       '@asset-doctor/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@asset-doctor/parsers':
+        specifier: workspace:*
+        version: link:../../packages/parsers
       '@fontsource/ibm-plex-mono':
         specifier: ^5
         version: 5.2.7
