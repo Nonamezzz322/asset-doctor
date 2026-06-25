@@ -1,5 +1,10 @@
 # Asset Doctor
 
+**▶ Live demo:** <https://nonamezzz322.github.io/asset-doctor/> — drop the folder
+`fixtures/sample-projects/tp-hash-symbols` to see a real diagnosis.
+
+[![Deploy](https://github.com/Nonamezzz322/asset-doctor/actions/workflows/deploy.yml/badge.svg)](https://github.com/Nonamezzz322/asset-doctor/actions/workflows/deploy.yml)
+
 Browser-side audit and optimization for HTML5-game assets (PixiJS / Phaser). Drop an asset
 folder and in seconds see a map of problems — wasted atlas space, suboptimal formats,
 oversized textures, excess VRAM and draw calls — and how much weight you can cut. Assets
