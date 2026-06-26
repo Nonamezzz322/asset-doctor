@@ -4,8 +4,8 @@
 
 export { pack } from './pack';
 export type { PackItem, Placement, PackBin, PackOptions } from './pack';
-export { repackAtlases } from './repack';
+export { repackAtlases, scaleAtlas } from './repack';
 export type { RepackOptions } from './repack';
-export { emitTexturePackerJson } from './manifest';
+export { emitTexturePackerJson, emitSpineAtlasText } from './manifest';
 export { planFix } from './plan';
 export type { PlanOptions } from './plan';

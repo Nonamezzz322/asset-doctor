@@ -12,10 +12,10 @@ export interface FixOptions {
   quality: number;
   padding: number;
   maxSize: number;
-  /** Downscale a loose image whose longest edge exceeds this (px). */
+  /** Downscale an image/atlas whose longest edge exceeds this (px). */
   maxEdge: number;
-  /** Merge under-filled atlases into fewer sheets — NON-drop-in (rewrites manifest references). */
-  mergeAtlases: boolean;
+  /** Aggressive, NON-drop-in: merge under-filled atlases + drop exact/near duplicates. */
+  aggressive: boolean;
 }
 
 export type FixRequest = { type: 'fix'; files: FixInputFile[]; options: FixOptions };

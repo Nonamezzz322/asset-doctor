@@ -123,6 +123,6 @@
   "fix.optimized": "otimizado",
   "fix.download": "Baixar .zip",
   "fix.skipped": "ignorado",
-  "fix.merge": "Mesclar atlas (não drop-in)",
+  "fix.merge": "Agressivo: mesclar + dedup (não drop-in)",
   "fix.mergeWarn": "Referências alteradas — atualize seu loader"
 }

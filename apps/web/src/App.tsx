@@ -321,12 +321,12 @@ function downloadZip(zip: Blob): void {
 function FixCard({ files }: { files: PickedFile[] }) {
   const { t } = useI18n();
   const [phase, setPhase] = useState<FixPhase>({ t: 'idle' });
-  const [merge, setMerge] = useState(false);
+  const [aggressive, setAggressive] = useState(false);
 
   async function run() {
     setPhase({ t: 'running', p: { label: '', done: 0, total: 1 } });
     try {
-      const out = await runFix(files, { targetMime: 'image/avif', quality: 0.85, padding: 2, maxSize: 4096, maxEdge: 2048, mergeAtlases: merge }, (p) => setPhase({ t: 'running', p }));
+      const out = await runFix(files, { targetMime: 'image/avif', quality: 0.85, padding: 2, maxSize: 4096, maxEdge: 2048, aggressive }, (p) => setPhase({ t: 'running', p }));
       downloadZip(out.zip);
       setPhase({ t: 'done', out });
     } catch (e) {
@@ -344,7 +344,7 @@ function FixCard({ files }: { files: PickedFile[] }) {
       ) : (
         <>
           <label className="mt-2 flex items-center justify-center gap-1.5 font-mono text-[10px] text-ink-soft">
-            <input type="checkbox" checked={merge} onChange={(e) => setMerge(e.target.checked)} className="accent-teal" />
+            <input type="checkbox" checked={aggressive} onChange={(e) => setAggressive(e.target.checked)} className="accent-teal" />
             {t('fix.merge')}
           </label>
           <button

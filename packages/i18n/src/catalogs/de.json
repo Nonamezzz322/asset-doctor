@@ -120,6 +120,6 @@
   "fix.optimized": "optimiert",
   "fix.download": "ZIP herunterladen",
   "fix.skipped": "übersprungen",
-  "fix.merge": "Atlanten zusammenführen (kein Drop-in)",
+  "fix.merge": "Aggressiv: zusammenführen + dedupe (kein Drop-in)",
   "fix.mergeWarn": "Referenzen geändert — Loader aktualisieren"
 }

@@ -2,7 +2,7 @@
 //   1. File System Access API (showDirectoryPicker)
 //   2. <input webkitdirectory> fallback
 //   3. drag-and-drop (webkitGetAsEntry recursion)
-// Only .json + image files are read. Zero network: bytes never leave the device.
+// Only manifest (.json / Spine .atlas) + image files are read. Zero network: bytes never leave the device.
 
 export interface PickedFile {
   path: string;
@@ -10,7 +10,7 @@ export interface PickedFile {
   bytes: ArrayBuffer;
 }
 
-const RELEVANT_RE = /\.(json|png|webp|jpe?g)$/i;
+const RELEVANT_RE = /\.(json|atlas|png|webp|jpe?g|avif)$/i;
 
 /* ── File System Access API ─────────────────────────────────────────────── */
 

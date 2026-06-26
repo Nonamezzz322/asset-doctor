@@ -123,6 +123,6 @@
   "fix.optimized": "ottimizzato",
   "fix.download": "Scarica .zip",
   "fix.skipped": "saltato",
-  "fix.merge": "Unisci atlas (non drop-in)",
+  "fix.merge": "Aggressivo: unione + dedup (non drop-in)",
   "fix.mergeWarn": "Riferimenti cambiati — aggiorna il loader"
 }

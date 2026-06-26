@@ -5,11 +5,12 @@
 // (native WebP, or AVIF via @jsquash with honest fallback), drop exact duplicates, and zip a drop-in
 // optimized folder. Assets never leave the device. Every fix the browser can't do lands in skipped[].
 
-import type { Asset, Atlas, ImageMime } from '@asset-doctor/core';
+import type { Asset, Atlas, ImageFeatures, ImageMime } from '@asset-doctor/core';
 import { groupFiles, type RawFile } from '@asset-doctor/ingest';
-import { parseAtlas, parseImage, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
+import { parseAtlas, parseImage, parseSpineAtlasText, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
 import { analyze, mergeSharedAtlases, type EncodeSizer } from '@asset-doctor/analysis';
-import { emitTexturePackerJson, planFix, repackAtlases } from '@asset-doctor/fix';
+import { emitSpineAtlasText, emitTexturePackerJson, planFix, repackAtlases, scaleAtlas } from '@asset-doctor/fix';
+import { dHashFromGray, isFlat, luma } from '../lib/perceptual';
 import { makeZip, type ZipEntry } from './zip';
 import type { FixInputFile, FixOptions, FixReceipt, FixRequest, FixResponse } from './fix-protocol';
 
@@ -62,7 +63,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
     }
   }
 
-  // manifest file path per atlas image (so we can rewrite it in place)
+  // manifest file path per atlas image (so we can rewrite it in place): TexturePacker / Pixi JSON …
   const manifestPathByImage = new Map<string, string>();
   for (const f of files) {
     if (!/\.json$/i.test(f.name)) continue;
@@ -71,6 +72,17 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
       if (typeof j.meta?.image === 'string') manifestPathByImage.set(basename(j.meta.image), f.path);
     } catch {
       /* not a manifest */
+    }
+  }
+  // … and Spine `.atlas` (page image → its atlas file + page count, for single-page Spine repack)
+  const spineAtlasInfo = new Map<string, { path: string; pages: number }>();
+  for (const f of files) {
+    if (!/\.atlas$/i.test(f.name)) continue;
+    try {
+      const pages = parseSpineAtlasText(td.decode(f.bytes));
+      for (const pg of pages) spineAtlasInfo.set(basename(pg.image), { path: f.path, pages: pages.length });
+    } catch {
+      /* not a spine atlas */
     }
   }
 
@@ -86,9 +98,11 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
     }
   }
 
+  // aggressive dedup needs per-image features (SHA-256 + dHash); skip the decode cost otherwise.
+  const features = opts.aggressive ? await computeFeatures(bytesByRef) : undefined;
   // measure format savings (native WebP) so format findings → transcode ops appear
-  const report = await analyze(merged, undefined, { missingImages: grouped.missing, encodeImage: makeEncoder(bytesByRef) });
-  const plan = planFix(report, { targetMime: opts.targetMime, quality: opts.quality, lossless: true, padding: opts.padding, maxSize: opts.maxSize, maxEdge: opts.maxEdge, mergeAtlases: opts.mergeAtlases });
+  const report = await analyze(merged, undefined, { missingImages: grouped.missing, encodeImage: makeEncoder(bytesByRef), ...(features ? { features } : {}) });
+  const plan = planFix(report, { targetMime: opts.targetMime, quality: opts.quality, lossless: true, padding: opts.padding, maxSize: opts.maxSize, maxEdge: opts.maxEdge, aggressive: opts.aggressive });
 
   // ── execute ──
   const out: { path: string; bytes: Uint8Array }[] = [];
@@ -115,7 +129,49 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
     post({ type: 'fix-progress', label: op.kind, done: done++, total });
 
     if (op.kind === 'repack') {
-      for (const rf of op.atlasRefs) if (spineRefs.has(rf)) skipped.push({ assetRef: rf, reason: 'Spine atlas repack not supported in v1' });
+      // Spine single-page repack: emit a .atlas (not JSON) and keep PNG (Spine-runtime safe). Drop-in.
+      if (op.atlasRefs.length === 1 && spineRefs.has(op.atlasRefs[0]!)) {
+        const ref = op.atlasRefs[0]!;
+        const info = spineAtlasInfo.get(basename(ref));
+        const atlas = atlasByRef.get(ref);
+        if (!atlas || !info || info.pages > 1) {
+          skipped.push({ assetRef: ref, reason: info && info.pages > 1 ? 'multi-page Spine repack not supported in v1' : 'Spine atlas not found' });
+          continue;
+        }
+        const r = repackAtlases([atlas], { allowRotation: false, padding: op.padding, maxSize: op.maxSize });
+        if (r.atlases.length !== 1) {
+          skipped.push({ assetRef: ref, reason: 'Spine repack spilled into multiple sheets' });
+          continue;
+        }
+        const na = r.atlases[0]!;
+        const canvas = new OffscreenCanvas(na.size.w, na.size.h);
+        const c2d = canvas.getContext('2d');
+        let ok = !!c2d;
+        if (c2d) {
+          for (const blit of r.blits) {
+            const bmp = await bitmapOf(blit.from.atlasRef);
+            if (!bmp) {
+              ok = false;
+              break;
+            }
+            c2d.drawImage(bmp, blit.from.rect.x, blit.from.rect.y, blit.from.rect.w, blit.from.rect.h, blit.to.x, blit.to.y, blit.to.w, blit.to.h);
+          }
+        }
+        if (!ok) {
+          skipped.push({ assetRef: ref, reason: 'source sheet unavailable' });
+          continue;
+        }
+        const png = new Uint8Array(await (await canvas.convertToBlob({ type: 'image/png' })).arrayBuffer());
+        const imagePath = pathByRef.get(ref)!;
+        out.push({ path: imagePath, bytes: png });
+        out.push({ path: info.path, bytes: te.encode(emitSpineAtlasText(na)) });
+        replaced.add(imagePath);
+        replaced.add(info.path);
+        vramSaved += r.vramBytesBefore - r.vramBytesAfter;
+        operations.push(`repack ${basename(ref)} (spine) → ${na.size.w}×${na.size.h}`);
+        continue;
+      }
+      for (const rf of op.atlasRefs) if (spineRefs.has(rf)) skipped.push({ assetRef: rf, reason: 'Spine atlas not mergeable in v1' });
       const refs = op.atlasRefs.filter((rf) => !spineRefs.has(rf));
       const group = refs.map((rf) => atlasByRef.get(rf)).filter((a): a is Atlas => !!a);
       if (group.length === 0) {
@@ -203,21 +259,57 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
       }
       const bmp = await createImageBitmap(new Blob([bytes]));
       const origPx = bmp.width * bmp.height;
-      const canvas = new OffscreenCanvas(op.to.w, op.to.h);
-      const c2d = canvas.getContext('2d');
-      if (!c2d) {
+      const atlas = atlasByRef.get(ref);
+
+      if (atlas) {
+        // resize an ATLAS: scale the manifest frames too, keep the filename + source format → drop-in.
+        const scaled = scaleAtlas(atlas, op.to.w / atlas.size.w);
+        const canvas = new OffscreenCanvas(scaled.size.w, scaled.size.h);
+        const c2d = canvas.getContext('2d');
+        if (!c2d) {
+          bmp.close();
+          skipped.push({ assetRef: ref, reason: 'no 2D context' });
+          continue;
+        }
+        c2d.drawImage(bmp, 0, 0, bmp.width, bmp.height, 0, 0, scaled.size.w, scaled.size.h);
         bmp.close();
-        skipped.push({ assetRef: ref, reason: 'no 2D context' });
-        continue;
+        const srcMime = mimeOf(path);
+        const blob = await canvas.convertToBlob({ type: srcMime });
+        out.push({ path, bytes: new Uint8Array(await blob.arrayBuffer()) });
+        replaced.add(path);
+        if (spineRefs.has(ref)) {
+          const info = spineAtlasInfo.get(basename(ref));
+          if (info) {
+            out.push({ path: info.path, bytes: te.encode(emitSpineAtlasText(scaled)) });
+            replaced.add(info.path);
+          }
+        } else {
+          const mPath = manifestPathByImage.get(basename(ref));
+          if (mPath) {
+            out.push({ path: mPath, bytes: te.encode(emitTexturePackerJson(scaled)) });
+            replaced.add(mPath);
+          }
+        }
+        vramSaved += Math.max(0, (origPx - scaled.size.w * scaled.size.h) * 4);
+        operations.push(`resize atlas ${basename(ref)} → ${scaled.size.w}×${scaled.size.h}`);
+      } else {
+        // loose image: downscale + transcode to the target format
+        const canvas = new OffscreenCanvas(op.to.w, op.to.h);
+        const c2d = canvas.getContext('2d');
+        if (!c2d) {
+          bmp.close();
+          skipped.push({ assetRef: ref, reason: 'no 2D context' });
+          continue;
+        }
+        c2d.drawImage(bmp, 0, 0, bmp.width, bmp.height, 0, 0, op.to.w, op.to.h);
+        bmp.close();
+        const enc = await encodeCanvas(canvas, c2d, op.targetMime, { quality: op.quality, allowPngFallback: true });
+        const newPath = path.replace(/[^/]+$/, basename(path).replace(/\.[a-z0-9]+$/i, EXT[enc!.mime] ?? '.png'));
+        out.push({ path: newPath, bytes: enc!.bytes });
+        replaced.add(path);
+        vramSaved += Math.max(0, (origPx - op.to.w * op.to.h) * 4);
+        operations.push(`resize ${basename(path)} → ${op.to.w}×${op.to.h} ${enc!.mime.replace('image/', '')}`);
       }
-      c2d.drawImage(bmp, 0, 0, bmp.width, bmp.height, 0, 0, op.to.w, op.to.h);
-      bmp.close();
-      const enc = await encodeCanvas(canvas, c2d, op.targetMime, { quality: op.quality, allowPngFallback: true });
-      const newPath = path.replace(/[^/]+$/, basename(path).replace(/\.[a-z0-9]+$/i, EXT[enc!.mime] ?? '.png'));
-      out.push({ path: newPath, bytes: enc!.bytes });
-      replaced.add(path);
-      vramSaved += Math.max(0, (origPx - op.to.w * op.to.h) * 4);
-      operations.push(`resize ${basename(path)} → ${op.to.w}×${op.to.h} ${enc!.mime.replace('image/', '')}`);
     } else if (op.kind === 'transcode') {
       const ref = op.assetRef;
       const path = pathByRef.get(ref);
@@ -239,6 +331,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
       const path = pathByRef.get(op.assetRef);
       if (path) {
         dropped.add(path);
+        referencesChanged = true; // removing a file changes the folder's references
         vramSaved += vramByRef.get(op.assetRef) ?? 0;
         operations.push(`drop duplicate ${basename(path)}`);
       }
@@ -341,4 +434,42 @@ async function transcode(bytes: ArrayBuffer, target: ImageMime, quality: number)
   c2d.drawImage(bmp, 0, 0);
   bmp.close();
   return encodeCanvas(canvas, c2d, target, { quality, allowPngFallback: false });
+}
+
+const MIME_BY_EXT: Record<string, ImageMime> = { png: 'image/png', webp: 'image/webp', jpg: 'image/jpeg', jpeg: 'image/jpeg', avif: 'image/avif' };
+const mimeOf = (path: string): ImageMime => MIME_BY_EXT[(path.split('.').pop() ?? '').toLowerCase()] ?? 'image/png';
+
+/** Per-image features for aggressive dedup: SHA-256 content hash (exact) + dHash (near). Same as the
+ *  analysis worker, so the dedup findings match the diagnosis. */
+async function computeFeatures(bytesByRef: Map<string, ArrayBuffer>): Promise<ImageFeatures[]> {
+  const out: ImageFeatures[] = [];
+  for (const [assetRef, bytes] of bytesByRef) {
+    const contentHash = await sha256Hex(bytes);
+    const dHash = await dHashHex(bytes);
+    out.push(dHash ? { assetRef, contentHash, dHash } : { assetRef, contentHash });
+  }
+  return out;
+}
+
+async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function dHashHex(bytes: ArrayBuffer): Promise<string | null> {
+  try {
+    const bmp = await createImageBitmap(new Blob([bytes]));
+    const canvas = new OffscreenCanvas(9, 8);
+    const c2d = canvas.getContext('2d');
+    if (!c2d) return null;
+    c2d.drawImage(bmp, 0, 0, 9, 8);
+    bmp.close();
+    const data = c2d.getImageData(0, 0, 9, 8).data;
+    const gray: number[] = [];
+    for (let p = 0; p < 72; p++) gray.push(luma(data, p * 4));
+    if (isFlat(gray)) return null; // flat fills collapse to one hash → false near-dup matches
+    return dHashFromGray(gray);
+  } catch {
+    return null;
+  }
 }

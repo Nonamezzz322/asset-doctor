@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { AnalysisReport, Atlas } from '@asset-doctor/core';
-import { parseAtlas, parseAtlasManifest } from '@asset-doctor/parsers';
+import { parseAtlas, parseAtlasManifest, parseSpineAtlasText, parseSpinePage } from '@asset-doctor/parsers';
 import { analyze, DEFAULT_THRESHOLDS } from '@asset-doctor/analysis';
-import { emitTexturePackerJson, pack, planFix, repackAtlases, type Placement } from '../src/index';
+import { emitSpineAtlasText, emitTexturePackerJson, pack, planFix, repackAtlases, scaleAtlas, type Placement } from '../src/index';
 
 const fixDir = fileURLToPath(new URL('../../../fixtures/sample-projects/tp-hash-symbols/', import.meta.url));
 function loadAtlas(): Atlas {
@@ -87,7 +87,7 @@ describe('repackAtlases (golden, on tp-hash-symbols)', () => {
 describe('planFix', () => {
   it('plans a repack for the under-filled atlas', async () => {
     const report = await analyze([{ kind: 'atlas', atlas: loadAtlas(), image: { name: 'symbols.png', imageRef: 'symbols.png', size: { w: 512, h: 512 }, mime: 'image/png', byteSize: 1747 } }]);
-    const plan = planFix(report, { targetMime: 'image/webp', quality: 0.9, lossless: true, padding: 2, maxSize: 4096, maxEdge: 2048, mergeAtlases: false });
+    const plan = planFix(report, { targetMime: 'image/webp', quality: 0.9, lossless: true, padding: 2, maxSize: 4096, maxEdge: 2048, aggressive: false });
     const repack = plan.ops.find((o) => o.kind === 'repack');
     expect(repack).toBeDefined();
     if (repack?.kind === 'repack') expect(repack.atlasRefs).toContain('symbols.png');
@@ -103,7 +103,7 @@ describe('planFix', () => {
       totals: { diskBytes: 1000, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
       thresholds: DEFAULT_THRESHOLDS,
     };
-    const plan = planFix(report, { targetMime: 'image/avif', quality: 0.85, lossless: false, padding: 2, maxSize: 4096, maxEdge: 2048, mergeAtlases: false });
+    const plan = planFix(report, { targetMime: 'image/avif', quality: 0.85, lossless: false, padding: 2, maxSize: 4096, maxEdge: 2048, aggressive: false });
     const resize = plan.ops.find((o) => o.kind === 'resize');
     expect(resize).toBeDefined();
     if (resize?.kind === 'resize') expect(resize.to).toEqual({ w: 2048, h: 2048 });
@@ -124,14 +124,71 @@ describe('planFix', () => {
     };
     const base = { targetMime: 'image/webp' as const, quality: 0.9, lossless: true, padding: 2, maxSize: 4096, maxEdge: 2048 };
 
-    const merged = planFix(report, { ...base, mergeAtlases: true });
+    const merged = planFix(report, { ...base, aggressive: true });
     const repacks = merged.ops.filter((o) => o.kind === 'repack');
     expect(repacks).toHaveLength(1); // one merge op, not two individual repacks
     if (repacks[0]?.kind === 'repack') expect(repacks[0].atlasRefs).toEqual(['atlas_a.png', 'atlas_b.png']);
 
-    const dropIn = planFix(report, { ...base, mergeAtlases: false });
+    const dropIn = planFix(report, { ...base, aggressive: false });
     const single = dropIn.ops.filter((o) => o.kind === 'repack' && o.atlasRefs.length === 1);
     expect(single).toHaveLength(2); // each atlas repacked in place
     expect(dropIn.ops.some((o) => o.kind === 'repack' && o.atlasRefs.length > 1)).toBe(false);
+  });
+
+  it('drops near-duplicates only in aggressive mode', () => {
+    const report: AnalysisReport = {
+      assets: [{ assetRef: 'a.png', diskBytes: 100, vramBytes: 0 }, { assetRef: 'b.png', diskBytes: 100, vramBytes: 0 }],
+      findings: [{ id: 'dup-similar:a.png', rule: 'duplicate-similar', severity: 'info', scope: 'folder', assetRef: 'a.png', relatedRefs: ['a.png', 'b.png'], title: '', detail: '' }],
+      totals: { diskBytes: 200, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+      thresholds: DEFAULT_THRESHOLDS,
+    };
+    const base = { targetMime: 'image/webp' as const, quality: 0.9, lossless: true, padding: 2, maxSize: 4096, maxEdge: 2048 };
+    expect(planFix(report, { ...base, aggressive: false }).ops.some((o) => o.kind === 'drop')).toBe(false);
+    const drops = planFix(report, { ...base, aggressive: true }).ops.filter((o) => o.kind === 'drop');
+    expect(drops).toHaveLength(1);
+    if (drops[0]?.kind === 'drop') expect(drops[0].assetRef).toBe('b.png');
+  });
+
+  it('plans a resize for an oversized ATLAS (occupancy-defined, not repacked)', () => {
+    const report: AnalysisReport = {
+      assets: [{ assetRef: 'big.json', diskBytes: 1000, vramBytes: 0, occupancy: 0.9 }],
+      findings: [{ id: 'big.json:oversize', rule: 'dimensions-oversize', severity: 'crit', assetRef: 'big.json', title: '', detail: '', messageKey: 'oversize', params: { w: 4096, h: 4096, edge: 4096, budget: 2730, sev: 'crit', vram: 0 } }],
+      totals: { diskBytes: 1000, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+      thresholds: DEFAULT_THRESHOLDS,
+    };
+    const resize = planFix(report, { targetMime: 'image/webp', quality: 0.9, lossless: true, padding: 2, maxSize: 4096, maxEdge: 2048, aggressive: false }).ops.find((o) => o.kind === 'resize');
+    expect(resize).toBeDefined();
+    if (resize?.kind === 'resize') {
+      expect(resize.assetRef).toBe('big.json');
+      expect(resize.to).toEqual({ w: 2048, h: 2048 });
+    }
+  });
+});
+
+describe('emitSpineAtlasText (inverse of the parser)', () => {
+  const spineDir = fileURLToPath(new URL('../../../fixtures/sample-projects/spine-basic/', import.meta.url));
+  it('round-trips: emit → parse → identical sprites', () => {
+    const page = parseSpineAtlasText(readFileSync(`${spineDir}sheet.atlas`, 'utf8'))[0]!;
+    const res = parseSpinePage(page, { ref: 'sheet.png', bytes: new Uint8Array(readFileSync(`${spineDir}sheet.png`)) });
+    if (!res.ok || res.asset.kind !== 'atlas') throw new Error('spine fixture parse failed');
+    const atlas = res.asset.atlas;
+    const reParsed = parseSpineAtlasText(emitSpineAtlasText(atlas))[0]!;
+    const sortByName = <T extends { name: string }>(a: T[]) => [...a].sort((x, y) => x.name.localeCompare(y.name));
+    expect(sortByName(reParsed.sprites)).toEqual(sortByName(atlas.sprites));
+    expect(reParsed.size).toEqual(atlas.size);
+  });
+});
+
+describe('scaleAtlas', () => {
+  it('uniformly halves the sheet and every frame', () => {
+    const atlas = loadAtlas(); // 512²
+    const s = scaleAtlas(atlas, 0.5);
+    expect(s.size).toEqual({ w: 256, h: 256 });
+    for (const src of atlas.sprites) {
+      const o = s.sprites.find((x) => x.name === src.name)!;
+      expect(o.frame.w).toBe(Math.max(1, Math.round(src.frame.w * 0.5)));
+      expect(o.frame.h).toBe(Math.max(1, Math.round(src.frame.h * 0.5)));
+      expect(o.rotated).toBe(src.rotated); // metadata preserved
+    }
   });
 });
