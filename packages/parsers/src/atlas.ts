@@ -3,7 +3,7 @@
 // TexturePacker `meta.app` signature — that's how we tag the source kind. Pure & defensive:
 // malformed input returns an error result, never throws.
 
-import type { Atlas, AtlasSourceKind, ImageAsset, Rect, Size, Sprite } from '@asset-doctor/core';
+import type { Atlas, AtlasSourceKind, ImageAsset, Rect, Size, Sprite, SpriteMesh, Vec2 } from '@asset-doctor/core';
 import type { ParseResult } from './types';
 import { readImageInfo } from './image-size';
 
@@ -41,6 +41,51 @@ function parseScale(v: unknown): number | undefined {
   return undefined;
 }
 
+// Read an array of [x,y] integer pairs (the emit shape) into Vec2[]. Returns null on any malformed
+// entry so a bad mesh degrades to a rectangle-only sprite rather than throwing.
+function readVec2Pairs(v: unknown): Vec2[] | null {
+  if (!Array.isArray(v)) return null;
+  const out: Vec2[] = [];
+  for (const pair of v) {
+    if (!Array.isArray(pair) || pair.length !== 2) return null;
+    const x = num(pair[0]);
+    const y = num(pair[1]);
+    if (x === undefined || y === undefined) return null;
+    out.push({ x, y });
+  }
+  return out;
+}
+
+// Read triangle index triplets into number[][], mirroring the manifest's `triangles` shape.
+function readTriangles(v: unknown): number[][] | null {
+  if (!Array.isArray(v)) return null;
+  const out: number[][] = [];
+  for (const tri of v) {
+    if (!Array.isArray(tri) || tri.length !== 3) return null;
+    const a = num(tri[0]);
+    const b = num(tri[1]);
+    const c = num(tri[2]);
+    if (a === undefined || b === undefined || c === undefined) return null;
+    out.push([a, b, c]);
+  }
+  return out;
+}
+
+// Additive polygon-mode mesh parse-back (Phase 2). Symmetric with emitTexturePackerJson: a mesh is
+// produced ONLY when all three keys (vertices/verticesUV/triangles) are present and well-formed, so
+// the emit→parse→toEqual round-trip holds for meshed atlases. Absent ⇒ no mesh (behavior unchanged).
+// verticesUV are packed-atlas integer px (NOT normalized), kept verbatim per the coordinate contract.
+function readMesh(body: Record<string, unknown>): SpriteMesh | undefined {
+  if (body.vertices === undefined && body.verticesUV === undefined && body.triangles === undefined) {
+    return undefined;
+  }
+  const vertices = readVec2Pairs(body.vertices);
+  const verticesUV = readVec2Pairs(body.verticesUV);
+  const triangles = readTriangles(body.triangles);
+  if (!vertices || !verticesUV || !triangles) return undefined;
+  return { vertices, verticesUV, triangles };
+}
+
 function isTexturePackerApp(meta: Record<string, unknown>): boolean {
   const app = typeof meta.app === 'string' ? meta.app.toLowerCase() : '';
   return app.includes('texturepacker') || app.includes('codeandweb');
@@ -60,6 +105,8 @@ function bodyToSprite(name: string, body: Record<string, unknown>): Sprite | nul
     const py = num(p.y);
     if (px !== undefined && py !== undefined) sprite.pivot = { x: px, y: py };
   }
+  const mesh = readMesh(body);
+  if (mesh) sprite.mesh = mesh;
   return sprite;
 }
 
