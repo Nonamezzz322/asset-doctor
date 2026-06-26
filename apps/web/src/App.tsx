@@ -325,6 +325,7 @@ function FixCard({ files }: { files: PickedFile[] }) {
   const { t } = useI18n();
   const [phase, setPhase] = useState<FixPhase>({ t: 'idle' });
   const [aggressive, setAggressive] = useState(false);
+  const [polygon, setPolygon] = useState(false);
   const [unlocked, setUnlocked] = useState(!PRO_GATE_ENABLED);
 
   useEffect(() => {
@@ -343,7 +344,7 @@ function FixCard({ files }: { files: PickedFile[] }) {
   async function run() {
     setPhase({ t: 'running', p: { label: '', done: 0, total: 1 } });
     try {
-      const out = await runFix(files, { targetMime: 'image/avif', quality: 0.85, padding: 2, maxSize: 4096, maxEdge: 2048, aggressive }, (p) => setPhase({ t: 'running', p }));
+      const out = await runFix(files, { targetMime: 'image/avif', quality: 0.85, padding: 2, maxSize: 4096, maxEdge: 2048, aggressive, polygon }, (p) => setPhase({ t: 'running', p }));
       downloadZip(out.zip);
       setPhase({ t: 'done', out });
     } catch (e) {
@@ -374,6 +375,10 @@ function FixCard({ files }: { files: PickedFile[] }) {
             <input type="checkbox" checked={aggressive} onChange={(e) => setAggressive(e.target.checked)} className="accent-teal" />
             {t('fix.merge')}
           </label>
+          <label title={t('fix.polygonHint')} className="mt-2 flex items-center justify-center gap-1.5 font-mono text-[10px] text-ink-soft">
+            <input type="checkbox" checked={polygon} onChange={(e) => setPolygon(e.target.checked)} className="accent-teal" />
+            {t('fix.polygon')}
+          </label>
           <button
             type="button"
             onClick={run}
@@ -402,6 +407,13 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
         <ReceiptRow label={t('metric.disk')} before={receipt.diskBytesBefore} after={receipt.diskBytesAfter} pct={pct(receipt.diskBytesBefore, receipt.diskBytesAfter)} />
         <ReceiptRow label="VRAM" before={receipt.vramBytesBefore} after={receipt.vramBytesAfter} pct={pct(receipt.vramBytesBefore, receipt.vramBytesAfter)} />
       </div>
+      {(receipt.meshSprites ?? 0) > 0 ? (
+        <p className="font-mono text-[10px] text-ink-soft">
+          {t('fix.meshedCount', { n: receipt.meshSprites ?? 0 })} ·{' '}
+          {receipt.polygonAreaSavedPct ? t('fix.tighter', { pct: Math.round(receipt.polygonAreaSavedPct * 100) }) : t('fix.tighterPlain')}
+          <span className="mt-0.5 block text-ink-soft/80">{t('fix.meshNote')}</span>
+        </p>
+      ) : null}
       {receipt.referencesChanged ? <p className="font-mono text-[10px] text-warn">⚠ {t('fix.mergeWarn')}</p> : null}
       {receipt.skipped.length > 0 ? <p className="font-mono text-[10px] text-ink-soft">{receipt.skipped.length} {t('fix.skipped')}</p> : null}
       <button type="button" onClick={onRedownload} className="w-full rounded-lg border border-line px-3 py-1.5 font-mono text-[11px] text-teal transition hover:border-teal">

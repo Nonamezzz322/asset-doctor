@@ -125,6 +125,16 @@
   "fix.skipped": "saltato",
   "fix.merge": "Aggressivo: unione + dedup (non drop-in)",
   "fix.mergeWarn": "Riferimenti cambiati — aggiorna il loader",
+  "fix.polygon": "Impacchettamento poligonale: fogli più compatti con mesh",
+  "fix.polygonHint": "Incastra gli sprite concavi; la grafica rettangolare ripiega automaticamente",
+  "fix.meshedCount": {
+    "$count": "n",
+    "one": "{n} sprite con mesh",
+    "other": "{n} sprite con mesh"
+  },
+  "fix.tighter": "{pct}% più compatto",
+  "fix.tighterPlain": "impacchettamento più compatto",
+  "fix.meshNote": "La % mostrata è il guadagno di impacchettamento misurato. Il risparmio di overdraw richiede una mesh lato motore (opzionale).",
   "license.locked": "Attiva una licenza per sbloccare il fix Pro",
   "license.keyPlaceholder": "Chiave di licenza (AD-…)",
   "license.activate": "Attiva",

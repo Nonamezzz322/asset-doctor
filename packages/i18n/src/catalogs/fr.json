@@ -125,6 +125,16 @@
   "fix.skipped": "ignoré",
   "fix.merge": "Agressif : fusion + dédup (non drop-in)",
   "fix.mergeWarn": "Références modifiées — mettez à jour votre loader",
+  "fix.polygon": "Empaquetage polygonal : feuilles plus compactes avec maillage",
+  "fix.polygonHint": "Imbrique les sprites concaves ; l'art rectangulaire revient automatiquement en arrière",
+  "fix.meshedCount": {
+    "$count": "n",
+    "one": "{n} sprite maillé",
+    "other": "{n} sprites maillés"
+  },
+  "fix.tighter": "{pct}% plus compact",
+  "fix.tighterPlain": "empaquetage plus compact",
+  "fix.meshNote": "Le % affiché est le gain d'empaquetage mesuré. Les économies d'overdraw nécessitent un maillage côté moteur (en option).",
   "license.locked": "Activez une licence pour débloquer le correctif Pro",
   "license.keyPlaceholder": "Clé de licence (AD-…)",
   "license.activate": "Activer",

@@ -5,11 +5,32 @@
 // (native WebP, or AVIF via @jsquash with honest fallback), drop exact duplicates, and zip a drop-in
 // optimized folder. Assets never leave the device. Every fix the browser can't do lands in skipped[].
 
-import type { Asset, Atlas, ImageFeatures, ImageMime } from '@asset-doctor/core';
+import type { Asset, Atlas, ImageFeatures, ImageMime, Rect } from '@asset-doctor/core';
 import { groupFiles, type RawFile } from '@asset-doctor/ingest';
 import { parseAtlas, parseImage, parseSpineAtlasText, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
 import { analyze, mergeSharedAtlases, type EncodeSizer } from '@asset-doctor/analysis';
-import { emitSpineAtlasText, emitTexturePackerJson, planFix, repackAtlases, scaleAtlas } from '@asset-doctor/fix';
+import {
+  emitSpineAtlasText,
+  emitTexturePackerJson,
+  planFix,
+  polygonWins,
+  repackAtlases,
+  repackAtlasesPolygon,
+  scaleAtlas,
+  scaleMeshToFrame,
+  traceMesh,
+  // PURE per-sprite extraction cores — single source of truth for the threshold/dilation/downscale
+  // logic (Vitest-covered in packages/fix). The worker only reads pixels and delegates here.
+  maskItemFromRGBA,
+  alphaMaskFromRGBA,
+  // Frozen polygon constants — re-exported from the SINGLE source of truth (polygon-config) so no
+  // tunable the mesh/mesh-trace path depends on can drift between the worker and packages/fix.
+  HULL_AREA_RATIO_MAX,
+  POLY_MAX_VERTS,
+  POLY_TOLERANCE2,
+  type MaskItem,
+  type RawMesh,
+} from '@asset-doctor/fix';
 import { dHashFromGray, isFlat, luma } from '../lib/perceptual';
 import { makeZip, type ZipEntry } from './zip';
 import type { FixInputFile, FixOptions, FixReceipt, FixRequest, FixResponse } from './fix-protocol';
@@ -135,7 +156,49 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
     return bmp;
   };
 
+  // Polygon-mode per-sprite extraction cache, keyed by the dir-aware id `${atlas.name} ${sprite.name}`
+  // (same key repack.ts / repackAtlasesPolygon use — no cross-atlas mis-attribution in merge mode).
+  // Each sprite's frame region is drawn ONCE to a throwaway canvas and read with ONE getImageData; both
+  // the nesting MaskItem and the mesh AlphaMask come from that single read (no duplicate extraction).
+  const maskCache = new Map<string, MaskItem>();
+  const meshCache = new Map<string, RawMesh | null>();
+  const rotatedSkipped = new Set<string>(); // dir-aware ids already surfaced as rotated-source skips
+  /** Extract a sprite's MaskItem (always) and RawMesh (null for rotated/degenerate sprites) from a
+   *  single getImageData of its frame region. Caches by dir-aware id; pushes the rotated-source skip
+   *  to skipped[] exactly once. Returns null only when the source sheet is unavailable. */
+  const extractSprite = async (id: string, atlasRef: string, frame: Rect, rotated: boolean): Promise<MaskItem | null> => {
+    if (maskCache.has(id)) return maskCache.get(id)!;
+    const bmp = await bitmapOf(atlasRef);
+    if (!bmp) return null;
+    const c = new OffscreenCanvas(frame.w, frame.h);
+    const c2d = c.getContext('2d');
+    if (!c2d) return null;
+    c2d.drawImage(bmp, frame.x, frame.y, frame.w, frame.h, 0, 0, frame.w, frame.h);
+    const imageData = c2d.getImageData(0, 0, frame.w, frame.h);
+    // The frame region was drawn at the canvas origin, so the extraction region is the whole canvas.
+    const src = { data: imageData.data, width: imageData.width };
+    const region = { x: 0, y: 0, w: frame.w, h: frame.h };
+    const mask = maskItemFromRGBA(id, src, region, opts.padding);
+    maskCache.set(id, mask);
+    // Source-rotated sprites are NEVER meshed (rectangle-only, no clip) — recorded honestly, not silent.
+    if (rotated) {
+      if (!rotatedSkipped.has(id)) {
+        rotatedSkipped.add(id);
+        skipped.push({ assetRef: id, reason: 'mesh skipped: source sprite is rotated' });
+      }
+      meshCache.set(id, null);
+      return mask;
+    }
+    const { mask: alpha, scale } = alphaMaskFromRGBA(src, region);
+    const raw = traceMesh(alpha, { tolerance2: POLY_TOLERANCE2, maxVerts: POLY_MAX_VERTS, hullAreaRatioMax: HULL_AREA_RATIO_MAX });
+    meshCache.set(id, raw ? scaleMeshToFrame(raw, scale, frame.w, frame.h) : null);
+    return mask;
+  };
+
   let vramSaved = 0;
+  let meshSpritesTotal = 0; // Σ sprites carrying a mesh in the SELECTED polygon results (0 on fallback)
+  let polyVramBefore = 0; // Σ vramBytesBefore of polygon-WON ops (basis for the honest saved-% figure)
+  let polyVramAfter = 0; // Σ vramBytesAfter of those same ops
   let done = 0;
   const total = plan.ops.length + 1;
 
@@ -152,6 +215,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
           skipped.push({ assetRef: ref, reason: info && info.pages > 1 ? 'multi-page Spine repack not supported in v1' : 'Spine atlas not found' });
           continue;
         }
+        // Polygon mode has no mesh slot in the Spine `.atlas` format → rectangle repack, surfaced honestly.
+        if (opts.polygon) skipped.push({ assetRef: ref, reason: 'polygon mode not supported for Spine (no mesh slot in .atlas)' });
         const r = repackAtlases([atlas], { allowRotation: false, padding: op.padding, maxSize: op.maxSize });
         if (r.atlases.length !== 1) {
           skipped.push({ assetRef: ref, reason: 'Spine repack spilled into multiple sheets' });
@@ -193,7 +258,49 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
         continue;
       }
       const merge = group.length > 1; // multi-atlas op = the non-drop-in "merge atlases" mode
-      const r = repackAtlases(group, { allowRotation: false, padding: op.padding, maxSize: op.maxSize });
+
+      // Polygon mode: nest by silhouette and keep it only when it is a MEASURABLE VRAM win; otherwise
+      // fall back to today's rectangle repack (honest no-op, surfaced in skipped[]). When opts.polygon
+      // is false we take exactly today's path — byte-identical behavior, no mask extraction at all.
+      let r: ReturnType<typeof repackAtlases>;
+      let polySelected = false; // true iff the polygon nesting won and was selected for this op
+      if (opts.polygon) {
+        // ONE getImageData per sprite → both the nesting MaskItem (all sprites) and the mesh (non-rotated,
+        // non-null traceMesh). bitmapOf failures abort this op honestly (same as the compose paths below).
+        const masks: MaskItem[] = [];
+        const meshById = new Map<string, RawMesh>();
+        let extractOk = true;
+        for (const a of group) {
+          for (const s of a.sprites) {
+            const id = `${a.name} ${s.name}`;
+            const mask = await extractSprite(id, a.name, s.frame, s.rotated);
+            if (!mask) {
+              extractOk = false;
+              break;
+            }
+            masks.push(mask);
+            const raw = meshCache.get(id);
+            if (raw) meshById.set(id, raw); // only non-rotated sprites with a non-null traceMesh carry a mesh
+          }
+          if (!extractOk) break;
+        }
+        if (!extractOk) {
+          for (const rf of refs) skipped.push({ assetRef: rf, reason: 'source sheet unavailable' });
+          continue;
+        }
+        const poly = repackAtlasesPolygon(group, masks, meshById, { allowRotation: false, padding: 0, maxSize: op.maxSize, emitMesh: true });
+        const rect = repackAtlases(group, { allowRotation: false, padding: op.padding, maxSize: op.maxSize });
+        if (polygonWins(poly, rect)) {
+          r = poly;
+          polySelected = true; // receipt stats are accrued only AFTER this op composes (below), never on a later skip
+        } else {
+          r = rect;
+          for (const rf of refs) skipped.push({ assetRef: rf, reason: 'polygon mode: no measurable VRAM win, used rectangle packing' });
+        }
+      } else {
+        r = repackAtlases(group, { allowRotation: false, padding: op.padding, maxSize: op.maxSize });
+      }
+
       if (!merge && r.atlases.length !== 1) {
         skipped.push({ assetRef: refs[0]!, reason: 'repack spilled into multiple sheets (v1 keeps single-sheet atlases)' });
         continue;
@@ -222,7 +329,22 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
             composeOk = false;
             break;
           }
-          c2d.drawImage(bmp, blit.from.rect.x, blit.from.rect.y, blit.from.rect.w, blit.from.rect.h, blit.to.x, blit.to.y, blit.to.w, blit.to.h);
+          // Cardinal polygon fix: when a blit carries a clip polygon (its conservative verticesUV in
+          // destination space), clip the drawImage to it so an interlocked neighbor's bounding box can
+          // overlap this one's transparent margin without overwriting opaque pixels (source-over). When
+          // blit.clip is absent (rectangle path / non-meshed sprite) this is byte-for-byte today's blit.
+          if (blit.clip && blit.clip.length >= 3) {
+            c2d.save();
+            c2d.beginPath();
+            c2d.moveTo(blit.clip[0]!.x, blit.clip[0]!.y);
+            for (let k = 1; k < blit.clip.length; k++) c2d.lineTo(blit.clip[k]!.x, blit.clip[k]!.y);
+            c2d.closePath();
+            c2d.clip();
+            c2d.drawImage(bmp, blit.from.rect.x, blit.from.rect.y, blit.from.rect.w, blit.from.rect.h, blit.to.x, blit.to.y, blit.to.w, blit.to.h);
+            c2d.restore();
+          } else {
+            c2d.drawImage(bmp, blit.from.rect.x, blit.from.rect.y, blit.from.rect.w, blit.from.rect.h, blit.to.x, blit.to.y, blit.to.w, blit.to.h);
+          }
         }
         if (!composeOk) break;
         const sheet = await encodeCanvas(canvas, c2d, 'image/webp', { lossless: true, allowPngFallback: true });
@@ -245,7 +367,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
             out.push({ path: mPath, bytes: te.encode(emitTexturePackerJson(na)) });
             replaced.add(mPath);
           }
-          operations.push(`repack ${basename(ref)} → ${na.size.w}×${na.size.h} ${sheet!.mime.replace('image/', '')}`);
+          operations.push(`repack ${basename(ref)}${polySelected ? ' (polygon)' : ''} → ${na.size.w}×${na.size.h} ${sheet!.mime.replace('image/', '')}`);
         }
       }
       if (!composeOk) {
@@ -263,6 +385,13 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
         operations.push(`merge ${refs.length} atlases → ${r.atlases.length} sheet${r.atlases.length === 1 ? '' : 's'}`);
       }
       vramSaved += r.vramBytesBefore - r.vramBytesAfter;
+      // Accrue polygon receipt stats only now that the op has fully composed (skips above never reach here),
+      // so meshSprites / polygonAreaSavedPct reflect ONLY sheets that actually shipped.
+      if (polySelected) {
+        meshSpritesTotal += r.atlases.reduce((n, a) => n + a.sprites.filter((s) => s.mesh).length, 0);
+        polyVramBefore += r.vramBytesBefore;
+        polyVramAfter += r.vramBytesAfter;
+      }
     } else if (op.kind === 'resize') {
       const ref = op.assetRef;
       const path = pathByRef.get(ref);
@@ -382,6 +511,11 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
     operations,
     skipped,
     referencesChanged,
+    // Polygon mode (additive, optional): meshSprites counts sprites carrying a mesh in the SELECTED
+    // results (0 on fallback ⇒ omit); polygonAreaSavedPct is the measured VRAM delta, only when a
+    // polygon result actually won. Absent in non-polygon runs ⇒ receipt is byte-identical to today.
+    ...(meshSpritesTotal > 0 ? { meshSprites: meshSpritesTotal } : {}),
+    ...(polyVramBefore > 0 ? { polygonAreaSavedPct: (polyVramBefore - polyVramAfter) / polyVramBefore } : {}),
   };
   post({ type: 'fix-done', receipt, zip });
 }
@@ -456,6 +590,17 @@ async function transcode(bytes: ArrayBuffer, target: ImageMime, quality: number)
   bmp.close();
   return encodeCanvas(canvas, c2d, target, { quality, allowPngFallback: false });
 }
+
+// ── Polygon mode: impure pixel read, PURE extraction ──────────────────────────────────────────────
+// The worker's only pixel-reading job is the `getImageData` in `extractSprite` above; the actual mask /
+// alpha-silhouette derivation (alpha-threshold + ACC_CELL grid + conservative dilation; integer
+// downscale to the MESH_MAX_CELLS cap) now lives in the PURE `maskItemFromRGBA` / `alphaMaskFromRGBA`
+// in packages/fix/src/mask.ts. That is the SINGLE Vitest-covered source of truth for the threshold/
+// dilation/downscale logic, so no constant can drift between the worker and the pure pipeline.
+//
+// `scaleMeshToFrame` (the provably-conservative capped→full-res mesh scale-up) likewise lives in the
+// PURE packages/fix/src/mesh.ts (see the scale>1 coverage test in polygon.test.ts). The worker imports
+// all three above.
 
 const MIME_BY_EXT: Record<string, ImageMime> = { png: 'image/png', webp: 'image/webp', jpg: 'image/jpeg', jpeg: 'image/jpeg', avif: 'image/avif' };
 const mimeOf = (path: string): ImageMime => MIME_BY_EXT[(path.split('.').pop() ?? '').toLowerCase()] ?? 'image/png';

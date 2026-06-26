@@ -125,6 +125,16 @@
   "fix.skipped": "omitido",
   "fix.merge": "Agresivo: fusionar + dedup (no drop-in)",
   "fix.mergeWarn": "Referencias cambiadas — actualiza tu cargador",
+  "fix.polygon": "Empaque poligonal: hojas más compactas con malla",
+  "fix.polygonHint": "Entrelaza sprites cóncavos; el arte rectangular vuelve atrás automáticamente",
+  "fix.meshedCount": {
+    "$count": "n",
+    "one": "{n} sprite con malla",
+    "other": "{n} sprites con malla"
+  },
+  "fix.tighter": "{pct}% más compacto",
+  "fix.tighterPlain": "empaque más compacto",
+  "fix.meshNote": "El % mostrado es la ganancia de empaque medida. Ahorrar overdraw requiere una malla del lado del motor (opcional).",
   "license.locked": "Activa una licencia para desbloquear el arreglo Pro",
   "license.keyPlaceholder": "Clave de licencia (AD-…)",
   "license.activate": "Activar",

@@ -122,6 +122,16 @@
   "fix.skipped": "skipped",
   "fix.merge": "Aggressive: merge + dedupe (not drop-in)",
   "fix.mergeWarn": "References changed — update your loader",
+  "fix.polygon": "Polygon pack: tighter, mesh-aware sheets",
+  "fix.polygonHint": "Interlocks concave sprites; rectangular art falls back automatically",
+  "fix.meshedCount": {
+    "$count": "n",
+    "one": "{n} sprite meshed",
+    "other": "{n} sprites meshed"
+  },
+  "fix.tighter": "{pct}% tighter",
+  "fix.tighterPlain": "tighter packing",
+  "fix.meshNote": "% shown is the measured packing win. Overdraw savings need an engine-side mesh (opt-in).",
   "license.locked": "Activate a license to unlock the Pro fix",
   "license.keyPlaceholder": "License key (AD-…)",
   "license.activate": "Activate",

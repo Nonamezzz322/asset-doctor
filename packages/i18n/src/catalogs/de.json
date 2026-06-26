@@ -122,6 +122,16 @@
   "fix.skipped": "übersprungen",
   "fix.merge": "Aggressiv: zusammenführen + dedupe (kein Drop-in)",
   "fix.mergeWarn": "Referenzen geändert — Loader aktualisieren",
+  "fix.polygon": "Polygon-Packen: dichtere, mesh-fähige Sheets",
+  "fix.polygonHint": "Verzahnt konkave Sprites; rechteckige Grafik fällt automatisch zurück",
+  "fix.meshedCount": {
+    "$count": "n",
+    "one": "{n} Sprite mit Mesh",
+    "other": "{n} Sprites mit Mesh"
+  },
+  "fix.tighter": "{pct}% kompakter",
+  "fix.tighterPlain": "kompaktere Packung",
+  "fix.meshNote": "Der gezeigte % ist der gemessene Pack-Gewinn. Overdraw-Einsparungen brauchen ein Mesh auf Engine-Seite (optional).",
   "license.locked": "Lizenz aktivieren, um den Pro-Fix freizuschalten",
   "license.keyPlaceholder": "Lizenzschlüssel (AD-…)",
   "license.activate": "Aktivieren",

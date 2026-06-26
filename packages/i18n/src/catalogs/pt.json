@@ -125,6 +125,16 @@
   "fix.skipped": "ignorado",
   "fix.merge": "Agressivo: mesclar + dedup (não drop-in)",
   "fix.mergeWarn": "Referências alteradas — atualize seu loader",
+  "fix.polygon": "Empacotamento poligonal: folhas mais compactas com malha",
+  "fix.polygonHint": "Encaixa sprites côncavos; arte retangular volta atrás automaticamente",
+  "fix.meshedCount": {
+    "$count": "n",
+    "one": "{n} sprite com malha",
+    "other": "{n} sprites com malha"
+  },
+  "fix.tighter": "{pct}% mais compacto",
+  "fix.tighterPlain": "empacotamento mais compacto",
+  "fix.meshNote": "O % exibido é o ganho de empacotamento medido. Economia de overdraw exige uma malha no lado do motor (opcional).",
   "license.locked": "Ative uma licença para desbloquear o ajuste Pro",
   "license.keyPlaceholder": "Chave de licença (AD-…)",
   "license.activate": "Ativar",

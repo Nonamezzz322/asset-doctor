@@ -16,6 +16,8 @@ export interface FixOptions {
   maxEdge: number;
   /** Aggressive, NON-drop-in: merge under-filled atlases + drop exact/near duplicates. */
   aggressive: boolean;
+  /** Polygon mode: bitmap-mask nesting + tight mesh. Execution-time choice (worker treats undefined as false). */
+  polygon: boolean;
 }
 
 export type FixRequest = { type: 'fix'; files: FixInputFile[]; options: FixOptions };
@@ -32,6 +34,10 @@ export interface FixReceipt {
   skipped: { assetRef: string; reason: string }[];
   /** True when a merge rewrote manifest references — the folder is NOT a drop-in replacement. */
   referencesChanged: boolean;
+  /** Polygon mode: count of sprites carrying a mesh in the FINAL selected result (0 on fallback). */
+  meshSprites?: number;
+  /** Polygon mode: measured VRAM saving (%) of the selected result, only when polygon packing won. */
+  polygonAreaSavedPct?: number;
 }
 
 export type FixResponse =

@@ -119,6 +119,15 @@
   "fix.skipped": "已跳过",
   "fix.merge": "激进模式：合并 + 去重（非直接替换）",
   "fix.mergeWarn": "引用已更改 — 请更新加载器",
+  "fix.polygon": "多边形打包：更紧凑、支持网格的图集",
+  "fix.polygonHint": "咬合凹形精灵；矩形素材会自动回退",
+  "fix.meshedCount": {
+    "$count": "n",
+    "other": "{n} 个精灵已生成网格"
+  },
+  "fix.tighter": "紧凑 {pct}%",
+  "fix.tighterPlain": "更紧凑的打包",
+  "fix.meshNote": "所示百分比为实测的打包收益。减少过绘需引擎侧网格（需自行启用）。",
   "license.locked": "激活许可证以解锁 Pro 修复",
   "license.keyPlaceholder": "许可证密钥（AD-…）",
   "license.activate": "激活",
