@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import type { AnalysisReport, Atlas } from '@asset-doctor/core';
+import type { AnalysisReport, Atlas, Blit } from '@asset-doctor/core';
 import { parseAtlas, parseAtlasManifest, parseSpineAtlasText, parseSpinePage } from '@asset-doctor/parsers';
 import { analyze, DEFAULT_THRESHOLDS } from '@asset-doctor/analysis';
-import { emitSpineAtlasText, emitTexturePackerJson, pack, planFix, repackAtlases, scaleAtlas, type Placement } from '../src/index';
+import { ACC_CELL, emitSpineAtlasText, emitTexturePackerJson, pack, planFix, repackAtlases, repackAtlasesPolygon, scaleAtlas, type MaskItem, type Placement, type RawMesh } from '../src/index';
 
 const fixDir = fileURLToPath(new URL('../../../fixtures/sample-projects/tp-hash-symbols/', import.meta.url));
 function loadAtlas(): Atlas {
@@ -205,5 +205,162 @@ describe('scaleAtlas', () => {
     const f = s.sprites[0]!.frame;
     expect(f.x + f.w).toBeLessThanOrEqual(s.size.w);
     expect(f.y + f.h).toBeLessThanOrEqual(s.size.h);
+  });
+});
+
+// ── Polygon mode: manifest/parser round-trip + back-compat + UV/spill ───────────────────────────
+// Tests B from docs/polygon-packer-design.md § "Test plan": (f) back-compat, (g) meshed round-trip
+// symmetry, (l) UV/spill correctness. All inputs are built inline (pure layer, no image files): a
+// fully-opaque MaskItem at the ACC_CELL grid and a deterministic CCW triangle-fan RawMesh.
+
+/** A fully-opaque MaskItem (every cell 1) at the ACC_CELL grid for a `w`×`h` px sprite. Drives the
+ *  nester to a known packing without depending on the impure worker's mask extraction. */
+function solidMask(id: string, w: number, h: number): MaskItem {
+  const cols = Math.ceil(w / ACC_CELL);
+  const rows = Math.ceil(h / ACC_CELL);
+  return { id, w, h, cols, rows, bits: new Uint8Array(cols * rows).fill(1) };
+}
+
+/** A deterministic trimmed-local RawMesh: a CCW triangle fan over a small integer outline that fits a
+ *  `w`×`h` frame. `verticesUV` is intentionally NOT carried here — repackAtlasesPolygon recomputes it
+ *  from the final per-bin frame.xy, which tests (g)/(l) verify. */
+function triMesh(w: number, h: number): RawMesh {
+  // CCW under the Y-down shoelace convention (matches SpriteMesh's winding contract).
+  const vertices = [
+    { x: 0, y: h },
+    { x: w, y: h },
+    { x: w, y: 0 },
+    { x: 0, y: 0 },
+  ];
+  const triangles = [
+    [0, 1, 2],
+    [0, 2, 3],
+  ];
+  return { vertices, triangles };
+}
+
+describe('polygon mode — back-compat (f)', () => {
+  it('a non-mesh atlas emit is byte-identical to the current rectangle golden', () => {
+    // Same atlas, two repack arms: the rectangle packer vs. the polygon repack with emitMesh:false.
+    // With no mesh attached, polygon mode must reduce to the rectangle shape — so once both are packed
+    // by the same family of placements the rectangle GOLDEN emit stays the source of truth and the
+    // no-mesh polygon emit carries none of the additive keys.
+    const atlas = loadAtlas();
+    const rect = repackAtlases([atlas], { allowRotation: false, padding: 2, maxSize: 4096 }).atlases[0]!;
+    const golden = emitTexturePackerJson(rect);
+
+    // The golden (rectangle) manifest must contain none of the additive polygon keys.
+    expect(golden.includes('"vertices"')).toBe(false);
+    expect(golden.includes('"verticesUV"')).toBe(false);
+    expect(golden.includes('"triangles"')).toBe(false);
+
+    // Re-emitting the same rectangle atlas is byte-identical (determinism unchanged by the additive code path).
+    expect(emitTexturePackerJson(rect)).toBe(golden);
+
+    // A polygon repack with emitMesh:false yields a mesh-free atlas whose emit also carries no polygon keys.
+    const masks = atlas.sprites.map((s) => solidMask(`${atlas.name} ${s.name}`, s.frame.w, s.frame.h));
+    const poly = repackAtlasesPolygon([atlas], masks, new Map(), { allowRotation: false, padding: 0, maxSize: 4096, emitMesh: false });
+    for (const a of poly.atlases) {
+      const json = emitTexturePackerJson(a);
+      expect(json.includes('"vertices"')).toBe(false);
+      expect(json.includes('"verticesUV"')).toBe(false);
+      expect(json.includes('"triangles"')).toBe(false);
+    }
+    // No clip on any blit when no mesh is emitted ⇒ today's full-rect compose behavior.
+    expect(poly.blits.every((b) => b.clip === undefined)).toBe(true);
+  });
+
+  it('a Blit with no clip behaves as today (clip key absent on the rectangle repack)', () => {
+    const atlas = loadAtlas();
+    const r = repackAtlases([atlas], { allowRotation: false, padding: 2, maxSize: 4096 });
+    expect(r.blits.length).toBe(atlas.sprites.length);
+    for (const b of r.blits) {
+      expect('clip' in b).toBe(false); // the rectangle path never sets clip — full-rect blit, unchanged
+      expect(b.rotate90).toBe(false);
+    }
+  });
+});
+
+describe('polygon mode — round-trip symmetry for meshed atlases (g)', () => {
+  it('emit → parse → toEqual for an atlas whose sprites carry mesh (exercises parse-back)', () => {
+    // Build a meshed atlas through the real repack so its shape matches what the parser reconstructs
+    // (Atlas.name = imageRef, source.kind = texturepacker-hash, sorted sprites). Every sprite gets a
+    // mesh, so the additive vertices/verticesUV/triangles keys must survive emit → parse unchanged.
+    const atlas = loadAtlas();
+    const masks = atlas.sprites.map((s) => solidMask(`${atlas.name} ${s.name}`, s.frame.w, s.frame.h));
+    const meshById = new Map<string, RawMesh>(atlas.sprites.map((s) => [`${atlas.name} ${s.name}`, triMesh(s.frame.w, s.frame.h)]));
+    const repacked = repackAtlasesPolygon([atlas], masks, meshById, { allowRotation: false, padding: 0, maxSize: 4096, emitMesh: true }).atlases[0]!;
+
+    // Every sprite carries a mesh (this is the meshed case we want to round-trip).
+    expect(repacked.sprites.length).toBeGreaterThan(0);
+    expect(repacked.sprites.every((s) => s.mesh !== undefined)).toBe(true);
+
+    const json1 = emitTexturePackerJson(repacked);
+    // Determinism: re-emitting the exact same meshed atlas is byte-identical.
+    expect(emitTexturePackerJson(repacked)).toBe(json1);
+    // The additive keys are actually present (otherwise the round-trip would trivially hold).
+    expect(json1.includes('"vertices"')).toBe(true);
+    expect(json1.includes('"verticesUV"')).toBe(true);
+    expect(json1.includes('"triangles"')).toBe(true);
+
+    const res = parseAtlasManifest(JSON.parse(json1), { imageRef: repacked.imageRef, imageSize: repacked.size });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.atlas).toEqual(repacked); // full symmetry: emit → parse → same meshed Atlas
+  });
+});
+
+describe('polygon mode — UV/spill correctness (l)', () => {
+  it('verticesUV[i] === vertices[i] + frame.xy (integers, not normalized) and Blit.clip equals verticesUV under spill', () => {
+    // Three solid masks at maxSize=64 (16×16 ACC_CELL cells): C fills a whole bin, A+B share the next
+    // — forcing a spill (≥2 bins) where B lands at a NONZERO offset, proving verticesUV is recomputed
+    // from the FINAL per-bin frame.xy rather than carried from the source.
+    const atlas: Atlas = {
+      name: 'concave.png',
+      imageRef: 'concave.png',
+      size: { w: 128, h: 128 },
+      source: { kind: 'texturepacker-hash' },
+      sprites: [
+        { name: 'wide', frame: { x: 0, y: 0, w: 64, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 64, h: 32 } },
+        { name: 'small', frame: { x: 0, y: 0, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 32, h: 32 } },
+        { name: 'full', frame: { x: 0, y: 0, w: 64, h: 64 }, rotated: false, trimmed: false, sourceSize: { w: 64, h: 64 } },
+      ],
+    };
+    const masks = atlas.sprites.map((s) => solidMask(`${atlas.name} ${s.name}`, s.frame.w, s.frame.h));
+    const meshById = new Map<string, RawMesh>(atlas.sprites.map((s) => [`${atlas.name} ${s.name}`, triMesh(s.frame.w, s.frame.h)]));
+    const r = repackAtlasesPolygon([atlas], masks, meshById, { allowRotation: false, padding: 0, maxSize: 64, emitMesh: true });
+
+    // The set genuinely spilled across bins (so a `_1` sheet exists) — the load-bearing condition for (l).
+    expect(r.atlases.length).toBeGreaterThanOrEqual(2);
+
+    const blitByName = new Map<string, Blit>(r.blits.map((b) => [b.name, b]));
+    let sawNonZeroOffset = false;
+    for (const a of r.atlases) {
+      for (const s of a.sprites) {
+        const mesh = s.mesh!;
+        expect(mesh).toBeDefined();
+        // verticesUV is the trimmed-local outline translated by the FINAL per-bin frame.xy — integer,
+        // NOT normalized (a normalized UV would be a fraction in [0,1], never equal to vertex+frame).
+        for (let i = 0; i < mesh.vertices.length; i++) {
+          const v = mesh.vertices[i]!;
+          const uv = mesh.verticesUV[i]!;
+          expect(uv).toEqual({ x: v.x + s.frame.x, y: v.y + s.frame.y });
+          expect(Number.isInteger(uv.x)).toBe(true);
+          expect(Number.isInteger(uv.y)).toBe(true);
+        }
+        if (s.frame.x !== 0 || s.frame.y !== 0) sawNonZeroOffset = true;
+        // The blit's clip path is exactly this sprite's verticesUV (the compose-safety contract).
+        const blit = blitByName.get(s.name)!;
+        expect(blit.clip).toEqual(mesh.verticesUV);
+      }
+    }
+    // At least one meshed sprite was placed at a nonzero offset ⇒ the +frame.xy recompute is exercised,
+    // not a trivial pass where every sprite sits at the origin.
+    expect(sawNonZeroOffset).toBe(true);
+
+    // Determinism: the same polygon repack emits byte-identical manifests on re-run.
+    const r2 = repackAtlasesPolygon([atlas], masks, meshById, { allowRotation: false, padding: 0, maxSize: 64, emitMesh: true });
+    for (let i = 0; i < r.atlases.length; i++) {
+      expect(emitTexturePackerJson(r2.atlases[i]!)).toBe(emitTexturePackerJson(r.atlases[i]!));
+    }
   });
 });
