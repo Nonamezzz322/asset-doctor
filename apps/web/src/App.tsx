@@ -8,6 +8,8 @@ import {
   type PickedFile,
 } from './lib/import';
 import { runAnalysis, type Progress } from './lib/worker-client';
+import { runFix, type FixOutcome, type FixProgress } from './lib/fix-client';
+import type { FixReceipt } from './worker/fix-protocol';
 import { fmtBytes, SEVERITY_TEXT } from './lib/format';
 import { LOCALES, NATIVE_NAME, useI18n } from './lib/i18n';
 import { FilmViewer } from './components/FilmViewer';
@@ -151,16 +153,7 @@ export function App() {
                 <aside className="space-y-3">
                   <h2 className="font-mono text-xs uppercase tracking-[0.06em] text-teal">{t('findings.title')}</h2>
                   <Findings findings={assetFindings} selectedId={selectedFinding} onSelect={setSelectedFinding} />
-                  <div className="rounded-xl border-2 border-teal/70 bg-panel p-4 text-center">
-                    <p className="font-mono text-xs text-ink-soft">{t('pro.note')}</p>
-                    <button
-                      type="button"
-                      disabled
-                      className="mt-2.5 w-full cursor-not-allowed rounded-lg bg-cta px-3 py-2 font-sans text-xs font-semibold text-white opacity-55"
-                    >
-                      {t('pro.cta')}
-                    </button>
-                  </div>
+                  <FixCard files={files} />
                   <button
                     type="button"
                     onClick={() => setPhase({ t: 'idle' })}
@@ -304,6 +297,91 @@ function AssetSelector({
           <span className={SEVERITY_TEXT[worst(a.assetRef)]}>●</span> {a.assetRef}
         </button>
       ))}
+    </div>
+  );
+}
+
+type FixPhase =
+  | { t: 'idle' }
+  | { t: 'running'; p: FixProgress }
+  | { t: 'done'; out: FixOutcome }
+  | { t: 'error'; message: string };
+
+function downloadZip(zip: Blob): void {
+  const url = URL.createObjectURL(zip);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'optimized-folder.zip';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// The Phase-2 fix: repack + transcode the loaded folder in a worker, then download a drop-in
+// optimized .zip. Free in this build (no monetization yet); assets never leave the device.
+function FixCard({ files }: { files: PickedFile[] }) {
+  const { t } = useI18n();
+  const [phase, setPhase] = useState<FixPhase>({ t: 'idle' });
+
+  async function run() {
+    setPhase({ t: 'running', p: { label: '', done: 0, total: 1 } });
+    try {
+      const out = await runFix(files, { targetMime: 'image/avif', quality: 0.85, padding: 2, maxSize: 4096 }, (p) => setPhase({ t: 'running', p }));
+      downloadZip(out.zip);
+      setPhase({ t: 'done', out });
+    } catch (e) {
+      setPhase({ t: 'error', message: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  return (
+    <div className="rounded-xl border-2 border-teal/70 bg-panel p-4 text-center">
+      <p className="font-mono text-xs text-ink-soft">{t('pro.note')}</p>
+      {phase.t === 'running' ? (
+        <p className="mt-2.5 font-mono text-xs text-teal">Optimizing… {phase.p.total > 1 ? `${phase.p.done}/${phase.p.total}` : ''} {phase.p.label}</p>
+      ) : phase.t === 'done' ? (
+        <Receipt receipt={phase.out.receipt} onRedownload={() => downloadZip(phase.out.zip)} />
+      ) : (
+        <button
+          type="button"
+          onClick={run}
+          disabled={files.length === 0}
+          className="mt-2.5 w-full rounded-lg bg-cta px-3 py-2 font-sans text-xs font-semibold text-white shadow-[0_2px_6px_rgba(21,160,106,0.32)] transition hover:bg-cta-hover disabled:opacity-55"
+        >
+          {t('pro.cta')}
+        </button>
+      )}
+      {phase.t === 'error' && <p className="mt-2 font-mono text-[11px] text-crit">{phase.message}</p>}
+    </div>
+  );
+}
+
+function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload: () => void }) {
+  const pct = (before: number, after: number): number => (before > 0 ? Math.round((1 - after / before) * 100) : 0);
+  return (
+    <div className="mt-2.5 space-y-1.5 text-left">
+      <div className="flex items-center justify-center gap-1.5 font-mono text-xs text-ok">
+        <span className="h-2 w-2 rounded-full bg-ok" /> ✓ optimized
+      </div>
+      <div className="space-y-1 rounded-md bg-bg p-2 font-mono text-[11px]">
+        <ReceiptRow label="disk" before={receipt.diskBytesBefore} after={receipt.diskBytesAfter} pct={pct(receipt.diskBytesBefore, receipt.diskBytesAfter)} />
+        <ReceiptRow label="VRAM" before={receipt.vramBytesBefore} after={receipt.vramBytesAfter} pct={pct(receipt.vramBytesBefore, receipt.vramBytesAfter)} />
+      </div>
+      {receipt.skipped.length > 0 ? <p className="font-mono text-[10px] text-ink-soft">{receipt.skipped.length} skipped</p> : null}
+      <button type="button" onClick={onRedownload} className="w-full rounded-lg border border-line px-3 py-1.5 font-mono text-[11px] text-teal transition hover:border-teal">
+        ↓ .zip
+      </button>
+    </div>
+  );
+}
+
+function ReceiptRow({ label, before, after, pct }: { label: string; before: number; after: number; pct: number }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-ink-soft">{label}</span>
+      <span>
+        <span className="text-ink-soft line-through">{fmtBytes(before)}</span> → <span className="text-ink">{fmtBytes(after)}</span>{' '}
+        <span className="text-cta">{pct >= 0 ? `−${pct}%` : `+${-pct}%`}</span>
+      </span>
     </div>
   );
 }
