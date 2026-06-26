@@ -84,7 +84,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
 
   // measure format savings (native WebP) so format findings → transcode ops appear
   const report = await analyze(merged, undefined, { missingImages: grouped.missing, encodeImage: makeEncoder(bytesByRef) });
-  const plan = planFix(report, { targetMime: opts.targetMime, quality: opts.quality, lossless: true, padding: opts.padding, maxSize: opts.maxSize });
+  const plan = planFix(report, { targetMime: opts.targetMime, quality: opts.quality, lossless: true, padding: opts.padding, maxSize: opts.maxSize, maxEdge: opts.maxEdge });
 
   // ── execute ──
   const out: { path: string; bytes: Uint8Array }[] = [];
@@ -116,9 +116,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
         continue;
       }
       const atlas = atlasByRef.get(ref);
-      const srcBmp = atlas ? await bitmapOf(ref) : null;
-      if (!atlas || !srcBmp) {
-        skipped.push({ assetRef: ref, reason: 'atlas image unavailable' });
+      if (!atlas) {
+        skipped.push({ assetRef: ref, reason: 'atlas not found' });
         continue;
       }
       const r = repackAtlases([atlas], { allowRotation: false, padding: op.padding, maxSize: op.maxSize });
@@ -133,20 +132,59 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
         skipped.push({ assetRef: ref, reason: 'no 2D context' });
         continue;
       }
+      let composeOk = true;
       for (const blit of r.blits) {
-        c2d.drawImage(srcBmp, blit.from.rect.x, blit.from.rect.y, blit.from.rect.w, blit.from.rect.h, blit.to.x, blit.to.y, blit.to.w, blit.to.h);
+        const bmp = await bitmapOf(blit.from.atlasRef); // per-blit source (correct for shared/merged pages)
+        if (!bmp) {
+          composeOk = false;
+          break;
+        }
+        c2d.drawImage(bmp, blit.from.rect.x, blit.from.rect.y, blit.from.rect.w, blit.from.rect.h, blit.to.x, blit.to.y, blit.to.w, blit.to.h);
       }
-      const imgBytes = new Uint8Array(await (await canvas.convertToBlob({ type: 'image/png' })).arrayBuffer());
-      const imagePath = pathByRef.get(ref)!;
-      out.push({ path: imagePath, bytes: imgBytes });
+      if (!composeOk) {
+        skipped.push({ assetRef: ref, reason: 'source sheet unavailable' });
+        continue;
+      }
+      // lossless WebP sheet (smaller on disk, pixel-perfect); falls back to PNG.
+      const sheet = await encodeCanvas(canvas, c2d, 'image/webp', { lossless: true, allowPngFallback: true });
+      const origPath = pathByRef.get(ref)!;
+      const imagePath = sheet!.mime === 'image/webp' ? origPath.replace(/\.[a-z0-9]+$/i, '.webp') : origPath;
+      if (sheet!.mime === 'image/webp') na.imageRef = na.imageRef.replace(/\.[a-z0-9]+$/i, '.webp');
+      out.push({ path: imagePath, bytes: sheet!.bytes });
+      replaced.add(origPath);
       replaced.add(imagePath);
-      const mPath = manifestPathByImage.get(basename(na.imageRef)) ?? manifestPathByImage.get(basename(ref));
+      const mPath = manifestPathByImage.get(basename(ref));
       if (mPath) {
         out.push({ path: mPath, bytes: te.encode(emitTexturePackerJson(na)) });
         replaced.add(mPath);
       }
       vramSaved += r.vramBytesBefore - r.vramBytesAfter;
-      operations.push(`repack ${basename(ref)} ${na.size.w}×${na.size.h}`);
+      operations.push(`repack ${basename(ref)} → ${na.size.w}×${na.size.h} ${sheet!.mime.replace('image/', '')}`);
+    } else if (op.kind === 'resize') {
+      const ref = op.assetRef;
+      const path = pathByRef.get(ref);
+      const bytes = bytesByRef.get(ref);
+      if (!path || !bytes) {
+        skipped.push({ assetRef: ref, reason: 'image unavailable' });
+        continue;
+      }
+      const bmp = await createImageBitmap(new Blob([bytes]));
+      const origPx = bmp.width * bmp.height;
+      const canvas = new OffscreenCanvas(op.to.w, op.to.h);
+      const c2d = canvas.getContext('2d');
+      if (!c2d) {
+        bmp.close();
+        skipped.push({ assetRef: ref, reason: 'no 2D context' });
+        continue;
+      }
+      c2d.drawImage(bmp, 0, 0, bmp.width, bmp.height, 0, 0, op.to.w, op.to.h);
+      bmp.close();
+      const enc = await encodeCanvas(canvas, c2d, op.targetMime, { quality: op.quality, allowPngFallback: true });
+      const newPath = path.replace(/[^/]+$/, basename(path).replace(/\.[a-z0-9]+$/i, EXT[enc!.mime] ?? '.png'));
+      out.push({ path: newPath, bytes: enc!.bytes });
+      replaced.add(path);
+      vramSaved += Math.max(0, (origPx - op.to.w * op.to.h) * 4);
+      operations.push(`resize ${basename(path)} → ${op.to.w}×${op.to.h} ${enc!.mime.replace('image/', '')}`);
     } else if (op.kind === 'transcode') {
       const ref = op.assetRef;
       const path = pathByRef.get(ref);
@@ -221,8 +259,46 @@ function makeEncoder(bytesByRef: Map<string, ArrayBuffer>): EncodeSizer {
   };
 }
 
-/** Encode an ImageData to a target format; native WebP/PNG, AVIF via @jsquash (lazy). null if the
- *  browser silently fell back to another format (honest skip). */
+interface EncodeOpts {
+  quality?: number;
+  lossless?: boolean;
+  /** When the target codec is unavailable: true → fall back to PNG, false → return null (honest skip). */
+  allowPngFallback?: boolean;
+}
+
+/** Encode an OffscreenCanvas: AVIF + lossless-WebP via lazy @jsquash (the codecs native canvas lacks),
+ *  lossy WebP/PNG native. Feature-detects the silent PNG fallback so we never mislabel an output. */
+async function encodeCanvas(canvas: OffscreenCanvas, c2d: OffscreenCanvasRenderingContext2D, target: ImageMime, opts: EncodeOpts): Promise<{ bytes: Uint8Array; mime: ImageMime } | null> {
+  const q = opts.quality ?? 0.85;
+  if (target === 'image/avif') {
+    try {
+      const data = c2d.getImageData(0, 0, canvas.width, canvas.height);
+      const m = (await import('@jsquash/avif')) as { encode: (d: ImageData, o?: { quality?: number }) => Promise<ArrayBuffer> };
+      const buf = await m.encode(data, { quality: Math.round(q * 100) });
+      if (buf && buf.byteLength > 0) return { bytes: new Uint8Array(buf), mime: 'image/avif' };
+    } catch {
+      /* fall through to WebP */
+    }
+    target = 'image/webp';
+  }
+  if (target === 'image/webp' && opts.lossless) {
+    try {
+      const data = c2d.getImageData(0, 0, canvas.width, canvas.height);
+      const m = (await import('@jsquash/webp')) as { encode: (d: ImageData, o?: { lossless?: number }) => Promise<ArrayBuffer> };
+      const buf = await m.encode(data, { lossless: 1 });
+      if (buf && buf.byteLength > 0) return { bytes: new Uint8Array(buf), mime: 'image/webp' };
+    } catch {
+      /* fall through to native */
+    }
+  }
+  const blob = await canvas.convertToBlob({ type: target, quality: q });
+  if (blob.type === target) return { bytes: new Uint8Array(await blob.arrayBuffer()), mime: blob.type as ImageMime };
+  if (!opts.allowPngFallback) return null;
+  const png = await canvas.convertToBlob({ type: 'image/png' });
+  return { bytes: new Uint8Array(await png.arrayBuffer()), mime: 'image/png' };
+}
+
+/** Transcode raw image bytes (decode → canvas → encode). null = target codec unavailable (skip). */
 async function transcode(bytes: ArrayBuffer, target: ImageMime, quality: number): Promise<{ bytes: Uint8Array; mime: ImageMime } | null> {
   const bmp = await createImageBitmap(new Blob([bytes]));
   const canvas = new OffscreenCanvas(bmp.width, bmp.height);
@@ -230,21 +306,5 @@ async function transcode(bytes: ArrayBuffer, target: ImageMime, quality: number)
   if (!c2d) return null;
   c2d.drawImage(bmp, 0, 0);
   bmp.close();
-
-  if (target === 'image/avif') {
-    try {
-      const data = c2d.getImageData(0, 0, canvas.width, canvas.height);
-      const avif = (await import('@jsquash/avif')) as { encode: (d: ImageData, o?: { quality?: number }) => Promise<ArrayBuffer> };
-      const buf = await avif.encode(data, { quality: Math.round(quality * 100) });
-      if (buf && buf.byteLength > 0) return { bytes: new Uint8Array(buf), mime: 'image/avif' };
-    } catch {
-      /* fall through to WebP */
-    }
-    target = 'image/webp';
-  }
-
-  const blob = await canvas.convertToBlob({ type: target, quality });
-  // convertToBlob silently falls back to PNG when a codec is unavailable — only accept the real target.
-  if (blob.type !== target) return null;
-  return { bytes: new Uint8Array(await blob.arrayBuffer()), mime: blob.type as ImageMime };
+  return encodeCanvas(canvas, c2d, target, { quality, allowPngFallback: false });
 }

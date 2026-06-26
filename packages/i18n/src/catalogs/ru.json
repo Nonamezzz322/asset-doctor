@@ -121,5 +121,9 @@
   "ext.hud.binds": "binds текстур/кадр {avg} · избыточных {redundant}",
   "ext.hud.vram": "VRAM ~{vram} · текстур {textures}",
   "ext.hud.hitches": "загрузки с подвисанием {uploads} · шейдеры {shaders}",
-  "ext.hud.fps": "fps {fps} · {ms}ms (зависит от устройства)"
+  "ext.hud.fps": "fps {fps} · {ms}ms (зависит от устройства)",
+  "fix.optimizing": "Оптимизация…",
+  "fix.optimized": "оптимизировано",
+  "fix.download": "Скачать .zip",
+  "fix.skipped": "пропущено"
 }

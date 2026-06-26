@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import type { Atlas } from '@asset-doctor/core';
+import type { AnalysisReport, Atlas } from '@asset-doctor/core';
 import { parseAtlas, parseAtlasManifest } from '@asset-doctor/parsers';
-import { analyze } from '@asset-doctor/analysis';
+import { analyze, DEFAULT_THRESHOLDS } from '@asset-doctor/analysis';
 import { emitTexturePackerJson, pack, planFix, repackAtlases, type Placement } from '../src/index';
 
 const fixDir = fileURLToPath(new URL('../../../fixtures/sample-projects/tp-hash-symbols/', import.meta.url));
@@ -87,9 +87,26 @@ describe('repackAtlases (golden, on tp-hash-symbols)', () => {
 describe('planFix', () => {
   it('plans a repack for the under-filled atlas', async () => {
     const report = await analyze([{ kind: 'atlas', atlas: loadAtlas(), image: { name: 'symbols.png', imageRef: 'symbols.png', size: { w: 512, h: 512 }, mime: 'image/png', byteSize: 1747 } }]);
-    const plan = planFix(report, { targetMime: 'image/webp', quality: 0.9, lossless: true, padding: 2, maxSize: 4096 });
+    const plan = planFix(report, { targetMime: 'image/webp', quality: 0.9, lossless: true, padding: 2, maxSize: 4096, maxEdge: 2048 });
     const repack = plan.ops.find((o) => o.kind === 'repack');
     expect(repack).toBeDefined();
     if (repack?.kind === 'repack') expect(repack.atlasRefs).toContain('symbols.png');
+  });
+
+  it('plans a resize for an oversized loose image (not an atlas), preferring it over transcode', () => {
+    const report: AnalysisReport = {
+      assets: [{ assetRef: 'hero.png', diskBytes: 1000, vramBytes: 4096 * 4096 * 4 }],
+      findings: [
+        { id: 'hero.png:oversize', rule: 'dimensions-oversize', severity: 'crit', assetRef: 'hero.png', title: '', detail: '', messageKey: 'oversize', params: { w: 4096, h: 4096, edge: 4096, budget: 2730, sev: 'crit', vram: 0 } },
+        { id: 'hero.png:format', rule: 'format', severity: 'warn', assetRef: 'hero.png', title: '', detail: '' },
+      ],
+      totals: { diskBytes: 1000, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+      thresholds: DEFAULT_THRESHOLDS,
+    };
+    const plan = planFix(report, { targetMime: 'image/avif', quality: 0.85, lossless: false, padding: 2, maxSize: 4096, maxEdge: 2048 });
+    const resize = plan.ops.find((o) => o.kind === 'resize');
+    expect(resize).toBeDefined();
+    if (resize?.kind === 'resize') expect(resize.to).toEqual({ w: 2048, h: 2048 });
+    expect(plan.ops.some((o) => o.kind === 'transcode')).toBe(false); // resize wins over transcode
   });
 });

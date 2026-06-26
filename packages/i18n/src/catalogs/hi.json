@@ -115,5 +115,9 @@
   "ext.hud.binds": "texture binds/frame {avg} · अनावश्यक {redundant}",
   "ext.hud.vram": "VRAM ~{vram} · textures {textures}",
   "ext.hud.hitches": "hitch uploads {uploads} · shaders {shaders}",
-  "ext.hud.fps": "fps {fps} · {ms}ms (डिवाइस-निर्भर)"
+  "ext.hud.fps": "fps {fps} · {ms}ms (डिवाइस-निर्भर)",
+  "fix.optimizing": "अनुकूलन…",
+  "fix.optimized": "अनुकूलित",
+  "fix.download": ".zip डाउनलोड करें",
+  "fix.skipped": "छोड़ा गया"
 }

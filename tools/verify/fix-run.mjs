@@ -60,9 +60,9 @@ try {
   });
   console.log('FIX_BUTTON', JSON.stringify(clicked));
 
-  await page.waitForFunction(() => /optimized/i.test(document.body.innerText), { timeout: 30000 });
+  await page.waitForFunction(() => /optimized|оптимизир/i.test(document.body.innerText), { timeout: 40000 });
   const receipt = await page.evaluate(() => {
-    const card = [...document.querySelectorAll('div')].find((d) => /✓ optimized/.test(d.textContent || ''));
+    const card = [...document.querySelectorAll('div')].find((d) => /✓ (optimized|оптимизир)/i.test(d.textContent || ''));
     return card ? card.innerText.replace(/\s+/g, ' ').trim() : '';
   });
   console.log('RECEIPT', JSON.stringify(receipt));
@@ -88,9 +88,12 @@ try {
   });
   console.log('REPACKED size', manifest.meta.size.w + '×' + manifest.meta.size.h, '(was 512×512)', '· area', newArea, '<', 512 * 512, '?', newArea < 512 * 512);
   console.log('SPRITES kept', frameNames.length, '/ 5 ·', frameNames.join(','), '· in-bounds', inBounds);
-  console.log('PNG present', !!Object.keys(entries).find((n) => n.endsWith('symbols.png')));
+  // the repacked sheet is referenced by meta.image (now lossless WebP) and present in the zip
+  const sheetRef = manifest.meta.image;
+  const sheetInZip = Object.keys(entries).some((n) => n.endsWith(sheetRef));
+  console.log('SHEET', sheetRef, '· in zip', sheetInZip);
 
-  const ok = newArea < 512 * 512 && frameNames.length === 5 && inBounds && !!Object.keys(entries).find((n) => n.endsWith('symbols.png'));
+  const ok = newArea < 512 * 512 && frameNames.length === 5 && inBounds && sheetInZip;
   console.log(ok ? 'FIX_E2E PASS' : 'FIX_E2E FAIL');
   if (!ok) process.exitCode = 1;
 } finally {

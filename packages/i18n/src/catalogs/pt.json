@@ -118,5 +118,9 @@
   "ext.hud.binds": "binds de textura/frame {avg} · redundantes {redundant}",
   "ext.hud.vram": "VRAM ~{vram} · texturas {textures}",
   "ext.hud.hitches": "uploads com travada {uploads} · shaders {shaders}",
-  "ext.hud.fps": "fps {fps} · {ms}ms (dep. do dispositivo)"
+  "ext.hud.fps": "fps {fps} · {ms}ms (dep. do dispositivo)",
+  "fix.optimizing": "Otimizando…",
+  "fix.optimized": "otimizado",
+  "fix.download": "Baixar .zip",
+  "fix.skipped": "ignorado"
 }

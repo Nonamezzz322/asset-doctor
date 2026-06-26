@@ -325,7 +325,7 @@ function FixCard({ files }: { files: PickedFile[] }) {
   async function run() {
     setPhase({ t: 'running', p: { label: '', done: 0, total: 1 } });
     try {
-      const out = await runFix(files, { targetMime: 'image/avif', quality: 0.85, padding: 2, maxSize: 4096 }, (p) => setPhase({ t: 'running', p }));
+      const out = await runFix(files, { targetMime: 'image/avif', quality: 0.85, padding: 2, maxSize: 4096, maxEdge: 2048 }, (p) => setPhase({ t: 'running', p }));
       downloadZip(out.zip);
       setPhase({ t: 'done', out });
     } catch (e) {
@@ -337,7 +337,7 @@ function FixCard({ files }: { files: PickedFile[] }) {
     <div className="rounded-xl border-2 border-teal/70 bg-panel p-4 text-center">
       <p className="font-mono text-xs text-ink-soft">{t('pro.note')}</p>
       {phase.t === 'running' ? (
-        <p className="mt-2.5 font-mono text-xs text-teal">Optimizing… {phase.p.total > 1 ? `${phase.p.done}/${phase.p.total}` : ''} {phase.p.label}</p>
+        <p className="mt-2.5 font-mono text-xs text-teal">{t('fix.optimizing')} {phase.p.total > 1 ? `${phase.p.done}/${phase.p.total}` : ''} {phase.p.label}</p>
       ) : phase.t === 'done' ? (
         <Receipt receipt={phase.out.receipt} onRedownload={() => downloadZip(phase.out.zip)} />
       ) : (
@@ -356,19 +356,20 @@ function FixCard({ files }: { files: PickedFile[] }) {
 }
 
 function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload: () => void }) {
+  const { t } = useI18n();
   const pct = (before: number, after: number): number => (before > 0 ? Math.round((1 - after / before) * 100) : 0);
   return (
     <div className="mt-2.5 space-y-1.5 text-left">
       <div className="flex items-center justify-center gap-1.5 font-mono text-xs text-ok">
-        <span className="h-2 w-2 rounded-full bg-ok" /> ✓ optimized
+        <span className="h-2 w-2 rounded-full bg-ok" /> ✓ {t('fix.optimized')}
       </div>
       <div className="space-y-1 rounded-md bg-bg p-2 font-mono text-[11px]">
-        <ReceiptRow label="disk" before={receipt.diskBytesBefore} after={receipt.diskBytesAfter} pct={pct(receipt.diskBytesBefore, receipt.diskBytesAfter)} />
+        <ReceiptRow label={t('metric.disk')} before={receipt.diskBytesBefore} after={receipt.diskBytesAfter} pct={pct(receipt.diskBytesBefore, receipt.diskBytesAfter)} />
         <ReceiptRow label="VRAM" before={receipt.vramBytesBefore} after={receipt.vramBytesAfter} pct={pct(receipt.vramBytesBefore, receipt.vramBytesAfter)} />
       </div>
-      {receipt.skipped.length > 0 ? <p className="font-mono text-[10px] text-ink-soft">{receipt.skipped.length} skipped</p> : null}
+      {receipt.skipped.length > 0 ? <p className="font-mono text-[10px] text-ink-soft">{receipt.skipped.length} {t('fix.skipped')}</p> : null}
       <button type="button" onClick={onRedownload} className="w-full rounded-lg border border-line px-3 py-1.5 font-mono text-[11px] text-teal transition hover:border-teal">
-        ↓ .zip
+        ↓ {t('fix.download')}
       </button>
     </div>
   );

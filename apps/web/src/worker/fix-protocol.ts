@@ -12,6 +12,8 @@ export interface FixOptions {
   quality: number;
   padding: number;
   maxSize: number;
+  /** Downscale a loose image whose longest edge exceeds this (px). */
+  maxEdge: number;
 }
 
 export type FixRequest = { type: 'fix'; files: FixInputFile[]; options: FixOptions };
