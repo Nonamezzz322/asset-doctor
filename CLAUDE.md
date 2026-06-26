@@ -17,10 +17,10 @@
 TS · React · Vite · PixiJS v8 (render-probe/WebGL) · Web Workers (анализ вне main-thread)
 · WASM-кодеки (libwebp — позже) · File System Access API (+фолбэк webkitdirectory) · Tailwind v4.
 Тесты: Vitest (ядро) · Playwright (e2e, позже). ESLint/Prettier.
-Бэкенд (Phase 2): Go или NestJS — решение фиксируем перед Phase 2.
+Бэкенд (Slice B): **Go** (chi · pure-Go SQLite `modernc.org/sqlite` · stripe-go · ed25519). Решено и реализовано.
 
 ## Раскладка монорепо (pnpm workspaces)
-`apps/{web,extension,cli}` · `apps/api`(P2-биллинг, Go, позже) · `packages/{core,parsers,ingest,analysis,probe,correlate,budget,i18n,fix}`
+`apps/{web,extension,cli}` · `apps/api`(Slice B: Go thin-биллинг — реализован) · `packages/{core,parsers,ingest,analysis,probe,correlate,budget,i18n,fix}`
 · `action.yml`(composite GH Action) · `fixtures/sample-projects` + `fixtures/budgets`
 - `core` — общие TS-контракты (atlas + analysis модель). **Единственный источник правды**, без дрейфа.
 - `parsers` — TexturePacker JSON (Hash/Array) + Pixi + одиночные + Spine `.atlas` → норм. `Atlas`-модель. Pure, worker-safe.
@@ -30,7 +30,8 @@ TS · React · Vite · PixiJS v8 (render-probe/WebGL) · Web Workers (анали
 - `probe` — render-probe + рантайм-профайлер (draw calls/VRAM из offscreen/live Pixi). `correlate` — линтер→доктор (static×runtime).
 - `budget` — Phase-3 чистое ядро гейта: metric-registry, JSON-конфиг (fail-closed), evaluate, serialize (json/sarif/summary). `apps/cli` — тонкий bin `asset-doctor`.
 - `i18n` — zero-dep локализация (Intl.PluralRules/NumberFormat), общий каталог для web+extension. Findings несут `messageKey`+`params`; en — источник (drift-тест воспроизводит baked); CLI остаётся EN. **9 языков:** en/ru/de/es/pt/fr/it/zh/hi.
-- `fix` — **Phase 2 платный фикс (PURE половина):** MaxRects-упаковка (`pack.ts`), геометрия-репак (`repack.ts`, недеструктивно), детерминированный TexturePacker-манифест (`manifest.ts`), findings→FixPlan (`plan.ts`). Грязная половина — `apps/web/src/worker/fix.worker.ts` (crop→pack→compose→encode→zip) + `zip.ts` (свой store-only zip, zero-dep). Транскод: нативный WebP/PNG + AVIF через lazy `@jsquash/avif`. Кнопка Pro → скачать оптимизированную папку. **Без монетизации пока** (Go-биллинг = Slice B позже).
+- `fix` — **Phase 2 платный фикс (PURE половина):** MaxRects-упаковка (`pack.ts`), геометрия-репак (`repack.ts`, недеструктивно), детерминированный TexturePacker-манифест (`manifest.ts`), findings→FixPlan (`plan.ts`). Грязная половина — `apps/web/src/worker/fix.worker.ts` (crop→pack→compose→encode→zip) + `zip.ts` (свой store-only zip, zero-dep). Транскод: нативный WebP/PNG + AVIF через lazy `@jsquash/avif`. Кнопка Pro → скачать оптимизированную папку.
+- `apps/api` — **Slice B: Go thin-биллинг** (chi · pure-Go SQLite · stripe-go · ed25519). Эндпоинты: `/v1/stripe/webhook` (sig-verify + идемпотентный mint), `/v1/{activate,refresh,deactivate}` (лимит сидов, kill-switch на refund), `/v1/key?session_id` (доставка ключа без email-провайдера). **Лицензия = опак-ключ (lookup); entitlement = ed25519-токен, верифицируется в браузере ОФЛАЙН** (`apps/web/src/lib/license.ts`, WebCrypto). Кросс-язык-фикстура (`fixtures/license/`) гарантирует байт-контракт Go↔WebCrypto. **Гейт OFF по умолчанию** (`VITE_PRO_GATE`) — фикс бесплатен в бете; деплой Fly.io + Stripe = документирован, секреты у юзера. Тонкий: НИКАКОЙ обработки ассетов (инвариант 1–2). 30 Go-тестов.
 
 ## Фаза
 **Phase 1 (диагноз) — готов и задеплоен** (https://nonamezzz322.github.io/asset-doctor/, GH Pages). Полный
@@ -40,7 +41,8 @@ TS · React · Vite · PixiJS v8 (render-probe/WebGL) · Web Workers (анали
 **Phase 3 (CLI + GitHub Action budget-gate) — реализован**: `asset-doctor audit|budget|init` реюзает ядро в
 Node (assets не покидают машину), VRAM=Σw×h×4, exact-dup через node:crypto; JSON-конфиг fail-closed на
 browser-only метрики; composite `action.yml` с before/after через git worktree. Verified: 88 тестов + live CLI.
-**Дальше:** Phase 2 (платный фикс: MaxRects-репак + транскод + Stripe + Go/Nest бэкенд — решить перед стартом).
+**Phase 2 (платный фикс) — клиентский движок готов**: MaxRects-репак + resize + транскод (WebP/AVIF) + Spine-репак + [aggressive] merge/dedup, всё в браузере. **Slice B (Go thin-биллинг) — реализован** (`apps/api`): Stripe-вебхук→mint, ed25519-entitlement, офлайн-верификация в вебе, гейт OFF по умолчанию. Не задеплоено (нужны Stripe/Fly секреты юзера).
+**Дальше:** включить монетизацию (деплой `apps/api` + Stripe + `VITE_PRO_GATE=true`), когда продукт готов к продаже. Опц.: Litestream-дюрабилити, email-доставка ключа, подписки, история-метрик UI.
 
 ## UI — рентген-кабинет
 Герой — **film-viewer** (атлас-снимок с подсвеченными аномалиями), НЕ большая цифра экономии.

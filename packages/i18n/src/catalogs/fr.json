@@ -124,5 +124,20 @@
   "fix.download": "Télécharger .zip",
   "fix.skipped": "ignoré",
   "fix.merge": "Agressif : fusion + dédup (non drop-in)",
-  "fix.mergeWarn": "Références modifiées — mettez à jour votre loader"
+  "fix.mergeWarn": "Références modifiées — mettez à jour votre loader",
+  "license.locked": "Activez une licence pour débloquer le correctif Pro",
+  "license.keyPlaceholder": "Clé de licence (AD-…)",
+  "license.activate": "Activer",
+  "license.activating": "Activation…",
+  "license.buy": "Obtenir une licence",
+  "license.active": "Pro actif",
+  "license.seats": "{active} sur {seats} appareils",
+  "license.deactivate": "Désactiver cet appareil",
+  "license.err.unknown_key": "Clé de licence inconnue",
+  "license.err.inactive": "Cette licence n'est plus active",
+  "license.err.seats_exceeded": "Toutes les places d'appareil sont utilisées — désactivez-en une",
+  "license.err.reactivate": "Veuillez réactiver cet appareil",
+  "license.err.network": "Impossible de joindre le serveur de licences",
+  "license.err.rate_limited": "Trop de tentatives — attendez une minute",
+  "license.err.generic": "Échec de l'activation"
 }

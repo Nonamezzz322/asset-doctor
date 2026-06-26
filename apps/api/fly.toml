@@ -1,0 +1,40 @@
+# Fly.io deploy for the thin entitlement backend. A single small machine + a persistent volume for the
+# SQLite file is plenty at launch. Add Litestream (streaming replica to object storage) before relying
+# on it for anything you can't re-mint — see README "Durability".
+app = "asset-doctor-api"
+primary_region = "fra"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  ADDR = ":8080"
+  ENV = "production"
+  DB_PATH = "/data/asset-doctor.db"
+  ENTITLEMENT_TTL_DAYS = "7"
+  # Fly's edge sets the real client IP here (and overwrites any client-supplied value), so the rate
+  # limiter can trust it. Behind a different proxy, set this to that proxy's equivalent header instead.
+  TRUSTED_IP_HEADER = "Fly-Client-IP"
+  # ALLOWED_ORIGINS must be set to your app origin(s), e.g. "https://nonamezzz322.github.io"
+
+[[mounts]]
+  source = "ad_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/healthz"
+    interval = "30s"
+    timeout = "5s"
+
+# Secrets (NOT here — set via `fly secrets set`):
+#   LICENSE_SIGNING_SEED=...   (from `go run ./tools/keygen`)
+#   STRIPE_WEBHOOK_SECRET=whsec_...
+#   STRIPE_SECRET_KEY=sk_...   (optional; only if/when we call Stripe back)

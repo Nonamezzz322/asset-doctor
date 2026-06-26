@@ -121,5 +121,20 @@
   "fix.download": "Download .zip",
   "fix.skipped": "skipped",
   "fix.merge": "Aggressive: merge + dedupe (not drop-in)",
-  "fix.mergeWarn": "References changed — update your loader"
+  "fix.mergeWarn": "References changed — update your loader",
+  "license.locked": "Activate a license to unlock the Pro fix",
+  "license.keyPlaceholder": "License key (AD-…)",
+  "license.activate": "Activate",
+  "license.activating": "Activating…",
+  "license.buy": "Get a license",
+  "license.active": "Pro active",
+  "license.seats": "{active} of {seats} devices",
+  "license.deactivate": "Deactivate this device",
+  "license.err.unknown_key": "No such license key",
+  "license.err.inactive": "This license is no longer active",
+  "license.err.seats_exceeded": "All device seats are in use — deactivate one",
+  "license.err.reactivate": "Please activate this device again",
+  "license.err.network": "Couldn't reach the licensing server",
+  "license.err.rate_limited": "Too many attempts — wait a minute",
+  "license.err.generic": "Activation failed"
 }

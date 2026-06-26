@@ -124,5 +124,20 @@
   "fix.download": "Descargar .zip",
   "fix.skipped": "omitido",
   "fix.merge": "Agresivo: fusionar + dedup (no drop-in)",
-  "fix.mergeWarn": "Referencias cambiadas — actualiza tu cargador"
+  "fix.mergeWarn": "Referencias cambiadas — actualiza tu cargador",
+  "license.locked": "Activa una licencia para desbloquear el arreglo Pro",
+  "license.keyPlaceholder": "Clave de licencia (AD-…)",
+  "license.activate": "Activar",
+  "license.activating": "Activando…",
+  "license.buy": "Conseguir una licencia",
+  "license.active": "Pro activa",
+  "license.seats": "{active} de {seats} dispositivos",
+  "license.deactivate": "Desactivar este dispositivo",
+  "license.err.unknown_key": "No existe esa clave de licencia",
+  "license.err.inactive": "Esta licencia ya no está activa",
+  "license.err.seats_exceeded": "Todas las plazas de dispositivo están en uso: desactiva una",
+  "license.err.reactivate": "Vuelve a activar este dispositivo",
+  "license.err.network": "No se pudo contactar con el servidor de licencias",
+  "license.err.rate_limited": "Demasiados intentos: espera un minuto",
+  "license.err.generic": "Error al activar"
 }

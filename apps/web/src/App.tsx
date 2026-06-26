@@ -12,6 +12,8 @@ import { runFix, type FixOutcome, type FixProgress } from './lib/fix-client';
 import type { FixReceipt } from './worker/fix-protocol';
 import { fmtBytes, SEVERITY_TEXT } from './lib/format';
 import { LOCALES, NATIVE_NAME, useI18n } from './lib/i18n';
+import { isProUnlocked, maybeRefresh, PRO_GATE_ENABLED } from './lib/license';
+import { ActivatePanel, ProBadge } from './components/LicensePanel';
 import { FilmViewer } from './components/FilmViewer';
 import { Findings } from './components/Findings';
 import { FolderReport } from './components/FolderReport';
@@ -317,11 +319,26 @@ function downloadZip(zip: Blob): void {
 }
 
 // The Phase-2 fix: repack + transcode the loaded folder in a worker, then download a drop-in
-// optimized .zip. Free in this build (no monetization yet); assets never leave the device.
+// optimized .zip. Assets never leave the device. The Pro gate is OFF by default (free) and only
+// engages when VITE_PRO_GATE === 'true' — then a valid offline-verified entitlement is required.
 function FixCard({ files }: { files: PickedFile[] }) {
   const { t } = useI18n();
   const [phase, setPhase] = useState<FixPhase>({ t: 'idle' });
   const [aggressive, setAggressive] = useState(false);
+  const [unlocked, setUnlocked] = useState(!PRO_GATE_ENABLED);
+
+  useEffect(() => {
+    if (!PRO_GATE_ENABLED) return;
+    let alive = true;
+    void (async () => {
+      await maybeRefresh();
+      const ok = await isProUnlocked();
+      if (alive) setUnlocked(ok);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   async function run() {
     setPhase({ t: 'running', p: { label: '', done: 0, total: 1 } });
@@ -332,6 +349,16 @@ function FixCard({ files }: { files: PickedFile[] }) {
     } catch (e) {
       setPhase({ t: 'error', message: e instanceof Error ? e.message : String(e) });
     }
+  }
+
+  // Gated + not yet unlocked → show activation instead of the run button.
+  if (PRO_GATE_ENABLED && !unlocked) {
+    return (
+      <div className="rounded-xl border-2 border-teal/70 bg-panel p-4 text-center">
+        <p className="font-mono text-xs text-ink-soft">{t('pro.note')}</p>
+        <ActivatePanel onUnlocked={() => setUnlocked(true)} />
+      </div>
+    );
   }
 
   return (
@@ -358,6 +385,7 @@ function FixCard({ files }: { files: PickedFile[] }) {
         </>
       )}
       {phase.t === 'error' && <p className="mt-2 font-mono text-[11px] text-crit">{phase.message}</p>}
+      {PRO_GATE_ENABLED && unlocked && <ProBadge onDeactivated={() => setUnlocked(false)} />}
     </div>
   );
 }

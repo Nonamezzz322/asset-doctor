@@ -29,6 +29,25 @@ export interface Rect {
 
 export type AtlasSourceKind = 'texturepacker-hash' | 'texturepacker-array' | 'pixi' | 'spine';
 
+/* ── Sprite mesh (Phase 2 polygon mode — additive, TexturePacker-compatible) ──────────────
+ * A tight outline + triangulation an engine MAY consume to cut overdraw, AND the clip geometry
+ * the fix worker uses to compose interlocked sprites without corrupting neighbors. The rectangle
+ * `frame` + metadata remain the authoritative default render path. Absent ⇒ a pure rectangle
+ * sprite (today's behavior). All coordinates are INTEGER pixels (no float ever enters here). */
+export interface SpriteMesh {
+  /** Outline in TRIMMED-SPRITE-LOCAL pixel space: origin = top-left of the frame region, Y-DOWN,
+   *  positive (CCW under the Y-down shoelace convention, see Determinism §). Repack-INVARIANT —
+   *  copied verbatim on re-placement. Length >= 3; no two consecutive coincident; no collinear triple. */
+  vertices: Vec2[];
+  /** Same points in PACKED-ATLAS pixel space (NOT normalized). For an unrotated frame:
+   *  verticesUV[i] = vertices[i] + (frame.x, frame.y). RECOMPUTED on every re-placement from the
+   *  FINAL per-bin frame.xy — never carried from the source. Same length & order as `vertices`. */
+  verticesUV: Vec2[];
+  /** Index triplets into BOTH vertices and verticesUV (same ordering). Each length 3. Positive
+   *  (CCW) winding, emitted in triangulation order. Length === 3*(vertices.length - 2). */
+  triangles: number[][];
+}
+
 export interface Sprite {
   name: string;
   /** Packed rectangle in the atlas image, as placed (w/h swapped if rotated). */
@@ -41,6 +60,8 @@ export interface Sprite {
   /** Trimmed-region offset/size within the source (present when trimmed). */
   spriteSourceSize?: Rect;
   pivot?: Vec2;
+  /** Optional tight mesh (polygon mode). Additive; absent ⇒ rectangle-only sprite. */
+  mesh?: SpriteMesh;
 }
 
 export interface Atlas {
@@ -202,6 +223,11 @@ export interface Blit {
   from: { atlasRef: string; rect: Rect; rotated: boolean };
   to: Rect;
   rotate90: boolean;
+  /** OPTIONAL clip polygon in DESTINATION atlas pixel space (= the new sprite's verticesUV). When
+   *  present the worker MUST clip the drawImage to this polygon so an interlocked neighbor's
+   *  bounding box can overlap this one's transparent margin without overwriting opaque pixels.
+   *  Absent ⇒ full-rect blit (today's behavior, unchanged). */
+  clip?: Vec2[];
 }
 
 /** Geometry-only repack result (no pixels). `atlases` is plural to model maxSize/POT bin spill. */
@@ -234,4 +260,26 @@ export interface FixReport {
   vramBytesAfter: number;
   /** Every fix the browser couldn't perform (e.g. AVIF unsupported) — surfaced, never silent. */
   skipped: { assetRef: string; reason: string }[];
+}
+
+/* ── Entitlement model (Slice B — the only thing the thin backend signs) ───────────────────────
+ * The web client verifies an Entitlement OFFLINE with an embedded ed25519 public key. The token wire
+ * form is `base64url(payloadJSON) + "." + base64url(sig)`; the SIGNED message is the literal first
+ * segment, so there is no canonical-JSON requirement. `dev` is a client-generated random id (NOT a
+ * fingerprint). Kept here so apps/web and apps/api (Go) share one source of truth for the claim shape. */
+export const ENTITLEMENT_VERSION = 1;
+
+export interface Entitlement {
+  /** token version (must equal ENTITLEMENT_VERSION) */
+  v: number;
+  /** license key */
+  lic: string;
+  /** device id (opaque, client-generated random) */
+  dev: string;
+  /** plan, e.g. "pro" */
+  plan: string;
+  /** issued-at (unix seconds) */
+  iat: number;
+  /** expiry (unix seconds) */
+  exp: number;
 }

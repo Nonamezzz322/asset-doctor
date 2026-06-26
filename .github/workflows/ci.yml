@@ -23,6 +23,32 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
 
+  api:
+    name: api (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: apps/api/go.sum
+      - name: vet
+        working-directory: apps/api
+        run: go vet ./...
+      - name: build
+        working-directory: apps/api
+        run: go build ./...
+      - name: test
+        working-directory: apps/api
+        run: go test ./...
+      - name: entitlement fixture is in sync (regen must be a no-op)
+        working-directory: apps/api
+        run: |
+          go run ./tools/fixturegen
+          if ! git diff --quiet -- ../../fixtures/license/entitlement-fixture.json; then
+            echo "::error::entitlement fixture is stale — run 'go run ./tools/fixturegen' and commit"; exit 1
+          fi
+
   gate-dry-run:
     runs-on: ubuntu-latest
     steps:

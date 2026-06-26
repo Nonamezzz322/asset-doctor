@@ -127,5 +127,20 @@
   "fix.download": "Скачать .zip",
   "fix.skipped": "пропущено",
   "fix.merge": "Агрессивно: слияние + дедуп (не drop-in)",
-  "fix.mergeWarn": "Ссылки изменились — обновите загрузчик"
+  "fix.mergeWarn": "Ссылки изменились — обновите загрузчик",
+  "license.locked": "Активируйте лицензию, чтобы открыть Pro-фикс",
+  "license.keyPlaceholder": "Лицензионный ключ (AD-…)",
+  "license.activate": "Активировать",
+  "license.activating": "Активация…",
+  "license.buy": "Получить лицензию",
+  "license.active": "Pro активна",
+  "license.seats": "{active} из {seats} устройств",
+  "license.deactivate": "Отвязать это устройство",
+  "license.err.unknown_key": "Нет такого ключа",
+  "license.err.inactive": "Лицензия больше не активна",
+  "license.err.seats_exceeded": "Все слоты устройств заняты — отвяжите одно",
+  "license.err.reactivate": "Активируйте это устройство заново",
+  "license.err.network": "Не удалось связаться с сервером лицензий",
+  "license.err.rate_limited": "Слишком много попыток — подождите минуту",
+  "license.err.generic": "Не удалось активировать"
 }

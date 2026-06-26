@@ -36,3 +36,14 @@ tools/calibrate/out/
 /assets/
 /raw/
 **/__MACOSX/
+
+# secrets & local env (keep .env.example, ignore real ones)
+.env
+.env.local
+.env.*.local
+
+# apps/api (Go) runtime artifacts — SQLite db + compiled binary (never commit)
+apps/api/*.db
+apps/api/*.db-shm
+apps/api/*.db-wal
+apps/api/api

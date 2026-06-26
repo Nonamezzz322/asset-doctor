@@ -124,5 +124,20 @@
   "fix.download": "Scarica .zip",
   "fix.skipped": "saltato",
   "fix.merge": "Aggressivo: unione + dedup (non drop-in)",
-  "fix.mergeWarn": "Riferimenti cambiati — aggiorna il loader"
+  "fix.mergeWarn": "Riferimenti cambiati — aggiorna il loader",
+  "license.locked": "Attiva una licenza per sbloccare il fix Pro",
+  "license.keyPlaceholder": "Chiave di licenza (AD-…)",
+  "license.activate": "Attiva",
+  "license.activating": "Attivazione…",
+  "license.buy": "Ottieni una licenza",
+  "license.active": "Pro attivo",
+  "license.seats": "{active} di {seats} dispositivi",
+  "license.deactivate": "Disattiva questo dispositivo",
+  "license.err.unknown_key": "Chiave di licenza inesistente",
+  "license.err.inactive": "Questa licenza non è più attiva",
+  "license.err.seats_exceeded": "Tutti i posti dispositivo sono in uso — disattivane uno",
+  "license.err.reactivate": "Riattiva questo dispositivo",
+  "license.err.network": "Impossibile contattare il server delle licenze",
+  "license.err.rate_limited": "Troppi tentativi — attendi un minuto",
+  "license.err.generic": "Attivazione non riuscita"
 }

@@ -118,5 +118,20 @@
   "fix.download": "下载 .zip",
   "fix.skipped": "已跳过",
   "fix.merge": "激进模式：合并 + 去重（非直接替换）",
-  "fix.mergeWarn": "引用已更改 — 请更新加载器"
+  "fix.mergeWarn": "引用已更改 — 请更新加载器",
+  "license.locked": "激活许可证以解锁 Pro 修复",
+  "license.keyPlaceholder": "许可证密钥（AD-…）",
+  "license.activate": "激活",
+  "license.activating": "正在激活…",
+  "license.buy": "获取许可证",
+  "license.active": "Pro 已激活",
+  "license.seats": "{active}/{seats} 台设备",
+  "license.deactivate": "停用此设备",
+  "license.err.unknown_key": "没有此许可证密钥",
+  "license.err.inactive": "此许可证已失效",
+  "license.err.seats_exceeded": "设备名额已满——请先停用一台",
+  "license.err.reactivate": "请重新激活此设备",
+  "license.err.network": "无法连接许可证服务器",
+  "license.err.rate_limited": "尝试过于频繁——请稍候一分钟",
+  "license.err.generic": "激活失败"
 }

@@ -121,5 +121,20 @@
   "fix.download": ".zip डाउनलोड करें",
   "fix.skipped": "छोड़ा गया",
   "fix.merge": "आक्रामक: मर्ज + डीडुप (ड्रॉप-इन नहीं)",
-  "fix.mergeWarn": "संदर्भ बदले — अपना लोडर अपडेट करें"
+  "fix.mergeWarn": "संदर्भ बदले — अपना लोडर अपडेट करें",
+  "license.locked": "Pro फ़िक्स अनलॉक करने के लिए लाइसेंस सक्रिय करें",
+  "license.keyPlaceholder": "लाइसेंस कुंजी (AD-…)",
+  "license.activate": "सक्रिय करें",
+  "license.activating": "सक्रिय किया जा रहा है…",
+  "license.buy": "लाइसेंस प्राप्त करें",
+  "license.active": "Pro सक्रिय",
+  "license.seats": "{seats} में से {active} डिवाइस",
+  "license.deactivate": "यह डिवाइस निष्क्रिय करें",
+  "license.err.unknown_key": "ऐसी कोई लाइसेंस कुंजी नहीं",
+  "license.err.inactive": "यह लाइसेंस अब सक्रिय नहीं है",
+  "license.err.seats_exceeded": "सभी डिवाइस स्लॉट भरे हैं — एक निष्क्रिय करें",
+  "license.err.reactivate": "कृपया इस डिवाइस को फिर से सक्रिय करें",
+  "license.err.network": "लाइसेंस सर्वर से संपर्क नहीं हो सका",
+  "license.err.rate_limited": "बहुत अधिक प्रयास — एक मिनट रुकें",
+  "license.err.generic": "सक्रियण विफल"
 }

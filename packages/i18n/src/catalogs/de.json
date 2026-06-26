@@ -121,5 +121,20 @@
   "fix.download": "ZIP herunterladen",
   "fix.skipped": "übersprungen",
   "fix.merge": "Aggressiv: zusammenführen + dedupe (kein Drop-in)",
-  "fix.mergeWarn": "Referenzen geändert — Loader aktualisieren"
+  "fix.mergeWarn": "Referenzen geändert — Loader aktualisieren",
+  "license.locked": "Lizenz aktivieren, um den Pro-Fix freizuschalten",
+  "license.keyPlaceholder": "Lizenzschlüssel (AD-…)",
+  "license.activate": "Aktivieren",
+  "license.activating": "Aktivierung…",
+  "license.buy": "Lizenz erwerben",
+  "license.active": "Pro aktiv",
+  "license.seats": "{active} von {seats} Geräten",
+  "license.deactivate": "Dieses Gerät deaktivieren",
+  "license.err.unknown_key": "Kein solcher Lizenzschlüssel",
+  "license.err.inactive": "Diese Lizenz ist nicht mehr aktiv",
+  "license.err.seats_exceeded": "Alle Geräteplätze belegt — eines deaktivieren",
+  "license.err.reactivate": "Bitte dieses Gerät erneut aktivieren",
+  "license.err.network": "Lizenzserver nicht erreichbar",
+  "license.err.rate_limited": "Zu viele Versuche — eine Minute warten",
+  "license.err.generic": "Aktivierung fehlgeschlagen"
 }
