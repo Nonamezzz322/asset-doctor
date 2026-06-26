@@ -180,6 +180,19 @@ importers:
         specifier: workspace:*
         version: link:../probe
 
+  packages/fix:
+    dependencies:
+      '@asset-doctor/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@asset-doctor/analysis':
+        specifier: workspace:*
+        version: link:../analysis
+      '@asset-doctor/parsers':
+        specifier: workspace:*
+        version: link:../parsers
+
   packages/i18n:
     dependencies:
       '@asset-doctor/core':

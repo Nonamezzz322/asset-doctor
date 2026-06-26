@@ -177,3 +177,60 @@ export interface AnalysisReport {
   /** The thresholds actually applied (for transparency in the UI). */
   thresholds: ThresholdConfig;
 }
+
+/* ── Fix model (Phase 2 — output of @asset-doctor/fix + the fix worker) ─────────────────────
+ * The paid fix. A FixPlan is a PURE, structured-cloneable translation of MEASURED findings (never
+ * invented) and NEVER carries pixel bytes. The pure packages/fix computes geometry (RepackResult +
+ * Blits); the impure worker reads/writes pixels per the Blit contract and emits FixedFiles. */
+
+/** A single optimization operation, derived mechanically from the diagnosis. */
+export type FixOp =
+  | { kind: 'repack'; atlasRefs: string[]; targetMime: ImageMime; pot: boolean; allowRotation: boolean; padding: number; maxSize: number }
+  | { kind: 'transcode'; assetRef: string; targetMime: ImageMime; quality: number; lossless: boolean }
+  | { kind: 'drop'; assetRef: string; reason: 'duplicate-exact' };
+
+export interface FixPlan {
+  ops: FixOp[];
+  thresholds: ThresholdConfig;
+}
+
+/** Where a sprite's pixels come from and where they land in the new sheet — the pure→impure compose
+ *  contract. `rotate90` is reserved for packer-introduced rotation (v1 preserves source orientation). */
+export interface Blit {
+  name: string;
+  from: { atlasRef: string; rect: Rect; rotated: boolean };
+  to: Rect;
+  rotate90: boolean;
+}
+
+/** Geometry-only repack result (no pixels). `atlases` is plural to model maxSize/POT bin spill. */
+export interface RepackResult {
+  atlases: Atlas[];
+  blits: Blit[];
+  occupancyBefore: number;
+  occupancyAfter: number;
+  vramBytesBefore: number;
+  vramBytesAfter: number;
+}
+
+/** One emitted file in the optimized download. `originalPath` drives the zip tree; `bytes` is the new
+ *  content; `newName` rewrites the basename (e.g. btn.png → btn.webp). */
+export interface FixedFile {
+  originalPath: string;
+  newName?: string;
+  bytes: ArrayBuffer;
+  /** Audit trail of ops applied to this file (e.g. ['repack', 'transcode webp']). */
+  operations: string[];
+}
+
+/** The receipt for a whole fix run + the files to zip. disk AND vram both carried (POT-rounding can
+ *  shrink one while the other moves — invariant 5); after-numbers are measured, not estimated. */
+export interface FixReport {
+  files: FixedFile[];
+  diskBytesBefore: number;
+  diskBytesAfter: number;
+  vramBytesBefore: number;
+  vramBytesAfter: number;
+  /** Every fix the browser couldn't perform (e.g. AVIF unsupported) — surfaced, never silent. */
+  skipped: { assetRef: string; reason: string }[];
+}
