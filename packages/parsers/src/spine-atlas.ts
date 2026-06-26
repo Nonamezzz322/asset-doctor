@@ -22,6 +22,8 @@ interface RegionAcc {
   orig?: { w: number; h: number };
   bounds?: Rect;
   offsets?: { w: number; h: number };
+  /** legacy `offset: x, y` — the trimmed region's offset within the original. */
+  offset?: { x: number; y: number };
 }
 
 const ints = (v: string): number[] =>
@@ -58,6 +60,7 @@ function applyRegionKey(r: RegionAcc, key: string, val: string): void {
   else if (key === 'orig') r.orig = { w: n[0] ?? 0, h: n[1] ?? 0 };
   else if (key === 'bounds') r.bounds = { x: n[0] ?? 0, y: n[1] ?? 0, w: n[2] ?? 0, h: n[3] ?? 0 };
   else if (key === 'offsets') r.offsets = { w: n[2] ?? 0, h: n[3] ?? 0 };
+  else if (key === 'offset') r.offset = { x: n[0] ?? 0, y: n[1] ?? 0 };
 }
 
 function toSprite(r: RegionAcc): Sprite {
@@ -69,7 +72,10 @@ function toSprite(r: RegionAcc): Sprite {
   const frame: Rect = r.rotated ? { x, y, w: h, h: w } : { x, y, w, h };
   const sourceSize: Size = r.orig ?? r.offsets ?? { w, h };
   const trimmed = sourceSize.w !== w || sourceSize.h !== h;
-  return { name: r.name, frame, rotated: r.rotated, trimmed, sourceSize };
+  const sprite: Sprite = { name: r.name, frame, rotated: r.rotated, trimmed, sourceSize };
+  // a trimmed region carries its offset within the original (so a repack can re-emit it)
+  if (trimmed) sprite.spriteSourceSize = { x: r.offset?.x ?? 0, y: r.offset?.y ?? 0, w, h };
+  return sprite;
 }
 
 export function parseSpineAtlasText(text: string): SpinePage[] {

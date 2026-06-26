@@ -188,7 +188,7 @@ export type FixOp =
   | { kind: 'repack'; atlasRefs: string[]; targetMime: ImageMime; pot: boolean; allowRotation: boolean; padding: number; maxSize: number }
   | { kind: 'transcode'; assetRef: string; targetMime: ImageMime; quality: number; lossless: boolean }
   | { kind: 'resize'; assetRef: string; to: Size; targetMime: ImageMime; quality: number }
-  | { kind: 'drop'; assetRef: string; reason: 'duplicate-exact' };
+  | { kind: 'drop'; assetRef: string; reason: 'duplicate-exact' | 'duplicate-similar' };
 
 export interface FixPlan {
   ops: FixOp[];

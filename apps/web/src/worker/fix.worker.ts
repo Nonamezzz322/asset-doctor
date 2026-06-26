@@ -21,6 +21,17 @@ const dirOf = (p: string): string => {
   const i = p.lastIndexOf('/');
   return i < 0 ? '' : p.slice(0, i + 1);
 };
+const normalize = (p: string): string => {
+  const out: string[] = [];
+  for (const s of p.split('/')) {
+    if (s === '' || s === '.') continue;
+    if (s === '..') out.pop();
+    else out.push(s);
+  }
+  return out.join('/');
+};
+/** Resolve a manifest's `meta.image` (relative to the manifest's dir) → the image's folder-relative path. */
+const resolveImageRef = (manifestPath: string, img: string): string => normalize(dirOf(manifestPath) + img);
 const td = new TextDecoder();
 const te = new TextEncoder();
 const EXT: Record<string, string> = { 'image/webp': '.webp', 'image/avif': '.avif', 'image/png': '.png', 'image/jpeg': '.jpg' };
@@ -63,28 +74,31 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
     }
   }
 
-  // manifest file path per atlas image (so we can rewrite it in place): TexturePacker / Pixi JSON …
+  // manifest file path keyed by the RESOLVED image path (dir-aware — two atlases can share a basename
+  // across folders): TexturePacker / Pixi JSON …
   const manifestPathByImage = new Map<string, string>();
   for (const f of files) {
     if (!/\.json$/i.test(f.name)) continue;
     try {
       const j = JSON.parse(td.decode(f.bytes)) as { meta?: { image?: unknown } };
-      if (typeof j.meta?.image === 'string') manifestPathByImage.set(basename(j.meta.image), f.path);
+      if (typeof j.meta?.image === 'string') manifestPathByImage.set(resolveImageRef(f.path, j.meta.image), f.path);
     } catch {
       /* not a manifest */
     }
   }
-  // … and Spine `.atlas` (page image → its atlas file + page count, for single-page Spine repack)
+  // … and Spine `.atlas` (resolved page image path → its atlas file + page count)
   const spineAtlasInfo = new Map<string, { path: string; pages: number }>();
   for (const f of files) {
     if (!/\.atlas$/i.test(f.name)) continue;
     try {
       const pages = parseSpineAtlasText(td.decode(f.bytes));
-      for (const pg of pages) spineAtlasInfo.set(basename(pg.image), { path: f.path, pages: pages.length });
+      for (const pg of pages) spineAtlasInfo.set(resolveImageRef(f.path, pg.image), { path: f.path, pages: pages.length });
     } catch {
       /* not a spine atlas */
     }
   }
+  const manifestPathOf = (ref: string): string | undefined => manifestPathByImage.get(pathByRef.get(ref) ?? '');
+  const spineInfoOf = (ref: string): { path: string; pages: number } | undefined => spineAtlasInfo.get(pathByRef.get(ref) ?? '');
 
   const merged = mergeSharedAtlases(assets);
   const atlasByRef = new Map<string, Atlas>();
@@ -132,7 +146,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
       // Spine single-page repack: emit a .atlas (not JSON) and keep PNG (Spine-runtime safe). Drop-in.
       if (op.atlasRefs.length === 1 && spineRefs.has(op.atlasRefs[0]!)) {
         const ref = op.atlasRefs[0]!;
-        const info = spineAtlasInfo.get(basename(ref));
+        const info = spineInfoOf(ref);
         const atlas = atlasByRef.get(ref);
         if (!atlas || !info || info.pages > 1) {
           skipped.push({ assetRef: ref, reason: info && info.pages > 1 ? 'multi-page Spine repack not supported in v1' : 'Spine atlas not found' });
@@ -226,7 +240,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
           out.push({ path: imagePath, bytes: sheet!.bytes });
           replaced.add(origPath);
           replaced.add(imagePath);
-          const mPath = manifestPathByImage.get(basename(ref));
+          const mPath = manifestPathOf(ref);
           if (mPath) {
             out.push({ path: mPath, bytes: te.encode(emitTexturePackerJson(na)) });
             replaced.add(mPath);
@@ -242,7 +256,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
         for (const rf of refs) {
           const ip = pathByRef.get(rf);
           if (ip) dropped.add(ip);
-          const mp = manifestPathByImage.get(basename(rf));
+          const mp = manifestPathOf(rf);
           if (mp) dropped.add(mp);
         }
         referencesChanged = true;
@@ -278,13 +292,13 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
         out.push({ path, bytes: new Uint8Array(await blob.arrayBuffer()) });
         replaced.add(path);
         if (spineRefs.has(ref)) {
-          const info = spineAtlasInfo.get(basename(ref));
+          const info = spineInfoOf(ref);
           if (info) {
             out.push({ path: info.path, bytes: te.encode(emitSpineAtlasText(scaled)) });
             replaced.add(info.path);
           }
         } else {
-          const mPath = manifestPathByImage.get(basename(ref));
+          const mPath = manifestPathOf(ref);
           if (mPath) {
             out.push({ path: mPath, bytes: te.encode(emitTexturePackerJson(scaled)) });
             replaced.add(mPath);
@@ -307,6 +321,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
         const newPath = path.replace(/[^/]+$/, basename(path).replace(/\.[a-z0-9]+$/i, EXT[enc!.mime] ?? '.png'));
         out.push({ path: newPath, bytes: enc!.bytes });
         replaced.add(path);
+        if (newPath !== path) referencesChanged = true; // a loose-image rename is NOT drop-in
         vramSaved += Math.max(0, (origPx - op.to.w * op.to.h) * 4);
         operations.push(`resize ${basename(path)} → ${op.to.w}×${op.to.h} ${enc!.mime.replace('image/', '')}`);
       }
@@ -326,11 +341,17 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
       const newPath = path.replace(/[^/]+$/, basename(path).replace(/\.[a-z0-9]+$/i, EXT[enc.mime] ?? '.webp'));
       out.push({ path: newPath, bytes: enc.bytes });
       replaced.add(path);
+      if (newPath !== path) referencesChanged = true; // a loose-image rename is NOT drop-in
       operations.push(`transcode ${basename(path)} → ${enc.mime.replace('image/', '')}`);
     } else if (op.kind === 'drop') {
       const path = pathByRef.get(op.assetRef);
       if (path) {
         dropped.add(path);
+        // if the dropped duplicate is an atlas image, drop its manifest too (else it dangles)
+        const mPath = manifestPathOf(op.assetRef);
+        if (mPath) dropped.add(mPath);
+        const sInfo = spineInfoOf(op.assetRef);
+        if (sInfo) dropped.add(sInfo.path);
         referencesChanged = true; // removing a file changes the folder's references
         vramSaved += vramByRef.get(op.assetRef) ?? 0;
         operations.push(`drop duplicate ${basename(path)}`);

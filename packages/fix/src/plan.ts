@@ -26,11 +26,11 @@ export function planFix(report: AnalysisReport, opts: PlanOptions): FixPlan {
   const dropped = new Set<string>();
   const resized = new Set<string>();
 
-  const dropGroup = (refs: string[]): void => {
+  const dropGroup = (refs: string[], reason: 'duplicate-exact' | 'duplicate-similar'): void => {
     for (const ref of refs.slice(1)) {
       if (dropped.has(ref) || repacked.has(ref)) continue;
       dropped.add(ref);
-      ops.push({ kind: 'drop', assetRef: ref, reason: 'duplicate-exact' });
+      ops.push({ kind: 'drop', assetRef: ref, reason });
     }
   };
 
@@ -63,7 +63,7 @@ export function planFix(report: AnalysisReport, opts: PlanOptions): FixPlan {
         ops.push({ kind: 'resize', assetRef: f.assetRef, to: { w: Math.round(w * s), h: Math.round(h * s) }, targetMime: opts.targetMime, quality: opts.quality });
       }
     } else if (opts.aggressive && (f.rule === 'duplicate-exact' || f.rule === 'duplicate-similar')) {
-      dropGroup(f.relatedRefs ?? []);
+      dropGroup(f.relatedRefs ?? [], f.rule);
     }
   }
 

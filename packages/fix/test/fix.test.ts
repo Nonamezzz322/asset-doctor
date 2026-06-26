@@ -177,6 +177,13 @@ describe('emitSpineAtlasText (inverse of the parser)', () => {
     expect(sortByName(reParsed.sprites)).toEqual(sortByName(atlas.sprites));
     expect(reParsed.size).toEqual(atlas.size);
   });
+
+  it('round-trips a trimmed region offset (spriteSourceSize)', () => {
+    const atlas: Atlas = { name: 's', imageRef: 'sheet.png', size: { w: 256, h: 256 }, sprites: [{ name: 'r', frame: { x: 10, y: 20, w: 50, h: 40 }, rotated: false, trimmed: true, sourceSize: { w: 80, h: 60 }, spriteSourceSize: { x: 5, y: 8, w: 50, h: 40 } }], source: { kind: 'spine' } };
+    const sp = parseSpineAtlasText(emitSpineAtlasText(atlas))[0]!.sprites[0]!;
+    expect(sp.trimmed).toBe(true);
+    expect(sp.spriteSourceSize).toEqual({ x: 5, y: 8, w: 50, h: 40 });
+  });
 });
 
 describe('scaleAtlas', () => {
@@ -190,5 +197,13 @@ describe('scaleAtlas', () => {
       expect(o.frame.h).toBe(Math.max(1, Math.round(src.frame.h * 0.5)));
       expect(o.rotated).toBe(src.rotated); // metadata preserved
     }
+  });
+
+  it('clamps frames inside the scaled sheet (no out-of-bounds after rounding)', () => {
+    const atlas: Atlas = { name: 'a', imageRef: 'a.png', size: { w: 512, h: 512 }, sprites: [{ name: 'edge', frame: { x: 509, y: 509, w: 3, h: 3 }, rotated: false, trimmed: false, sourceSize: { w: 3, h: 3 } }], source: { kind: 'pixi' } };
+    const s = scaleAtlas(atlas, 0.5); // independent rounding would push x+w to 257 > 256
+    const f = s.sprites[0]!.frame;
+    expect(f.x + f.w).toBeLessThanOrEqual(s.size.w);
+    expect(f.y + f.h).toBeLessThanOrEqual(s.size.h);
   });
 });
