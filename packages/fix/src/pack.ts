@@ -109,19 +109,18 @@ function placeInBin(items: PackItem[], W: number, H: number, opts: PackOptions):
   return { placements, unplaced };
 }
 
-function potsUpTo(max: number): number[] {
+/** Powers of two from 1 up to and including `max` (the largest POT ≤ max). */
+export function potsUpTo(max: number): number[] {
   const out: number[] = [];
   for (let s = 1; s <= max; s *= 2) out.push(s);
   return out;
 }
 
-/** Smallest-area POT bin that fits ALL items, else null. */
-function fitOneBin(sorted: PackItem[], opts: PackOptions): PackBin | null {
-  const pad = opts.padding;
-  const totalArea = sorted.reduce((s, it) => s + (it.w + pad) * (it.h + pad), 0);
-  const maxDim = Math.max(...sorted.map((it) => Math.max(it.w + pad, it.h + pad)));
-  const minDim = Math.max(...sorted.map((it) => Math.min(it.w + pad, it.h + pad)));
-  const pots = potsUpTo(opts.maxSize);
+/** Ordered candidate POT bin sizes that can hold `totalArea` while respecting the long-/short-edge
+ *  lower bounds (`maxDim`/`minDim`). Sorted smallest-area first, then narrower width (determinism).
+ *  Shared by the rectangle packer and the polygon nester so both explore bins identically. */
+export function binCandidates(totalArea: number, maxDim: number, minDim: number, maxSize: number): { w: number; h: number }[] {
+  const pots = potsUpTo(maxSize);
   const candidates: { w: number; h: number }[] = [];
   for (const w of pots) {
     for (const h of pots) {
@@ -131,6 +130,16 @@ function fitOneBin(sorted: PackItem[], opts: PackOptions): PackBin | null {
     }
   }
   candidates.sort((a, b) => a.w * a.h - b.w * b.h || a.w - b.w);
+  return candidates;
+}
+
+/** Smallest-area POT bin that fits ALL items, else null. */
+function fitOneBin(sorted: PackItem[], opts: PackOptions): PackBin | null {
+  const pad = opts.padding;
+  const totalArea = sorted.reduce((s, it) => s + (it.w + pad) * (it.h + pad), 0);
+  const maxDim = Math.max(...sorted.map((it) => Math.max(it.w + pad, it.h + pad)));
+  const minDim = Math.max(...sorted.map((it) => Math.min(it.w + pad, it.h + pad)));
+  const candidates = binCandidates(totalArea, maxDim, minDim, opts.maxSize);
   for (const c of candidates) {
     const { placements, unplaced } = placeInBin(sorted, c.w, c.h, opts);
     if (unplaced.length === 0) return { w: c.w, h: c.h, placements };

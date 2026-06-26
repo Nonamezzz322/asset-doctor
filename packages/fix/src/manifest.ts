@@ -14,6 +14,14 @@ export function emitTexturePackerJson(atlas: Atlas): string {
       ...(s.spriteSourceSize ? { spriteSourceSize: { x: s.spriteSourceSize.x, y: s.spriteSourceSize.y, w: s.spriteSourceSize.w, h: s.spriteSourceSize.h } } : {}),
       sourceSize: { w: s.sourceSize.w, h: s.sourceSize.h },
       ...(s.pivot ? { pivot: { x: s.pivot.x, y: s.pivot.y } } : {}),
+      // Polygon-mode mesh (additive): emitted ONLY when present, after the rectangle keys, in the
+      // fixed order vertices → verticesUV → triangles. Vec2 pairs map to [x,y]; all integers ⇒
+      // identical stringification. Absent ⇒ byte-identical to the rectangle-only manifest above.
+      ...(s.mesh ? {
+        vertices: s.mesh.vertices.map((p) => [p.x, p.y]),
+        verticesUV: s.mesh.verticesUV.map((p) => [p.x, p.y]),
+        triangles: s.mesh.triangles,
+      } : {}),
     };
   }
   const meta: Record<string, unknown> = {
