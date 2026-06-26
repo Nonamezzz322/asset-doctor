@@ -22,6 +22,15 @@ type Phase =
 
 const baseName = (p: string): string => p.split('/').pop() ?? p;
 
+function Logo({ size = 22 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="9.2" stroke="#0E8C8C" strokeWidth="1.8" />
+      <path d="M12 6.5v11M6.5 12h11" stroke="#0E8C8C" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function App() {
   const { t } = useI18n();
   const [phase, setPhase] = useState<Phase>({ t: 'idle' });
@@ -73,37 +82,33 @@ export function App() {
   const totals = report?.totals;
   const savedPct = totals && totals.diskBytes > 0 ? Math.round((totals.potentialDiskSaved / totals.diskBytes) * 100) : 0;
   const folderFindings = report?.findings.filter((f) => f.scope === 'folder') ?? [];
-  const assetFindings =
-    report?.findings.filter((f) => f.scope !== 'folder' && f.assetRef === selectedAsset) ?? [];
+  const assetFindings = report?.findings.filter((f) => f.scope !== 'folder' && f.assetRef === selectedAsset) ?? [];
   const selectedBytes = selectedAsset ? fileMap.get(selectedAsset) : undefined;
+  const selectedMetrics = report?.assets.find((a) => a.assetRef === selectedAsset);
 
   return (
     <div className="min-h-full bg-bg text-ink">
-      <header className="border-b border-line bg-panel">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-4">
-          <div className="flex items-baseline gap-3">
-            <span className="font-display text-xl font-semibold tracking-tight">Asset Doctor</span>
-            <span className="font-mono text-xs text-ink-soft">{t('app.tag')}</span>
+      <header className="sticky top-0 z-50 border-b border-line bg-bg/80 backdrop-blur-md">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-3">
+          <div className="flex items-center gap-2.5">
+            <Logo />
+            <span className="font-display text-[16.5px] font-semibold tracking-tight">Asset Doctor</span>
+            <span className="hidden font-mono text-[11px] text-ink-soft sm:inline">{t('app.tag')}</span>
           </div>
-          <div className="flex items-center gap-5">
+          <div className="flex items-center gap-4">
             {report ? (
-              <div className="flex items-center gap-5 font-mono text-xs">
-                <Metric label={t('metric.disk')} value={fmtBytes(totals?.diskBytes ?? 0)} />
-                <Metric
-                  label={t('metric.vram')}
-                  value={`${fmtBytes(totals?.vramBytes ?? 0)} → ~${fmtBytes(totals?.loadedVramBytes ?? 0)} ${t('metric.loaded')}`}
-                />
-                <Metric label={t('metric.saveable')} value={`${fmtBytes(totals?.potentialDiskSaved ?? 0)} · ${savedPct}%`} accent />
+              <div className="hidden items-stretch gap-px overflow-hidden rounded-lg border border-line bg-line md:flex">
+                <HeaderMetric label={t('metric.disk')} value={fmtBytes(totals?.diskBytes ?? 0)} />
+                <HeaderMetric label={t('metric.vram')} value={`${fmtBytes(totals?.loadedVramBytes ?? 0)}`} />
+                <HeaderMetric label={t('metric.saveable')} value={`${fmtBytes(totals?.potentialDiskSaved ?? 0)} · ${savedPct}%`} accent />
               </div>
-            ) : (
-              <span className="font-mono text-xs text-teal">{t('header.xray')}</span>
-            )}
+            ) : null}
             <LanguageSwitcher />
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-6 py-8">
+      <main className="mx-auto max-w-6xl px-6 py-10">
         {phase.t !== 'done' && (
           <Dropzone
             phase={phase}
@@ -136,22 +141,22 @@ export function App() {
                       setSelectedFinding(undefined);
                     }}
                   />
-                  {selectedBytes ? (
-                    <FilmViewer bytes={selectedBytes} findings={assetFindings} highlightId={selectedFinding} />
+                  {selectedBytes && selectedAsset ? (
+                    <FilmViewer bytes={selectedBytes} findings={assetFindings} highlightId={selectedFinding} name={selectedAsset} metrics={selectedMetrics} />
                   ) : (
                     <p className="font-mono text-sm text-ink-soft">{t('report.noImage')}</p>
                   )}
                 </div>
 
                 <aside className="space-y-3">
-                  <h2 className="font-display text-lg font-semibold">{t('findings.title')}</h2>
+                  <h2 className="font-mono text-xs uppercase tracking-[0.06em] text-teal">{t('findings.title')}</h2>
                   <Findings findings={assetFindings} selectedId={selectedFinding} onSelect={setSelectedFinding} />
-                  <div className="rounded-md border border-dashed border-line p-3 text-center">
+                  <div className="rounded-xl border-2 border-teal/70 bg-panel p-4 text-center">
                     <p className="font-mono text-xs text-ink-soft">{t('pro.note')}</p>
                     <button
                       type="button"
                       disabled
-                      className="mt-2 cursor-not-allowed rounded bg-cta px-3 py-1.5 font-mono text-xs text-white opacity-60"
+                      className="mt-2.5 w-full cursor-not-allowed rounded-lg bg-cta px-3 py-2 font-sans text-xs font-semibold text-white opacity-55"
                     >
                       {t('pro.cta')}
                     </button>
@@ -159,7 +164,7 @@ export function App() {
                   <button
                     type="button"
                     onClick={() => setPhase({ t: 'idle' })}
-                    className="font-mono text-xs text-teal underline"
+                    className="font-mono text-xs text-teal underline-offset-2 hover:underline"
                   >
                     {t('action.analyzeAnother')}
                   </button>
@@ -185,7 +190,7 @@ function LanguageSwitcher() {
       aria-label={t('ui.language')}
       value={locale}
       onChange={(e) => setLocale(e.target.value as typeof locale)}
-      className="rounded border border-line bg-panel px-2 py-1 font-mono text-xs text-ink-soft hover:border-ink-soft"
+      className="rounded-lg border border-line bg-panel px-2 py-1.5 font-mono text-xs text-ink-soft transition hover:border-teal hover:text-teal focus:border-teal focus:outline-none"
     >
       {LOCALES.map((l) => (
         <option key={l} value={l}>
@@ -196,12 +201,12 @@ function LanguageSwitcher() {
   );
 }
 
-function Metric({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+function HeaderMetric({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
-    <span className="flex items-baseline gap-1.5">
-      <span className="text-ink-soft">{label}</span>
-      <span className={accent ? 'text-cta' : 'text-ink'}>{value}</span>
-    </span>
+    <div className="bg-panel px-3 py-1.5">
+      <div className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-soft">{label}</div>
+      <div className={`font-mono text-xs font-semibold ${accent ? 'text-cta' : 'text-ink'}`}>{value}</div>
+    </div>
   );
 }
 
@@ -215,39 +220,59 @@ function Dropzone({
   onDrop: (dt: DataTransferItemList) => void;
 }) {
   const { t } = useI18n();
+  const [dragging, setDragging] = useState(false);
   const analyzing = phase.t === 'analyzing';
   return (
-    <div
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => {
-        e.preventDefault();
-        if (e.dataTransfer.items.length) onDrop(e.dataTransfer.items);
-      }}
-      className="rounded-lg border border-dashed border-line bg-film p-12 text-center"
-    >
-      <h1 className="font-display text-2xl font-semibold tracking-tight text-white">{t('dropzone.title')}</h1>
-      <p className="mx-auto mt-2 max-w-xl font-mono text-xs text-line">{t('dropzone.subtitle')}</p>
-
-      {analyzing ? (
-        <div className="mt-6">
-          <p className="font-mono text-sm text-teal">
-            {t('dropzone.analyzing')}{' '}
-            {phase.progress ? t('dropzone.progress', { done: phase.progress.done, total: phase.progress.total, label: phase.progress.label }) : ''}
-          </p>
+    <section className="mx-auto max-w-3xl">
+      <div className="text-center">
+        <div className="mb-5 inline-flex items-center gap-2 font-mono text-xs font-medium uppercase tracking-[0.06em] text-teal">
+          <span className="ad-pulse-dot inline-block h-[7px] w-[7px] rounded-full bg-cta" />
+          {t('header.xray')}
         </div>
-      ) : (
-        <button
-          type="button"
-          onClick={onOpen}
-          className="mt-6 rounded bg-cta px-4 py-2 font-mono text-sm text-white"
-        >
-          {t('dropzone.open')}
-        </button>
-      )}
+        <h1 className="text-balance font-display text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl">{t('dropzone.title')}</h1>
+        <p className="mx-auto mt-4 max-w-xl text-pretty text-[15px] leading-relaxed text-ink-soft">{t('dropzone.subtitle')}</p>
+      </div>
 
-      {phase.t === 'error' && <p className="mt-4 font-mono text-xs text-crit">{phase.message}</p>}
-      <p className="mt-6 font-mono text-[11px] text-ink-soft">{t('dropzone.footnote')}</p>
-    </div>
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          if (e.dataTransfer.items.length) onDrop(e.dataTransfer.items);
+        }}
+        className="ad-grid ad-clip ad-viewer-shadow relative mt-9 rounded-2xl border border-film-border p-3.5"
+      >
+        <div
+          className={`relative flex min-h-[240px] flex-col items-center justify-center gap-5 overflow-hidden rounded-[10px] border-2 border-dashed px-6 py-10 text-center transition-colors ${
+            dragging ? 'border-teal bg-teal/10' : 'border-teal/35'
+          }`}
+        >
+          <div className="ad-scanline" />
+          <Logo size={40} />
+          {analyzing ? (
+            <p className="font-mono text-sm text-[#9be7e7]">
+              {t('dropzone.analyzing')}{' '}
+              {phase.progress ? t('dropzone.progress', { done: phase.progress.done, total: phase.progress.total, label: phase.progress.label }) : ''}
+            </p>
+          ) : (
+            <button
+              type="button"
+              onClick={onOpen}
+              className="rounded-lg bg-cta px-5 py-2.5 font-sans text-sm font-semibold text-white shadow-[0_2px_6px_rgba(21,160,106,0.32)] transition hover:bg-cta-hover"
+            >
+              {t('dropzone.open')}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {phase.t === 'error' && <p className="mt-3 text-center font-mono text-xs text-crit">{phase.message}</p>}
+      <p className="mt-5 text-center font-mono text-[11px] text-ink-soft">{t('dropzone.footnote')}</p>
+    </section>
   );
 }
 
@@ -272,7 +297,7 @@ function AssetSelector({
           key={a.assetRef}
           type="button"
           onClick={() => onSelect(a.assetRef)}
-          className={`rounded border px-2 py-1 font-mono text-xs ${
+          className={`rounded-lg border px-2.5 py-1 font-mono text-xs transition ${
             a.assetRef === selected ? 'border-teal text-ink' : 'border-line text-ink-soft hover:border-ink-soft'
           }`}
         >

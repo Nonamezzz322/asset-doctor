@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react';
-import type { Finding, OverlayZone } from '@asset-doctor/core';
+import { useEffect, useRef, useState } from 'react';
+import type { AssetMetrics, Finding, OverlayZone } from '@asset-doctor/core';
+import { fmtBytes } from '../lib/format';
 
 // Overlay styles (§5): empty = red, transparent = yellow, bleeding = teal.
 const ZONE_STYLE: Record<OverlayZone['kind'], { stroke: string; fill: string }> = {
@@ -10,17 +11,27 @@ const ZONE_STYLE: Record<OverlayZone['kind'], { stroke: string; fill: string }> 
 
 const MAX_W = 760;
 
+const formatOf = (name: string): string => {
+  const ext = name.split('.').pop()?.toLowerCase() ?? '';
+  return { jpg: 'JPEG', jpeg: 'JPEG' }[ext] ?? ext.toUpperCase();
+};
+
 /** The signature view: the atlas read like an X-ray on the dark film, problems glowing. */
 export function FilmViewer({
   bytes,
   findings,
   highlightId,
+  name,
+  metrics,
 }: {
   bytes: ArrayBuffer;
   findings: Finding[];
   highlightId?: string;
+  name: string;
+  metrics?: AssetMetrics;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -30,6 +41,7 @@ export function FilmViewer({
 
     void createImageBitmap(new Blob([bytes])).then((bmp) => {
       if (cancelled) return;
+      setDims({ w: bmp.width, h: bmp.height });
       const scale = Math.min(1, MAX_W / bmp.width);
       canvas.width = Math.round(bmp.width * scale);
       canvas.height = Math.round(bmp.height * scale);
@@ -67,9 +79,43 @@ export function FilmViewer({
     };
   }, [bytes, findings, highlightId]);
 
+  const occ = metrics?.occupancy;
+  const occColor = occ === undefined ? 'text-film-soft' : occ < 0.6 ? 'text-crit' : occ < 0.8 ? 'text-warn' : 'text-ok';
+  const sizeStr = dims ? (dims.w === dims.h ? `${dims.w}²` : `${dims.w}×${dims.h}`) : '—';
+
   return (
-    <div className="overflow-auto rounded-lg border border-dashed border-line bg-film p-3">
-      <canvas ref={canvasRef} className="mx-auto block max-w-full" />
+    <div className="relative ad-clip ad-viewer-shadow rounded-2xl border border-film-border bg-film p-3.5">
+      {/* top bar */}
+      <div className="flex items-center justify-between gap-2 px-1.5 pb-3 pt-1 font-mono">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-xs text-film-soft">{name}</span>
+          <span className="rounded bg-info px-1.5 py-0.5 text-[10px] font-semibold text-film">{formatOf(name)}</span>
+        </div>
+        <span className="shrink-0 text-[11px] text-ink-soft">{sizeStr}</span>
+      </div>
+
+      {/* x-ray stage */}
+      <div className="ad-grid relative aspect-square w-full overflow-hidden rounded-[10px]">
+        <canvas ref={canvasRef} className="absolute inset-0 m-auto block max-h-full max-w-full" />
+        <div key={name} className="ad-scanline" />
+      </div>
+
+      {/* readout strip */}
+      <div className="mt-3 grid grid-cols-4 gap-px overflow-hidden rounded-lg border border-film-border bg-film-border">
+        <ReadCell label="VRAM" value={fmtBytes(metrics?.vramBytes ?? 0)} color="text-info" />
+        <ReadCell label="DISK" value={fmtBytes(metrics?.diskBytes ?? 0)} color="text-ok" />
+        <ReadCell label="SIZE" value={sizeStr} color="text-[#cdd6df]" />
+        <ReadCell label="OCC" value={occ === undefined ? '—' : `${Math.round(occ * 100)}%`} color={occColor} />
+      </div>
+    </div>
+  );
+}
+
+function ReadCell({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div className="bg-film px-3 py-2.5">
+      <div className="mb-1 font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-soft">{label}</div>
+      <div className={`font-mono text-[17px] font-semibold leading-none ${color}`}>{value}</div>
     </div>
   );
 }

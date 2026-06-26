@@ -7,9 +7,17 @@
   --color-line: #dce3ea;
   --color-ink: #16202a;
   --color-ink-soft: #566472;
-  --color-film: #0c1116;
   --color-teal: #0e8c8c;
   --color-cta: #15a06a;
+  --color-cta-hover: #128a5b;
+
+  /* film / x-ray stage palette */
+  --color-film: #0c1116;
+  --color-film-2: #0a0e12;
+  --color-film-line: #121a22;
+  --color-film-border: #1b2530;
+  --color-film-soft: #9fb0bd;
+  --color-film-mute: #8593a0;
 
   --color-crit: #e5484d;
   --color-warn: #d98a00;
@@ -29,4 +37,122 @@ body,
 
 body {
   font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: #0e8c8c;
+  color: #fff;
+}
+
+/* ── signature motifs ─────────────────────────────────────────────────── */
+
+/* x-ray stage: dark film with a faint instrument grid */
+.ad-grid {
+  background-color: var(--color-film-2);
+  background-image:
+    linear-gradient(var(--color-film-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-film-line) 1px, transparent 1px);
+  background-size: 26px 26px;
+}
+
+/* the viewer card lift */
+.ad-viewer-shadow {
+  box-shadow:
+    0 24px 60px -24px rgba(12, 17, 22, 0.55),
+    0 2px 0 rgba(255, 255, 255, 0.5);
+}
+
+/* the film-clip notch at the top of the viewer */
+.ad-clip::before {
+  content: '';
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 64px;
+  height: 16px;
+  background: #cdd6df;
+  border-radius: 5px;
+  box-shadow: inset 0 -2px 3px rgba(0, 0, 0, 0.25);
+  z-index: 5;
+}
+
+@keyframes ad-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ad-scan {
+  0% {
+    top: -8%;
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.95;
+  }
+  90% {
+    opacity: 0.95;
+  }
+  100% {
+    top: 106%;
+    opacity: 0;
+  }
+}
+@keyframes ad-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.35);
+  }
+}
+@keyframes ad-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.ad-reveal {
+  animation: ad-reveal 0.5s ease both;
+}
+.ad-pulse-dot {
+  animation: ad-pulse 2.6s ease-in-out infinite;
+}
+.ad-scanline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -8%;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, #0e8c8c, transparent);
+  box-shadow: 0 0 22px 6px rgba(14, 140, 140, 0.55);
+  z-index: 4;
+  pointer-events: none;
+  animation: ad-scan 2.1s ease-in-out 0.2s both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ad-reveal,
+  .ad-pulse-dot {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+  .ad-scanline {
+    display: none !important;
+  }
 }

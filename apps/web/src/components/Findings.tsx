@@ -1,6 +1,8 @@
-import type { Finding } from '@asset-doctor/core';
-import { SEVERITY_RING, SEVERITY_TEXT } from '../lib/format';
+import type { Finding, Severity } from '@asset-doctor/core';
 import { useI18n } from '../lib/i18n';
+
+export const DOT: Record<Severity, string> = { crit: 'bg-crit', warn: 'bg-warn', ok: 'bg-ok', info: 'bg-info' };
+export const TXT: Record<Severity, string> = { crit: 'text-crit', warn: 'text-warn', ok: 'text-ok', info: 'text-info' };
 
 export function Findings({
   findings,
@@ -13,10 +15,14 @@ export function Findings({
 }) {
   const { t, renderFinding } = useI18n();
   if (findings.length === 0) {
-    return <p className="font-mono text-sm text-ok">{t('findings.none')}</p>;
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-line bg-panel p-4 font-mono text-sm text-ok">
+        <span className="h-2 w-2 rounded-full bg-ok" /> {t('findings.none')}
+      </div>
+    );
   }
   return (
-    <ul className="space-y-2">
+    <ul className="space-y-2.5">
       {findings.map((f) => {
         const selected = f.id === selectedId;
         const r = renderFinding(f);
@@ -25,20 +31,17 @@ export function Findings({
             <button
               type="button"
               onClick={() => onSelect(selected ? undefined : f.id)}
-              className={`w-full rounded-md border bg-panel p-3 text-left transition ${
-                selected ? `ring-2 ${SEVERITY_RING[f.severity]} border-transparent` : 'border-line hover:border-ink-soft'
+              className={`ad-reveal w-full rounded-xl border bg-panel p-4 text-left transition ${
+                selected ? 'border-teal ring-1 ring-teal/40' : 'border-line hover:border-ink-soft'
               }`}
             >
-              <div className="flex items-center gap-2">
-                <span
-                  className={`rounded px-1.5 py-0.5 font-mono text-[10px] uppercase ring-1 ${SEVERITY_TEXT[f.severity]} ${SEVERITY_RING[f.severity]}`}
-                >
-                  {t(`severity.${f.severity}`)}
-                </span>
-                <span className="font-mono text-sm text-ink">{r.title}</span>
+              <div className="mb-2 flex items-center gap-2">
+                <span className={`ad-pulse-dot h-2 w-2 rounded-full ${DOT[f.severity]}`} />
+                <span className={`font-mono text-[10px] uppercase tracking-[0.06em] ${TXT[f.severity]}`}>{t(`severity.${f.severity}`)}</span>
               </div>
-              <p className="mt-1 text-xs text-ink-soft">{r.detail}</p>
-              {r.fix ? <p className="mt-1 font-mono text-xs text-teal">→ {r.fix}</p> : null}
+              <h3 className="font-display text-[15px] font-semibold leading-snug text-ink">{r.title}</h3>
+              <p className="mt-1 text-[13px] leading-snug text-ink-soft">{r.detail}</p>
+              {r.fix ? <p className="mt-2 font-mono text-xs text-teal">→ {r.fix}</p> : null}
             </button>
           </li>
         );
