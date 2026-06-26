@@ -53,6 +53,35 @@ function solidPng(w, h, color) {
   return PNG.sync.write(png);
 }
 
+/** Paint an OPAQUE silhouette into a frame's bbox: for each local pixel (lx,ly) in [0,w)×[0,h),
+ *  call `inside(lx, ly, w, h)` — truthy ⇒ opaque (color), falsy ⇒ left transparent (alpha 0).
+ *  This is how Case 8 draws concave shapes whose opaque area is far smaller than the bbox. */
+function fillShape(png, x, y, w, h, [r, g, b], inside) {
+  for (let ly = 0; ly < h; ly++) {
+    for (let lx = 0; lx < w; lx++) {
+      if (!inside(lx, ly, w, h)) continue;
+      const i = (png.width * (y + ly) + (x + lx)) << 2;
+      png.data[i] = r;
+      png.data[i + 1] = g;
+      png.data[i + 2] = b;
+      png.data[i + 3] = 255;
+    }
+  }
+}
+
+/** Like atlasPng, but each frame may carry a `shape(lx,ly,w,h)` predicate (a concave silhouette);
+ *  frames without one fall back to a solid bbox fill. Background stays transparent. */
+function shapeAtlasPng(size, frames) {
+  const png = new PNG({ width: size.w, height: size.h });
+  png.data.fill(0); // transparent background
+  frames.forEach((f, i) => {
+    const color = COLORS[i % COLORS.length];
+    if (f.shape) fillShape(png, f.frame.x, f.frame.y, f.frame.w, f.frame.h, color, f.shape);
+    else fillRect(png, f.frame.x, f.frame.y, f.frame.w, f.frame.h, color);
+  });
+  return PNG.sync.write(png);
+}
+
 const round4 = (n) => Math.round(n * 10000) / 10000;
 const occupancyOf = (size, frames) =>
   round4(frames.reduce((s, f) => s + f.frame.w * f.frame.h, 0) / (size.w * size.h));
@@ -387,6 +416,94 @@ the Spine parser end-to-end (group → parseSpinePage → analyze).
 Two under-filled 256×256 TexturePacker atlases (~12.5% occupancy each). Their content fits in a
 single sheet, so **atlas-merge** fires. Used to verify the non-drop-in "merge atlases" fix mode
 (which combines them into one sheet and rewrites manifest references).
+`,
+  );
+}
+
+/* ── Case 8: poly-concave — concave silhouettes whose bboxes waste space, so polygon nesting wins ──
+ * 8 untrimmed 128×128 sprites (frame == bbox) on a 512×512 TexturePacker **Hash** atlas. Each sprite's
+ * OPAQUE silhouette is ~half its bbox (a right-triangle split on the diagonal), and the sprites come in
+ * 4 COMPLEMENTARY pairs (lower-left ▙ + upper-right ▝) that interlock into ~one bbox. Rectangle packing
+ * sees only the 128×128 bboxes (Σ ≈ 8·130² with padding) and needs a 512² POT sheet; the bitmap-mask
+ * nester sees ~half-occupied cell grids (Σ mask-cell area ≈ 4·128²) and interlocks the pairs into a 256²
+ * POT sheet → 1/4 the VRAM. At ACC_CELL=4 a 128px edge is 32 cells and the +1-cell dilation
+ * (DILATE_CELLS(padding=2)=1) still leaves a deep diagonal concavity, so the win is robust.
+ *
+ * Shapes (local lx,ly in [0,128), Y-down):
+ *  - ll: lower-left triangle  (lx + ly >= w)   ▙   opaque below the anti-diagonal
+ *  - ur: upper-right triangle (lx + ly <= w)   ▝   opaque above the anti-diagonal — complements ll
+ *  - L:  L-shape (left column + bottom row)         a concave bracket
+ *  - chevron: downward chevron (two diagonals)      a deep central notch */
+{
+  const size = { w: 512, h: 512 };
+  const S = 128;
+  // Anti-diagonal split: the two halves tile the bbox (every pixel belongs to exactly one of them on
+  // the lx+ly==w line, so together they reconstruct the full 128×128 — a true interlock).
+  const lowerLeft = (lx, ly, w) => lx + ly >= w; // ▙
+  const upperRight = (lx, ly, w) => lx + ly < w; // ▝
+  // A thick concave L (left column + bottom row, each 40px) — large transparent top-right quadrant.
+  const lShape = (lx, ly, w, h) => lx < 40 || ly >= h - 40;
+  // A downward chevron: opaque only near the two falling diagonals (deep transparent notch at top).
+  const chevron = (lx, ly, w) => {
+    const t = 26; // band thickness
+    const onLeft = Math.abs(lx - ly) <= t && lx <= w / 2; // ╲
+    const onRight = Math.abs(w - 1 - lx - ly) <= t && lx >= w / 2; // ╱
+    return onLeft || onRight;
+  };
+  const frames = [
+    fr('tri_ll_0.png', 0, 0, S, S, { shape: lowerLeft }),
+    fr('tri_ur_0.png', 128, 0, S, S, { shape: upperRight }),
+    fr('tri_ll_1.png', 256, 0, S, S, { shape: lowerLeft }),
+    fr('tri_ur_1.png', 384, 0, S, S, { shape: upperRight }),
+    fr('tri_ll_2.png', 0, 128, S, S, { shape: lowerLeft }),
+    fr('tri_ur_2.png', 128, 128, S, S, { shape: upperRight }),
+    fr('lshape_0.png', 256, 128, S, S, { shape: lShape }),
+    fr('chevron_0.png', 384, 128, S, S, { shape: chevron }),
+  ];
+  writeCase(
+    'poly-concave',
+    {
+      'atlas.png': shapeAtlasPng(size, frames),
+      'atlas.json': hashManifest('atlas.png', size, frames),
+      'expected.json': {
+        kind: 'atlas',
+        format: 'texturepacker-hash',
+        atlas: size,
+        frameCount: frames.length,
+        occupancy: occupancyOf(size, frames),
+        // expected.json occupancy is BBOX occupancy (frame area ÷ atlas area) — the diagnosis figure.
+        // The actual OPAQUE coverage is far lower (~half the bboxes), which is the defect this case
+        // documents: bbox-based rectangle packing wastes the transparent halves.
+        defect: 'concave-silhouettes-waste-bbox',
+        polygon: {
+          mode: 'win',
+          why: 'Opaque silhouettes are ~half their 128×128 bboxes and interlock in complementary pairs. '
+            + 'Rectangle packing of the bboxes needs a 512² POT sheet; bitmap-mask polygon nesting '
+            + 'interlocks the pairs into a 256² POT sheet → 1/4 the VRAM.',
+          expectMeshedSprites: '>=1',
+        },
+        findings: [{ rule: 'occupancy', severity: 'crit' }],
+        note: '8 concave 128² sprites (frame==bbox). BBox occupancy is the headline; opaque coverage is ~half, so polygon-mode packing wins (256² vs 512²).',
+      },
+    },
+    `# poly-concave
+
+8 untrimmed **128×128** sprites (frame == bbox) on a 512×512 TexturePacker **Hash** atlas, drawn with
+**concave** opaque silhouettes whose opaque area is only ~half each bounding box:
+
+- \`tri_ll_*\` / \`tri_ur_*\` — complementary right-triangles split on the anti-diagonal (▙ / ▝). Each
+  opaque half is ~50% of its bbox; a ▙ and a ▝ **interlock into one 128×128 square**.
+- \`lshape_0\` — a thick concave **L** (left column + bottom row); the top-right quadrant is transparent.
+- \`chevron_0\` — a downward **chevron** with a deep transparent notch at the top.
+
+### Known defect (what this fixture proves)
+Rectangle packing sees only the 128×128 **bounding boxes** (the transparent halves are dead weight), so it
+needs a **512² POT** sheet. The binary (bitmap-mask) polygon packer measures the actual opaque silhouette
+at the \`ACC_CELL=4\` grid (with a conservative +1-cell dilation for the \`padding=2\` bleed budget) and
+**interlocks the complementary pairs into a 256² POT** sheet — **1/4 the VRAM**. At least one concave
+sprite traces to a real mesh (non-null \`traceMesh\`), so \`verticesUV\` / \`triangles\` ship in the
+polygon manifest and the on-screen receipt reports the meshed count. This is the end-to-end proof that
+polygon mode beats rectangle packing on genuinely concave art.
 `,
   );
 }

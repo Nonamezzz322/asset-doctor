@@ -1,0 +1,23 @@
+{
+  "kind": "atlas",
+  "format": "texturepacker-hash",
+  "atlas": {
+    "w": 512,
+    "h": 512
+  },
+  "frameCount": 8,
+  "occupancy": 0.5,
+  "defect": "concave-silhouettes-waste-bbox",
+  "polygon": {
+    "mode": "win",
+    "why": "Opaque silhouettes are ~half their 128×128 bboxes and interlock in complementary pairs. Rectangle packing of the bboxes needs a 512² POT sheet; bitmap-mask polygon nesting interlocks the pairs into a 256² POT sheet → 1/4 the VRAM.",
+    "expectMeshedSprites": ">=1"
+  },
+  "findings": [
+    {
+      "rule": "occupancy",
+      "severity": "crit"
+    }
+  ],
+  "note": "8 concave 128² sprites (frame==bbox). BBox occupancy is the headline; opaque coverage is ~half, so polygon-mode packing wins (256² vs 512²)."
+}

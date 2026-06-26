@@ -50,6 +50,8 @@ try {
   await sh('node', ['tools/verify/ui-run.mjs'], { APP_URL });
   console.log('\ne2e: scenario 2 — whole folder');
   await sh('node', ['tools/verify/folder-run.mjs'], { APP_URL });
+  console.log('\ne2e: scenario 3 — polygon packer');
+  await sh('node', ['tools/verify/fix-polygon-run.mjs'], { APP_URL });
   console.log('\ne2e: PASS');
 } catch (e) {
   console.error('\ne2e: FAIL —', e.message);
