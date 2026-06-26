@@ -357,4 +357,38 @@ the Spine parser end-to-end (group → parseSpinePage → analyze).
   );
 }
 
+/* ── Case 7: tp-merge — two under-filled atlases for the atlas-merge (non-drop-in) fix ──
+ * Two 256² sheets at ~12.5% occupancy each; their content fits in one sheet, so atlas-merge
+ * fires. Used to verify the "merge atlases" fix mode (which changes manifest references). */
+{
+  const size = { w: 256, h: 256 };
+  const aFrames = [fr('a_red.png', 8, 8, 64, 64), fr('a_blue.png', 8, 96, 64, 64)];
+  const bFrames = [fr('b_green.png', 8, 8, 64, 64), fr('b_gold.png', 8, 96, 64, 64)];
+  writeCase(
+    'tp-merge',
+    {
+      'atlas_a.png': atlasPng(size, aFrames),
+      'atlas_a.json': hashManifest('atlas_a.png', size, aFrames),
+      'atlas_b.png': atlasPng(size, bFrames),
+      'atlas_b.json': hashManifest('atlas_b.png', size, bFrames),
+      'expected.json': {
+        kind: 'folder',
+        atlases: 2,
+        occupancyEach: occupancyOf(size, aFrames),
+        findings: [
+          { rule: 'atlas-merge', severity: 'warn' },
+          { rule: 'occupancy', severity: 'crit' },
+        ],
+        note: 'Two ~12.5% atlases whose content fits in one sheet → atlas-merge.',
+      },
+    },
+    `# tp-merge
+
+Two under-filled 256×256 TexturePacker atlases (~12.5% occupancy each). Their content fits in a
+single sheet, so **atlas-merge** fires. Used to verify the non-drop-in "merge atlases" fix mode
+(which combines them into one sheet and rewrites manifest references).
+`,
+  );
+}
+
 console.log('Done.');

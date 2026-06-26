@@ -125,5 +125,7 @@
   "fix.optimizing": "Оптимизация…",
   "fix.optimized": "оптимизировано",
   "fix.download": "Скачать .zip",
-  "fix.skipped": "пропущено"
+  "fix.skipped": "пропущено",
+  "fix.merge": "Слить атласы (не drop-in)",
+  "fix.mergeWarn": "Ссылки изменились — обновите загрузчик"
 }

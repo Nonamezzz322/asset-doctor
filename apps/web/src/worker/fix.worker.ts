@@ -16,6 +16,10 @@ import type { FixInputFile, FixOptions, FixReceipt, FixRequest, FixResponse } fr
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 const post = (m: FixResponse): void => ctx.postMessage(m);
 const basename = (p: string): string => p.split('/').pop() ?? p;
+const dirOf = (p: string): string => {
+  const i = p.lastIndexOf('/');
+  return i < 0 ? '' : p.slice(0, i + 1);
+};
 const td = new TextDecoder();
 const te = new TextEncoder();
 const EXT: Record<string, string> = { 'image/webp': '.webp', 'image/avif': '.avif', 'image/png': '.png', 'image/jpeg': '.jpg' };
@@ -84,7 +88,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
 
   // measure format savings (native WebP) so format findings → transcode ops appear
   const report = await analyze(merged, undefined, { missingImages: grouped.missing, encodeImage: makeEncoder(bytesByRef) });
-  const plan = planFix(report, { targetMime: opts.targetMime, quality: opts.quality, lossless: true, padding: opts.padding, maxSize: opts.maxSize, maxEdge: opts.maxEdge });
+  const plan = planFix(report, { targetMime: opts.targetMime, quality: opts.quality, lossless: true, padding: opts.padding, maxSize: opts.maxSize, maxEdge: opts.maxEdge, mergeAtlases: opts.mergeAtlases });
 
   // ── execute ──
   const out: { path: string; bytes: Uint8Array }[] = [];
@@ -92,6 +96,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
   const dropped = new Set<string>();
   const skipped: { assetRef: string; reason: string }[] = [];
   const operations: string[] = [];
+  let referencesChanged = false;
   const bmpCache = new Map<string, ImageBitmap>();
   const bitmapOf = async (ref: string): Promise<ImageBitmap | null> => {
     if (bmpCache.has(ref)) return bmpCache.get(ref)!;
@@ -110,56 +115,84 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
     post({ type: 'fix-progress', label: op.kind, done: done++, total });
 
     if (op.kind === 'repack') {
-      const ref = op.atlasRefs[0]!;
-      if (spineRefs.has(ref)) {
-        skipped.push({ assetRef: ref, reason: 'Spine atlas repack not supported in v1' });
+      for (const rf of op.atlasRefs) if (spineRefs.has(rf)) skipped.push({ assetRef: rf, reason: 'Spine atlas repack not supported in v1' });
+      const refs = op.atlasRefs.filter((rf) => !spineRefs.has(rf));
+      const group = refs.map((rf) => atlasByRef.get(rf)).filter((a): a is Atlas => !!a);
+      if (group.length === 0) {
+        if (refs[0]) skipped.push({ assetRef: refs[0], reason: 'atlas not found' });
         continue;
       }
-      const atlas = atlasByRef.get(ref);
-      if (!atlas) {
-        skipped.push({ assetRef: ref, reason: 'atlas not found' });
+      const merge = group.length > 1; // multi-atlas op = the non-drop-in "merge atlases" mode
+      const r = repackAtlases(group, { allowRotation: false, padding: op.padding, maxSize: op.maxSize });
+      if (!merge && r.atlases.length !== 1) {
+        skipped.push({ assetRef: refs[0]!, reason: 'repack spilled into multiple sheets (v1 keeps single-sheet atlases)' });
         continue;
       }
-      const r = repackAtlases([atlas], { allowRotation: false, padding: op.padding, maxSize: op.maxSize });
-      if (r.atlases.length !== 1) {
-        skipped.push({ assetRef: ref, reason: 'repack spilled into multiple sheets (v1 keeps single-sheet atlases)' });
+      // merging atlases with a shared sprite name would clobber manifest keys — skip honestly
+      const names = r.atlases.flatMap((a) => a.sprites.map((s) => s.name));
+      if (merge && new Set(names).size !== names.length) {
+        for (const rf of refs) skipped.push({ assetRef: rf, reason: 'merge skipped: sprite-name collision across atlases' });
         continue;
       }
-      const na = r.atlases[0]!;
-      const canvas = new OffscreenCanvas(na.size.w, na.size.h);
-      const c2d = canvas.getContext('2d');
-      if (!c2d) {
-        skipped.push({ assetRef: ref, reason: 'no 2D context' });
-        continue;
-      }
+
       let composeOk = true;
-      for (const blit of r.blits) {
-        const bmp = await bitmapOf(blit.from.atlasRef); // per-blit source (correct for shared/merged pages)
-        if (!bmp) {
+      const baseDir = merge ? dirOf(pathByRef.get(refs[0]!) ?? '') : '';
+      for (let i = 0; i < r.atlases.length && composeOk; i++) {
+        const na = r.atlases[i]!;
+        const naNames = new Set(na.sprites.map((s) => s.name));
+        const canvas = new OffscreenCanvas(na.size.w, na.size.h);
+        const c2d = canvas.getContext('2d');
+        if (!c2d) {
           composeOk = false;
           break;
         }
-        c2d.drawImage(bmp, blit.from.rect.x, blit.from.rect.y, blit.from.rect.w, blit.from.rect.h, blit.to.x, blit.to.y, blit.to.w, blit.to.h);
+        for (const blit of r.blits.filter((b) => naNames.has(b.name))) {
+          const bmp = await bitmapOf(blit.from.atlasRef); // per-blit source (correct across merged pages)
+          if (!bmp) {
+            composeOk = false;
+            break;
+          }
+          c2d.drawImage(bmp, blit.from.rect.x, blit.from.rect.y, blit.from.rect.w, blit.from.rect.h, blit.to.x, blit.to.y, blit.to.w, blit.to.h);
+        }
+        if (!composeOk) break;
+        const sheet = await encodeCanvas(canvas, c2d, 'image/webp', { lossless: true, allowPngFallback: true });
+        const ext = EXT[sheet!.mime] ?? '.png';
+        if (merge) {
+          const stem = `atlas-merged${r.atlases.length > 1 ? `-${i}` : ''}`;
+          na.imageRef = `${stem}${ext}`;
+          out.push({ path: `${baseDir}${stem}${ext}`, bytes: sheet!.bytes });
+          out.push({ path: `${baseDir}${stem}.json`, bytes: te.encode(emitTexturePackerJson(na)) });
+        } else {
+          const ref = refs[0]!;
+          const origPath = pathByRef.get(ref)!;
+          const imagePath = sheet!.mime === 'image/webp' ? origPath.replace(/\.[a-z0-9]+$/i, '.webp') : origPath;
+          if (sheet!.mime === 'image/webp') na.imageRef = na.imageRef.replace(/\.[a-z0-9]+$/i, '.webp');
+          out.push({ path: imagePath, bytes: sheet!.bytes });
+          replaced.add(origPath);
+          replaced.add(imagePath);
+          const mPath = manifestPathByImage.get(basename(ref));
+          if (mPath) {
+            out.push({ path: mPath, bytes: te.encode(emitTexturePackerJson(na)) });
+            replaced.add(mPath);
+          }
+          operations.push(`repack ${basename(ref)} → ${na.size.w}×${na.size.h} ${sheet!.mime.replace('image/', '')}`);
+        }
       }
       if (!composeOk) {
-        skipped.push({ assetRef: ref, reason: 'source sheet unavailable' });
+        for (const rf of refs) skipped.push({ assetRef: rf, reason: 'source sheet unavailable' });
         continue;
       }
-      // lossless WebP sheet (smaller on disk, pixel-perfect); falls back to PNG.
-      const sheet = await encodeCanvas(canvas, c2d, 'image/webp', { lossless: true, allowPngFallback: true });
-      const origPath = pathByRef.get(ref)!;
-      const imagePath = sheet!.mime === 'image/webp' ? origPath.replace(/\.[a-z0-9]+$/i, '.webp') : origPath;
-      if (sheet!.mime === 'image/webp') na.imageRef = na.imageRef.replace(/\.[a-z0-9]+$/i, '.webp');
-      out.push({ path: imagePath, bytes: sheet!.bytes });
-      replaced.add(origPath);
-      replaced.add(imagePath);
-      const mPath = manifestPathByImage.get(basename(ref));
-      if (mPath) {
-        out.push({ path: mPath, bytes: te.encode(emitTexturePackerJson(na)) });
-        replaced.add(mPath);
+      if (merge) {
+        for (const rf of refs) {
+          const ip = pathByRef.get(rf);
+          if (ip) dropped.add(ip);
+          const mp = manifestPathByImage.get(basename(rf));
+          if (mp) dropped.add(mp);
+        }
+        referencesChanged = true;
+        operations.push(`merge ${refs.length} atlases → ${r.atlases.length} sheet${r.atlases.length === 1 ? '' : 's'}`);
       }
       vramSaved += r.vramBytesBefore - r.vramBytesAfter;
-      operations.push(`repack ${basename(ref)} → ${na.size.w}×${na.size.h} ${sheet!.mime.replace('image/', '')}`);
     } else if (op.kind === 'resize') {
       const ref = op.assetRef;
       const path = pathByRef.get(ref);
@@ -234,6 +267,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
     changedCount: replaced.size + dropped.size,
     operations,
     skipped,
+    referencesChanged,
   };
   post({ type: 'fix-done', receipt, zip });
 }

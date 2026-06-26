@@ -14,6 +14,8 @@ export interface PlanOptions {
   maxSize: number;
   /** Downscale a loose image whose longest edge exceeds this (px). */
   maxEdge: number;
+  /** Merge under-filled atlases into fewer sheets (NON-drop-in: rewrites manifest references). */
+  mergeAtlases: boolean;
 }
 
 export function planFix(report: AnalysisReport, opts: PlanOptions): FixPlan {
@@ -22,6 +24,18 @@ export function planFix(report: AnalysisReport, opts: PlanOptions): FixPlan {
   const dropped = new Set<string>();
   const resized = new Set<string>();
   const isAtlas = (ref: string): boolean => report.assets.find((a) => a.assetRef === ref)?.occupancy !== undefined;
+
+  // pass 0 (opt-in): merge under-filled atlas groups into one repack op BEFORE per-atlas repack, so
+  // the merged atlases aren't also individually repacked. A multi-ref repack op = the merge.
+  if (opts.mergeAtlases) {
+    for (const f of report.findings) {
+      if (f.rule !== 'atlas-merge') continue;
+      const fresh = (f.relatedRefs ?? []).filter((r) => !repacked.has(r));
+      if (fresh.length < 2) continue;
+      fresh.forEach((r) => repacked.add(r));
+      ops.push({ kind: 'repack', atlasRefs: fresh, targetMime: opts.targetMime, pot: true, allowRotation: false, padding: opts.padding, maxSize: opts.maxSize });
+    }
+  }
 
   // pass 1: repack under-filled atlases · drop exact dupes · resize oversized loose images
   for (const f of report.findings) {

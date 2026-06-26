@@ -122,5 +122,7 @@
   "fix.optimizing": "Optimisation…",
   "fix.optimized": "optimisé",
   "fix.download": "Télécharger .zip",
-  "fix.skipped": "ignoré"
+  "fix.skipped": "ignoré",
+  "fix.merge": "Fusionner les atlas (non drop-in)",
+  "fix.mergeWarn": "Références modifiées — mettez à jour votre loader"
 }

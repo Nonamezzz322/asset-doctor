@@ -116,5 +116,7 @@
   "fix.optimizing": "优化中…",
   "fix.optimized": "已优化",
   "fix.download": "下载 .zip",
-  "fix.skipped": "已跳过"
+  "fix.skipped": "已跳过",
+  "fix.merge": "合并图集（非直接替换）",
+  "fix.mergeWarn": "引用已更改 — 请更新加载器"
 }

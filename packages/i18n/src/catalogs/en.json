@@ -119,5 +119,7 @@
   "fix.optimizing": "Optimizing…",
   "fix.optimized": "optimized",
   "fix.download": "Download .zip",
-  "fix.skipped": "skipped"
+  "fix.skipped": "skipped",
+  "fix.merge": "Merge atlases (not drop-in)",
+  "fix.mergeWarn": "References changed — update your loader"
 }

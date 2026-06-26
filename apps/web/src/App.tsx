@@ -321,11 +321,12 @@ function downloadZip(zip: Blob): void {
 function FixCard({ files }: { files: PickedFile[] }) {
   const { t } = useI18n();
   const [phase, setPhase] = useState<FixPhase>({ t: 'idle' });
+  const [merge, setMerge] = useState(false);
 
   async function run() {
     setPhase({ t: 'running', p: { label: '', done: 0, total: 1 } });
     try {
-      const out = await runFix(files, { targetMime: 'image/avif', quality: 0.85, padding: 2, maxSize: 4096, maxEdge: 2048 }, (p) => setPhase({ t: 'running', p }));
+      const out = await runFix(files, { targetMime: 'image/avif', quality: 0.85, padding: 2, maxSize: 4096, maxEdge: 2048, mergeAtlases: merge }, (p) => setPhase({ t: 'running', p }));
       downloadZip(out.zip);
       setPhase({ t: 'done', out });
     } catch (e) {
@@ -341,14 +342,20 @@ function FixCard({ files }: { files: PickedFile[] }) {
       ) : phase.t === 'done' ? (
         <Receipt receipt={phase.out.receipt} onRedownload={() => downloadZip(phase.out.zip)} />
       ) : (
-        <button
-          type="button"
-          onClick={run}
-          disabled={files.length === 0}
-          className="mt-2.5 w-full rounded-lg bg-cta px-3 py-2 font-sans text-xs font-semibold text-white shadow-[0_2px_6px_rgba(21,160,106,0.32)] transition hover:bg-cta-hover disabled:opacity-55"
-        >
-          {t('pro.cta')}
-        </button>
+        <>
+          <label className="mt-2 flex items-center justify-center gap-1.5 font-mono text-[10px] text-ink-soft">
+            <input type="checkbox" checked={merge} onChange={(e) => setMerge(e.target.checked)} className="accent-teal" />
+            {t('fix.merge')}
+          </label>
+          <button
+            type="button"
+            onClick={run}
+            disabled={files.length === 0}
+            className="mt-2 w-full rounded-lg bg-cta px-3 py-2 font-sans text-xs font-semibold text-white shadow-[0_2px_6px_rgba(21,160,106,0.32)] transition hover:bg-cta-hover disabled:opacity-55"
+          >
+            {t('pro.cta')}
+          </button>
+        </>
       )}
       {phase.t === 'error' && <p className="mt-2 font-mono text-[11px] text-crit">{phase.message}</p>}
     </div>
@@ -367,6 +374,7 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
         <ReceiptRow label={t('metric.disk')} before={receipt.diskBytesBefore} after={receipt.diskBytesAfter} pct={pct(receipt.diskBytesBefore, receipt.diskBytesAfter)} />
         <ReceiptRow label="VRAM" before={receipt.vramBytesBefore} after={receipt.vramBytesAfter} pct={pct(receipt.vramBytesBefore, receipt.vramBytesAfter)} />
       </div>
+      {receipt.referencesChanged ? <p className="font-mono text-[10px] text-warn">⚠ {t('fix.mergeWarn')}</p> : null}
       {receipt.skipped.length > 0 ? <p className="font-mono text-[10px] text-ink-soft">{receipt.skipped.length} {t('fix.skipped')}</p> : null}
       <button type="button" onClick={onRedownload} className="w-full rounded-lg border border-line px-3 py-1.5 font-mono text-[11px] text-teal transition hover:border-teal">
         ↓ {t('fix.download')}

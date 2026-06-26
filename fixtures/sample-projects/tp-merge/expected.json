@@ -1,0 +1,16 @@
+{
+  "kind": "folder",
+  "atlases": 2,
+  "occupancyEach": 0.125,
+  "findings": [
+    {
+      "rule": "atlas-merge",
+      "severity": "warn"
+    },
+    {
+      "rule": "occupancy",
+      "severity": "crit"
+    }
+  ],
+  "note": "Two ~12.5% atlases whose content fits in one sheet → atlas-merge."
+}

@@ -14,6 +14,8 @@ export interface FixOptions {
   maxSize: number;
   /** Downscale a loose image whose longest edge exceeds this (px). */
   maxEdge: number;
+  /** Merge under-filled atlases into fewer sheets — NON-drop-in (rewrites manifest references). */
+  mergeAtlases: boolean;
 }
 
 export type FixRequest = { type: 'fix'; files: FixInputFile[]; options: FixOptions };
@@ -28,6 +30,8 @@ export interface FixReceipt {
   changedCount: number;
   operations: string[];
   skipped: { assetRef: string; reason: string }[];
+  /** True when a merge rewrote manifest references — the folder is NOT a drop-in replacement. */
+  referencesChanged: boolean;
 }
 
 export type FixResponse =

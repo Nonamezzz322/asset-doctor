@@ -87,7 +87,7 @@ describe('repackAtlases (golden, on tp-hash-symbols)', () => {
 describe('planFix', () => {
   it('plans a repack for the under-filled atlas', async () => {
     const report = await analyze([{ kind: 'atlas', atlas: loadAtlas(), image: { name: 'symbols.png', imageRef: 'symbols.png', size: { w: 512, h: 512 }, mime: 'image/png', byteSize: 1747 } }]);
-    const plan = planFix(report, { targetMime: 'image/webp', quality: 0.9, lossless: true, padding: 2, maxSize: 4096, maxEdge: 2048 });
+    const plan = planFix(report, { targetMime: 'image/webp', quality: 0.9, lossless: true, padding: 2, maxSize: 4096, maxEdge: 2048, mergeAtlases: false });
     const repack = plan.ops.find((o) => o.kind === 'repack');
     expect(repack).toBeDefined();
     if (repack?.kind === 'repack') expect(repack.atlasRefs).toContain('symbols.png');
@@ -103,10 +103,35 @@ describe('planFix', () => {
       totals: { diskBytes: 1000, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
       thresholds: DEFAULT_THRESHOLDS,
     };
-    const plan = planFix(report, { targetMime: 'image/avif', quality: 0.85, lossless: false, padding: 2, maxSize: 4096, maxEdge: 2048 });
+    const plan = planFix(report, { targetMime: 'image/avif', quality: 0.85, lossless: false, padding: 2, maxSize: 4096, maxEdge: 2048, mergeAtlases: false });
     const resize = plan.ops.find((o) => o.kind === 'resize');
     expect(resize).toBeDefined();
     if (resize?.kind === 'resize') expect(resize.to).toEqual({ w: 2048, h: 2048 });
     expect(plan.ops.some((o) => o.kind === 'transcode')).toBe(false); // resize wins over transcode
+  });
+
+  it('merge mode collapses an atlas-merge group into one repack op; drop-in keeps them separate', () => {
+    const atlas = (ref: string) => ({ assetRef: ref, diskBytes: 100, vramBytes: 256 * 256 * 4, occupancy: 0.125 });
+    const report: AnalysisReport = {
+      assets: [atlas('atlas_a.png'), atlas('atlas_b.png')],
+      findings: [
+        { id: 'atlas_a.png:occupancy', rule: 'occupancy', severity: 'crit', assetRef: 'atlas_a.png', title: '', detail: '' },
+        { id: 'atlas_b.png:occupancy', rule: 'occupancy', severity: 'crit', assetRef: 'atlas_b.png', title: '', detail: '' },
+        { id: 'folder:atlas-merge', rule: 'atlas-merge', severity: 'warn', scope: 'folder', assetRef: 'atlas_a.png', relatedRefs: ['atlas_a.png', 'atlas_b.png'], title: '', detail: '' },
+      ],
+      totals: { diskBytes: 200, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+      thresholds: DEFAULT_THRESHOLDS,
+    };
+    const base = { targetMime: 'image/webp' as const, quality: 0.9, lossless: true, padding: 2, maxSize: 4096, maxEdge: 2048 };
+
+    const merged = planFix(report, { ...base, mergeAtlases: true });
+    const repacks = merged.ops.filter((o) => o.kind === 'repack');
+    expect(repacks).toHaveLength(1); // one merge op, not two individual repacks
+    if (repacks[0]?.kind === 'repack') expect(repacks[0].atlasRefs).toEqual(['atlas_a.png', 'atlas_b.png']);
+
+    const dropIn = planFix(report, { ...base, mergeAtlases: false });
+    const single = dropIn.ops.filter((o) => o.kind === 'repack' && o.atlasRefs.length === 1);
+    expect(single).toHaveLength(2); // each atlas repacked in place
+    expect(dropIn.ops.some((o) => o.kind === 'repack' && o.atlasRefs.length > 1)).toBe(false);
   });
 });

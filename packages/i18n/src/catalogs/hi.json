@@ -119,5 +119,7 @@
   "fix.optimizing": "अनुकूलन…",
   "fix.optimized": "अनुकूलित",
   "fix.download": ".zip डाउनलोड करें",
-  "fix.skipped": "छोड़ा गया"
+  "fix.skipped": "छोड़ा गया",
+  "fix.merge": "एटलस मर्ज करें (ड्रॉप-इन नहीं)",
+  "fix.mergeWarn": "संदर्भ बदले — अपना लोडर अपडेट करें"
 }
