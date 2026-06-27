@@ -6,6 +6,16 @@
   "metric.vram": "vram",
   "metric.saveable": "saveable",
   "metric.loaded": "loaded",
+  "metric.vramMeasured": "vram (measured)",
+  "readout.declared": "vram (declared)",
+  "readout.measured": "vram (measured)",
+  "readout.drawCalls": "draw calls",
+  "readout.batched": {
+    "$count": "n",
+    "one": "{n} sprite batched",
+    "other": "{n} sprites batched"
+  },
+  "readout.measuredTooltip": "Actual decoded texture footprint, measured by a real WebGL render — differs from the declared estimate when the manifest size ≠ the image's real pixels. Not a savings; a different quantity.",
   "dropzone.title": "Drop an asset folder to diagnose",
   "dropzone.subtitle": "TexturePacker / Pixi atlases + loose images. Analysis runs locally — nothing leaves your device.",
   "dropzone.open": "Open folder",

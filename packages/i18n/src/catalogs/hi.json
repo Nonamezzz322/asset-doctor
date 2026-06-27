@@ -6,6 +6,16 @@
   "metric.vram": "VRAM",
   "metric.saveable": "बचत-योग्य",
   "metric.loaded": "लोडेड",
+  "metric.vramMeasured": "VRAM (मापा गया)",
+  "readout.declared": "VRAM (घोषित)",
+  "readout.measured": "VRAM (मापा गया)",
+  "readout.drawCalls": "draw calls",
+  "readout.batched": {
+    "$count": "n",
+    "one": "{n} sprite बैच हुआ",
+    "other": "{n} sprites बैच हुए"
+  },
+  "readout.measuredTooltip": "असली WebGL रेंडर से मापा गया वास्तविक डिकोडेड टेक्सचर फ़ुटप्रिंट — जब मैनिफ़ेस्ट साइज़ ≠ इमेज के असली पिक्सेल हों तो घोषित अनुमान से भिन्न होता है। यह बचत नहीं, बल्कि एक अलग मात्रा है।",
   "dropzone.title": "जाँच के लिए एसेट फ़ोल्डर यहाँ छोड़ें",
   "dropzone.subtitle": "TexturePacker / Pixi atlas + अलग इमेज। विश्लेषण लोकल चलता है — कुछ भी आपके डिवाइस से बाहर नहीं जाता।",
   "dropzone.open": "फ़ोल्डर खोलें",

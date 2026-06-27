@@ -6,6 +6,16 @@
   "metric.vram": "vram",
   "metric.saveable": "ahorrable",
   "metric.loaded": "cargado",
+  "metric.vramMeasured": "vram (medido)",
+  "readout.declared": "vram (declarado)",
+  "readout.measured": "vram (medido)",
+  "readout.drawCalls": "draw calls",
+  "readout.batched": {
+    "$count": "n",
+    "one": "{n} sprite agrupado",
+    "other": "{n} sprites agrupados"
+  },
+  "readout.measuredTooltip": "Huella real de la textura decodificada, medida con un render WebGL real — difiere de la estimación declarada cuando el tamaño del manifiesto ≠ los píxeles reales de la imagen. No es un ahorro, sino una magnitud distinta.",
   "dropzone.title": "Suelta una carpeta de assets para diagnosticar",
   "dropzone.subtitle": "Atlas de TexturePacker / Pixi + imágenes sueltas. El análisis se ejecuta localmente: nada sale de tu dispositivo.",
   "dropzone.open": "Abrir carpeta",

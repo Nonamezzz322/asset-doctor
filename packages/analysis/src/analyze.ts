@@ -11,6 +11,7 @@ import type {
   Finding,
   ImageAsset,
   ImageFeatures,
+  Rect,
   Severity,
   ThresholdConfig,
 } from '@asset-doctor/core';
@@ -58,6 +59,11 @@ export async function analyze(
   const metrics: AssetMetrics[] = [];
   const formatFindings: Finding[] = [];
   const atlases: Atlas[] = [];
+  // Per-atlas packed frame rects for the host render-probe (which sprites to draw) — keyed by
+  // atlas.name, the SAME value used for AssetMetrics.assetRef (below) and the fileMap keyOf ref in the
+  // web app. That equality is an invariant (asserted in tests), not interchangeable by luck. Stays
+  // undefined when no atlas has frames so a loose-only folder is byte-identical to today.
+  const atlasFrames: Record<string, Rect[]> = {};
   let potentialDiskSaved = 0;
 
   const addFormat = async (ref: string, image: ImageAsset) => {
@@ -92,6 +98,12 @@ export async function analyze(
       if (waste) findings.push(waste);
       findings.push(...dimensionFindings(atlas.name, atlas.size, cfg));
       await addFormat(atlas.name, image);
+      // The packed rects the host render-probe replays as sprites. Keyed by atlas.name === the
+      // assetRef pushed above. `frame` is the rect AS PLACED in the atlas image (already w/h-swapped
+      // when rotated), which is exactly what probeAtlas wants.
+      if (atlas.sprites.length > 0) {
+        atlasFrames[atlas.name] = atlas.sprites.map((s) => ({ ...s.frame }));
+      }
     } else {
       const { image } = asset;
       metrics.push({
@@ -143,5 +155,8 @@ export async function analyze(
       potentialDiskSaved,
     },
     thresholds: cfg,
+    // Additive: omit entirely when no atlas had frames (loose-only folder) so the report is
+    // byte-identical to today. The host probe reads this; absent ⇒ nothing to probe.
+    ...(Object.keys(atlasFrames).length > 0 ? { atlasFrames } : {}),
   };
 }

@@ -6,6 +6,16 @@
   "metric.vram": "vram",
   "metric.saveable": "можно срезать",
   "metric.loaded": "загружено",
+  "metric.vramMeasured": "vram (измер.)",
+  "readout.declared": "vram (заявл.)",
+  "readout.measured": "vram (измер.)",
+  "readout.drawCalls": "draw calls",
+  "readout.batched": {
+    "$count": "n",
+    "one": "{n} sprite в одном батче",
+    "other": "{n} sprite в одном батче"
+  },
+  "readout.measuredTooltip": "Реальный объём декодированной текстуры, измеренный настоящим WebGL-рендером — отличается от заявленной оценки, когда размер из манифеста ≠ реальным пикселям изображения. Это не экономия, а другая величина.",
   "dropzone.title": "Перетащите папку с ассетами для диагностики",
   "dropzone.subtitle": "Атласы TexturePacker / Pixi + отдельные изображения. Анализ идёт локально — ничего не покидает ваше устройство.",
   "dropzone.open": "Открыть папку",

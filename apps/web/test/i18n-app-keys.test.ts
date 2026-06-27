@@ -13,7 +13,12 @@ import { describe, expect, it } from 'vitest';
 import { CATALOGS } from '@asset-doctor/i18n';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const appSrc = readFileSync(join(here, '..', 'src', 'App.tsx'), 'utf8');
+const appSrc =
+  readFileSync(join(here, '..', 'src', 'App.tsx'), 'utf8') +
+  '\n' +
+  // Also scan FilmViewer.tsx — it owns probe/readout t() keys (readout.declared/measured/drawCalls/batched)
+  // that App.tsx never references, so without this a future key rename there would silently render raw keys.
+  readFileSync(join(here, '..', 'src', 'components', 'FilmViewer.tsx'), 'utf8');
 
 // Suffix maps mirrored from App.tsx (modeKey / granKey) so dynamic option keys resolve to concrete keys.
 const MODE_SUFFIXES = ['auto', 'static', 'spine'];

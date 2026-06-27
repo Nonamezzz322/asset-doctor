@@ -71,6 +71,41 @@ describe('analyze — single images', () => {
   });
 });
 
+describe('atlasFrames (host render-probe input)', () => {
+  it('carries one rect per sprite, keyed by atlas.name === assetRef === the fileMap key', async () => {
+    const c = ATLAS_CASES[0]!; // tp-hash-symbols
+    const parsed = parseAtlas(readJson(`${c.dir}/${c.manifest}`), {
+      ref: c.img,
+      bytes: readBytes(`${c.dir}/${c.img}`),
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const atlas = (parsed.asset as Extract<Asset, { kind: 'atlas' }>).atlas;
+
+    const report = await analyze([parsed.asset]);
+    expect(report.atlasFrames).toBeDefined();
+    const frames = report.atlasFrames?.[atlas.name];
+    expect(frames).toBeDefined();
+    // One rect per sprite, matching the packed frame geometry verbatim (already w/h-swapped if rotated).
+    expect(frames?.length).toBe(atlas.sprites.length);
+    expect(frames?.[0]).toEqual(atlas.sprites[0]?.frame);
+
+    // INVARIANT (MAJOR2): every atlasFrames key === an AssetMetrics.assetRef. The web app keys its
+    // fileMap by the same value (keyOf === atlas.name for atlases), so this guards the probe lookup
+    // against a future ingest change silently breaking it.
+    const refs = new Set(report.assets.map((a) => a.assetRef));
+    for (const key of Object.keys(report.atlasFrames ?? {})) expect(refs.has(key)).toBe(true);
+  });
+
+  it('is omitted entirely for a loose-only folder (byte-identical to today)', async () => {
+    const r = parseImage('hero.png', readBytes('single-images/hero.png'));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const report = await analyze([r.asset]);
+    expect(report.atlasFrames).toBeUndefined();
+  });
+});
+
 describe('wasted-regions overlay', () => {
   const intersects = (a: Rect, b: Rect): boolean =>
     a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;

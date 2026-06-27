@@ -6,6 +6,16 @@
   "metric.vram": "显存",
   "metric.saveable": "可节省",
   "metric.loaded": "已加载",
+  "metric.vramMeasured": "显存（实测）",
+  "readout.declared": "显存（声明）",
+  "readout.measured": "显存（实测）",
+  "readout.drawCalls": "draw call",
+  "readout.batched": {
+    "$count": "n",
+    "one": "{n} 个 sprite 已合批",
+    "other": "{n} 个 sprite 已合批"
+  },
+  "readout.measuredTooltip": "由真实 WebGL 渲染实测的已解码纹理占用——当清单尺寸 ≠ 图像真实像素时，会与声明的估算值不同。这不是节省量，而是另一种度量。",
   "dropzone.title": "拖入资源文件夹以进行诊断",
   "dropzone.subtitle": "TexturePacker / Pixi 图集 + 散图。分析在本地运行 — 数据不会离开你的设备。",
   "dropzone.open": "打开文件夹",

@@ -6,6 +6,16 @@
   "metric.vram": "vram",
   "metric.saveable": "risparmiabile",
   "metric.loaded": "caricato",
+  "metric.vramMeasured": "vram (misurato)",
+  "readout.declared": "vram (dichiarato)",
+  "readout.measured": "vram (misurato)",
+  "readout.drawCalls": "draw call",
+  "readout.batched": {
+    "$count": "n",
+    "one": "{n} sprite raggruppato",
+    "other": "{n} sprite raggruppati"
+  },
+  "readout.measuredTooltip": "Impronta reale della texture decodificata, misurata da un render WebGL reale — diversa dalla stima dichiarata quando la dimensione del manifest ≠ i pixel reali dell'immagine. Non è un risparmio, ma una grandezza diversa.",
   "dropzone.title": "Trascina una cartella di asset per la diagnosi",
   "dropzone.subtitle": "Atlas TexturePacker / Pixi + immagini sciolte. L'analisi è locale — nulla lascia il tuo dispositivo.",
   "dropzone.open": "Apri cartella",

@@ -33,6 +33,9 @@ describe('catalog completeness (all 9 locales)', () => {
     for (const loc of LOCALES) {
       expect(translate(loc, 'folder.issues', { n: 5 })).not.toContain('{');
       expect(translate(loc, 'find.occupancy.title', { occ: 0.4, wasted: 0.6 })).toMatch(/40%/);
+      // Render the measured-probe sprite-batch plural — both forms carry {n}, no leftover braces.
+      expect(translate(loc, 'readout.batched', { n: 12 })).not.toContain('{');
+      expect(translate(loc, 'readout.batched', { n: 1 })).not.toContain('{');
     }
   });
 

@@ -6,6 +6,16 @@
   "metric.vram": "VRAM",
   "metric.saveable": "einsparbar",
   "metric.loaded": "geladen",
+  "metric.vramMeasured": "VRAM (gemessen)",
+  "readout.declared": "VRAM (deklariert)",
+  "readout.measured": "VRAM (gemessen)",
+  "readout.drawCalls": "Draw Calls",
+  "readout.batched": {
+    "$count": "n",
+    "one": "{n} Sprite gebündelt",
+    "other": "{n} Sprites gebündelt"
+  },
+  "readout.measuredTooltip": "Tatsächlicher decodierter Textur-Footprint, gemessen per echtem WebGL-Render — weicht von der deklarierten Schätzung ab, wenn die Manifest-Größe ≠ den realen Pixeln des Bildes ist. Keine Einsparung, sondern eine andere Größe.",
   "dropzone.title": "Asset-Ordner zum Diagnostizieren ablegen",
   "dropzone.subtitle": "TexturePacker- / Pixi-Atlanten + lose Bilder. Analyse läuft lokal — nichts verlässt dein Gerät.",
   "dropzone.open": "Ordner öffnen",

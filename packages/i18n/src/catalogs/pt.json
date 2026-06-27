@@ -6,6 +6,16 @@
   "metric.vram": "vram",
   "metric.saveable": "economizável",
   "metric.loaded": "carregado",
+  "metric.vramMeasured": "vram (medido)",
+  "readout.declared": "vram (declarado)",
+  "readout.measured": "vram (medido)",
+  "readout.drawCalls": "draw calls",
+  "readout.batched": {
+    "$count": "n",
+    "one": "{n} sprite agrupado",
+    "other": "{n} sprites agrupados"
+  },
+  "readout.measuredTooltip": "Pegada real da textura decodificada, medida por um render WebGL real — difere da estimativa declarada quando o tamanho do manifesto ≠ os pixels reais da imagem. Não é economia, e sim uma grandeza diferente.",
   "dropzone.title": "Solte uma pasta de assets para diagnosticar",
   "dropzone.subtitle": "Atlas TexturePacker / Pixi + imagens avulsas. A análise roda localmente — nada sai do seu dispositivo.",
   "dropzone.open": "Abrir pasta",

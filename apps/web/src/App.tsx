@@ -11,6 +11,7 @@ import {
   type PickedFile,
 } from './lib/import';
 import { keyOf } from './lib/group';
+import { attachProbeReadings } from './lib/probe-run';
 import { runAnalysis, type Progress } from './lib/worker-client';
 import { planFix, runFix, type FixOutcome, type FixProgress } from './lib/fix-client';
 import type { FixOptions, FixPlanSummary, FixReceipt } from './worker/fix-protocol';
@@ -46,6 +47,9 @@ export function App() {
   const [selectedAsset, setSelectedAsset] = useState<string | undefined>();
   const [selectedFinding, setSelectedFinding] = useState<string | undefined>();
   const inputRef = useRef<HTMLInputElement>(null);
+  // Aborts a still-running render-probe when a fresh analysis starts, so a stale probe's late results
+  // can't overwrite the new report. Lives in a ref (not state) — it's control flow, not render data.
+  const probeAbort = useRef<AbortController | null>(null);
 
   useEffect(() => {
     inputRef.current?.setAttribute('webkitdirectory', '');
@@ -64,15 +68,31 @@ export function App() {
       setPhase({ t: 'error', message: t('error.noFiles') });
       return;
     }
+    // Abort any in-flight probe from a previous run before starting a new analysis.
+    probeAbort.current?.abort();
     setFiles(picked);
     setReport(null);
     setSelectedFinding(undefined);
     setPhase({ t: 'analyzing' });
     try {
       const rep = await runAnalysis(picked, (p) => setPhase({ t: 'analyzing', progress: p }));
+      // The static result lands FIRST (invariant 4: ≤10s instant-wow is never blocked by the probe).
       setReport(rep);
       setSelectedAsset(rep.assets[0]?.assetRef);
       setPhase({ t: 'done' });
+      // THEN, non-blocking, replay each atlas through real offscreen-WebGL (main thread) and fill in
+      // the MEASURED draw-calls / decoded-VRAM. Skipped silently when there's no WebGL or no atlas.
+      // MAJOR2 invariant: the probe looks bytes up by AssetMetrics.assetRef === atlas.name === keyOf —
+      // the SAME key this map is built with, the same one fileMap uses.
+      const bytesByRef = new Map<string, ArrayBuffer>();
+      for (const f of picked) bytesByRef.set(keyOf(f), f.bytes);
+      const ctrl = new AbortController();
+      probeAbort.current = ctrl;
+      void attachProbeReadings(rep, (ref) => bytesByRef.get(ref), ctrl.signal).then((probed) => {
+        // Only write back if this probe wasn't superseded AND it actually produced readings (a new
+        // object reference signals readings attached; identity ⇒ nothing measured, leave the report).
+        if (!ctrl.signal.aborted && probed !== rep) setReport(probed);
+      });
     } catch (e) {
       setPhase({ t: 'error', message: e instanceof Error ? e.message : String(e) });
     }
@@ -94,6 +114,9 @@ export function App() {
   const assetFindings = report?.findings.filter((f) => f.scope !== 'folder' && f.assetRef === selectedAsset) ?? [];
   const selectedBytes = selectedAsset ? fileMap.get(selectedAsset) : undefined;
   const selectedMetrics = report?.assets.find((a) => a.assetRef === selectedAsset);
+  // Sprite count for the MEASURED draw-calls readout ("N sprites batched"). Same keying invariant as
+  // the probe (assetRef === atlas.name === atlasFrames key). 0 for loose / un-probed assets.
+  const selectedFrameCount = selectedAsset ? report?.atlasFrames?.[selectedAsset]?.length ?? 0 : 0;
 
   return (
     <div className="min-h-full bg-bg text-ink">
@@ -109,6 +132,16 @@ export function App() {
               <div className="hidden items-stretch gap-px overflow-hidden rounded-lg border border-line bg-line md:flex">
                 <HeaderMetric label={t('metric.disk')} value={fmtBytes(totals?.diskBytes ?? 0)} />
                 <HeaderMetric label={t('metric.vram')} value={`${fmtBytes(totals?.loadedVramBytes ?? 0)}`} />
+                {/* MEASURED aggregate, additive — appears only once the render-probe has run (WebGL
+                    present, ≥1 atlas). It's the REAL decoded footprint, a different quantity from the
+                    declared estimate beside it — never a savings delta (BLOCKER1). */}
+                {totals?.probe ? (
+                  <HeaderMetric
+                    label={t('metric.vramMeasured')}
+                    value={fmtBytes(totals.probe.vramBytes)}
+                    title={t('readout.measuredTooltip')}
+                  />
+                ) : null}
                 <HeaderMetric label={t('metric.saveable')} value={`${fmtBytes(totals?.potentialDiskSaved ?? 0)} · ${savedPct}%`} accent />
               </div>
             ) : null}
@@ -151,7 +184,7 @@ export function App() {
                     }}
                   />
                   {selectedBytes && selectedAsset ? (
-                    <FilmViewer bytes={selectedBytes} findings={assetFindings} highlightId={selectedFinding} name={selectedAsset} metrics={selectedMetrics} />
+                    <FilmViewer bytes={selectedBytes} findings={assetFindings} highlightId={selectedFinding} name={selectedAsset} metrics={selectedMetrics} frameCount={selectedFrameCount} />
                   ) : (
                     <p className="font-mono text-sm text-ink-soft">{t('report.noImage')}</p>
                   )}
@@ -201,9 +234,9 @@ function LanguageSwitcher() {
   );
 }
 
-function HeaderMetric({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+function HeaderMetric({ label, value, accent, title }: { label: string; value: string; accent?: boolean; title?: string }) {
   return (
-    <div className="bg-panel px-3 py-1.5">
+    <div className="bg-panel px-3 py-1.5" title={title}>
       <div className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-soft">{label}</div>
       <div className={`font-mono text-xs font-semibold ${accent ? 'text-cta' : 'text-ink'}`}>{value}</div>
     </div>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AssetMetrics, Finding, OverlayZone } from '@asset-doctor/core';
 import { fmtBytes } from '../lib/format';
+import { useI18n } from '../lib/i18n';
 
 // Overlay styles (§5): empty = red, transparent = yellow, bleeding = teal.
 const ZONE_STYLE: Record<OverlayZone['kind'], { stroke: string; fill: string }> = {
@@ -23,13 +24,17 @@ export function FilmViewer({
   highlightId,
   name,
   metrics,
+  frameCount = 0,
 }: {
   bytes: ArrayBuffer;
   findings: Finding[];
   highlightId?: string;
   name: string;
   metrics?: AssetMetrics;
+  /** Sprite count for the MEASURED draw-calls readout ("N sprites batched"). 0 ⇒ not shown. */
+  frameCount?: number;
 }) {
+  const { t } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
 
@@ -87,6 +92,9 @@ export function FilmViewer({
   const fragColor =
     frag === undefined ? 'text-film-soft' : frag < 0.4 ? 'text-crit' : frag < 0.7 ? 'text-warn' : 'text-ok';
   const sizeStr = dims ? (dims.w === dims.h ? `${dims.w}²` : `${dims.w}×${dims.h}`) : '—';
+  // MEASURED render-probe reading (real offscreen-WebGL). Present only after the host probe ran on the
+  // main thread with WebGL available; absent for loose assets / no-WebGL ⇒ today's 4-cell readout.
+  const probe = metrics?.probe;
 
   return (
     <div className="relative ad-clip ad-viewer-shadow rounded-2xl border border-film-border bg-film p-3.5">
@@ -105,22 +113,63 @@ export function FilmViewer({
         <div key={name} className="ad-scanline" />
       </div>
 
-      {/* readout strip */}
+      {/* readout strip — when a render-probe reading exists, the static VRAM is relabelled "declared"
+          (it's the manifest atlas geometry, an estimate). Without a probe it shows exactly today. */}
       <div className="mt-3 grid grid-cols-4 gap-px overflow-hidden rounded-lg border border-film-border bg-film-border">
-        <ReadCell label="VRAM" value={fmtBytes(metrics?.vramBytes ?? 0)} color="text-info" />
+        <ReadCell
+          label={probe ? t('readout.declared') : 'VRAM'}
+          value={fmtBytes(metrics?.vramBytes ?? 0)}
+          color="text-info"
+        />
         <ReadCell label="DISK" value={fmtBytes(metrics?.diskBytes ?? 0)} color="text-ok" />
         <ReadCell label="OCC" value={occ === undefined ? '—' : `${Math.round(occ * 100)}%`} color={occColor} />
         <ReadCell label="FRAG" value={frag === undefined ? '—' : `${Math.round(frag * 100)}%`} color={fragColor} />
       </div>
+
+      {/* MEASURED strip — additive, only when the render-probe ran (real offscreen-WebGL). These are
+          a DIFFERENT quantity from the declared estimate above (real decoded footprint + issued draws),
+          framed as "measured", never a savings delta vs the estimate (BLOCKER1). Absent ⇒ nothing here,
+          so a loose / un-probed asset renders exactly today. */}
+      {probe ? (
+        <div className="mt-px grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-film-border bg-film-border">
+          <ReadCell
+            label={t('readout.measured')}
+            value={fmtBytes(probe.vramBytes)}
+            color="text-info"
+            title={t('readout.measuredTooltip')}
+          />
+          <ReadCell
+            label={t('readout.drawCalls')}
+            value={`${probe.drawCalls}`}
+            sub={frameCount > 0 ? t('readout.batched', { n: frameCount }) : undefined}
+            color="text-ok"
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function ReadCell({ label, value, color }: { label: string; value: string; color: string }) {
+function ReadCell({
+  label,
+  value,
+  color,
+  sub,
+  title,
+}: {
+  label: string;
+  value: string;
+  color: string;
+  /** Secondary line under the value (e.g. "N sprites batched" beside draw calls). */
+  sub?: string;
+  /** Hover explainer (e.g. the declared-vs-measured divergence note). */
+  title?: string;
+}) {
   return (
-    <div className="bg-film px-3 py-2.5">
+    <div className="bg-film px-3 py-2.5" title={title}>
       <div className="mb-1 font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-soft">{label}</div>
       <div className={`font-mono text-[17px] font-semibold leading-none ${color}`}>{value}</div>
+      {sub ? <div className="mt-1 font-mono text-[9px] leading-tight text-film-soft">{sub}</div> : null}
     </div>
   );
 }

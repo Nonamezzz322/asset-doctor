@@ -272,6 +272,31 @@ export interface DedupGroup {
   consumers: DedupConsumer[];
 }
 
+/* ── Render-probe reading (output of @asset-doctor/probe — MEASURED, not estimated) ─────────────
+ * The ACTUAL GPU workload read from a real offscreen-WebGL render of an atlas: a Spector.js-style
+ * GL instrument counts the issued draw calls and sums Σ w×h×4 over the textures the driver actually
+ * uploaded (the +33% mip chain charged ONLY per observed generateMipmap call). This is the moat —
+ * a MEASUREMENT, distinct from the static estimate. Crucially `vramBytes` here is the real DECODED
+ * texture footprint (the image's true pixel dims), which DIFFERS from the static `AssetMetrics.vramBytes`
+ * estimate (the atlas's DECLARED manifest size) whenever the manifest size ≠ the image's real pixels.
+ * The two are different quantities measured two ways — declared vs measured — never a savings delta.
+ * Lives in core (zero-dep) so AssetMetrics/AnalysisReport can carry it without core depending on probe;
+ * @asset-doctor/probe re-exports this type for back-compat. Superset of these fields stays in probe's
+ * GlStats (independent, untouched). */
+export interface ProbeReading {
+  /** Issued GL draw calls for the rendered frames (the batcher collapses N sprites → few draws). */
+  drawCalls: number;
+  /** Σ w×h×4 over the textures the driver actually uploaded (+33% per observed generateMipmap).
+   *  The REAL decoded texture footprint — differs from the static estimate when manifest size ≠ image pixels. */
+  vramBytes: number;
+  /** Number of distinct base textures resident after the render. */
+  liveTextures: number;
+  /** texImage2D / texSubImage2D upload calls observed during the render. */
+  textureUploads: number;
+  /** compileShader calls observed during the render. */
+  shaderCompiles: number;
+}
+
 export interface AssetMetrics {
   assetRef: string;
   diskBytes: number;
@@ -291,6 +316,12 @@ export interface AssetMetrics {
    *  rects, so it inherits the coverage map's under-claim. Absent when there is no empty space to map
    *  (treat as 1 = contiguous) or for loose (non-atlas) assets. */
   fragmentation?: number;
+  /** MEASURED render-probe reading from a real offscreen-WebGL render of this atlas (drawCalls +
+   *  actual decoded VRAM). Additive & non-blocking: filled in by the host AFTER static analysis, only
+   *  on the main thread when WebGL is available; absent ⇒ byte-identical to today (no probe ran, no
+   *  WebGL, or a loose non-atlas asset). NOT a second opinion on the static estimate above — it is the
+   *  real GPU footprint (declared vs measured), never compared as a savings delta. */
+  probe?: ProbeReading;
 }
 
 /** Calibrated audit thresholds. Lives in config, never hardcoded inside rules. */
@@ -332,9 +363,26 @@ export interface AnalysisReport {
     /** loadedVramBytes × 4/3 — the loaded-set ceiling IF mipmaps are enabled. Conditional, not residency. */
     loadedVramBytesMipmapped: number;
     potentialDiskSaved: number;
+    /** MEASURED aggregate over every probed atlas (render-probe). Additive & non-blocking: present only
+     *  when ≥1 atlas was probed on the main thread with WebGL available; absent ⇒ byte-identical to today.
+     *  Sums are pure integer addition (commutative — iteration order is not load-bearing for determinism).
+     *  Honest aggregate of the moat metric, never compared as a savings delta against the static totals. */
+    probe?: {
+      /** Σ measured draw calls across all probed atlases. */
+      drawCalls: number;
+      /** Σ measured (real decoded) VRAM bytes across all probed atlases. */
+      vramBytes: number;
+      /** How many atlases actually yielded a probe reading (denominator for the measured aggregate). */
+      atlasesProbed: number;
+    };
   };
   /** The thresholds actually applied (for transparency in the UI). */
   thresholds: ThresholdConfig;
+  /** Per-atlas packed frame rects, keyed by atlas.name (=== AssetMetrics.assetRef === the fileMap keyOf
+   *  ref — this equality is an invariant, asserted in tests, not interchangeable by luck). Drives the
+   *  host render-probe (which sprites to draw) without re-parsing manifests. Additive: absent/per-key
+   *  undefined ⇒ no atlas frames to probe (loose-only folder); byte-identical to today when omitted. */
+  atlasFrames?: Record<string, Rect[]>;
 }
 
 /* ── Fix model (Phase 2 — output of @asset-doctor/fix + the fix worker) ─────────────────────
