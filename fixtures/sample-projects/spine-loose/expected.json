@@ -1,0 +1,142 @@
+{
+  "kind": "pack-spine",
+  "feature": "pack-loose-spine",
+  "skinsShape": "array-modern",
+  "grouping": {
+    "mode": "auto",
+    "spineRoot": "(the upload folder)",
+    "skeletonRef": "skeleton.json",
+    "regionCount": 4
+  },
+  "regions": [
+    {
+      "region": "head",
+      "sourceSize": {
+        "w": 64,
+        "h": 64
+      },
+      "size": {
+        "w": 56,
+        "h": 56
+      },
+      "trim": {
+        "x": 4,
+        "y": 4,
+        "w": 56,
+        "h": 56
+      },
+      "offset": {
+        "x": 4,
+        "y": 4
+      },
+      "rotate": 0
+    },
+    {
+      "region": "items/sword",
+      "sourceSize": {
+        "w": 32,
+        "h": 96
+      },
+      "size": {
+        "w": 16,
+        "h": 96
+      },
+      "trim": {
+        "x": 8,
+        "y": 0,
+        "w": 16,
+        "h": 96
+      },
+      "offset": {
+        "x": 8,
+        "y": 0
+      },
+      "rotate": 0
+    },
+    {
+      "region": "shield",
+      "sourceSize": {
+        "w": 72,
+        "h": 72
+      },
+      "size": {
+        "w": 60,
+        "h": 60
+      },
+      "trim": {
+        "x": 6,
+        "y": 6,
+        "w": 60,
+        "h": 60
+      },
+      "offset": {
+        "x": 6,
+        "y": 6
+      },
+      "rotate": 0
+    },
+    {
+      "region": "cape",
+      "sourceSize": {
+        "w": 80,
+        "h": 100
+      },
+      "size": {
+        "w": 60,
+        "h": 60
+      },
+      "trim": {
+        "x": 10,
+        "y": 20,
+        "w": 60,
+        "h": 60
+      },
+      "offset": {
+        "x": 10,
+        "y": 20
+      },
+      "rotate": 0
+    }
+  ],
+  "verification": {
+    "unverified": false,
+    "verified": 6,
+    "unmatched": [],
+    "ignored": [
+      "mask (clipping → needs no region)"
+    ],
+    "sharedRegion": {
+      "region": "shield",
+      "slots": [
+        "shieldA",
+        "shieldB"
+      ],
+      "note": "shared across slots — NOT a collision"
+    },
+    "pathOverride": {
+      "attachment": "sword",
+      "region": "items/sword"
+    },
+    "linkedmesh": {
+      "attachment": "capeLink",
+      "parent": "cape",
+      "resolvedRegion": "cape"
+    }
+  },
+  "atlas": {
+    "format": "RGBA8888",
+    "filter": "Linear,Linear",
+    "repeat": "none",
+    "pma": false,
+    "pages": 1,
+    "sort": "localeCompare",
+    "roundTrip": "parseSpineAtlasText recovers each region byte-equivalently (orig/size/offset/rotate)"
+  },
+  "pack": {
+    "allowRotation": false,
+    "targetMime": "image/png",
+    "referencesChanged": true,
+    "skeletonPassedThrough": true
+  },
+  "note": "Loose Spine region PNGs + a MODERN skins-ARRAY skeleton whose attachment paths equal the region stems (incl. nested items/sword). Covers a path override (sword→items/sword), a region shared by two slots (shield — never a collision), a mesh (cape), a linkedmesh resolved via its parent (capeLink→cape), and an ignored clipping (mask). Packs into ONE .atlas; verified=6; skeleton passed through untouched. cape.png carries an asymmetric margin so the bottom-left offset (Y-flip) is exercised."
+}

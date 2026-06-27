@@ -1,0 +1,199 @@
+{
+  "kind": "pack-static",
+  "feature": "pack-loose-static",
+  "grouping": {
+    "mode": "auto",
+    "granularity": "per-leaf-folder",
+    "thresholds": {
+      "minLooseImages": 8,
+      "maxSpriteEdgePx": 512
+    },
+    "groups": [
+      {
+        "id": "static:/loose-static",
+        "kind": "static",
+        "regionCount": 9,
+        "note": "Root leaf folder packs (≥8 candidates). icons/ has 2 (<8) → skipped unless forced or one-sheet-for-all."
+      }
+    ],
+    "skipped": [
+      {
+        "bucket": "icons",
+        "regionCount": 2,
+        "why": "below minLooseImages (8)"
+      }
+    ]
+  },
+  "regions": [
+    {
+      "name": "coin",
+      "sourceSize": {
+        "w": 64,
+        "h": 64
+      },
+      "trim": {
+        "x": 8,
+        "y": 8,
+        "w": 48,
+        "h": 48
+      },
+      "trimmed": true,
+      "spriteSourceSize": {
+        "x": 8,
+        "y": 8,
+        "w": 48,
+        "h": 48
+      }
+    },
+    {
+      "name": "gem",
+      "sourceSize": {
+        "w": 64,
+        "h": 64
+      },
+      "trim": {
+        "x": 0,
+        "y": 0,
+        "w": 64,
+        "h": 64
+      },
+      "trimmed": false
+    },
+    {
+      "name": "key",
+      "sourceSize": {
+        "w": 80,
+        "h": 40
+      },
+      "trim": {
+        "x": 10,
+        "y": 4,
+        "w": 60,
+        "h": 32
+      },
+      "trimmed": true,
+      "spriteSourceSize": {
+        "x": 10,
+        "y": 4,
+        "w": 60,
+        "h": 32
+      }
+    },
+    {
+      "name": "potion",
+      "sourceSize": {
+        "w": 48,
+        "h": 96
+      },
+      "trim": {
+        "x": 6,
+        "y": 12,
+        "w": 36,
+        "h": 72
+      },
+      "trimmed": true,
+      "spriteSourceSize": {
+        "x": 6,
+        "y": 12,
+        "w": 36,
+        "h": 72
+      }
+    },
+    {
+      "name": "ring",
+      "sourceSize": {
+        "w": 40,
+        "h": 40
+      },
+      "trim": {
+        "x": 4,
+        "y": 4,
+        "w": 32,
+        "h": 32
+      },
+      "trimmed": true,
+      "spriteSourceSize": {
+        "x": 4,
+        "y": 4,
+        "w": 32,
+        "h": 32
+      }
+    },
+    {
+      "name": "scroll",
+      "sourceSize": {
+        "w": 100,
+        "h": 60
+      },
+      "trim": {
+        "x": 0,
+        "y": 0,
+        "w": 100,
+        "h": 60
+      },
+      "trimmed": false
+    },
+    {
+      "name": "shield",
+      "sourceSize": {
+        "w": 72,
+        "h": 72
+      },
+      "trim": {
+        "x": 4,
+        "y": 8,
+        "w": 64,
+        "h": 56
+      },
+      "trimmed": true,
+      "spriteSourceSize": {
+        "x": 4,
+        "y": 8,
+        "w": 64,
+        "h": 56
+      }
+    },
+    {
+      "name": "sword",
+      "sourceSize": {
+        "w": 32,
+        "h": 120
+      },
+      "trim": {
+        "x": 8,
+        "y": 0,
+        "w": 16,
+        "h": 120
+      },
+      "trimmed": true,
+      "spriteSourceSize": {
+        "x": 8,
+        "y": 0,
+        "w": 16,
+        "h": 120
+      }
+    },
+    {
+      "name": "blank",
+      "sourceSize": {
+        "w": 50,
+        "h": 50
+      },
+      "trim": null,
+      "transparent": true,
+      "sentinel": "1x1",
+      "trimmed": true
+    }
+  ],
+  "relativeKeys": [
+    "icons/star",
+    "icons/heart"
+  ],
+  "pack": {
+    "sort": "localeCompare",
+    "allowRotation": false,
+    "targetMimeDefault": "image/webp",
+    "referencesChanged": true
+  },
+  "note": "8 loose PNGs (most with transparent margins) + a fully-transparent blank (1×1 sentinel) + a nested icons/ subfolder. Default per-leaf-folder grouping packs the 9 root candidates into ONE sheet + TP JSON (frames keyed by folder-relative stem); icons/ (2 < 8) is skipped. Reference-changing."
+}

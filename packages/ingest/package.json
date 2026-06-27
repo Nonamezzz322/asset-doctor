@@ -13,6 +13,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@asset-doctor/core": "workspace:*",
     "@asset-doctor/parsers": "workspace:*"
   }
 }

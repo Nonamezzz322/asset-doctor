@@ -91,6 +91,42 @@ export type Asset =
   | { kind: 'atlas'; atlas: Atlas; image: ImageAsset }
   | { kind: 'image'; image: ImageAsset };
 
+/* ── Feature 4: pack loose assets into spritesheets ───────────────────────────────────────────
+ * Turns OWNED loose images into ONE logical sheet (TP JSON) or ONE logical Spine atlas (.atlas,
+ * N page blocks). REFERENCE-CHANGING (FixReceipt.referencesChanged): the game must load the
+ * sheet/atlas, not the loose files. Geometry is pure (trim.ts + packLoose); the worker supplies
+ * each region's alpha bbox. v1 never rotates a blit, so rotated/rotate is always false/0. */
+
+/** Trimmed-content bbox of a loose image, TOP-LEFT source px coords (the worker's alpha bbox).
+ *  w/h = opaque extent. Fully transparent ⇒ caller decides sentinel/skip (never zero-size region). */
+export interface TrimRect { x: number; y: number; w: number; h: number; }
+
+/** One loose image to pack. `ref` = dir-aware ingest key (keyOf). `name` = the region/frame name
+ *  the sheet exposes (relative-path stem, slash-preserved). `sourceSize` = FULL untrimmed size.
+ *  `trim` (optional) = worker-measured opaque bbox; absent ⇒ pack untrimmed. */
+export interface LooseRegion {
+  ref: string;
+  name: string;
+  sourceSize: Size;
+  trim?: TrimRect;
+}
+
+export type PackKind = 'static' | 'spine';
+
+/** A deterministic grouping of loose refs → ONE sheet (static) or ONE .atlas (spine).
+ *  `id` = stable group key (the sheet's output dir + stem). `root` = dir all region names are
+ *  relative to. `outDir` = directory the sheet/JSON/.atlas is written to (= the dir meta.image /
+ *  page-image basenames resolve against). Spine groups MAY carry the skeleton ref for verification. */
+export interface PackGroup {
+  id: string;
+  kind: PackKind;
+  root: string;
+  outDir: string;
+  stem: string;                 // sheet basename stem (no ext); collision-checked in the worker
+  regions: LooseRegion[];
+  skeletonRef?: string;         // spine only: the .json/.skel ref driving verification
+}
+
 /* ── Analysis model (output of @asset-doctor/analysis, input of the UI) ──── */
 
 export type Severity = 'crit' | 'warn' | 'ok' | 'info';
@@ -162,6 +198,59 @@ export interface ImageFeatures {
   dHash?: string;
 }
 
+/* ── Bundle / lazy marking (Feature 3 — UI-sourced) ────────────────────────────────────────
+ * A "bundle" is the runtime load unit. Identity: bundle(ref) = FIRST PATH SEGMENT of the dir-aware
+ * ref ("main_game/ui/x.png" → "main_game"); a ref with no "/" has bundle === ref (its own singleton).
+ * The UI marks each top-level bundle. Marking semantics (precise, binding for correctness):
+ *   'eager'    = GLOBALLY RESIDENT: loaded before any other bundle's assets are referenced, never
+ *                unloaded. Only an eager owner may serve a consumer in a different bundle.
+ *   'lazy'     = resident only after its own bundle loads; load order vs other lazy bundles is unknown.
+ *   'isolated' = DEFAULT for any UNMARKED bundle: treated as its own self-contained unit; may neither
+ *                own across bundles nor consume across bundles. (Fail-safe: an unmarked bundle can
+ *                never silently become a global owner that a lazy consumer breaks against.) */
+export type BundleAvailability = 'eager' | 'lazy' | 'isolated';
+
+/** UI-supplied marking, keyed by top-level bundle name. Absent key ⇒ 'isolated'. Pure data; flows in
+ *  the FixRequest. Sub-bundle granularity and user-declared lazy load-order are future extensions. */
+export type LazyMarking = Record<string, BundleAvailability>;
+
+/* ── Dedup partition dimensions (Feature 1) ────────────────────────────────────────────────
+ * A dedup may only collapse members of the SAME (pool, skinGroup) partition. */
+export type DedupPool = 'spine' | 'pixi';
+
+/** Skin/variation guard. Renamed from the rejected "AssetVariations" to avoid collision with the
+ *  unrelated variants.ts model. Keeps skin "key" assets distinct from their "value" variants so a
+ *  skin-switch build never loses an asset. Matched on the dir-aware ref's FILE basename (no ext) —
+ *  this is AD's DELIBERATELY STRICTER rule (no general-owner fallback), NOT builder parity. */
+export type SkinGuard = Record<string, string>; // { keyBasename: valueBasename }
+export type SkinGroup = 'general' | 'keys' | 'values';
+
+/* ── Owner/consumer dedup result model (whole-file only) ────────────────────────────────────
+ * One DedupGroup per contentHash AFTER (pool, skinGroup) partitioning. A group may have >1 owner
+ * (the lazy/isolated case: each such bundle keeps its own owner). Every consumer names exactly one
+ * owner whose bundle DOMINATES the consumer's bundle (same bundle OR eager owner). */
+export interface DedupConsumer {
+  /** Dir-aware ref of the whole duplicate to drop. */
+  ref: string;
+  /** Retained ref this consumer's references repoint to. Same (pool, skinGroup) partition AND
+   *  bundle(ownerRef) dominates bundle(ref). */
+  ownerRef: string;
+  /** Why this edge is safe — for the receipt + golden tests. */
+  reason: 'same-eager-bundle' | 'eager-owner-cross-bundle' | 'same-lazy-bundle' | 'same-isolated-bundle';
+}
+
+/** One contentHash group within one (pool, skinGroup) partition. `owners` length ≥ 1. */
+export interface DedupGroup {
+  contentHash: string;
+  pool: DedupPool;
+  skinGroup: SkinGroup;
+  /** Retained refs (never dropped). >1 only when members span multiple non-eager bundles. Sorted by
+   *  the deterministic codepoint comparator. */
+  owners: string[];
+  /** Drops, each bound to one owner. Sorted by `ref` (codepoint). */
+  consumers: DedupConsumer[];
+}
+
 export interface AssetMetrics {
   assetRef: string;
   diskBytes: number;
@@ -209,7 +298,25 @@ export type FixOp =
   | { kind: 'repack'; atlasRefs: string[]; targetMime: ImageMime; pot: boolean; allowRotation: boolean; padding: number; maxSize: number }
   | { kind: 'transcode'; assetRef: string; targetMime: ImageMime; quality: number; lossless: boolean }
   | { kind: 'resize'; assetRef: string; to: Size; targetMime: ImageMime; quality: number }
-  | { kind: 'drop'; assetRef: string; reason: 'duplicate-exact' | 'duplicate-similar' };
+  | { kind: 'drop'; assetRef: string; reason: 'duplicate-exact' | 'duplicate-similar';
+      /** Owner-aware drop (Feature 1): retained ref this drop's references repoint to. Absent ⇒ legacy
+       *  bare-delete (today's behavior). */
+      ownerRef?: string;
+      /** True when this consumer is a whole atlas image+manifest pair identical to the owner's; the
+       *  worker keeps the consumer manifest, repoints meta.image → owner image, drops only the image. */
+      repointManifest?: boolean }
+  | { kind: 'pack';
+      /** ONE PackGroup → ONE sheet (static) or ONE multi-page .atlas (spine). Carries only OWNED
+       *  loose refs — never a dedup consumer scheduled for drop (enforced in plan.ts). */
+      group: PackGroup;
+      /** Sheet image target. Spine defaults to PNG (runtime-safe); static may use WebP/AVIF. */
+      targetMime: ImageMime;
+      /** Trim transparent margins (→ TP spriteSourceSize / Spine offset) before packing. */
+      trim: boolean;
+      padding: number;
+      maxSize: number;
+      /** ALWAYS false in v1 — the worker compose path cannot rotate a blit (verified). Typed literal. */
+      allowRotation: false };
 
 export interface FixPlan {
   ops: FixOp[];

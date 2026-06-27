@@ -1,0 +1,145 @@
+{
+  "skeleton": {
+    "hash": "fixture",
+    "spine": "3.8",
+    "width": 256,
+    "height": 256
+  },
+  "bones": [
+    {
+      "name": "root"
+    }
+  ],
+  "slots": [
+    {
+      "name": "part_00",
+      "bone": "root",
+      "attachment": "part_00"
+    },
+    {
+      "name": "part_01",
+      "bone": "root",
+      "attachment": "part_01"
+    },
+    {
+      "name": "part_02",
+      "bone": "root",
+      "attachment": "part_02"
+    },
+    {
+      "name": "part_03",
+      "bone": "root",
+      "attachment": "part_03"
+    },
+    {
+      "name": "part_04",
+      "bone": "root",
+      "attachment": "part_04"
+    },
+    {
+      "name": "part_05",
+      "bone": "root",
+      "attachment": "part_05"
+    },
+    {
+      "name": "part_06",
+      "bone": "root",
+      "attachment": "part_06"
+    },
+    {
+      "name": "part_07",
+      "bone": "root",
+      "attachment": "part_07"
+    },
+    {
+      "name": "part_08",
+      "bone": "root",
+      "attachment": "part_08"
+    },
+    {
+      "name": "part_09",
+      "bone": "root",
+      "attachment": "part_09"
+    },
+    {
+      "name": "part_10",
+      "bone": "root",
+      "attachment": "part_10"
+    },
+    {
+      "name": "part_11",
+      "bone": "root",
+      "attachment": "part_11"
+    }
+  ],
+  "skins": [
+    {
+      "name": "default",
+      "attachments": {
+        "part_00": {
+          "part_00": {
+            "type": "region"
+          }
+        },
+        "part_01": {
+          "part_01": {
+            "type": "region"
+          }
+        },
+        "part_02": {
+          "part_02": {
+            "type": "region"
+          }
+        },
+        "part_03": {
+          "part_03": {
+            "type": "region"
+          }
+        },
+        "part_04": {
+          "part_04": {
+            "type": "region"
+          }
+        },
+        "part_05": {
+          "part_05": {
+            "type": "region"
+          }
+        },
+        "part_06": {
+          "part_06": {
+            "type": "region"
+          }
+        },
+        "part_07": {
+          "part_07": {
+            "type": "region"
+          }
+        },
+        "part_08": {
+          "part_08": {
+            "type": "region"
+          }
+        },
+        "part_09": {
+          "part_09": {
+            "type": "region"
+          }
+        },
+        "part_10": {
+          "part_10": {
+            "type": "region"
+          }
+        },
+        "part_11": {
+          "part_11": {
+            "type": "region"
+          }
+        }
+      }
+    }
+  ],
+  "animations": {
+    "idle": {}
+  }
+}

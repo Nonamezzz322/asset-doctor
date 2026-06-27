@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import type { AnalysisReport, Atlas, Blit } from '@asset-doctor/core';
+import type { AnalysisReport, Atlas, Blit, DedupGroup, FixOp, PackGroup } from '@asset-doctor/core';
 import { parseAtlas, parseAtlasManifest, parseSpineAtlasText, parseSpinePage } from '@asset-doctor/parsers';
 import { analyze, DEFAULT_THRESHOLDS } from '@asset-doctor/analysis';
 import { ACC_CELL, emitSpineAtlasText, emitTexturePackerJson, pack, planFix, repackAtlases, repackAtlasesPolygon, scaleAtlas, type MaskItem, type Placement, type RawMesh } from '../src/index';
@@ -162,6 +162,268 @@ describe('planFix', () => {
       expect(resize.assetRef).toBe('big.json');
       expect(resize.to).toEqual({ w: 2048, h: 2048 });
     }
+  });
+});
+
+// ── Owner-aware dedup drop path (design §3d / §10) ───────────────────────────────────────────────
+// planFix's THIRD argument (DedupGroup[]) turns exact-dup drops into OWNER-AWARE drops: one drop per
+// consumer carrying `ownerRef`, with `repointManifest:true` only for atlas consumers (isAtlasRef). Owners
+// are added to a protectedOwners set and must NEVER be a drop/merge/resize target. These are pure data
+// assertions on op kinds — the most testable part of the new fix-side logic.
+describe('planFix — owner-aware dedup drops (groups)', () => {
+  const base = { targetMime: 'image/webp' as const, quality: 0.9, lossless: true, padding: 2, maxSize: 4096, maxEdge: 2048 };
+  const drops = (plan: { ops: FixOp[] }) => plan.ops.filter((o): o is Extract<FixOp, { kind: 'drop' }> => o.kind === 'drop');
+
+  /** Minimal report: just the assets, no findings (the dedup plan is data-driven via groups). */
+  const reportOf = (refs: string[]): AnalysisReport => ({
+    assets: refs.map((assetRef) => ({ assetRef, diskBytes: 100, vramBytes: 0 })),
+    findings: [],
+    totals: { diskBytes: refs.length * 100, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+    thresholds: DEFAULT_THRESHOLDS,
+  });
+
+  it('each consumer becomes a drop op carrying ownerRef (one per consumer, not a bare-drop)', () => {
+    const groups: DedupGroup[] = [
+      {
+        contentHash: 'h1',
+        pool: 'pixi',
+        skinGroup: 'general',
+        owners: ['core/a.png'],
+        consumers: [
+          { ref: 'lvl1/a.png', ownerRef: 'core/a.png', reason: 'eager-owner-cross-bundle' },
+          { ref: 'lvl2/a.png', ownerRef: 'core/a.png', reason: 'eager-owner-cross-bundle' },
+        ],
+      },
+    ];
+    const plan = planFix(reportOf(['core/a.png', 'lvl1/a.png', 'lvl2/a.png']), { ...base, aggressive: true }, groups);
+    const d = drops(plan);
+    expect(d).toHaveLength(2); // one drop per consumer
+    expect(d.map((o) => o.assetRef).sort()).toEqual(['lvl1/a.png', 'lvl2/a.png']);
+    for (const o of d) {
+      expect(o.reason).toBe('duplicate-exact');
+      expect(o.ownerRef).toBe('core/a.png'); // each drop is bound to its owner
+    }
+    // The OWNER is never a drop target.
+    expect(d.some((o) => o.assetRef === 'core/a.png')).toBe(false);
+  });
+
+  it('repointManifest:true only when isAtlasRef returns true for the consumer', () => {
+    const groups: DedupGroup[] = [
+      {
+        contentHash: 'h2',
+        pool: 'pixi',
+        skinGroup: 'general',
+        owners: ['main/sheet.png'],
+        consumers: [
+          { ref: 'extra/sheet.png', ownerRef: 'main/sheet.png', reason: 'eager-owner-cross-bundle' }, // atlas
+          { ref: 'extra/loose.png', ownerRef: 'main/sheet.png', reason: 'eager-owner-cross-bundle' }, // loose
+        ],
+      },
+    ];
+    const isAtlasRef = (ref: string) => ref === 'extra/sheet.png' || ref === 'main/sheet.png';
+    const plan = planFix(reportOf(['main/sheet.png', 'extra/sheet.png', 'extra/loose.png']), { ...base, aggressive: true, isAtlasRef }, groups);
+    const byRef = new Map(drops(plan).map((o) => [o.assetRef, o]));
+    expect(byRef.get('extra/sheet.png')?.repointManifest).toBe(true); // atlas consumer → repoint meta.image
+    expect('repointManifest' in (byRef.get('extra/loose.png') ?? {})).toBe(false); // loose consumer → bare drop, no key
+  });
+
+  it('an owner is never a drop/repack/resize target even when it also matches occupancy/oversize/atlas-merge', () => {
+    // owner core/sheet.png ALSO carries an occupancy + oversize finding AND is in an atlas-merge group.
+    const report: AnalysisReport = {
+      assets: [
+        { assetRef: 'core/sheet.png', diskBytes: 100, vramBytes: 4096 * 4096 * 4, occupancy: 0.1 },
+        { assetRef: 'core/other.png', diskBytes: 100, vramBytes: 256 * 256 * 4, occupancy: 0.1 },
+        { assetRef: 'extra/sheet.png', diskBytes: 100, vramBytes: 0 },
+      ],
+      findings: [
+        { id: 'core/sheet.png:occupancy', rule: 'occupancy', severity: 'crit', assetRef: 'core/sheet.png', title: '', detail: '' },
+        { id: 'core/sheet.png:oversize', rule: 'dimensions-oversize', severity: 'crit', assetRef: 'core/sheet.png', title: '', detail: '', messageKey: 'oversize', params: { w: 4096, h: 4096, edge: 4096, budget: 2730, sev: 'crit', vram: 0 } },
+        { id: 'folder:atlas-merge', rule: 'atlas-merge', severity: 'warn', scope: 'folder', assetRef: 'core/sheet.png', relatedRefs: ['core/sheet.png', 'core/other.png'], title: '', detail: '' },
+      ],
+      totals: { diskBytes: 300, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+      thresholds: DEFAULT_THRESHOLDS,
+    };
+    const groups: DedupGroup[] = [
+      { contentHash: 'h3', pool: 'pixi', skinGroup: 'general', owners: ['core/sheet.png'], consumers: [{ ref: 'extra/sheet.png', ownerRef: 'core/sheet.png', reason: 'eager-owner-cross-bundle' }] },
+    ];
+    const plan = planFix(report, { ...base, aggressive: true, isAtlasRef: (r) => r.endsWith('.png') }, groups);
+    // The owner must NOT be repacked, resized, merged, or dropped — protectedOwners guards every pass.
+    expect(plan.ops.some((o) => o.kind === 'repack' && o.atlasRefs.includes('core/sheet.png'))).toBe(false);
+    expect(plan.ops.some((o) => o.kind === 'resize' && o.assetRef === 'core/sheet.png')).toBe(false);
+    expect(plan.ops.some((o) => o.kind === 'drop' && o.assetRef === 'core/sheet.png')).toBe(false);
+    // The consumer is still dropped (owner-aware), and the non-owner peer can still be repacked.
+    expect(plan.ops.some((o) => o.kind === 'drop' && o.assetRef === 'extra/sheet.png' && o.ownerRef === 'core/sheet.png')).toBe(true);
+  });
+
+  it('near-duplicates still use the legacy bare-drop path when groups is supplied (only exact dupes are owner-modelled)', () => {
+    const report: AnalysisReport = {
+      assets: [{ assetRef: 'x/a.png', diskBytes: 100, vramBytes: 0 }, { assetRef: 'x/b.png', diskBytes: 100, vramBytes: 0 }],
+      findings: [{ id: 'dup-similar', rule: 'duplicate-similar', severity: 'info', scope: 'folder', assetRef: 'x/a.png', relatedRefs: ['x/a.png', 'x/b.png'], title: '', detail: '' }],
+      totals: { diskBytes: 200, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+      thresholds: DEFAULT_THRESHOLDS,
+    };
+    // exact-dup groups present (empty here) but the near-dup finding must still produce a BARE drop.
+    const plan = planFix(report, { ...base, aggressive: true }, []);
+    const d = drops(plan);
+    expect(d).toHaveLength(1);
+    expect(d[0]?.assetRef).toBe('x/b.png');
+    expect(d[0]?.reason).toBe('duplicate-similar');
+    expect(d[0]?.ownerRef).toBeUndefined(); // legacy bare-drop — no owner info for near-dupes
+  });
+
+  it('legacy two-arg path unchanged: exact dupes drop every copy after the first with NO owner info', () => {
+    // No DedupGroup[] arg at all ⇒ today's behavior. An exact-duplicate finding must drop copies 2..n
+    // via the bare-drop path: no ownerRef, no repointManifest, even though isAtlasRef would say "atlas".
+    const report: AnalysisReport = {
+      assets: ['p/a.png', 'q/a.png', 'r/a.png'].map((assetRef) => ({ assetRef, diskBytes: 100, vramBytes: 0 })),
+      findings: [{ id: 'dup-exact', rule: 'duplicate-exact', severity: 'warn', scope: 'folder', assetRef: 'p/a.png', relatedRefs: ['p/a.png', 'q/a.png', 'r/a.png'], title: '', detail: '' }],
+      totals: { diskBytes: 300, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+      thresholds: DEFAULT_THRESHOLDS,
+    };
+    // isAtlasRef is supplied but must NOT take effect — the third arg (groups) is absent, so the
+    // owner-aware path is never entered and repointManifest is never set.
+    const plan = planFix(report, { ...base, aggressive: true, isAtlasRef: () => true });
+    const d = drops(plan);
+    expect(d.map((o) => o.assetRef)).toEqual(['q/a.png', 'r/a.png']); // copies after the first, in order
+    for (const o of d) {
+      expect(o.reason).toBe('duplicate-exact');
+      expect(o.ownerRef).toBeUndefined(); // bare-drop carries no owner
+      expect('repointManifest' in o).toBe(false); // and never repoints — that's owner-aware only
+    }
+    expect(d.some((o) => o.assetRef === 'p/a.png')).toBe(false); // the first copy is retained
+  });
+});
+
+// ── Pack pass (Feature 4, design §8) ─────────────────────────────────────────────────────────────
+// planFix's FOURTH argument (PackGroup[]) emits one `pack` op per non-empty group, AFTER dedup pass 0a
+// (so `dropped` is populated) and BEFORE pass 1. Pack OWNERS only: a region.ref already in `dropped` is
+// excluded. A `packed` set guards pass-2 transcode so a both-findings ref → exactly one pack, zero
+// transcode. No PackGroup[] ⇒ no pack ops (legacy path intact).
+describe('planFix — pack pass (packGroups)', () => {
+  const base = { targetMime: 'image/webp' as const, quality: 0.9, lossless: true, padding: 2, maxSize: 4096, maxEdge: 2048 };
+  const region = (ref: string, name: string): { ref: string; name: string; sourceSize: { w: number; h: number } } => ({ ref, name, sourceSize: { w: 64, h: 64 } });
+  const staticGroup = (id: string, refs: [string, string][]): PackGroup => ({
+    id, kind: 'static', root: 'icons', outDir: 'icons', stem: id,
+    regions: refs.map(([ref, name]) => region(ref, name)),
+  });
+  const packs = (plan: { ops: FixOp[] }) => plan.ops.filter((o): o is Extract<FixOp, { kind: 'pack' }> => o.kind === 'pack');
+
+  /** Loose images carrying BOTH a should-atlas (folder) finding and per-asset format findings. */
+  const reportOf = (refs: string[]): AnalysisReport => ({
+    assets: refs.map((assetRef) => ({ assetRef, diskBytes: 100, vramBytes: 0 })),
+    findings: [
+      { id: 'folder:should-atlas', rule: 'should-atlas', severity: 'warn', scope: 'folder', assetRef: refs[0]!, relatedRefs: refs, title: '', detail: '' },
+      ...refs.map((assetRef) => ({ id: `${assetRef}:format`, rule: 'format' as const, severity: 'warn' as const, assetRef, title: '', detail: '' })),
+    ],
+    totals: { diskBytes: refs.length * 100, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+    thresholds: DEFAULT_THRESHOLDS,
+  });
+
+  it('no PackGroup[] ⇒ no pack ops (legacy path unchanged; format findings still transcode)', () => {
+    const plan = planFix(reportOf(['icons/a.png', 'icons/b.png']), { ...base, aggressive: false });
+    expect(packs(plan)).toHaveLength(0);
+    expect(plan.ops.filter((o) => o.kind === 'transcode')).toHaveLength(2); // both still transcode
+  });
+
+  it('emits one pack op per non-empty group with the approved defaults (trim, no rotation)', () => {
+    const groups = [staticGroup('icons', [['icons/a.png', 'a'], ['icons/b.png', 'b']])];
+    const plan = planFix(reportOf(['icons/a.png', 'icons/b.png']), { ...base, aggressive: false }, undefined, groups);
+    const p = packs(plan);
+    expect(p).toHaveLength(1);
+    expect(p[0]!.trim).toBe(true);
+    expect(p[0]!.allowRotation).toBe(false);
+    expect(p[0]!.padding).toBe(2);
+    expect(p[0]!.maxSize).toBe(4096);
+    expect(p[0]!.targetMime).toBe('image/webp');
+    expect(p[0]!.group.regions.map((r) => r.ref)).toEqual(['icons/a.png', 'icons/b.png']);
+  });
+
+  it('a ref with BOTH should-atlas and format → exactly ONE pack op and ZERO transcode ops', () => {
+    const groups = [staticGroup('icons', [['icons/a.png', 'a'], ['icons/b.png', 'b']])];
+    const plan = planFix(reportOf(['icons/a.png', 'icons/b.png']), { ...base, aggressive: false }, undefined, groups);
+    expect(packs(plan)).toHaveLength(1);
+    expect(packs(plan)[0]!.group.regions).toHaveLength(2);
+    expect(plan.ops.filter((o) => o.kind === 'transcode')).toHaveLength(0); // packed refs are NOT transcoded
+    // exactly one op touches each packed ref (no pack+transcode double-emit)
+    for (const ref of ['icons/a.png', 'icons/b.png']) {
+      const touching = plan.ops.filter((o) => (o.kind === 'transcode' || o.kind === 'resize' || o.kind === 'drop') && o.assetRef === ref);
+      expect(touching).toHaveLength(0);
+    }
+  });
+
+  it('pack OWNERS only: a loose ref scheduled for drop by dedup is excluded from its group', () => {
+    // icons/b.png is an exact-dup consumer of icons/a.png (dropped in pass 0a) — it must NOT be packed.
+    const dedup: DedupGroup[] = [
+      { contentHash: 'h', pool: 'pixi', skinGroup: 'general', owners: ['icons/a.png'], consumers: [{ ref: 'icons/b.png', ownerRef: 'icons/a.png', reason: 'eager-owner-cross-bundle' }] },
+    ];
+    const groups = [staticGroup('icons', [['icons/a.png', 'a'], ['icons/b.png', 'b']])];
+    const report: AnalysisReport = {
+      assets: [{ assetRef: 'icons/a.png', diskBytes: 100, vramBytes: 0 }, { assetRef: 'icons/b.png', diskBytes: 100, vramBytes: 0 }],
+      findings: [],
+      totals: { diskBytes: 200, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+      thresholds: DEFAULT_THRESHOLDS,
+    };
+    const plan = planFix(report, { ...base, aggressive: true }, dedup, groups);
+    const p = packs(plan);
+    expect(p).toHaveLength(1);
+    expect(p[0]!.group.regions.map((r) => r.ref)).toEqual(['icons/a.png']); // owner packed, consumer excluded
+    // the dropped consumer is never in a pack group
+    expect(p.some((o) => o.group.regions.some((r) => r.ref === 'icons/b.png'))).toBe(false);
+  });
+
+  it('a group whose every region is dropped emits NO pack op', () => {
+    const dedup: DedupGroup[] = [
+      { contentHash: 'h', pool: 'pixi', skinGroup: 'general', owners: ['kept/a.png'], consumers: [{ ref: 'icons/a.png', ownerRef: 'kept/a.png', reason: 'eager-owner-cross-bundle' }] },
+    ];
+    const groups = [staticGroup('icons', [['icons/a.png', 'a']])];
+    const report: AnalysisReport = {
+      assets: [{ assetRef: 'kept/a.png', diskBytes: 100, vramBytes: 0 }, { assetRef: 'icons/a.png', diskBytes: 100, vramBytes: 0 }],
+      findings: [],
+      totals: { diskBytes: 200, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+      thresholds: DEFAULT_THRESHOLDS,
+    };
+    const plan = planFix(report, { ...base, aggressive: true }, dedup, groups);
+    expect(packs(plan)).toHaveLength(0);
+  });
+
+  // §11.11: a packed SPINE region is NEVER in `dropped`. Spine pool consumers are hard-kept by Phase C
+  // (fix.worker.ts) so they're never dropped; here a spine group's regions are OWNERS → packed, and no
+  // `drop` op may touch any of them (no double-handling of a region the .atlas ships).
+  it('a packed spine region is never dropped (owners packed, zero drop ops on them)', () => {
+    const spineGroup: PackGroup = {
+      id: 'spine:char', kind: 'spine', root: 'char', outDir: 'char', stem: 'char', skeletonRef: 'char/skeleton.json',
+      regions: [region('char/head.png', 'head'), region('char/items/sword.png', 'items/sword')],
+    };
+    // An exact-dup elsewhere that DOES drop a non-spine consumer — proves drops still happen, just not on
+    // the spine regions. The spine regions are owners (never consumers), so dedup never schedules them.
+    const dedup: DedupGroup[] = [
+      { contentHash: 'h', pool: 'pixi', skinGroup: 'general', owners: ['kept/x.png'], consumers: [{ ref: 'other/x.png', ownerRef: 'kept/x.png', reason: 'eager-owner-cross-bundle' }] },
+    ];
+    const report: AnalysisReport = {
+      assets: [{ assetRef: 'char/head.png', diskBytes: 100, vramBytes: 0 }, { assetRef: 'char/items/sword.png', diskBytes: 100, vramBytes: 0 }, { assetRef: 'kept/x.png', diskBytes: 100, vramBytes: 0 }, { assetRef: 'other/x.png', diskBytes: 100, vramBytes: 0 }],
+      findings: [],
+      totals: { diskBytes: 400, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+      thresholds: DEFAULT_THRESHOLDS,
+    };
+    const plan = planFix(report, { ...base, aggressive: true }, dedup, [spineGroup]);
+    const p = packs(plan);
+    expect(p).toHaveLength(1);
+    expect(p[0]!.group.kind).toBe('spine');
+    expect(p[0]!.group.regions.map((r) => r.ref)).toEqual(['char/head.png', 'char/items/sword.png']); // both owners packed
+    const droppedRefs = plan.ops.filter((o): o is Extract<FixOp, { kind: 'drop' }> => o.kind === 'drop').map((o) => o.assetRef);
+    for (const r of spineGroup.regions) expect(droppedRefs).not.toContain(r.ref); // never dropped
+    expect(droppedRefs).toContain('other/x.png'); // unrelated dedup drop still fires (drops aren't disabled)
+  });
+
+  it('groups are emitted deterministically by PackGroup.id regardless of input order', () => {
+    const a = staticGroup('aaa', [['x/a.png', 'a']]);
+    const b = staticGroup('bbb', [['x/b.png', 'b']]);
+    const c = staticGroup('ccc', [['x/c.png', 'c']]);
+    const report = reportOf(['x/a.png', 'x/b.png', 'x/c.png']);
+    const order1 = packs(planFix(report, { ...base, aggressive: false }, undefined, [c, a, b])).map((o) => o.group.id);
+    const order2 = packs(planFix(report, { ...base, aggressive: false }, undefined, [b, c, a])).map((o) => o.group.id);
+    expect(order1).toEqual(['aaa', 'bbb', 'ccc']);
+    expect(order2).toEqual(['aaa', 'bbb', 'ccc']);
   });
 });
 

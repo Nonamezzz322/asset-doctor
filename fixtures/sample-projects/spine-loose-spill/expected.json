@@ -1,0 +1,199 @@
+{
+  "kind": "pack-spine",
+  "feature": "pack-loose-spine-multipage",
+  "skinsShape": "array-modern",
+  "grouping": {
+    "mode": "auto",
+    "spineRoot": "(the upload folder)",
+    "skeletonRef": "skeleton.json",
+    "regionCount": 12
+  },
+  "pack": {
+    "maxSize": 128,
+    "padding": 2,
+    "allowRotation": false,
+    "targetMime": "image/png",
+    "referencesChanged": true
+  },
+  "regions": [
+    {
+      "region": "part_00",
+      "sourceSize": {
+        "w": 64,
+        "h": 64
+      },
+      "size": {
+        "w": 64,
+        "h": 64
+      },
+      "trimmed": false,
+      "rotate": 0
+    },
+    {
+      "region": "part_01",
+      "sourceSize": {
+        "w": 64,
+        "h": 64
+      },
+      "size": {
+        "w": 64,
+        "h": 64
+      },
+      "trimmed": false,
+      "rotate": 0
+    },
+    {
+      "region": "part_02",
+      "sourceSize": {
+        "w": 64,
+        "h": 64
+      },
+      "size": {
+        "w": 64,
+        "h": 64
+      },
+      "trimmed": false,
+      "rotate": 0
+    },
+    {
+      "region": "part_03",
+      "sourceSize": {
+        "w": 64,
+        "h": 64
+      },
+      "size": {
+        "w": 64,
+        "h": 64
+      },
+      "trimmed": false,
+      "rotate": 0
+    },
+    {
+      "region": "part_04",
+      "sourceSize": {
+        "w": 64,
+        "h": 64
+      },
+      "size": {
+        "w": 64,
+        "h": 64
+      },
+      "trimmed": false,
+      "rotate": 0
+    },
+    {
+      "region": "part_05",
+      "sourceSize": {
+        "w": 64,
+        "h": 64
+      },
+      "size": {
+        "w": 64,
+        "h": 64
+      },
+      "trimmed": false,
+      "rotate": 0
+    },
+    {
+      "region": "part_06",
+      "sourceSize": {
+        "w": 64,
+        "h": 64
+      },
+      "size": {
+        "w": 64,
+        "h": 64
+      },
+      "trimmed": false,
+      "rotate": 0
+    },
+    {
+      "region": "part_07",
+      "sourceSize": {
+        "w": 64,
+        "h": 64
+      },
+      "size": {
+        "w": 64,
+        "h": 64
+      },
+      "trimmed": false,
+      "rotate": 0
+    },
+    {
+      "region": "part_08",
+      "sourceSize": {
+        "w": 64,
+        "h": 64
+      },
+      "size": {
+        "w": 64,
+        "h": 64
+      },
+      "trimmed": false,
+      "rotate": 0
+    },
+    {
+      "region": "part_09",
+      "sourceSize": {
+        "w": 64,
+        "h": 64
+      },
+      "size": {
+        "w": 64,
+        "h": 64
+      },
+      "trimmed": false,
+      "rotate": 0
+    },
+    {
+      "region": "part_10",
+      "sourceSize": {
+        "w": 64,
+        "h": 64
+      },
+      "size": {
+        "w": 64,
+        "h": 64
+      },
+      "trimmed": false,
+      "rotate": 0
+    },
+    {
+      "region": "part_11",
+      "sourceSize": {
+        "w": 64,
+        "h": 64
+      },
+      "size": {
+        "w": 64,
+        "h": 64
+      },
+      "trimmed": false,
+      "rotate": 0
+    }
+  ],
+  "multipage": {
+    "minPages": 2,
+    "pageImages": [
+      "stem.png",
+      "stem_1.png",
+      "..."
+    ],
+    "atlasBlocks": "ONE .atlas = N page blocks (per-bin emitSpineAtlasText concat); each region under ITS page header",
+    "invariant": "every re-parsed region frame.xy is within its page size; pageOfName drives per-page membership"
+  },
+  "verification": {
+    "unverified": false,
+    "verified": 12,
+    "unmatched": []
+  },
+  "atlas": {
+    "format": "RGBA8888",
+    "filter": "Linear,Linear",
+    "repeat": "none",
+    "pma": false,
+    "sort": "localeCompare"
+  },
+  "note": "12 opaque 64×64 loose regions with a FORCED small maxSize (128) so the packer SPILLS across multiple POT pages. ONE .atlas with N page blocks (each region under its own page header, driven by pageOfName); page images stem.png, stem_1.png, … The golden pins the multi-page invariant (≥2 pages; each region within its page) and verified=N, NOT exact placements (the packer owns those)."
+}

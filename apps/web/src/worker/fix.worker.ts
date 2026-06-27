@@ -5,10 +5,10 @@
 // (native WebP, or AVIF via @jsquash with honest fallback), drop exact duplicates, and zip a drop-in
 // optimized folder. Assets never leave the device. Every fix the browser can't do lands in skipped[].
 
-import type { Asset, Atlas, ImageFeatures, ImageMime, Rect } from '@asset-doctor/core';
-import { groupFiles, type RawFile } from '@asset-doctor/ingest';
+import type { Asset, Atlas, Blit, ImageMime, ImageFeatures, PackGroup, Rect, TrimRect } from '@asset-doctor/core';
+import { groupFiles, groupLooseForPacking, keyOf, type LooseImage, type RawFile } from '@asset-doctor/ingest';
 import { parseAtlas, parseImage, parseSpineAtlasText, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
-import { analyze, mergeSharedAtlases, type EncodeSizer } from '@asset-doctor/analysis';
+import { analyze, buildDedupGroups, mergeSharedAtlases, type EncodeSizer } from '@asset-doctor/analysis';
 import {
   emitSpineAtlasText,
   emitTexturePackerJson,
@@ -19,6 +19,25 @@ import {
   scaleAtlas,
   scaleMeshToFrame,
   traceMesh,
+  // PURE settings helpers (design §4b): per-asset effective-option resolution (folder/type overrides)
+  // + scale-aware quality. Single Vitest-covered source of truth so the worker can't drift.
+  resolveOptions,
+  scaleAwareQuality,
+  type EffectiveOptions,
+  type FixAssetKind,
+  // PURE owner-aware dedup repoint path math (design §3d) — SINGLE source of truth, Vitest-covered in
+  // packages/fix, so the meta.image repoint resolves back through @asset-doctor/parsers and can't drift.
+  dirOf,
+  resolveImageRef,
+  relativeImageRef,
+  // PURE owner-aware dedup EXECUTION helpers (design §3d / §10.8): the rename rule (EXT/renamedTo) + the
+  // Phase-A owner final-name prediction. SINGLE source of truth — the worker and its Node round-trip test
+  // both import these, so the two-phase dangling-reference guard can't drift between them.
+  EXT,
+  renamedTo,
+  predictOwnerFinalNames,
+  isOwnerAwareDrop,
+  type OwnerFinalName,
   // PURE per-sprite extraction cores — single source of truth for the threshold/dilation/downscale
   // logic (Vitest-covered in packages/fix). The worker only reads pixels and delegates here.
   maskItemFromRGBA,
@@ -30,6 +49,12 @@ import {
   POLY_TOLERANCE2,
   type MaskItem,
   type RawMesh,
+  // Feature 4 (pack loose assets) — PURE halves: alphaBBox (worker's per-region opaque bbox), packLoose
+  // (loose regions → Atlas[]+Blit[]), and the Spine skeleton verifier. The worker supplies pixels +
+  // composes; ALL geometry/verification math lives in these tested pure helpers (no drift).
+  alphaBBox,
+  packLoose,
+  verifySpineSkeleton,
 } from '@asset-doctor/fix';
 import { dHashFromGray, isFlat, luma } from '../lib/perceptual';
 import { makeZip, type ZipEntry } from './zip';
@@ -38,24 +63,11 @@ import type { FixInputFile, FixOptions, FixReceipt, FixRequest, FixResponse } fr
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 const post = (m: FixResponse): void => ctx.postMessage(m);
 const basename = (p: string): string => p.split('/').pop() ?? p;
-const dirOf = (p: string): string => {
-  const i = p.lastIndexOf('/');
-  return i < 0 ? '' : p.slice(0, i + 1);
-};
-const normalize = (p: string): string => {
-  const out: string[] = [];
-  for (const s of p.split('/')) {
-    if (s === '' || s === '.') continue;
-    if (s === '..') out.pop();
-    else out.push(s);
-  }
-  return out.join('/');
-};
-/** Resolve a manifest's `meta.image` (relative to the manifest's dir) → the image's folder-relative path. */
-const resolveImageRef = (manifestPath: string, img: string): string => normalize(dirOf(manifestPath) + img);
+// dirOf / resolveImageRef / relativeImageRef are imported from @asset-doctor/fix (PURE, tested).
 const td = new TextDecoder();
 const te = new TextEncoder();
-const EXT: Record<string, string> = { 'image/webp': '.webp', 'image/avif': '.avif', 'image/png': '.png', 'image/jpeg': '.jpg' };
+// EXT (mime → ext) + renamedTo (the loose-image/owner rename) are imported from @asset-doctor/fix (PURE,
+// tested) — single source of truth shared with the Phase-A owner-final-name prediction.
 
 ctx.onmessage = async (e: MessageEvent<FixRequest>): Promise<void> => {
   if (e.data.type !== 'fix') return;
@@ -72,13 +84,22 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
   // ── parse + analyze (same pipeline as the diagnosis) ──
   const raw: RawFile[] = files.map((f) => ({ name: f.name, path: f.path, bytes: f.bytes }));
   const grouped = groupFiles(raw);
+  // Bytes of EVERY input file by its dir-aware key (keyOf) — lets the Feature 4 Spine verifier read the
+  // skeleton .json (a marker file, NOT in bytesByRef which only holds parsed image/atlas bytes).
+  const bytesByRefAll = new Map<string, ArrayBuffer>();
+  for (const f of raw) bytesByRefAll.set(keyOf(f), f.bytes);
   const assets: Asset[] = [];
   const bytesByRef = new Map<string, ArrayBuffer>();
   const pathByRef = new Map<string, string>();
   const spineRefs = new Set<string>();
   for (const a of grouped.atlases) {
     const image = { ref: a.name, bytes: new Uint8Array(a.image.bytes) };
-    const res = a.kind === 'spine' ? parseSpinePage(a.manifest as SpinePage, image) : parseAtlas(a.manifest, image);
+    // a.name is ingest's dir-aware key — pass it as the asset name so atlases sharing a meta.image
+    // basename across folders are keyed distinctly (atlas.name otherwise defaults to the bare imageRef).
+    const res =
+      a.kind === 'spine'
+        ? parseSpinePage(a.manifest as SpinePage, image, { name: a.name })
+        : parseAtlas(a.manifest, image, { name: a.name });
     if (res.ok && res.asset.kind === 'atlas') {
       assets.push(res.asset);
       bytesByRef.set(res.asset.atlas.name, a.image.bytes);
@@ -87,7 +108,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
     }
   }
   for (const im of grouped.images) {
-    const res = parseImage(basename(im.name), new Uint8Array(im.bytes));
+    // Key loose images by the dir-aware path so same-basename files in different folders stay distinct
+    // across bytesByRef / pathByRef / vramByRef / features (no silent overwrite).
+    const ref = keyOf(im);
+    const res = parseImage(ref, new Uint8Array(im.bytes));
     if (res.ok && res.asset.kind === 'image') {
       assets.push(res.asset);
       bytesByRef.set(res.asset.image.name, im.bytes);
@@ -137,15 +161,134 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
   const features = opts.aggressive ? await computeFeatures(bytesByRef) : undefined;
   // measure format savings (native WebP) so format findings → transcode ops appear
   const report = await analyze(merged, undefined, { missingImages: grouped.missing, encodeImage: makeEncoder(bytesByRef), ...(features ? { features } : {}) });
-  const plan = planFix(report, { targetMime: opts.targetMime, quality: opts.quality, lossless: true, padding: opts.padding, maxSize: opts.maxSize, maxEdge: opts.maxEdge, aggressive: opts.aggressive });
+
+  // Owner/consumer dedup (Feature 1, aggressive only): decide which exact-dup copy is the OWNER (kept,
+  // references repointed) and which are CONSUMERS (dropped). Pure + load-order-safe; takes spineRefs
+  // (pool separation), the UI lazy/bundle marking, and the skin guard. Plan turns each consumer into an
+  // owner-aware `drop` (repointManifest:true for atlas pairs); owners become protected (never targets).
+  const dedupGroups = opts.aggressive && features ? buildDedupGroups(features, spineRefs, opts.marking ?? {}, opts.skinGuard ?? {}) : undefined;
+
+  // ── Feature 4 (pack loose assets) — group OWNED loose images into deterministic PackGroups (design §4).
+  // Gated behind the own "Pack loose" toggle (default OFF ⇒ no groups, no pack ops, byte-identical to
+  // today). Re-derived & dir-aware: groupLooseForPacking re-applies shouldAtlas.maxSpriteEdgePx per image
+  // (NOT the should-atlas finding's relatedRefs). LooseImage sizes come from the parsed loose-image assets;
+  // markers (skeleton .json/.skel) come from the raw files. File→region collisions are surfaced as skips
+  // (the colliding region is dropped from its group by buildRegions). planFix excludes any region.ref
+  // already in `dropped` (pack owners only) and records each packed ref to guard pass-2 transcode.
+  let packGroups: PackGroup[] | undefined;
+  const packCollisionSkips: { assetRef: string; reason: string }[] = [];
+  if (opts.packLoose) {
+    const looseImages: LooseImage[] = [];
+    for (const a of merged) if (a.kind === 'image') looseImages.push({ ref: a.image.name, size: a.image.size });
+    const grouped2 = groupLooseForPacking(looseImages, raw, {
+      thresholds: report.thresholds,
+      mode: opts.packMode ?? 'auto',
+      granularity: opts.packGranularity ?? 'per-leaf-folder',
+      forced: opts.packForced ?? false,
+    });
+    packGroups = grouped2.groups;
+    for (const c of grouped2.collisions) packCollisionSkips.push({ assetRef: c.refs.join(' | '), reason: `pack skipped: two files map to one region name '${c.name}' — kept the first` });
+  }
+
+  const plan = planFix(
+    report,
+    { targetMime: opts.targetMime, quality: opts.quality, lossless: true, padding: opts.padding, maxSize: opts.maxSize, maxEdge: opts.maxEdge, aggressive: opts.aggressive, isAtlasRef: (ref) => atlasByRef.has(ref) },
+    dedupGroups,
+    packGroups,
+  );
+
+  // ── per-asset effective encode options (Feature 2, design §4c/§6) ─────────────────────────────────
+  // Resolve the EFFECTIVE quality/effort/target per asset: fold the per-folder/per-type overrides onto
+  // the request base (resolveOptions, pure), then lower quality on downscaled output (scaleAwareQuality).
+  // Defaults reproduce today's behavior: no overrides + scaleAwareQuality off ⇒ base quality/target,
+  // effort 0 (fast/native lossy path). quality lives in 0..100 here (the settings vocabulary); encodeCanvas
+  // takes a 0..1 fraction, so we divide on the way out.
+  const baseEffective: EffectiveOptions = {
+    quality: Math.round((opts.quality ?? 0.85) * 100),
+    effort: opts.effort ?? 0,
+    targetMime: opts.targetMime,
+    webpNearLossless: opts.webpNearLossless ?? 100,
+  };
+  const kindOf = (ref: string): FixAssetKind => (spineRefs.has(ref) ? 'spine' : atlasByRef.has(ref) ? 'pixi' : 'loose');
+  /** Effective encode options for a loose-image op at `ref`, optionally downscaled by `scale` (1 = none). */
+  const effectiveFor = (ref: string, scale: number): EffectiveOptions => {
+    const e = resolveOptions(ref, kindOf(ref), baseEffective, opts.overrides);
+    return { ...e, quality: scaleAwareQuality(e.quality, scale, opts.scaleAwareQuality ?? false) };
+  };
+  /** Build the encodeCanvas opts for a resolved per-asset EffectiveOptions (quality 0..100 → 0..1). */
+  const encOptsFor = (e: EffectiveOptions, allowPngFallback: boolean): EncodeOpts => ({
+    quality: e.quality / 100,
+    effort: e.effort,
+    webpNearLossless: e.webpNearLossless,
+    avifQualityAlpha: opts.avifQualityAlpha,
+    avifSubsample: opts.avifSubsample,
+    pngRecompressLevel: opts.pngRecompressLevel,
+    allowPngFallback,
+  });
 
   // ── execute ──
   const out: { path: string; bytes: Uint8Array }[] = [];
+  // Input file paths — the collision pre-check (Feature 4, design §6 step 1) asserts a synthesized
+  // sheet/page/JSON/.atlas path never overwrites an existing input or an already-emitted output.
+  const inputPaths = new Set(files.map((f) => f.path));
   const replaced = new Set<string>();
   const dropped = new Set<string>();
   const skipped: { assetRef: string; reason: string }[] = [];
   const operations: string[] = [];
   let referencesChanged = false;
+  // Owner-aware dedup receipt counters (Feature 1 / Tasks 6+7). DISK saving is REAL; VRAM saving is an
+  // UPPER BOUND (only realized if the runtime shares one GPU upload across the dropped copies) — reported
+  // as a SEPARATE flagged field, never folded into the hard vramBytesAfter claim (invariant 5).
+  let referencesRewritten = 0;
+  let looseRepathSkipped = 0;
+  let dedupDiskBytesSaved = 0;
+  let dedupVramBytesSavedUpperBound = 0;
+  // Feature 4 (pack loose) receipt counters. packedGroups/packedSheetCount/packedRegionCount feed
+  // FixReceipt.packedSheets; packVerified/packUnmatched/packUnverified feed FixReceipt.packVerification.
+  // Building a sheet is reference-changing ⇒ referencesChanged is also set (NOT a blind drop-in).
+  let packedGroups = 0;
+  let packedSheetCount = 0;
+  let packedRegionCount = 0;
+  // Pack VRAM delta (new sheet footprint − summed loose footprint). NEVER folded into the headline
+  // vramBytesAfter (invariant 5 / design §6.8): packing NPOT loose images into POT sheets with padding
+  // routinely RAISES VRAM, so this is frequently positive (an increase). Reported SEPARATELY as "sheets
+  // add X MB VRAM (POT padding); the win is fewer draw calls/binds", mirroring dedupVramBytesSavedUpperBound.
+  let packVramDelta = 0;
+  let packVerified = 0;
+  let packUnmatched = 0;
+  let packUnverified = 0;
+  // Surface file→region collisions detected during grouping (a region dropped from its group).
+  for (const s of packCollisionSkips) skipped.push(s);
+
+  // ── TWO-PHASE OWNER-NAME RESOLUTION (design §3d) ──────────────────────────────────────────────────
+  // Owner-aware drops repoint a consumer's references at the OWNER's FINAL emitted name — but an owner
+  // can itself be transcoded (renamed by extension) in the same run. So we (A) compute every retained
+  // owner's expected FINAL name from the PLAN before executing anything, (B) execute transforms and
+  // record each owner's ACTUAL emitted name, then (C) execute consumer drops against the actual map,
+  // KEEPING the consumer (never dangling) if an owner's actual name diverged from the prediction.
+  // Phase A — plan-predicted FINAL name per retained owner, computed by the PURE predictOwnerFinalNames
+  // (@asset-doctor/fix). Owners are protected from repack/resize/merge in plan.ts, so the ONLY rename-
+  // producing op that can hit an owner is `transcode` (ext swap → the EFFECTIVE target, since per-folder/
+  // type overrides may redirect it). The lookup callback hands the helper the worker's own path/manifest/
+  // op facts so the helper stays browser-API-free. Same logic the Node round-trip test drives.
+  const ownerFinalName = predictOwnerFinalNames(dedupGroups, (ref) => {
+    const op = plan.ops.find((o) => 'assetRef' in o && o.assetRef === ref);
+    const transcoded = op?.kind === 'transcode';
+    return {
+      imagePath: pathByRef.get(ref),
+      manifestPath: manifestPathOf(ref),
+      transcoded,
+      targetMime: transcoded ? effectiveFor(ref, 1).targetMime : opts.targetMime,
+    };
+  });
+  // Owner ACTUAL emitted name, filled during Phase B. Defaults to the original emitted paths; transform
+  // handlers below overwrite the image entry when they rename an owner. Phase C reconciles against the
+  // plan prediction and skips (keeps) any consumer whose owner diverged.
+  const ownerActualName = new Map<string, OwnerFinalName>();
+  for (const [ref, fn] of ownerFinalName) ownerActualName.set(ref, { ...fn });
+  // Owner-aware drops are DEFERRED to Phase C (executed after all transforms settle the owner names).
+  const dedupDrops = plan.ops.filter(isOwnerAwareDrop);
+
   const bmpCache = new Map<string, ImageBitmap>();
   const bitmapOf = async (ref: string): Promise<ImageBitmap | null> => {
     if (bmpCache.has(ref)) return bmpCache.get(ref)!;
@@ -156,6 +299,44 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
     return bmp;
   };
 
+  // ── Shared compose-page-and-encode helper (design §6 step 4–5) ───────────────────────────────────────
+  // Composes one POT page from its blits (straight drawImage, source-over) and encodes it. FACTORED so the
+  // `repack` and `pack` branches use ONE compose+encode path and can't drift. Each blit's source rect is
+  // cropped from its own source via bitmapOf (correct across merged/loose pages). A blit.clip polygon
+  // (polygon-repack only — pack blits never carry one) clips the drawImage so an interlocked neighbor's
+  // bbox can overlap this one's transparent margin without overwriting opaque pixels. Returns null on any
+  // missing source / no-2D-context (the caller surfaces an honest skip). Mirrors the prior inline loop
+  // byte-for-byte (imageSmoothingQuality 'high', same clip handling) — no behavior change for repack.
+  const composePageEncode = async (
+    blits: Blit[],
+    binW: number,
+    binH: number,
+    target: ImageMime,
+    encOpts: EncodeOpts,
+  ): Promise<{ bytes: Uint8Array; mime: ImageMime } | null> => {
+    const canvas = new OffscreenCanvas(binW, binH);
+    const c2d = canvas.getContext('2d');
+    if (!c2d) return null;
+    c2d.imageSmoothingQuality = 'high'; // best-effort resampling for any scaled blit (§4c)
+    for (const blit of blits) {
+      const bmp = await bitmapOf(blit.from.atlasRef); // per-blit source (correct across merged/loose pages)
+      if (!bmp) return null;
+      if (blit.clip && blit.clip.length >= 3) {
+        c2d.save();
+        c2d.beginPath();
+        c2d.moveTo(blit.clip[0]!.x, blit.clip[0]!.y);
+        for (let k = 1; k < blit.clip.length; k++) c2d.lineTo(blit.clip[k]!.x, blit.clip[k]!.y);
+        c2d.closePath();
+        c2d.clip();
+        c2d.drawImage(bmp, blit.from.rect.x, blit.from.rect.y, blit.from.rect.w, blit.from.rect.h, blit.to.x, blit.to.y, blit.to.w, blit.to.h);
+        c2d.restore();
+      } else {
+        c2d.drawImage(bmp, blit.from.rect.x, blit.from.rect.y, blit.from.rect.w, blit.from.rect.h, blit.to.x, blit.to.y, blit.to.w, blit.to.h);
+      }
+    }
+    return encodeCanvas(canvas, c2d, target, encOpts);
+  };
+
   // Polygon-mode per-sprite extraction cache, keyed by the dir-aware id `${atlas.name} ${sprite.name}`
   // (same key repack.ts / repackAtlasesPolygon use — no cross-atlas mis-attribution in merge mode).
   // Each sprite's frame region is drawn ONCE to a throwaway canvas and read with ONE getImageData; both
@@ -163,6 +344,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
   const maskCache = new Map<string, MaskItem>();
   const meshCache = new Map<string, RawMesh | null>();
   const rotatedSkipped = new Set<string>(); // dir-aware ids already surfaced as rotated-source skips
+  // Feature 4: per-region opaque-bbox cache (keyed by loose-image ref). null = fully transparent. A region
+  // can appear in only one pack group, but caching keeps a forced re-run / repeated probe cheap + consistent.
+  const trimCache = new Map<string, TrimRect | null>();
   /** Extract a sprite's MaskItem (always) and RawMesh (null for rotated/degenerate sprites) from a
    *  single getImageData of its frame region. Caches by dir-aware id; pushes the rotated-source skip
    *  to skipped[] exactly once. Returns null only when the source sheet is unavailable. */
@@ -203,6 +387,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
   const total = plan.ops.length + 1;
 
   for (const op of plan.ops) {
+    // Owner-aware dedup drops are executed in Phase C (after transforms settle owner names) — skip here.
+    if (op.kind === 'drop' && op.ownerRef != null) continue;
     post({ type: 'fix-progress', label: op.kind, done: done++, total });
 
     if (op.kind === 'repack') {
@@ -223,26 +409,15 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
           continue;
         }
         const na = r.atlases[0]!;
-        const canvas = new OffscreenCanvas(na.size.w, na.size.h);
-        const c2d = canvas.getContext('2d');
-        let ok = !!c2d;
-        if (c2d) {
-          for (const blit of r.blits) {
-            const bmp = await bitmapOf(blit.from.atlasRef);
-            if (!bmp) {
-              ok = false;
-              break;
-            }
-            c2d.drawImage(bmp, blit.from.rect.x, blit.from.rect.y, blit.from.rect.w, blit.from.rect.h, blit.to.x, blit.to.y, blit.to.w, blit.to.h);
-          }
-        }
-        if (!ok) {
+        // Compose + encode via the shared helper (Spine pages stay PNG, runtime-safe). encodeCanvas for PNG
+        // with no recompress level returns the native PNG bytes — same result as the prior convertToBlob.
+        const enc = await composePageEncode(r.blits, na.size.w, na.size.h, 'image/png', { allowPngFallback: true });
+        if (!enc) {
           skipped.push({ assetRef: ref, reason: 'source sheet unavailable' });
           continue;
         }
-        const png = new Uint8Array(await (await canvas.convertToBlob({ type: 'image/png' })).arrayBuffer());
         const imagePath = pathByRef.get(ref)!;
-        out.push({ path: imagePath, bytes: png });
+        out.push({ path: imagePath, bytes: enc.bytes });
         out.push({ path: info.path, bytes: te.encode(emitSpineAtlasText(na)) });
         replaced.add(imagePath);
         replaced.add(info.path);
@@ -317,37 +492,13 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
       for (let i = 0; i < r.atlases.length && composeOk; i++) {
         const na = r.atlases[i]!;
         const naNames = new Set(na.sprites.map((s) => s.name));
-        const canvas = new OffscreenCanvas(na.size.w, na.size.h);
-        const c2d = canvas.getContext('2d');
-        if (!c2d) {
+        // Compose + encode this page via the shared helper (same clip/imageSmoothing handling as before).
+        // null ⇒ source sheet / no-2D-context — surfaced as the honest skip below (composeOk false).
+        const sheet = await composePageEncode(r.blits.filter((b) => naNames.has(b.name)), na.size.w, na.size.h, 'image/webp', { lossless: true, allowPngFallback: true });
+        if (!sheet) {
           composeOk = false;
           break;
         }
-        for (const blit of r.blits.filter((b) => naNames.has(b.name))) {
-          const bmp = await bitmapOf(blit.from.atlasRef); // per-blit source (correct across merged pages)
-          if (!bmp) {
-            composeOk = false;
-            break;
-          }
-          // Cardinal polygon fix: when a blit carries a clip polygon (its conservative verticesUV in
-          // destination space), clip the drawImage to it so an interlocked neighbor's bounding box can
-          // overlap this one's transparent margin without overwriting opaque pixels (source-over). When
-          // blit.clip is absent (rectangle path / non-meshed sprite) this is byte-for-byte today's blit.
-          if (blit.clip && blit.clip.length >= 3) {
-            c2d.save();
-            c2d.beginPath();
-            c2d.moveTo(blit.clip[0]!.x, blit.clip[0]!.y);
-            for (let k = 1; k < blit.clip.length; k++) c2d.lineTo(blit.clip[k]!.x, blit.clip[k]!.y);
-            c2d.closePath();
-            c2d.clip();
-            c2d.drawImage(bmp, blit.from.rect.x, blit.from.rect.y, blit.from.rect.w, blit.from.rect.h, blit.to.x, blit.to.y, blit.to.w, blit.to.h);
-            c2d.restore();
-          } else {
-            c2d.drawImage(bmp, blit.from.rect.x, blit.from.rect.y, blit.from.rect.w, blit.from.rect.h, blit.to.x, blit.to.y, blit.to.w, blit.to.h);
-          }
-        }
-        if (!composeOk) break;
-        const sheet = await encodeCanvas(canvas, c2d, 'image/webp', { lossless: true, allowPngFallback: true });
         const ext = EXT[sheet!.mime] ?? '.png';
         if (merge) {
           const stem = `atlas-merged${r.atlases.length > 1 ? `-${i}` : ''}`;
@@ -402,6 +553,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
       }
       const bmp = await createImageBitmap(new Blob([bytes]));
       const origPx = bmp.width * bmp.height;
+      const srcW = bmp.width; // captured before bmp.close() — used for the scale-aware quality factor
       const atlas = atlasByRef.get(ref);
 
       if (atlas) {
@@ -414,6 +566,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
           skipped.push({ assetRef: ref, reason: 'no 2D context' });
           continue;
         }
+        c2d.imageSmoothingQuality = 'high'; // best-effort downscale resampling (free quality win, §4c)
         c2d.drawImage(bmp, 0, 0, bmp.width, bmp.height, 0, 0, scaled.size.w, scaled.size.h);
         bmp.close();
         const srcMime = mimeOf(path);
@@ -444,10 +597,13 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
           skipped.push({ assetRef: ref, reason: 'no 2D context' });
           continue;
         }
+        c2d.imageSmoothingQuality = 'high'; // best-effort downscale resampling (free quality win, §4c)
         c2d.drawImage(bmp, 0, 0, bmp.width, bmp.height, 0, 0, op.to.w, op.to.h);
         bmp.close();
-        const enc = await encodeCanvas(canvas, c2d, op.targetMime, { quality: op.quality, allowPngFallback: true });
-        const newPath = path.replace(/[^/]+$/, basename(path).replace(/\.[a-z0-9]+$/i, EXT[enc!.mime] ?? '.png'));
+        // Effective per-asset options (folder/type overrides + scale-aware quality on the downscale).
+        const eff = effectiveFor(ref, srcW > 0 ? op.to.w / srcW : 1);
+        const enc = await encodeCanvas(canvas, c2d, eff.targetMime, encOptsFor(eff, true));
+        const newPath = renamedTo(path, enc!.mime); // same rename the owner-final-name prediction uses
         out.push({ path: newPath, bytes: enc!.bytes });
         replaced.add(path);
         if (newPath !== path) referencesChanged = true; // a loose-image rename is NOT drop-in
@@ -462,17 +618,27 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
         skipped.push({ assetRef: ref, reason: 'image unavailable' });
         continue;
       }
-      const enc = await transcode(bytes, op.targetMime, op.quality);
+      // Effective per-asset options (folder/type overrides; no downscale ⇒ scale 1 ⇒ quality unchanged).
+      const eff = effectiveFor(ref, 1);
+      const enc = await transcode(bytes, eff.targetMime, encOptsFor(eff, false));
       if (!enc) {
-        skipped.push({ assetRef: ref, reason: `transcode to ${op.targetMime} unavailable` });
+        skipped.push({ assetRef: ref, reason: `transcode to ${eff.targetMime} unavailable` });
+        // Owner transcode skipped ⇒ the owner keeps its ORIGINAL image; correct the actual name so Phase
+        // C detects the divergence from its (renamed) prediction and KEEPS the consumer.
+        if (ownerActualName.has(ref)) ownerActualName.get(ref)!.image = path;
         continue;
       }
-      const newPath = path.replace(/[^/]+$/, basename(path).replace(/\.[a-z0-9]+$/i, EXT[enc.mime] ?? '.webp'));
+      const newPath = renamedTo(path, enc.mime); // same rename the owner-final-name prediction uses
       out.push({ path: newPath, bytes: enc.bytes });
       replaced.add(path);
+      // Phase B bookkeeping: if this transcoded image is a retained dedup OWNER, record its ACTUAL final
+      // image path so Phase C points consumers at the real (possibly PNG-fallback) name, not the guess.
+      if (ownerActualName.has(ref)) ownerActualName.get(ref)!.image = newPath;
       if (newPath !== path) referencesChanged = true; // a loose-image rename is NOT drop-in
       operations.push(`transcode ${basename(path)} → ${enc.mime.replace('image/', '')}`);
-    } else if (op.kind === 'drop') {
+    } else if (op.kind === 'drop' && op.ownerRef == null) {
+      // Legacy bare-drop (no owner-aware repoint): today's behavior — delete every copy after the first.
+      // Owner-aware drops (op.ownerRef set) are DEFERRED to Phase C below.
       const path = pathByRef.get(op.assetRef);
       if (path) {
         dropped.add(path);
@@ -485,7 +651,278 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
         vramSaved += vramByRef.get(op.assetRef) ?? 0;
         operations.push(`drop duplicate ${basename(path)}`);
       }
+    } else if (op.kind === 'pack') {
+      // ── Feature 4: pack OWNED loose images into ONE new sheet (static TexturePacker JSON) or ONE
+      // multi-page Spine `.atlas` (design §6). REFERENCE-CHANGING — the game must load the sheet/atlas,
+      // not the loose files. The plan already excluded any dedup-consumer ref (pack owners only).
+      const group = op.group;
+      const isSpine = group.kind === 'spine';
+      const join = (dir: string, name: string): string => (dir ? `${dir}/${name}` : name);
+
+      // (1) Collision pre-check — synthesize every page/JSON/.atlas path this op would write and assert
+      // none overwrites an input file or an already-emitted output. On collision, disambiguate the stem to
+      // `${stem}.packed`; if THAT still collides, skip the whole group + surface (never overwrite).
+      const used = new Set<string>([...inputPaths, ...out.map((o) => o.path)]);
+      // The max number of pages we might emit (one page per region is the worst case) — used only to
+      // synthesize candidate paths for the collision probe; the real page count comes from packLoose.
+      // Probe with the REQUESTED target ext (a later AVIF→WebP/PNG fallback only narrows the real set, so
+      // probing the requested ext is a superset — safe). Worst case = one page per region (the real page
+      // count from packLoose is ≤ this); we probe every candidate page name + its manifest.
+      const probeExt = isSpine ? '.png' : (EXT[resolveOptions(group.outDir, 'loose', baseEffective, opts.overrides).targetMime] ?? '.png');
+      const synthFor = (s: string): string[] => {
+        const paths: string[] = [];
+        for (let i = 0; i < group.regions.length; i++) {
+          const base = i === 0 ? s : `${s}_${i}`;
+          paths.push(join(group.outDir, `${base}${probeExt}`)); // page image
+          if (!isSpine) paths.push(join(group.outDir, `${base}.json`)); // static: one TP JSON per page
+        }
+        if (isSpine) paths.push(join(group.outDir, `${s}.atlas`)); // spine: ONE multi-page .atlas
+        return paths;
+      };
+      let stem = group.stem;
+      if (synthFor(stem).some((p) => used.has(p))) {
+        stem = `${group.stem}.packed`;
+        if (synthFor(stem).some((p) => used.has(p))) {
+          skipped.push({ assetRef: group.id, reason: `pack skipped: sheet name '${group.stem}' collides with an existing file` });
+          continue;
+        }
+      }
+
+      // (2) Per-region alpha bbox (only when op.trim): draw the FULL image once → ONE getImageData →
+      // alphaBBox. Cache by ref. Fully transparent ⇒ static: 1×1 sentinel (frame resolvable, trimmed);
+      // spine: skip + surface (a transparent attachment is a decoy — never a zero-size region).
+      const regions: typeof group.regions = [];
+      let bitmapMissing = false;
+      for (const r of group.regions) {
+        if (!op.trim) {
+          regions.push({ ref: r.ref, name: r.name, sourceSize: r.sourceSize });
+          continue;
+        }
+        if (trimCache.has(r.ref)) {
+          const cached = trimCache.get(r.ref)!;
+          if (cached === null) {
+            if (isSpine) {
+              skipped.push({ assetRef: r.ref, reason: 'pack skipped: fully-transparent region (Spine decoy)' });
+              continue;
+            }
+            regions.push({ ref: r.ref, name: r.name, sourceSize: r.sourceSize, trim: { x: 0, y: 0, w: 1, h: 1 } });
+          } else {
+            regions.push({ ref: r.ref, name: r.name, sourceSize: r.sourceSize, trim: cached });
+          }
+          continue;
+        }
+        const bmp = await bitmapOf(r.ref);
+        if (!bmp) {
+          bitmapMissing = true;
+          skipped.push({ assetRef: r.ref, reason: 'pack skipped: image unavailable' });
+          break;
+        }
+        const c = new OffscreenCanvas(bmp.width, bmp.height);
+        const c2d = c.getContext('2d');
+        if (!c2d) {
+          bitmapMissing = true;
+          skipped.push({ assetRef: r.ref, reason: 'pack skipped: no 2D context' });
+          break;
+        }
+        c2d.drawImage(bmp, 0, 0);
+        const imageData = c2d.getImageData(0, 0, bmp.width, bmp.height);
+        const bbox = alphaBBox({ data: imageData.data, width: imageData.width }, { x: 0, y: 0, w: bmp.width, h: bmp.height });
+        trimCache.set(r.ref, bbox);
+        if (bbox === null) {
+          if (isSpine) {
+            skipped.push({ assetRef: r.ref, reason: 'pack skipped: fully-transparent region (Spine decoy)' });
+            continue;
+          }
+          // static: 1×1 sentinel so the frame stays resolvable (trimmed, sourceSize = original).
+          regions.push({ ref: r.ref, name: r.name, sourceSize: r.sourceSize, trim: { x: 0, y: 0, w: 1, h: 1 } });
+        } else {
+          regions.push({ ref: r.ref, name: r.name, sourceSize: r.sourceSize, trim: bbox });
+        }
+      }
+      if (bitmapMissing) continue; // a source image was unavailable — surfaced above, skip the group
+      if (regions.length === 0) continue; // every region was a transparent decoy — nothing to pack
+
+      // (3) Pack (pure). Spine sheets default to PNG (runtime-safe); static uses the effective target.
+      const effTarget = isSpine ? 'image/png' : resolveOptions(group.outDir, 'loose', baseEffective, opts.overrides).targetMime;
+      const pl = packLoose(regions, {
+        kind: group.kind,
+        imageBase: stem,
+        targetMime: effTarget,
+        trim: op.trim,
+        padding: op.padding,
+        maxSize: op.maxSize,
+        allowRotation: false,
+        ...(isSpine ? { format: 'RGBA8888' } : {}),
+      });
+
+      // (4–6) Compose + encode + emit each page. Static: sheet image + ONE TP JSON per bin (meta.image =
+      // that page's basename). Spine: each page image + ONE `.atlas` concatenating emitSpineAtlasText per
+      // page (each region under ITS page header, via pl.pageOfName built into the per-bin atlases).
+      const eff = resolveOptions(group.outDir, isSpine ? 'spine' : 'loose', baseEffective, opts.overrides);
+      const encOpts: EncodeOpts = isSpine ? { allowPngFallback: true } : encOptsFor(eff, true);
+      const emitted: { path: string; bytes: Uint8Array }[] = [];
+      const spineBlocks: string[] = [];
+      let composeOk = true;
+      for (let i = 0; i < pl.atlases.length && composeOk; i++) {
+        const na = pl.atlases[i]!;
+        const naNames = new Set(na.sprites.map((s) => s.name));
+        const enc = await composePageEncode(pl.blits.filter((b) => naNames.has(b.name)), na.size.w, na.size.h, effTarget, encOpts);
+        if (!enc) {
+          composeOk = false;
+          break;
+        }
+        const ext = EXT[enc.mime] ?? '.png';
+        // packLoose synthesized imageRef from the *requested* target ext; re-point it at the ACTUAL emitted
+        // mime (e.g. AVIF→WebP/PNG fallback) so meta.image / the page header name matches the real file.
+        const pageBase = i === 0 ? stem : `${stem}_${i}`;
+        na.imageRef = `${pageBase}${ext}`;
+        emitted.push({ path: join(group.outDir, `${pageBase}${ext}`), bytes: enc.bytes });
+        if (isSpine) {
+          spineBlocks.push(emitSpineAtlasText(na));
+        } else {
+          emitted.push({ path: join(group.outDir, `${pageBase}.json`), bytes: te.encode(emitTexturePackerJson(na)) });
+        }
+      }
+      if (!composeOk) {
+        skipped.push({ assetRef: group.id, reason: 'pack skipped: source image unavailable during compose' });
+        continue;
+      }
+      if (isSpine) {
+        // ONE `.atlas` = the per-page blocks concatenated (blank line between), each region already under
+        // ITS page header (per-bin atlases). The skeleton .json/.skel is passed through untouched below.
+        emitted.push({ path: join(group.outDir, `${stem}.atlas`), bytes: te.encode(spineBlocks.join('\n')) });
+      }
+
+      // (8b) Spine verifier — read the UNTOUCHED skeleton .json and assert every attachment that needs a
+      // region resolves to one we packed. Unmatched ⇒ surface (the atlas ships, but the loader will miss
+      // that attachment — honest, not silent). Unrecognized shape / .skel ⇒ honest "paths not verified".
+      // A convention-detected spine root (animations/<name>/, spine/<name>/) carries NO skeletonRef — we
+      // still ship its `.atlas`, but we must NOT do so silently: surface it as unverified (the central
+      // honesty promise — never ship an unverified atlas with no "paths not verified" disclosure).
+      if (isSpine) {
+        if (!group.skeletonRef) {
+          packUnverified++;
+          skipped.push({ assetRef: group.id, reason: 'pack: skeleton paths not verified (no skeleton file found for this spine group)' });
+        } else {
+          const skelBytes = bytesByRefAll.get(group.skeletonRef);
+          let skelJson: unknown = null;
+          if (skelBytes && /\.json$/i.test(group.skeletonRef)) {
+            try {
+              skelJson = JSON.parse(td.decode(skelBytes));
+            } catch {
+              skelJson = null;
+            }
+          }
+          const v = verifySpineSkeleton(skelJson, new Set(pl.atlases.flatMap((a) => a.sprites.map((s) => s.name))));
+          if (v.unverified) {
+            packUnverified++;
+            skipped.push({ assetRef: group.skeletonRef, reason: 'pack: skeleton paths not verified (.skel binary or unrecognized skins shape)' });
+          } else {
+            packVerified += v.verified;
+            packUnmatched += v.unmatched.length;
+            for (const u of v.unmatched) skipped.push({ assetRef: group.id, reason: `pack: attachment '${u.attachment}' path '${u.region}' has no matching region` });
+          }
+        }
+      }
+
+      // (6/7) Commit the emitted files + drop the packed loose refs. Building a sheet is reference-changing.
+      for (const e of emitted) out.push(e);
+      for (const r of regions) {
+        const p = pathByRef.get(r.ref);
+        if (p) dropped.add(p);
+      }
+      referencesChanged = true;
+      packedGroups++;
+      packedSheetCount += pl.atlases.length;
+      packedRegionCount += regions.length;
+      // VRAM honesty (invariant 5 / §6.8): track the pack delta SEPARATELY — never fold it into the
+      // headline vramSaved. delta = new-sheet footprint − summed loose footprint; positive ⇒ packing RAISED
+      // VRAM (POT padding), which is the common case for NPOT loose images. Surfaced as its own receipt row.
+      packVramDelta += pl.vramBytesAfter - regions.reduce((s, r) => s + (vramByRef.get(r.ref) ?? 0), 0);
+      operations.push(`pack ${regions.length} loose → ${isSpine ? `${stem}.atlas` : `${stem} sheet`} (${pl.atlases.length} page${pl.atlases.length === 1 ? '' : 's'})`);
     }
+  }
+
+  // ── PHASE C — owner-aware consumer rewrites / drops (design §3d, §6) ───────────────────────────────
+  // Every consumer is repointed at its OWNER's reconciled final name. We KEEP the consumer (never
+  // dangle) whenever a rewrite isn't provably drop-in: a transcoded owner whose actual name diverged
+  // from the prediction, a loose dup whose reference may live in game code, or a Spine page. DISK saving
+  // is real and accrued here; VRAM saving is an UPPER BOUND tracked separately (invariant 5).
+  for (const op of dedupDrops) {
+    const consumerRef = op.assetRef;
+    const consumerPath = pathByRef.get(consumerRef);
+    const ownerRef = op.ownerRef!;
+    const predicted = ownerFinalName.get(ownerRef);
+    const actual = ownerActualName.get(ownerRef);
+    // Owner missing, or its actual emitted name diverged from the plan prediction (e.g. a transcode
+    // PNG-fallback) → KEEP the consumer rather than point it at a name that may not exist.
+    if (!consumerPath) continue;
+    if (!predicted || !actual || actual.image !== predicted.image) {
+      looseRepathSkipped++;
+      skipped.push({ assetRef: consumerRef, reason: `dedup skipped: owner ${basename(ownerRef)} final name diverged — kept duplicate` });
+      continue;
+    }
+    const consumerVram = vramByRef.get(consumerRef) ?? 0;
+    const consumerDisk = bytesByRef.get(consumerRef)?.byteLength ?? 0;
+
+    // Spine consumer (checked BEFORE the repointManifest branch — a Spine ref is an atlas in atlasByRef,
+    // so isAtlasRef set repointManifest, but a .atlas page has NO portable cross-page redirect and must
+    // never be re-emitted as TexturePacker JSON). Never silently delete a Spine page — KEEP + surface.
+    if (spineRefs.has(consumerRef)) {
+      looseRepathSkipped++;
+      skipped.push({ assetRef: consumerRef, reason: 'dedup skipped: Spine cross-page dedup not drop-in — kept duplicate' });
+      continue;
+    }
+
+    if (op.repointManifest) {
+      // Atlas consumer: KEEP its manifest (frame rects == owner sheet by content-hash identity), repoint
+      // meta.image → the owner's FINAL image, drop only the redundant consumer IMAGE. Round-trips through
+      // @asset-doctor/parsers parseAtlas (which reads meta.image), so it stays a valid drop-in atlas.
+      const consumerManifest = manifestPathOf(consumerRef);
+      const consumerAtlas = atlasByRef.get(consumerRef);
+      if (!consumerManifest || !consumerAtlas) {
+        looseRepathSkipped++;
+        skipped.push({ assetRef: consumerRef, reason: 'dedup skipped: atlas consumer manifest unavailable — kept duplicate' });
+        continue;
+      }
+      // meta.image must be relative to the consumer manifest's own directory (the owner image may sit in
+      // another folder), reusing dirOf/normalize so it resolves the same way the parser does.
+      const repointed: Atlas = { ...consumerAtlas, imageRef: relativeImageRef(dirOf(consumerManifest), actual.image) };
+      out.push({ path: consumerManifest, bytes: te.encode(emitTexturePackerJson(repointed)) });
+      replaced.add(consumerManifest);
+      dropped.add(consumerPath); // drop only the redundant image; manifest is kept (rewritten above)
+      referencesChanged = true;
+      referencesRewritten++;
+      dedupDiskBytesSaved += consumerDisk;
+      dedupVramBytesSavedUpperBound += consumerVram;
+      operations.push(`dedup ${basename(consumerRef)} → ${basename(ownerRef)} (repoint meta.image)`);
+      continue;
+    }
+
+    // Whole-file (loose) consumer: drop + rewrite ONLY where AD itself emits the referencing manifest;
+    // otherwise the reference may live in game code → KEEP + surface (fail-safe, the one place dedup
+    // could silently break a build).
+    const referencingManifest = manifestPathOf(consumerRef);
+    if (!referencingManifest) {
+      looseRepathSkipped++;
+      skipped.push({ assetRef: consumerRef, reason: 'dedup skipped: loose duplicate reference may live in game code — kept duplicate' });
+      continue;
+    }
+    const referencingAtlas = atlasByRef.get(consumerRef);
+    if (!referencingAtlas) {
+      looseRepathSkipped++;
+      skipped.push({ assetRef: consumerRef, reason: 'dedup skipped: referencing manifest unavailable — kept duplicate' });
+      continue;
+    }
+    const repointed: Atlas = { ...referencingAtlas, imageRef: relativeImageRef(dirOf(referencingManifest), actual.image) };
+    out.push({ path: referencingManifest, bytes: te.encode(emitTexturePackerJson(repointed)) });
+    replaced.add(referencingManifest);
+    dropped.add(consumerPath);
+    referencesChanged = true;
+    referencesRewritten++;
+    dedupDiskBytesSaved += consumerDisk;
+    dedupVramBytesSavedUpperBound += consumerVram;
+    operations.push(`dedup ${basename(consumerRef)} → ${basename(ownerRef)} (repoint meta.image)`);
   }
 
   // ── pass-through untouched files → drop-in optimized folder ──
@@ -495,27 +932,54 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
   }
 
   post({ type: 'fix-progress', label: 'zipping', done: total - 1, total });
-  const entries: ZipEntry[] = out.map((e) => ({ name: e.path, bytes: e.bytes }));
+  // `out` path-dedup before zip (design §6 step 9): last-write-wins for a deliberate replace; guards
+  // against a duplicate path ever reaching makeZip. Order-preserving on first appearance (determinism).
+  const byPath = new Map<string, Uint8Array>();
+  for (const e of out) byPath.set(e.path, e.bytes);
+  const dedupedOut: { path: string; bytes: Uint8Array }[] = [];
+  const seen = new Set<string>();
+  for (const e of out) {
+    if (seen.has(e.path)) continue;
+    seen.add(e.path);
+    dedupedOut.push({ path: e.path, bytes: byPath.get(e.path)! });
+  }
+  const entries: ZipEntry[] = dedupedOut.map((e) => ({ name: e.path, bytes: e.bytes }));
   const zip = makeZip(entries);
 
   const diskBefore = files.reduce((s, f) => s + f.bytes.byteLength, 0);
-  const diskAfter = out.reduce((s, e) => s + e.bytes.byteLength, 0);
+  const diskAfter = dedupedOut.reduce((s, e) => s + e.bytes.byteLength, 0);
   const vramBefore = report.totals.vramBytes;
   const receipt: FixReceipt = {
     diskBytesBefore: diskBefore,
     diskBytesAfter: diskAfter,
     vramBytesBefore: vramBefore,
     vramBytesAfter: Math.max(0, vramBefore - vramSaved),
-    fileCount: out.length,
+    fileCount: dedupedOut.length,
     changedCount: replaced.size + dropped.size,
     operations,
     skipped,
     referencesChanged,
+    // Owner-aware dedup (additive, optional — absent in non-dedup runs ⇒ receipt byte-identical to today).
+    // referencesRewritten / looseRepathSkipped count Phase-C outcomes. dedupDiskBytesSaved is REAL; the
+    // VRAM saving is an UPPER BOUND (realized only if the runtime shares one GPU upload across the dropped
+    // copies) — reported SEPARATELY and never folded into the hard vramBytesAfter (invariant 5).
+    ...(referencesRewritten > 0 ? { referencesRewritten } : {}),
+    ...(looseRepathSkipped > 0 ? { looseRepathSkipped } : {}),
+    ...(dedupDiskBytesSaved > 0 ? { dedupDiskBytesSaved } : {}),
+    ...(dedupVramBytesSavedUpperBound > 0 ? { dedupVramBytesSavedUpperBound } : {}),
     // Polygon mode (additive, optional): meshSprites counts sprites carrying a mesh in the SELECTED
     // results (0 on fallback ⇒ omit); polygonAreaSavedPct is the measured VRAM delta, only when a
     // polygon result actually won. Absent in non-polygon runs ⇒ receipt is byte-identical to today.
     ...(meshSpritesTotal > 0 ? { meshSprites: meshSpritesTotal } : {}),
     ...(polyVramBefore > 0 ? { polygonAreaSavedPct: (polyVramBefore - polyVramAfter) / polyVramBefore } : {}),
+    // Feature 4 (pack loose, additive, optional): packedSheets = packs performed / page images emitted /
+    // loose files folded in (now dropped). packVerification = Spine path-verification (verified matched /
+    // unmatched / unverified). Absent in non-pack runs ⇒ receipt byte-identical to today.
+    ...(packedGroups > 0 ? { packedSheets: { groups: packedGroups, sheets: packedSheetCount, regions: packedRegionCount } } : {}),
+    ...(packVerified > 0 || packUnmatched > 0 || packUnverified > 0 ? { packVerification: { verified: packVerified, unmatched: packUnmatched, unverified: packUnverified } } : {}),
+    // Pack VRAM delta (invariant 5): present SEPARATELY, never folded into vramBytesAfter. Emitted only on
+    // an actual pack run with a non-zero delta — a positive value means packing RAISED VRAM (POT padding).
+    ...(packedGroups > 0 && packVramDelta !== 0 ? { packVramDelta } : {}),
   };
   post({ type: 'fix-done', receipt, zip });
 }
@@ -542,53 +1006,127 @@ function makeEncoder(bytesByRef: Map<string, ArrayBuffer>): EncodeSizer {
 }
 
 interface EncodeOpts {
+  /** 0..1 fraction (native convertToBlob semantics). @jsquash paths scale it ×100. */
   quality?: number;
   lossless?: boolean;
+  /** Encoder effort 0(fast)..6(max). >0 routes WebP through @jsquash (method) even when lossy. */
+  effort?: number;
+  /** WebP near-lossless 0..100 (100 ⇒ off). <100 routes WebP through @jsquash near_lossless. */
+  webpNearLossless?: number;
+  /** AVIF alpha quality (qualityAlpha). Omit ⇒ -1 (track quality, @jsquash default behavior). */
+  avifQualityAlpha?: number;
+  /** AVIF chroma subsample integer (field wired; no UI toggle ships — kept hidden, §4d). */
+  avifSubsample?: number;
+  /** Lossless PNG recompress via @jsquash/oxipng level 0..6 (Task 10). Omit ⇒ off (no WASM loaded). */
+  pngRecompressLevel?: number;
   /** When the target codec is unavailable: true → fall back to PNG, false → return null (honest skip). */
   allowPngFallback?: boolean;
 }
 
-/** Encode an OffscreenCanvas: AVIF + lossless-WebP via lazy @jsquash (the codecs native canvas lacks),
- *  lossy WebP/PNG native. Feature-detects the silent PNG fallback so we never mislabel an output. */
+const clamp06 = (n: number): number => Math.max(0, Math.min(6, Math.round(n)));
+
+// Lazy oxipng module handle (Task 10). Loaded ON FIRST USE ONLY — never imported in the diagnosis path,
+// so the diagnosis bundle/payload (invariant 4, ≤10s) is untouched until a Pro fix actually opts in to
+// PNG recompression. Cached so repeated PNG recompresses in one run share the single WASM init.
+// @jsquash/oxipng re-exports its optimiser as the NAMED export `optimise` (index.js does
+// `export { default as optimise } from './optimise.js'`), so the module shape is { optimise }, not { default }.
+type OxipngMod = { optimise: (d: ImageData | ArrayBuffer, o?: { level?: number }) => Promise<ArrayBuffer> };
+let oxipngMod: Promise<OxipngMod> | null = null;
+const loadOxipng = (): Promise<OxipngMod> => {
+  if (!oxipngMod) oxipngMod = import('@jsquash/oxipng') as Promise<OxipngMod>;
+  return oxipngMod;
+};
+
+/** Encode an OffscreenCanvas. CONTRACT (design §4c): native `convertToBlob` stays the LOSSY fast-path
+ *  (lossy WebP, lossy single image, canvas-composed sheets); @jsquash is used ONLY where canvas lacks the
+ *  codec — AVIF (all), lossless WebP, near-lossless WebP, and when `effort` is explicitly raised. Lossy/
+ *  composed encodes are NEVER routed through @jsquash. Feature-detects the silent PNG fallback so we never
+ *  mislabel an output. */
 async function encodeCanvas(canvas: OffscreenCanvas, c2d: OffscreenCanvasRenderingContext2D, target: ImageMime, opts: EncodeOpts): Promise<{ bytes: Uint8Array; mime: ImageMime } | null> {
   const q = opts.quality ?? 0.85;
+  const effort = clamp06(opts.effort ?? 0);
   if (target === 'image/avif') {
+    // AVIF has no canvas encoder → always @jsquash. speed is inverse to effort (higher effort = slower/
+    // better): effort 0→speed 10 (fast), effort 6→speed 6. subsample only when explicitly supplied.
     try {
       const data = c2d.getImageData(0, 0, canvas.width, canvas.height);
-      const m = (await import('@jsquash/avif')) as { encode: (d: ImageData, o?: { quality?: number }) => Promise<ArrayBuffer> };
-      const buf = await m.encode(data, { quality: Math.round(q * 100) });
+      const m = (await import('@jsquash/avif')) as { encode: (d: ImageData, o?: Record<string, number | boolean>) => Promise<ArrayBuffer> };
+      const buf = await m.encode(data, {
+        quality: Math.round(q * 100),
+        qualityAlpha: opts.avifQualityAlpha ?? -1,
+        speed: 10 - Math.round((effort / 6) * 4),
+        enableSharpYUV: true,
+        ...(opts.avifSubsample != null ? { subsample: opts.avifSubsample } : {}),
+      });
       if (buf && buf.byteLength > 0) return { bytes: new Uint8Array(buf), mime: 'image/avif' };
     } catch {
       /* fall through to WebP */
     }
     target = 'image/webp';
   }
-  if (target === 'image/webp' && opts.lossless) {
-    try {
-      const data = c2d.getImageData(0, 0, canvas.width, canvas.height);
-      const m = (await import('@jsquash/webp')) as { encode: (d: ImageData, o?: { lossless?: number }) => Promise<ArrayBuffer> };
-      const buf = await m.encode(data, { lossless: 1 });
-      if (buf && buf.byteLength > 0) return { bytes: new Uint8Array(buf), mime: 'image/webp' };
-    } catch {
-      /* fall through to native */
+  if (target === 'image/webp') {
+    // @jsquash WebP ONLY where canvas can't do it: lossless, near-lossless (<100), or explicitly raised
+    // effort. Plain lossy WebP (effort 0, no near-lossless) stays on the native fast-path below.
+    const nearLossless = opts.webpNearLossless != null && opts.webpNearLossless < 100;
+    if (opts.lossless || nearLossless || effort > 0) {
+      try {
+        const data = c2d.getImageData(0, 0, canvas.width, canvas.height);
+        const m = (await import('@jsquash/webp')) as { encode: (d: ImageData, o?: Record<string, number>) => Promise<ArrayBuffer> };
+        const buf = await m.encode(data, {
+          quality: Math.round(q * 100),
+          lossless: opts.lossless ? 1 : 0,
+          ...(nearLossless ? { near_lossless: opts.webpNearLossless! } : {}),
+          method: effort,
+          use_sharp_yuv: 1,
+        });
+        if (buf && buf.byteLength > 0) return { bytes: new Uint8Array(buf), mime: 'image/webp' };
+      } catch {
+        /* fall through to native */
+      }
     }
   }
   const blob = await canvas.convertToBlob({ type: target, quality: q });
-  if (blob.type === target) return { bytes: new Uint8Array(await blob.arrayBuffer()), mime: blob.type as ImageMime };
+  if (blob.type === target) {
+    // Lossless PNG recompress (Task 10): only when the native output is actually PNG and the user opted
+    // in. oxipng is lazy-loaded on first use; on any failure we keep the native PNG (honest no-op).
+    if (blob.type === 'image/png' && opts.pngRecompressLevel != null) {
+      const optimized = await recompressPng(c2d, canvas, clamp06(opts.pngRecompressLevel));
+      if (optimized) return { bytes: optimized, mime: 'image/png' };
+    }
+    return { bytes: new Uint8Array(await blob.arrayBuffer()), mime: blob.type as ImageMime };
+  }
   if (!opts.allowPngFallback) return null;
   const png = await canvas.convertToBlob({ type: 'image/png' });
+  if (opts.pngRecompressLevel != null) {
+    const optimized = await recompressPng(c2d, canvas, clamp06(opts.pngRecompressLevel));
+    if (optimized) return { bytes: optimized, mime: 'image/png' };
+  }
   return { bytes: new Uint8Array(await png.arrayBuffer()), mime: 'image/png' };
 }
 
-/** Transcode raw image bytes (decode → canvas → encode). null = target codec unavailable (skip). */
-async function transcode(bytes: ArrayBuffer, target: ImageMime, quality: number): Promise<{ bytes: Uint8Array; mime: ImageMime } | null> {
+/** Lossless PNG recompress via lazy @jsquash/oxipng (Task 10). Returns null on any failure so the caller
+ *  keeps the native PNG. ImageData → optimise({level}) → PNG ArrayBuffer; no resize, in determinism scope. */
+async function recompressPng(c2d: OffscreenCanvasRenderingContext2D, canvas: OffscreenCanvas, level: number): Promise<Uint8Array | null> {
+  try {
+    const data = c2d.getImageData(0, 0, canvas.width, canvas.height);
+    const m = await loadOxipng();
+    const buf = await m.optimise(data, { level });
+    return buf && buf.byteLength > 0 ? new Uint8Array(buf) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Transcode raw image bytes (decode → canvas → encode). null = target codec unavailable (skip).
+ *  No resize ⇒ this is in the determinism scope (§4c) for native/@jsquash in-place transcodes. */
+async function transcode(bytes: ArrayBuffer, target: ImageMime, enc: EncodeOpts): Promise<{ bytes: Uint8Array; mime: ImageMime } | null> {
   const bmp = await createImageBitmap(new Blob([bytes]));
   const canvas = new OffscreenCanvas(bmp.width, bmp.height);
   const c2d = canvas.getContext('2d');
   if (!c2d) return null;
   c2d.drawImage(bmp, 0, 0);
   bmp.close();
-  return encodeCanvas(canvas, c2d, target, { quality, allowPngFallback: false });
+  return encodeCanvas(canvas, c2d, target, { ...enc, allowPngFallback: false });
 }
 
 // ── Polygon mode: impure pixel read, PURE extraction ──────────────────────────────────────────────

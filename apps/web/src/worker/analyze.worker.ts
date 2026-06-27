@@ -6,13 +6,12 @@
 import type { Asset, ImageFeatures, ImageMime } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
 import { analyze, mergeSharedAtlases, type EncodeSizer } from '@asset-doctor/analysis';
-import { groupFiles, type RawFile } from '../lib/group';
+import { groupFiles, keyOf, type RawFile } from '../lib/group';
 import { dHashFromGray, isFlat, luma } from '../lib/perceptual';
 import type { WorkerRequest, WorkerResponse } from './protocol';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 const post = (m: WorkerResponse): void => ctx.postMessage(m);
-const baseName = (p: string): string => p.split('/').pop() ?? p;
 
 ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
   const msg = e.data;
@@ -27,8 +26,12 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
 
     for (const a of grouped.atlases) {
       const image = { ref: a.name, bytes: new Uint8Array(a.image.bytes) };
+      // a.name is the dir-aware key from ingest — pass it as the asset name so two atlases sharing a
+      // meta.image basename across folders stay distinct (atlas.name defaults to the bare imageRef).
       const res =
-        a.kind === 'spine' ? parseSpinePage(a.manifest as SpinePage, image) : parseAtlas(a.manifest, image);
+        a.kind === 'spine'
+          ? parseSpinePage(a.manifest as SpinePage, image, { name: a.name })
+          : parseAtlas(a.manifest, image, { name: a.name });
       post({ type: 'progress', done: ++done, total, label: a.name });
       if (res.ok && res.asset.kind === 'atlas') {
         assets.push(res.asset);
@@ -36,9 +39,11 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       }
     }
     for (const im of grouped.images) {
-      const name = baseName(im.name);
-      const res = parseImage(name, new Uint8Array(im.bytes));
-      post({ type: 'progress', done: ++done, total, label: name });
+      // Key loose images by the dir-aware path (keyOf) so same-basename files in different folders are
+      // two distinct assets instead of silently overwriting each other in the bytes map + features.
+      const ref = keyOf(im);
+      const res = parseImage(ref, new Uint8Array(im.bytes));
+      post({ type: 'progress', done: ++done, total, label: ref });
       if (res.ok && res.asset.kind === 'image') {
         assets.push(res.asset);
         imageBytes.set(res.asset.image.name, im.bytes);

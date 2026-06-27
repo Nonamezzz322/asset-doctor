@@ -1,0 +1,101 @@
+{
+  "skeleton": {
+    "hash": "fixture",
+    "spine": "3.7",
+    "x": 0,
+    "y": 0,
+    "width": 100,
+    "height": 100
+  },
+  "bones": [
+    {
+      "name": "root"
+    }
+  ],
+  "slots": [
+    {
+      "name": "head",
+      "bone": "root",
+      "attachment": "head"
+    },
+    {
+      "name": "weapon",
+      "bone": "root",
+      "attachment": "sword"
+    },
+    {
+      "name": "shieldA",
+      "bone": "root",
+      "attachment": "shield"
+    },
+    {
+      "name": "shieldB",
+      "bone": "root",
+      "attachment": "shield"
+    },
+    {
+      "name": "cape",
+      "bone": "root",
+      "attachment": "cape"
+    },
+    {
+      "name": "capeLink",
+      "bone": "root",
+      "attachment": "capeLink"
+    },
+    {
+      "name": "mask",
+      "bone": "root",
+      "attachment": "mask"
+    }
+  ],
+  "skins": {
+    "default": {
+      "head": {
+        "head": {
+          "type": "region"
+        }
+      },
+      "weapon": {
+        "sword": {
+          "type": "region",
+          "path": "items/sword"
+        }
+      },
+      "shieldA": {
+        "shield": {
+          "type": "region"
+        }
+      },
+      "shieldB": {
+        "shield": {
+          "type": "region"
+        }
+      },
+      "cape": {
+        "cape": {
+          "type": "mesh",
+          "width": 60,
+          "height": 80
+        }
+      },
+      "capeLink": {
+        "capeLink": {
+          "type": "linkedmesh",
+          "parent": "cape",
+          "skin": "default"
+        }
+      },
+      "mask": {
+        "mask": {
+          "type": "clipping",
+          "end": "mask",
+          "vertexCount": 4
+        }
+      }
+    }
+  },
+  "animations": {
+    "idle": {}
+  }
+}

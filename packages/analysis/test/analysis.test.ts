@@ -240,6 +240,14 @@ describe('variant grouping (VRAM inflation)', () => {
     expect(stemOf('icon.png')).toBe('icon');
   });
 
+  it('strips the directory before stemming, then re-prefixes it (dir-aware refs)', () => {
+    // A path-prefixed name must stem on the BASENAME (so tokens peel) yet keep the dir prefix so two
+    // same-stem files in different folders stay distinct stems.
+    expect(stemOf('ui/hero_1080p.png')).toBe('ui/hero');
+    expect(stemOf('a/sprite.png')).not.toBe(stemOf('b/sprite.png'));
+    expect(stemOf('a/sprite.png')).toBe('a/sprite');
+  });
+
   it('groups format+resolution variants and computes the loaded VRAM range', () => {
     const v540 = 540 * 540 * 4;
     const v1080 = 1080 * 1080 * 4;

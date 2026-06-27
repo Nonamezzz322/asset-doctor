@@ -1,0 +1,19 @@
+frame.png
+size: 128,64
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+frameA
+  rotate: 0
+  xy: 0, 0
+  size: 60, 50
+  orig: 60, 50
+  offset: 0, 0
+  index: -1
+frameB
+  rotate: 0
+  xy: 64, 0
+  size: 50, 40
+  orig: 50, 40
+  offset: 0, 0
+  index: -1

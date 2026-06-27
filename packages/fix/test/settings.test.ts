@@ -1,0 +1,321 @@
+// Settings helpers (design §10.11–10.12) + worker-level dedup seams (design §10.7–10.10).
+//
+// packages/fix is PURE (no DOM/canvas), and the worker's owner-aware dedup execution lives inside the
+// fix.worker runFix loop (OffscreenCanvas-bound, not Node-importable). Per design §10, for the parts
+// that need the worker/canvas we test the PURE SEAM and note it:
+//   §10.7  meta.image repoint round-trips through @asset-doctor/parsers parseAtlas — exercised against
+//          the REAL emitTexturePackerJson + parseAtlas, with the worker's relativeImageRef/resolveImageRef
+//          pure string seam mirrored verbatim (the worker keeps these private; they are pure functions).
+//   §10.8  transcoded-owner final-name resolution — modelled as the worker's ownerFinalName derivation
+//          (a deterministic function of op kind + target mime) and asserted via the round-trip.
+//   §10.9  loose-repath gating — the pure KEEP-vs-rewrite decision predicate + the looseRepathSkipped count.
+//   §10.10 VRAM honesty receipt split — the pure accounting: real dedupDiskBytesSaved vs upper-bound
+//          dedupVramBytesSavedUpperBound, never folded into the hard vramBytesAfter.
+
+import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import type { Atlas, ImageMime } from '@asset-doctor/core';
+import { parseAtlas, parseAtlasManifest } from '@asset-doctor/parsers';
+import {
+  emitTexturePackerJson,
+  resolveOptions,
+  scaleAwareQuality,
+  SCALE_QUALITY_FLOOR,
+  type EffectiveOptions,
+} from '../src/index';
+
+// ── §10.11 scaleAwareQuality ────────────────────────────────────────────────────────────────────
+describe('scaleAwareQuality (§10.11)', () => {
+  it('scaleAwareQuality(90, 0.5, true) === 65', () => {
+    // 90 - round((1 - 0.5) * 50) = 90 - 25 = 65.
+    expect(scaleAwareQuality(90, 0.5, true)).toBe(65);
+  });
+
+  it('clamps at the floor on a heavy downscale', () => {
+    // 60 - round((1 - 0.1) * 50) = 60 - 45 = 15 → clamped up to the floor (50).
+    expect(scaleAwareQuality(60, 0.1, true)).toBe(SCALE_QUALITY_FLOOR);
+    expect(SCALE_QUALITY_FLOOR).toBe(50);
+    // an extreme downscale of a high base still floors, never below.
+    expect(scaleAwareQuality(100, 0.01, true)).toBe(SCALE_QUALITY_FLOOR);
+  });
+
+  it('is identity when disabled or not downscaling (today\'s behavior)', () => {
+    expect(scaleAwareQuality(90, 0.5, false)).toBe(90); // disabled ⇒ unchanged
+    expect(scaleAwareQuality(80, 1, true)).toBe(80); // scale >= 1 ⇒ no reduction
+    expect(scaleAwareQuality(80, 2, true)).toBe(80);
+  });
+
+  it('is deterministic integer math (no float drift)', () => {
+    const q = scaleAwareQuality(85, 0.5, true); // 85 - 25 = 60
+    expect(q).toBe(60);
+    expect(Number.isInteger(q)).toBe(true);
+  });
+});
+
+// ── §10.12 resolveOptions folder/type matching ──────────────────────────────────────────────────
+describe('resolveOptions folder/type matching (§10.12)', () => {
+  const base: EffectiveOptions = { quality: 80, effort: 0, targetMime: 'image/webp', webpNearLossless: 100 };
+
+  it('returns a copy of the base when no override matches', () => {
+    const out = resolveOptions('ui/btn.png', 'pixi', base, [{ match: 'fx', quality: 40 }]);
+    expect(out).toEqual(base);
+    expect(out).not.toBe(base); // fresh object
+  });
+
+  it('folder prefix matches the folder itself and anything nested under it', () => {
+    const overrides = [{ match: 'ui', quality: 50 }];
+    expect(resolveOptions('ui/btn.png', 'pixi', base, overrides).quality).toBe(50);
+    expect(resolveOptions('ui/sub/btn.png', 'pixi', base, overrides).quality).toBe(50);
+    // a prefix must be a full path segment, not a substring: 'uikit/...' is NOT under 'ui'.
+    expect(resolveOptions('uikit/btn.png', 'pixi', base, overrides).quality).toBe(80);
+    // an exact single-file path is also targetable directly.
+    expect(resolveOptions('ui', 'pixi', base, overrides).quality).toBe(50);
+  });
+
+  it('type:* matches the asset kind, not a folder', () => {
+    const overrides = [{ match: 'type:spine', targetMime: 'image/png' as ImageMime }];
+    expect(resolveOptions('skel/page.png', 'spine', base, overrides).targetMime).toBe('image/png');
+    expect(resolveOptions('skel/page.png', 'pixi', base, overrides).targetMime).toBe('image/webp');
+    expect(resolveOptions('img.png', 'loose', base, [{ match: 'type:loose', effort: 6 }]).effort).toBe(6);
+  });
+
+  it('later overrides win (stable order, not "most specific"); only set fields override', () => {
+    const overrides = [
+      { match: 'ui', quality: 50, effort: 2 },
+      { match: 'ui/btn.png', quality: 90 }, // later, wins on quality; leaves effort from the earlier one
+    ];
+    const out = resolveOptions('ui/btn.png', 'pixi', base, overrides);
+    expect(out.quality).toBe(90); // later override wins
+    expect(out.effort).toBe(2); // from the earlier matching override (not reset to base)
+    expect(out.targetMime).toBe('image/webp'); // untouched ⇒ base
+  });
+
+  it('is deterministic: same inputs ⇒ deep-equal output', () => {
+    const overrides = [{ match: 'ui', quality: 50 }, { match: 'type:pixi', effort: 3 }];
+    const a = resolveOptions('ui/x.png', 'pixi', base, overrides);
+    const b = resolveOptions('ui/x.png', 'pixi', base, overrides);
+    expect(a).toEqual(b);
+  });
+});
+
+// ── worker-level dedup seams (pure halves) ──────────────────────────────────────────────────────
+// Mirror of the worker's PRIVATE pure path helpers (fix.worker.ts dirOf/normalize/relativeImageRef/
+// resolveImageRef). The worker keeps these module-private; they are pure string functions, so the
+// round-trip property they guarantee is exercised here against the REAL emit/parse. Kept byte-faithful.
+const dirOf = (p: string): string => {
+  const i = p.lastIndexOf('/');
+  return i < 0 ? '' : p.slice(0, i + 1);
+};
+const normalize = (p: string): string => {
+  const out: string[] = [];
+  for (const s of p.split('/')) {
+    if (s === '' || s === '.') continue;
+    if (s === '..') out.pop();
+    else out.push(s);
+  }
+  return out.join('/');
+};
+const resolveImageRef = (manifestPath: string, img: string): string => normalize(dirOf(manifestPath) + img);
+const relativeImageRef = (fromDir: string, toPath: string): string => {
+  const from = normalize(fromDir).split('/').filter(Boolean);
+  const to = normalize(toPath).split('/').filter(Boolean);
+  let i = 0;
+  while (i < from.length && i < to.length && from[i] === to[i]) i++;
+  const up = from.slice(i).map(() => '..');
+  const down = to.slice(i);
+  const rel = [...up, ...down].join('/');
+  return rel === '' ? (to[to.length - 1] ?? toPath) : rel;
+};
+
+const fixDir = fileURLToPath(new URL('../../../fixtures/sample-projects/raw-multifolder-dupes/', import.meta.url));
+function loadConsumerAtlas(): Atlas {
+  // extra/sheet.{png,json} is byte-identical to the owner main_game/sheet.{png,json} (fixture case h).
+  const manifest = JSON.parse(readFileSync(`${fixDir}extra/sheet.json`, 'utf8')) as unknown;
+  const bytes = new Uint8Array(readFileSync(`${fixDir}extra/sheet.png`));
+  const res = parseAtlas(manifest, { ref: 'extra/sheet.png', bytes });
+  if (!res.ok || res.asset.kind !== 'atlas') throw new Error('fixture parse failed');
+  return res.asset.atlas;
+}
+
+describe('meta.image repoint round-trips via parseAtlas (§10.7)', () => {
+  it('repointing a consumer manifest meta.image at the owner image re-parses cleanly', () => {
+    const consumer = loadConsumerAtlas();
+    const ownerImage = 'main_game/sheet.png'; // owner's folder-relative image path
+    const consumerManifestPath = 'extra/sheet.json';
+    // worker Phase-C: meta.image relative to the consumer manifest's own directory.
+    const repointedRef = relativeImageRef(dirOf(consumerManifestPath), ownerImage);
+    expect(repointedRef).toBe('../main_game/sheet.png');
+
+    const repointed: Atlas = { ...consumer, imageRef: repointedRef };
+    const emitted = emitTexturePackerJson(repointed);
+
+    // re-parse the emitted JSON via @asset-doctor/parsers (uses the owner image bytes) — proves the
+    // rewritten meta.image is a valid drop-in atlas that resolves against the owner sheet.
+    const ownerBytes = new Uint8Array(readFileSync(`${fixDir}main_game/sheet.png`));
+    const reparsed = parseAtlas(JSON.parse(emitted) as unknown, { ref: 'extra/sheet.png', bytes: ownerBytes });
+    expect(reparsed.ok).toBe(true);
+    if (!reparsed.ok || reparsed.asset.kind !== 'atlas') throw new Error('re-parse failed');
+    // every original frame survives, identical rects (the consumer keeps its frame table).
+    expect(reparsed.asset.atlas.sprites.map((s) => s.name).sort()).toEqual(consumer.sprites.map((s) => s.name).sort());
+    // meta.image as parsed back resolves (relative to the consumer manifest dir) to the owner image.
+    const parsedMeta = (JSON.parse(emitted) as { meta: { image: string } }).meta;
+    expect(parsedMeta.image).toBe('../main_game/sheet.png');
+    expect(resolveImageRef(consumerManifestPath, parsedMeta.image)).toBe(ownerImage);
+  });
+
+  it('parseAtlasManifest reads the rewritten meta.image (the only mechanism — no linkedFrames/alias)', () => {
+    const consumer = loadConsumerAtlas();
+    const emitted = emitTexturePackerJson({ ...consumer, imageRef: 'owner.png' });
+    const json = JSON.parse(emitted) as Record<string, unknown>;
+    expect((json.meta as { image: string }).image).toBe('owner.png');
+    expect('linkedFrames' in json).toBe(false); // rejected mechanism never emitted
+    const res = parseAtlasManifest(json, { imageRef: 'owner.png', imageSize: { w: 128, h: 128 } });
+    expect(res.ok).toBe(true);
+  });
+});
+
+describe('transcoded-owner final-name resolution (§10.8)', () => {
+  // Pure model of the worker's ownerFinalName derivation: a deterministic function of op kind + target
+  // mime. When the owner is transcoded, its emitted image basename gains the target extension; the
+  // consumer's repointed meta.image must resolve to that FINAL name (not the owner's original name).
+  const EXT: Record<ImageMime, string> = { 'image/webp': '.webp', 'image/avif': '.avif', 'image/png': '.png', 'image/jpeg': '.jpg' };
+  const transcodedName = (imagePath: string, target: ImageMime): string =>
+    imagePath.replace(/\.[a-z0-9]+$/i, EXT[target]);
+
+  it('owner transcoded to webp → consumer meta.image points at the .webp final name', () => {
+    const consumer = loadConsumerAtlas();
+    const ownerOriginal = 'main_game/sheet.png';
+    const ownerFinal = transcodedName(ownerOriginal, 'image/webp');
+    expect(ownerFinal).toBe('main_game/sheet.webp');
+
+    const consumerManifestPath = 'extra/sheet.json';
+    const repointedRef = relativeImageRef(dirOf(consumerManifestPath), ownerFinal);
+    expect(repointedRef).toBe('../main_game/sheet.webp');
+
+    const emitted = emitTexturePackerJson({ ...consumer, imageRef: repointedRef });
+    const meta = (JSON.parse(emitted) as { meta: { image: string } }).meta;
+    // resolves (from the consumer dir) back to the owner's FINAL emitted path, not the stale .png.
+    expect(resolveImageRef(consumerManifestPath, meta.image)).toBe(ownerFinal);
+    expect(resolveImageRef(consumerManifestPath, meta.image)).not.toBe(ownerOriginal);
+  });
+
+  it('owner transcoded to avif → consumer resolves to the .avif final name', () => {
+    const ownerFinal = transcodedName('main_game/sheet.png', 'image/avif');
+    expect(ownerFinal).toBe('main_game/sheet.avif');
+    const rel = relativeImageRef(dirOf('extra/sheet.json'), ownerFinal);
+    expect(resolveImageRef('extra/sheet.json', rel)).toBe('main_game/sheet.avif');
+  });
+});
+
+describe('loose-repath gating keeps the file + counts looseRepathSkipped (§10.9)', () => {
+  // Pure model of the worker's Phase-C KEEP-vs-rewrite decision. A whole-file (loose) consumer is only
+  // dropped+rewritten where AD itself emits the referencing manifest; otherwise the reference may live
+  // in game code ⇒ KEEP the file and surface it in looseRepathSkipped (fail-safe).
+  interface Outcome { dropped: boolean; rewritten: number; looseRepathSkipped: number; skipped: string[] }
+  function gateLooseConsumer(opts: { repointManifest: boolean; isSpine: boolean; hasReferencingManifest: boolean }): Outcome {
+    const o: Outcome = { dropped: false, rewritten: 0, looseRepathSkipped: 0, skipped: [] };
+    if (opts.isSpine) {
+      o.looseRepathSkipped++;
+      o.skipped.push('Spine cross-page dedup not drop-in — kept duplicate');
+      return o;
+    }
+    if (opts.repointManifest) {
+      o.dropped = true; // only the redundant image is dropped (manifest kept + repointed)
+      o.rewritten++;
+      return o;
+    }
+    if (!opts.hasReferencingManifest) {
+      o.looseRepathSkipped++;
+      o.skipped.push('loose duplicate reference may live in game code — kept duplicate');
+      return o; // KEEP — never silently delete a loose dup whose ref may be in code
+    }
+    o.dropped = true;
+    o.rewritten++;
+    return o;
+  }
+
+  it('a loose dup with NO AD-emitted referencing manifest is KEPT and counted', () => {
+    // fixture case i: loose/orphan_copy.png — same isolated bundle as loose/orphan.png, no manifest refs.
+    const out = gateLooseConsumer({ repointManifest: false, isSpine: false, hasReferencingManifest: false });
+    expect(out.dropped).toBe(false); // KEPT — file survives
+    expect(out.looseRepathSkipped).toBe(1);
+    expect(out.rewritten).toBe(0);
+    expect(out.skipped[0]).toContain('game code');
+  });
+
+  it('an atlas-image consumer (repointManifest) drops the image and rewrites — not skipped', () => {
+    const out = gateLooseConsumer({ repointManifest: true, isSpine: false, hasReferencingManifest: true });
+    expect(out.dropped).toBe(true);
+    expect(out.rewritten).toBe(1);
+    expect(out.looseRepathSkipped).toBe(0);
+  });
+
+  it('a Spine consumer is never silently deleted — kept + counted', () => {
+    const out = gateLooseConsumer({ repointManifest: true, isSpine: true, hasReferencingManifest: true });
+    expect(out.dropped).toBe(false);
+    expect(out.looseRepathSkipped).toBe(1);
+    expect(out.skipped[0]).toContain('Spine');
+  });
+
+  it('the fixture authors loose/orphan_copy.png as the looseRepathSkipped case', () => {
+    const golden = JSON.parse(readFileSync(`${fixDir}expected.json`, 'utf8')) as { worker: { looseRepathSkipped: string[] } };
+    expect(golden.worker.looseRepathSkipped).toEqual(['loose/orphan_copy.png']);
+  });
+});
+
+describe('VRAM honesty receipt split (§10.10)', () => {
+  // Pure model of the worker's dedup receipt accounting. DISK saving is REAL (summed consumer bytes);
+  // VRAM saving is an UPPER BOUND tracked SEPARATELY and never folded into the hard vramBytesAfter
+  // (invariant 5: disk weight ≠ GPU footprint). A cross-bundle drop gets no unqualified VRAM credit.
+  interface Receipt {
+    vramBytesBefore: number;
+    vramBytesAfter: number;
+    dedupDiskBytesSaved: number;
+    dedupVramBytesSavedUpperBound: number;
+  }
+  function accrueDedup(
+    consumers: { diskBytes: number; vramBytes: number; repointed: boolean }[],
+    vramBefore: number,
+  ): Receipt {
+    let dedupDiskBytesSaved = 0;
+    let dedupVramBytesSavedUpperBound = 0;
+    for (const c of consumers) {
+      if (!c.repointed) continue; // KEPT consumers contribute nothing
+      dedupDiskBytesSaved += c.diskBytes; // REAL: the file is gone from the zip
+      dedupVramBytesSavedUpperBound += c.vramBytes; // UPPER BOUND: only if runtime shares the upload
+    }
+    return {
+      vramBytesBefore: vramBefore,
+      // owner-aware dedup does NOT credit the hard vram figure — vramBytesAfter excludes dedup VRAM.
+      vramBytesAfter: vramBefore,
+      dedupDiskBytesSaved,
+      dedupVramBytesSavedUpperBound,
+    };
+  }
+
+  it('reports real disk saving and upper-bound VRAM saving in SEPARATE fields', () => {
+    const r = accrueDedup(
+      [
+        { diskBytes: 500, vramBytes: 64 * 64 * 4, repointed: true },
+        { diskBytes: 300, vramBytes: 32 * 32 * 4, repointed: true },
+        { diskBytes: 999, vramBytes: 99 * 99 * 4, repointed: false }, // kept ⇒ no credit
+      ],
+      10_000,
+    );
+    expect(r.dedupDiskBytesSaved).toBe(800); // 500 + 300, the dropped copies only
+    expect(r.dedupVramBytesSavedUpperBound).toBe(64 * 64 * 4 + 32 * 32 * 4);
+    // the upper-bound VRAM is NOT subtracted from the hard vramBytesAfter (invariant 5).
+    expect(r.vramBytesAfter).toBe(r.vramBytesBefore);
+    expect(r.dedupVramBytesSavedUpperBound).toBeGreaterThan(0);
+    // disk and VRAM are distinct measures — never the same field.
+    expect(r.dedupDiskBytesSaved).not.toBe(r.dedupVramBytesSavedUpperBound);
+  });
+
+  it('a fully-kept dedup (no repoint) credits nothing', () => {
+    const r = accrueDedup([{ diskBytes: 500, vramBytes: 1024, repointed: false }], 10_000);
+    expect(r.dedupDiskBytesSaved).toBe(0);
+    expect(r.dedupVramBytesSavedUpperBound).toBe(0);
+    expect(r.vramBytesAfter).toBe(10_000);
+  });
+});

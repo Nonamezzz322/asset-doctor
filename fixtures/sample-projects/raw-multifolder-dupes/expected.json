@@ -1,0 +1,152 @@
+{
+  "kind": "dedup",
+  "marking": {
+    "main_game": "eager",
+    "fs_game": "eager",
+    "bonus": "lazy",
+    "bonus_b": "lazy"
+  },
+  "skinGuard": {
+    "skin_red": "skin_blue"
+  },
+  "dedupGroups": [
+    {
+      "case": "a-cross-bundle-eager",
+      "pool": "pixi",
+      "skinGroup": "general",
+      "owners": [
+        "fs_game/logo.png"
+      ],
+      "consumers": [
+        {
+          "ref": "main_game/logo.png",
+          "ownerRef": "fs_game/logo.png",
+          "reason": "eager-owner-cross-bundle"
+        }
+      ]
+    },
+    {
+      "case": "b-same-bundle-eager",
+      "pool": "pixi",
+      "skinGroup": "general",
+      "owners": [
+        "main_game/general/icon.png"
+      ],
+      "consumers": [
+        {
+          "ref": "main_game/ui/icon.png",
+          "ownerRef": "main_game/general/icon.png",
+          "reason": "same-eager-bundle"
+        }
+      ]
+    },
+    {
+      "case": "c-eager-plus-two-lazy",
+      "pool": "pixi",
+      "skinGroup": "general",
+      "owners": [
+        "main_game/spark.png"
+      ],
+      "consumers": [
+        {
+          "ref": "bonus/spark.png",
+          "ownerRef": "main_game/spark.png",
+          "reason": "eager-owner-cross-bundle"
+        },
+        {
+          "ref": "bonus_b/spark.png",
+          "ownerRef": "main_game/spark.png",
+          "reason": "eager-owner-cross-bundle"
+        }
+      ]
+    },
+    {
+      "case": "e-folder-vs-file-basename",
+      "pool": "pixi",
+      "skinGroup": "general",
+      "owners": [
+        "skin_blue/tile.png",
+        "skin_red/tile.png"
+      ],
+      "consumers": []
+    },
+    {
+      "case": "f-spine-pool-same-bundle",
+      "pool": "spine",
+      "skinGroup": "general",
+      "owners": [
+        "animations/a/frame.png"
+      ],
+      "consumers": [
+        {
+          "ref": "animations/b/frame.png",
+          "ownerRef": "animations/a/frame.png",
+          "reason": "same-isolated-bundle"
+        }
+      ]
+    },
+    {
+      "case": "h-atlas-repoint",
+      "pool": "pixi",
+      "skinGroup": "general",
+      "owners": [
+        "main_game/sheet.png"
+      ],
+      "consumers": [
+        {
+          "ref": "extra/sheet.png",
+          "ownerRef": "main_game/sheet.png",
+          "reason": "eager-owner-cross-bundle",
+          "repointManifest": true
+        }
+      ]
+    },
+    {
+      "case": "i-loose-no-rewritable-ref",
+      "pool": "pixi",
+      "skinGroup": "general",
+      "owners": [
+        "loose/orphan.png"
+      ],
+      "consumers": [
+        {
+          "ref": "loose/orphan_copy.png",
+          "ownerRef": "loose/orphan.png",
+          "reason": "same-isolated-bundle"
+        }
+      ]
+    }
+  ],
+  "mustNotCollapse": [
+    {
+      "case": "d-skin-keys-values",
+      "refs": [
+        "theme_dark/skin_blue.png",
+        "theme_default/skin_red.png"
+      ],
+      "why": "byte-identical, but skin_red∈keys and skin_blue∈values → different (pool,skinGroup) partitions; never collapse."
+    },
+    {
+      "case": "g-pixi-vs-spine-same-bytes",
+      "refs": [
+        "props/frame.png",
+        "animations/a/frame.png",
+        "animations/b/frame.png"
+      ],
+      "why": "props/frame.png (pixi) is byte-identical to the spine frames, but pool separation keeps pixi and spine in different partitions; props/frame.png is alone in the pixi pool for this hash ⇒ no group."
+    }
+  ],
+  "worker": {
+    "repointManifest": [
+      {
+        "consumerImage": "extra/sheet.png",
+        "consumerManifest": "extra/sheet.json",
+        "ownerImage": "main_game/sheet.png"
+      }
+    ],
+    "looseRepathSkipped": [
+      "loose/orphan_copy.png"
+    ]
+  },
+  "note": "Multi-folder raw dupes for owner/consumer dedup. Cross-bundle eager pair, same-bundle pair, eager+two-lazy, a keys/values skin pair that must NOT collapse, a folder-vs-file basename case, a spine-pool pair, a pixi sprite byte-identical to a spine frame (pool-separated, no collapse), an atlas image+manifest identical to an owner (meta.image repoint), and a loose dup with no rewritable reference (kept, surfaced). Marking: main_game/fs_game eager, bonus/bonus_b lazy, rest isolated."
+}

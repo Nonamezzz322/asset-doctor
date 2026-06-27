@@ -10,15 +10,25 @@ import { fmtBytes, vramBytes } from './rules';
 
 // Strip the extension, then peel resolution/format tokens off the end (in any order).
 const TOKEN = /[_-](\d{2,4}p|@?\d+x|hd|sd|png|webp|avif|jpe?g)$/i;
+const dirOf = (p: string): string => {
+  const i = p.lastIndexOf('/');
+  return i < 0 ? '' : p.slice(0, i + 1);
+};
+const baseOf = (p: string): string => p.split('/').pop() ?? p;
 
+/** The directory-relative variant stem. Inputs are now dir-aware (e.g. "ui/hero_1080p.png"), so we
+ *  STRIP the directory before peeling tokens off the BASENAME, then re-prefix the directory — a
+ *  path-prefixed name is never mis-stemmed, yet two same-stem files in different folders stay
+ *  distinct (their stems differ by the dir prefix). */
 export function stemOf(name: string): string {
-  let s = name.toLowerCase().replace(/\.[a-z0-9]+$/, '');
+  const dir = dirOf(name);
+  let s = baseOf(name).toLowerCase().replace(/\.[a-z0-9]+$/, '');
   let prev = '';
   while (s !== prev) {
     prev = s;
     s = s.replace(TOKEN, '');
   }
-  return s;
+  return dir + s;
 }
 
 interface VItem {

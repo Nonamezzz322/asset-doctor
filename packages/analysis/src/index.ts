@@ -28,3 +28,12 @@ export {
 } from './folder';
 export { defaultCell, buildCoverage, mergeEmptyRects } from './grid';
 export type { Coverage } from './grid';
+export {
+  buildDedupGroups,
+  cmp,
+  bundleOf,
+  baseNoExt,
+  skinGroupOf,
+  dominates,
+  LAZY_MAY_CONSUME_EAGER,
+} from './dedup';
