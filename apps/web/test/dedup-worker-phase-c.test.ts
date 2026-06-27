@@ -156,12 +156,15 @@ interface PhaseCResult {
   dedupDiskBytesSaved: number;
   dedupVramBytesSavedUpperBound: number;
 }
-function runPhaseC(b: Built, transcodedOwners: Set<string> = new Set()): PhaseCResult {
+function runPhaseC(b: Built, transcodedOwners: Set<string> = new Set(), tiering = false): PhaseCResult {
   const isAtlasRef = (ref: string): boolean => b.atlasByRef.has(ref);
   const groups = buildDedupGroups(b.features, b.spineRefs, expected.marking, expected.skinGuard);
+  // When tiering is on, plan.ts sets keepConsumer on owner-aware drops (the owner gets renamed) — the
+  // exact composition Finding 1 exercises. validateTiers requires a scale-1 top tier in the ladder.
+  const scaleTiers = tiering ? [{ scale: 1, suffix: '_1080p' }, { scale: 0.5, suffix: '_540p' }] : undefined;
   const plan = planFix(
     { assets: [], findings: [], totals: { diskBytes: 0, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 }, thresholds: {} as never },
-    { targetMime: 'image/webp', quality: 0.9, lossless: true, padding: 2, maxSize: 4096, maxEdge: 2048, aggressive: true, isAtlasRef },
+    { targetMime: 'image/webp', quality: 0.9, lossless: true, padding: 2, maxSize: 4096, maxEdge: 2048, aggressive: true, isAtlasRef, ...(scaleTiers ? { scaleTiers } : {}) },
     groups,
   );
   // SAME owner-aware-drop filter the worker uses (the pure isOwnerAwareDrop type guard).
@@ -191,6 +194,15 @@ function runPhaseC(b: Built, transcodedOwners: Set<string> = new Set()): PhaseCR
     const predicted = predictedFinal.get(ownerRef)?.image;
     const actual = ownerActualImage.get(ownerRef);
     if (!consumerPath) continue;
+    // keepConsumer (design correction 8 / Finding 1): scale tiering renames the owner away from its
+    // predicted name, so the repoint is impossible — short-circuit to keep-the-consumer (drop NOTHING).
+    // Mirrors fix.worker.ts; WITHOUT it an atlas consumer (repointManifest suppressed) would fall through
+    // to the repoint branch and dangle once the tier loop renames+drops the owner.
+    if (op.keepConsumer) {
+      res.looseRepathSkipped++;
+      res.skipped.push({ assetRef: consumerRef, reason: 'owner renamed by scale tiering — kept duplicate' });
+      continue;
+    }
     if (predicted == null || actual == null || actual !== predicted) {
       res.looseRepathSkipped++;
       res.skipped.push({ assetRef: consumerRef, reason: 'owner final name diverged — kept duplicate' });
@@ -299,5 +311,40 @@ describe('worker Phase-C owner-aware dedup execution (golden worker block)', () 
     expect(res.skipped.some((s) => s.assetRef === 'extra/sheet.png')).toBe(true);
     expect(res.dropped.has('extra/sheet.png')).toBe(false); // KEPT — not dropped against a diverged owner
     expect(res.referencesRewritten).toBe(0); // the only repoint was suppressed by the divergence guard
+  });
+
+  it('dedup × tiering (correction 8 / Finding 1): no surviving manifest references a DROPPED owner image', async () => {
+    const b = await buildWorkerState(loadRawFiles());
+    // aggressive + tiering ⇒ plan.ts sets keepConsumer on the owner-aware drops (the owner gets renamed by
+    // the tier loop). Phase C MUST keep the atlas consumer (extra/sheet.json + extra/sheet.png) intact and
+    // repoint NOTHING — otherwise it repoints extra/sheet.json's meta.image at main_game/sheet.png (the
+    // owner's PRE-tier name), the tier loop then renames+drops that image, and the kept manifest dangles.
+    const res = runPhaseC(b, new Set(), true);
+
+    // The consumer is KEPT (its image NOT dropped) and surfaced — never repointed at the owner.
+    expect(res.dropped.has('extra/sheet.png')).toBe(false);
+    expect(res.skipped.some((s) => s.assetRef === 'extra/sheet.png')).toBe(true);
+    expect(res.referencesRewritten).toBe(0); // owner-aware repoint disabled wholesale under tiering
+    // No manifest was re-emitted to point at the owner image.
+    expect(res.emitted.some((e) => e.path === 'extra/sheet.json')).toBe(false);
+
+    // Now simulate the tier loop renaming + DROPPING the owner image (the source-rename step). Combined with
+    // Phase C's drops, assert the invariant: no surviving (emitted-or-kept) manifest references a dropped
+    // owner image. With keepConsumer the consumer manifest is untouched (still points at its OWN image), so
+    // the only thing referencing main_game/sheet.png is the owner's own per-tier manifest (main_game/
+    // sheet_1080p.json → main_game/sheet_1080p.png), which is self-consistent.
+    const droppedOwnerImage = 'main_game/sheet.png';
+    const tierDropped = new Set<string>([...res.dropped, droppedOwnerImage]);
+    // The kept consumer manifest references extra/sheet.png (its own kept image), NOT the dropped owner.
+    expect(tierDropped.has('extra/sheet.png')).toBe(false);
+    // No Phase-C-emitted manifest references the dropped owner image (none were emitted at all here).
+    for (const e of res.emitted) {
+      const json = e.manifest as { meta?: { image?: string } };
+      const img = json.meta?.image;
+      if (img) {
+        // resolve the manifest's meta.image to a folder-relative path and assert it isn't the dropped owner.
+        expect(img.endsWith('sheet.png') && e.path.startsWith('extra/'), `${e.path} must not dangle at the dropped owner`).toBe(false);
+      }
+    }
   });
 });

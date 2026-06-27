@@ -5,7 +5,7 @@
 // transcode loose images. AGGRESSIVE (opt-in, reference-changing): merge under-filled atlas groups
 // and drop exact + near duplicate copies. Resize takes precedence over transcode for the same image.
 
-import type { AnalysisReport, DedupGroup, FixOp, FixPlan, ImageMime, PackGroup } from '@asset-doctor/core';
+import type { AnalysisReport, DedupGroup, FixOp, FixPlan, ImageMime, PackGroup, ScaleTier } from '@asset-doctor/core';
 
 export interface PlanOptions {
   /** Target format for transcode + the repacked sheet image. */
@@ -22,6 +22,20 @@ export interface PlanOptions {
    *  Pure predicate — used to decide owner-aware drops that repoint a consumer manifest's meta.image.
    *  Absent ⇒ no ref is treated as an atlas (every owner-aware drop is a whole-file drop). */
   isAtlasRef?: (ref: string) => boolean;
+  /** Validated scale-tier ladder (design docs/scale-tiers-design.md §7). NON-EMPTY ⇒ scale-tier export
+   *  is on: tier-eligible refs are folded into a `tiered` set that EXCLUDES them from the standalone
+   *  pass-1 oversize-resize and pass-2 transcode ops (the worker's tier loop OWNS each tier's encode +
+   *  oversize clamp, so a tiered asset is never ALSO separately resized/transcoded). The plan only
+   *  carries the guard — it emits NO tier op (tiering is a worker-side per-asset multiplier). Pass the
+   *  output of validateTiers; an INVALID ladder must arrive as empty/absent so today's path reproduces.
+   *  Empty/absent ⇒ byte-identical to today. */
+  scaleTiers?: ScaleTier[];
+  /** True iff `ref` is ALLOWED to be tiered. Supplied by the worker, which alone holds the data to
+   *  REFUSE tiering (and surface a skip): atlases carrying a source mesh (correction 2), multi-page
+   *  Spine (correction 4), and already-tiered input (correction 5). Only consulted when `scaleTiers`
+   *  is non-empty. Absent ⇒ every ref is eligible (the worker gates separately). A refused ref is NOT
+   *  added to `tiered`, so it keeps its normal single-scale resize/transcode op. Pure predicate. */
+  tierEligible?: (ref: string) => boolean;
 }
 
 /**
@@ -44,6 +58,18 @@ export interface PlanOptions {
  * flagged by BOTH should-atlas and format yields exactly one pack op and zero transcode ops. Building
  * a sheet is reference-changing (FixReceipt.referencesChanged + fix.packWarn). When omitted, no pack
  * ops are emitted — the legacy/today path is byte-identical.
+ *
+ * SCALE TIERS (`opts.scaleTiers` non-empty, design §7): the plan does NOT emit tier ops — tiering is a
+ * worker-side per-asset multiplier. The plan's only job is the GUARD: every tier-eligible ref
+ * (`opts.tierEligible`) that appears in the findings is folded into a `tiered` set which EXCLUDES it
+ * from the standalone pass-1 oversize-resize AND pass-2 transcode ops, because the worker's tier loop
+ * owns each tier's encode + oversize clamp (a tiered asset is never ALSO separately resized/transcoded).
+ * Refused refs (mesh / multi-page Spine / already-tiered — gated in the worker) are NOT in `tiered` and
+ * keep their normal single-scale op. Additionally, because tiering RENAMES owners (correction 8), when
+ * `aggressive` AND `scaleTiers` are both set the owner-aware dedup repoint is DISABLED (legacy
+ * keep-consumer: drops still occur but no `repointManifest` is emitted, since the worker would no-op
+ * the repoint against a renamed owner). Empty/absent scaleTiers ⇒ none of this runs ⇒ byte-identical
+ * to today.
  */
 export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: DedupGroup[], packGroups?: PackGroup[]): FixPlan {
   const ops: FixOp[] = [];
@@ -53,6 +79,17 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
   // Refs folded into a packed sheet/atlas (Feature 4). Guards pass-2 transcode below (a packed loose
   // image is encoded once, into its sheet — never also transcoded). Empty unless packGroups supplied.
   const packed = new Set<string>();
+
+  // Scale-tier export (design §7): ON iff a non-empty (already-validated) ladder is supplied. Tiering
+  // RENAMES owners, so when it coincides with aggressive owner-aware dedup we drop the manifest repoint
+  // (correction 8 — the worker would no-op a repoint against a renamed owner; fail safe to keep-consumer).
+  const tieringOn = (opts.scaleTiers?.length ?? 0) > 0;
+  const disableOwnerRepoint = tieringOn && opts.aggressive;
+  // Refs the worker's tier loop will own (its encode + oversize clamp). Any such ref is EXCLUDED from
+  // the standalone resize (pass 1) + transcode (pass 2) ops below, mirroring the `resized`/`packed`
+  // guards. Refs the worker refuses to tier (mesh / multi-page Spine / already-tiered) are gated out by
+  // `tierEligible` and stay here, keeping their normal single-scale op. Empty unless tiering is on.
+  const tiered = new Set<string>();
 
   // Owners are retained copies — never drop/merge/resize targets. Guarded before every existing
   // dropped/repacked/resized check below so an owner-aware run can't accidentally consume an owner.
@@ -69,9 +106,24 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
         if (protectedOwners.has(c.ref) || dropped.has(c.ref) || repacked.has(c.ref) || resized.has(c.ref)) continue;
         dropped.add(c.ref);
         // A content-hash group means the consumer's image bytes are byte-identical to the owner's, so
-        // an atlas consumer's sheet is "fully identical" by construction — repoint its manifest.
-        const repointManifest = opts.isAtlasRef?.(c.ref) ?? false;
-        ops.push({ kind: 'drop', assetRef: c.ref, reason: 'duplicate-exact', ownerRef: c.ownerRef, ...(repointManifest ? { repointManifest } : {}) });
+        // an atlas consumer's sheet is "fully identical" by construction — repoint its manifest. But
+        // when scale tiering is ALSO on (correction 8) the owner gets renamed to a tier suffix, so the
+        // repoint would target a name that no longer exists ⇒ disable it (legacy keep-consumer drop).
+        const repointManifest = !disableOwnerRepoint && (opts.isAtlasRef?.(c.ref) ?? false);
+        // When tiering disables owner-aware repoint (correction 8), mark the op keepConsumer so Phase C
+        // short-circuits to keep-the-consumer. Without this flag a still-emitted drop op with ownerRef set
+        // (but no repointManifest) falls through to the worker's loose/atlas repoint branch — which DOES
+        // repoint+drop against the owner's PRE-tier name, then the tier loop renames the owner, dangling
+        // the kept consumer at a now-dropped image. keepConsumer keeps the drop op (count/owner intact) but
+        // makes Phase C drop NOTHING and surface a skip instead.
+        ops.push({
+          kind: 'drop',
+          assetRef: c.ref,
+          reason: 'duplicate-exact',
+          ownerRef: c.ownerRef,
+          ...(repointManifest ? { repointManifest } : {}),
+          ...(disableOwnerRepoint ? { keepConsumer: true } : {}),
+        });
       }
     }
   };
@@ -126,6 +178,28 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
     }
   }
 
+  // Scale-tier eligibility (design §7): mark every tier-eligible ref the worker's tier loop will own,
+  // so the oversize-resize (pass 1) and transcode (pass 2) guards below skip it. A ref is tiered iff
+  // tiering is on AND the worker allows it (`tierEligible`, default-allow) AND it is not already a
+  // dedup/pack/merge target NOR a pass-1 repack target (those transforms own the ref; the tier loop
+  // runs on their emitted output in the worker, never as a duplicate standalone tier of the source).
+  // pass-1 repack hasn't run yet, so we pre-exclude occupancy/wasted-regions refs here (the deterministic
+  // pass-1 repack targets) — keeping "a repacked ref is never tiered" true regardless of finding order.
+  // Deterministic: findings iterate in report order; Set membership is order-free.
+  if (tieringOn) {
+    const eligible = opts.tierEligible ?? (() => true);
+    const willRepack = new Set<string>();
+    for (const f of report.findings) {
+      if ((f.rule === 'occupancy' || f.rule === 'wasted-regions') && !protectedOwners.has(f.assetRef)) willRepack.add(f.assetRef);
+    }
+    for (const f of report.findings) {
+      if (f.scope === 'folder') continue; // per-asset only — folder findings have no single tier target
+      const ref = f.assetRef;
+      if (dropped.has(ref) || repacked.has(ref) || packed.has(ref) || protectedOwners.has(ref) || willRepack.has(ref)) continue;
+      if (eligible(ref)) tiered.add(ref);
+    }
+  }
+
   // pass 1: repack under-filled atlases · resize oversized atlases/images · (aggressive) drop dupes
   for (const f of report.findings) {
     if (f.rule === 'occupancy' || f.rule === 'wasted-regions') {
@@ -138,8 +212,10 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
       const h = Number(f.params?.h ?? 0);
       const longest = Math.max(w, h);
       // an atlas that's also being repacked may already shrink; don't double-handle it. owners are
-      // never resize targets (guard before the existing resized/repacked checks).
-      if (w > 0 && h > 0 && longest > opts.maxEdge && !protectedOwners.has(f.assetRef) && !resized.has(f.assetRef) && !repacked.has(f.assetRef)) {
+      // never resize targets (guard before the existing resized/repacked checks). a TIERED ref is also
+      // skipped — the worker's tier loop owns its oversize clamp (top tier == clamped source), so a
+      // standalone resize op would double-resize (design §7 oversize × tiering).
+      if (w > 0 && h > 0 && longest > opts.maxEdge && !protectedOwners.has(f.assetRef) && !resized.has(f.assetRef) && !repacked.has(f.assetRef) && !tiered.has(f.assetRef)) {
         const s = opts.maxEdge / longest;
         resized.add(f.assetRef);
         ops.push({ kind: 'resize', assetRef: f.assetRef, to: { w: Math.round(w * s), h: Math.round(h * s) }, targetMime: opts.targetMime, quality: opts.quality });
@@ -152,11 +228,14 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
     }
   }
 
-  // pass 2: transcode format-improvable images not already resized, dropped, or packed. The `packed`
-  // guard (Feature 4) ensures a loose image folded into a sheet is encoded once (in the pack step),
-  // never also transcoded here — a ref with both should-atlas and format yields one pack, zero transcode.
+  // pass 2: transcode format-improvable images not already resized, dropped, packed, or tiered. The
+  // `packed` guard (Feature 4) ensures a loose image folded into a sheet is encoded once (in the pack
+  // step), never also transcoded here. The `tiered` guard (design §7 transcode × tiering) does the same
+  // for a tier-eligible ref: the worker's tier loop encodes it once per tier at the target mime, so a
+  // standalone transcode op would be an orphan duplicate. Result: format+tiered ⇒ N tier encodes, 0
+  // transcode ops; a ref with both should-atlas and format yields one pack, zero transcode.
   for (const f of report.findings) {
-    if (f.rule === 'format' && f.scope !== 'folder' && !resized.has(f.assetRef) && !dropped.has(f.assetRef) && !packed.has(f.assetRef)) {
+    if (f.rule === 'format' && f.scope !== 'folder' && !resized.has(f.assetRef) && !dropped.has(f.assetRef) && !packed.has(f.assetRef) && !tiered.has(f.assetRef)) {
       ops.push({ kind: 'transcode', assetRef: f.assetRef, targetMime: opts.targetMime, quality: opts.quality, lossless: opts.lossless });
     }
   }

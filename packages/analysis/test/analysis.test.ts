@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { Asset, Atlas, Rect } from '@asset-doctor/core';
 import { parseAtlas, parseImage } from '@asset-doctor/parsers';
-import { analyze, buildCoverage, mergeEmptyRects, mergeSharedAtlases, groupVariants, stemOf } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -259,11 +259,46 @@ describe('variant grouping (VRAM inflation)', () => {
       img('hero_1080p_avif.avif', 1080, 1080),
       img('other.png', 100, 100),
     ]);
-    expect(v.groups).toHaveLength(1); // hero variant set; 'other' is a singleton
-    expect(v.groups[0]?.members).toHaveLength(4);
+    // Resolution-stem clustering (correction 3): the two RESOLUTION-token files (hero_540p / hero_1080p)
+    // cluster by stem ALONE ("hero"); the two FORMAT-suffixed files (hero_540p_webp / hero_1080p_avif),
+    // whose TRAILING token is a format, keep the stem|aspectBucket key (both aspect 1:1 → one group).
+    // So this set forms TWO logical groups, each a 540p+1080p resolution pair; 'other' is a singleton.
+    expect(v.groups).toHaveLength(2);
+    for (const g of v.groups) expect(g.members).toHaveLength(2);
     expect(v.summedVram).toBe(2 * v540 + 2 * v1080 + v100);
-    expect(v.loadedVramMax).toBe(v1080 + v100); // one tier (largest) per group
-    expect(v.loadedVramMin).toBe(v540 + v100);
+    // One tier loads per group: each group's largest is 1080² → 2·v1080, plus the 'other' singleton.
+    expect(v.loadedVramMax).toBe(2 * v1080 + v100);
+    expect(v.loadedVramMin).toBe(2 * v540 + v100);
+  });
+
+  it('clusters a resolution tier with its source despite an independently-rounded aspect ratio', () => {
+    // A 100×50 banner downscaled to _720p (×0.75) rounds to 75×38 — aspectBucket round(w/h·50) is
+    // 100 (source) vs 99 (tier), so the old stem|aspectBucket key would split them into two groups
+    // and over-count loaded VRAM. The resolution-only stem path must put both in ONE group.
+    const vTop = 100 * 50 * 4;
+    const v = groupVariants([img('banner_1080p.png', 100, 50), img('banner_720p.png', 75, 38)]);
+    expect(hasResolutionToken('banner_720p.png')).toBe(true);
+    expect(hasResolutionToken('banner_webp.webp')).toBe(false); // format token, not resolution
+    expect(v.groups).toHaveLength(1);
+    expect(v.groups[0]?.members).toHaveLength(2);
+    expect(v.groups[0]?.stem).toBe('banner');
+    // One tier loads at runtime: loaded VRAM is the largest tier (the top), NOT the sum of both.
+    expect(v.loadedVramMax).toBe(vTop);
+    expect(v.loadedVramMax).toBeLessThan(v.summedVram);
+  });
+
+  it('clusters odd/non-divisible tier sets (33×17, 3×100) into one group each', () => {
+    // Two assets whose default-ladder tiers all round independently — the aspect-bucket key would scatter
+    // them, the resolution-stem path must keep each asset's three tiers together.
+    const v = groupVariants([
+      img('a/icon_1080p.png', 33, 17), img('a/icon_720p.png', 25, 13), img('a/icon_540p.png', 17, 9),
+      img('b/bar_1080p.png', 3, 100), img('b/bar_720p.png', 2, 75), img('b/bar_540p.png', 2, 50),
+    ]);
+    expect(v.groups).toHaveLength(2);
+    for (const g of v.groups) expect(g.members).toHaveLength(3); // every tier in its asset's group
+    // loadedVramMax = the two top tiers only (33×17 + 3×100), never under-counting the top tier.
+    expect(v.loadedVramMax).toBe(33 * 17 * 4 + 3 * 100 * 4);
+    expect(v.loadedVramMax).toBeLessThan(v.summedVram);
   });
 
   it('surfaces a folder finding + loadedVramBytes < vramBytes in totals', async () => {

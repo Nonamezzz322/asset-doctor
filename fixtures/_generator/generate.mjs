@@ -1196,4 +1196,112 @@ is always false; Spine pages default to PNG.
   );
 }
 
+/* ── Case 14: tier-source — inputs for SCALE-TIER export (docs/scale-tiers-design.md §test plan) ──
+ * A small mixed folder the scale-tier slice tiers (or refuses to tier):
+ *   - banner.png      : an ODD 100×50 loose image — the round-trip subject (scaleLoose 100×50 →
+ *                       75×38 (×0.75) → 50×25 (×0.5); independently-rounded aspect, the case that
+ *                       breaks the old stem|aspectBucket clustering, so the resolution-stem path must
+ *                       re-cluster all three tiers — correction 3).
+ *   - sheet.png/.json : a small TP-Hash atlas to TIER (scaleAtlas geometry + per-tier manifest).
+ *   - meshed.png/.json: a TP-Hash atlas whose frames carry a Sprite.mesh (vertices/verticesUV/
+ *                       triangles) → parses back WITH meshes → tiering is REFUSED (scaleAtlas drops
+ *                       mesh; correction 2). Mesh is a CCW corner fan over each frame's bbox;
+ *                       verticesUV = vertices + frame.xy per the core coordinate contract.
+ *   - spine_single.*  : a SINGLE-page Spine .atlas → tiering ALLOWED (one page, one info.path).
+ *   - spine_multi.*   : a TWO-page Spine .atlas (pages spine_multi_0.png + spine_multi_1.png sharing
+ *                       one info.path) → tiering SKIPPED in v1 (per-page emit would clobber; correction 4).
+ * Pixels are irrelevant to the pure tests (geometry only); they exist so a parse/ingest round-trip is real. */
+{
+  // (a) loose 100×50 banner — opaque solid; the odd aspect is the whole point.
+  const banner = solidPng(100, 50, COLORS[0]);
+
+  // (b) small TP-Hash atlas (sheet) — a few round-number frames, one trimmed for fidelity under scaling.
+  const sheetSize = { w: 128, h: 128 };
+  const sheetFrames = [
+    fr('a.png', 0, 0, 60, 40),
+    fr('b.png', 64, 0, 50, 50),
+    fr('c.png', 0, 64, 40, 30, { trimmed: true, spriteSourceSize: { x: 5, y: 8, w: 40, h: 30 }, sourceSize: { w: 50, h: 46 } }),
+  ];
+
+  // (c) meshed atlas — a CCW corner fan over each frame's bbox. verticesUV = vertices + frame.xy.
+  const meshSize = { w: 128, h: 64 };
+  const meshFrames = [fr('m0.png', 0, 0, 64, 64), fr('m1.png', 64, 0, 50, 50)];
+  /** Corner fan over [0,w)×[0,h): TL→TR→BR→BL, two triangles (CCW under Y-down shoelace). */
+  const cornerMesh = (f) => {
+    const verts = [{ x: 0, y: 0 }, { x: f.frame.w, y: 0 }, { x: f.frame.w, y: f.frame.h }, { x: 0, y: f.frame.h }];
+    return {
+      vertices: verts.map((v) => [v.x, v.y]),
+      verticesUV: verts.map((v) => [v.x + f.frame.x, v.y + f.frame.y]),
+      triangles: [[0, 1, 2], [0, 2, 3]],
+    };
+  };
+  const meshManifest = () => {
+    const frameObj = {};
+    for (const f of meshFrames) frameObj[f.name] = { ...tpFrameBody(f), ...cornerMesh(f) };
+    return { frames: frameObj, meta: { image: 'meshed.png', format: 'RGBA8888', size: meshSize, scale: '1', ...TP_META } };
+  };
+
+  // (d) single-page Spine + (e) two-page Spine. The multi-page .atlas has TWO page blocks under ONE
+  //     .atlas file (each begins with a bare image line + a non-indented `size:` header).
+  const spSize = { w: 64, h: 64 };
+  const spFrames = [fr('reg0', 0, 0, 30, 30), fr('reg1', 32, 0, 28, 24)];
+  const spinePage = (image, frames) =>
+    `${image}\nsize: ${spSize.w},${spSize.h}\nformat: RGBA8888\nfilter: Linear,Linear\nrepeat: none\n` +
+    frames
+      .map((f) => `${f.name}\n  rotate: 0\n  xy: ${f.frame.x}, ${f.frame.y}\n  size: ${f.frame.w}, ${f.frame.h}\n  orig: ${f.frame.w}, ${f.frame.h}\n  offset: 0, 0\n  index: -1`)
+      .join('\n') + '\n';
+  const singleAtlas = spinePage('spine_single.png', spFrames);
+  // two page blocks concatenated → one .atlas, two pages (the v1 skip case).
+  const multiAtlas = spinePage('spine_multi_0.png', [spFrames[0]]) + spinePage('spine_multi_1.png', [spFrames[1]]);
+
+  writeCase(
+    'tier-source',
+    {
+      'banner.png': banner,
+      'sheet.png': atlasPng(sheetSize, sheetFrames),
+      'sheet.json': hashManifest('sheet.png', sheetSize, sheetFrames),
+      'meshed.png': atlasPng(meshSize, meshFrames),
+      'meshed.json': meshManifest(),
+      'spine_single.atlas': singleAtlas,
+      'spine_single.png': atlasPng(spSize, spFrames),
+      'spine_multi.atlas': multiAtlas,
+      'spine_multi_0.png': atlasPng(spSize, [spFrames[0]]),
+      'spine_multi_1.png': atlasPng(spSize, [spFrames[1]]),
+      'expected.json': {
+        kind: 'tier-source',
+        feature: 'scale-tiers',
+        loose: { 'banner.png': { size: { w: 100, h: 50 }, tiers: { _1080p: { w: 100, h: 50 }, _720p: { w: 75, h: 38 }, _540p: { w: 50, h: 25 } } } },
+        atlas: { sheet: { size: sheetSize, frameCount: sheetFrames.length, tier: 'allowed' } },
+        meshed: { size: meshSize, frameCount: meshFrames.length, tier: 'refused', why: 'sprites carry a source mesh; scaleAtlas drops mesh → refuse tiering (correction 2)', expectMeshedSprites: meshFrames.length },
+        spine: {
+          single: { pages: 1, tier: 'allowed' },
+          multi: { pages: 2, tier: 'skipped', why: 'multi-page Spine pages share one info.path; per-page tier emit would clobber → skip in v1 (correction 4)' },
+        },
+        note: 'Mixed inputs for scale-tier export: an odd loose banner (tier round-trip), a TP atlas (tier), a meshed atlas (refuse), a single-page Spine (tier) and a 2-page Spine (skip).',
+      },
+    },
+    `# tier-source
+
+Mixed inputs for the **SCALE-TIER export** slice (\`docs/scale-tiers-design.md\`).
+
+- **\`banner.png\`** — an odd **100×50** loose image. The whole-folder default ladder produces
+  \`_1080p\` 100×50, \`_720p\` 75×38 (×0.75), \`_540p\` 50×25 (×0.5). The independently-rounded aspect
+  (round(w/h·50) = 100 vs 99) is exactly the case the resolution-stem clustering must re-cluster into
+  ONE group (correction 3 round-trip).
+- **\`sheet.png\` / \`sheet.json\`** — a small TexturePacker **Hash** atlas to **tier** (scaleAtlas
+  geometry + a per-tier manifest with scaled frames and per-tier \`meta.image\`/\`meta.scale\`).
+- **\`meshed.png\` / \`meshed.json\`** — a TP-Hash atlas whose frames carry a \`Sprite.mesh\`
+  (vertices/verticesUV/triangles, a CCW corner fan). \`scaleAtlas\` **drops** mesh, so tiering is
+  **refused** for any atlas carrying a source mesh (correction 2). The fixture round-trips the mesh
+  back through the parser so \`scaleAtlas(meshed, 0.5).sprites[i].mesh === undefined\` is a real assertion.
+- **\`spine_single.*\`** — a single-page Spine \`.atlas\` → tiering **allowed**.
+- **\`spine_multi.*\`** — a **two-page** \`.atlas\` (pages \`spine_multi_0.png\` + \`spine_multi_1.png\`)
+  → tiering **skipped** in v1 (per-page emit would clobber the shared \`info.path\`; correction 4).
+
+Pixels are irrelevant to the pure scale tests (geometry only); they exist so the parse/ingest
+round-trip is real.
+`,
+  );
+}
+
 console.log('Done.');

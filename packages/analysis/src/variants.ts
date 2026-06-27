@@ -37,6 +37,18 @@ interface VItem {
 }
 const aspectBucket = (s: Size): number => (s.h > 0 ? Math.round((s.w / s.h) * 50) : 0);
 
+// Resolution-only subset of TOKEN (EXCLUDES the format tokens png|webp|avif|jpeg): a true resolution
+// tier suffix. Matched against the ext-stripped basename's trailing token.
+const RES_TOKEN = /[_-](\d{2,4}p|@?\d+x|hd|sd)$/i;
+
+/** True when a name's basename ends in a RESOLUTION token (e.g. "hero_720p", "icon@2x", "bg_hd"),
+ *  i.e. it is one resolution tier of a logical asset. A format-only suffix ("sprite_webp") is NOT a
+ *  resolution token. Used to switch clustering to a resolution-only, aspect-bucket-free key (below). */
+export function hasResolutionToken(name: string): boolean {
+  const base = baseOf(name).toLowerCase().replace(/\.[a-z0-9]+$/, '');
+  return RES_TOKEN.test(base);
+}
+
 export interface VariantGroups {
   /** Groups with >1 member (i.e. actual variant sets). */
   groups: { stem: string; members: VItem[] }[];
@@ -53,7 +65,13 @@ export function groupVariants(assets: Asset[]): VariantGroups {
 
   const buckets = new Map<string, VItem[]>();
   for (const it of items) {
-    const key = `${stemOf(it.name)}|${aspectBucket(it.size)}`;
+    // Resolution variants cluster by stem ALONE: independently-rounded tiers (e.g. 100×50 → _720p
+    // 75×38) land in different aspect buckets (round(w/h·50) is 100 vs 99), so keeping aspectBucket
+    // would split one logical asset and over-count loaded VRAM. Non-resolution names keep the
+    // stem|aspectBucket key (genuine same-stem-different-aspect collisions stay distinct).
+    const key = hasResolutionToken(it.name)
+      ? stemOf(it.name)
+      : `${stemOf(it.name)}|${aspectBucket(it.size)}`;
     const arr = buckets.get(key);
     if (arr) arr.push(it);
     else buckets.set(key, [it]);

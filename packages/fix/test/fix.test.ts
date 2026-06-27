@@ -427,6 +427,128 @@ describe('planFix — pack pass (packGroups)', () => {
   });
 });
 
+// ── Scale-tier guard (Task 8 / design §7) ────────────────────────────────────────────────────────
+// When opts.scaleTiers is non-empty, every tier-eligible ref the worker's tier loop will own is folded
+// into a `tiered` set that EXCLUDES it from the standalone pass-1 oversize-resize AND pass-2 transcode
+// ops (the tier loop owns each tier's encode + oversize clamp). Refused refs (mesh / multi-page Spine /
+// already-tiered — gated by tierEligible) keep their normal single-scale op. When aggressive AND tiering
+// are both on, owner-aware dedup repoint is disabled (owners get renamed by tiering). Empty/absent
+// scaleTiers ⇒ byte-identical to today. The plan NEVER emits a tier op (tiering is a worker multiplier).
+describe('planFix — scale-tier guard (compose)', () => {
+  const base = { targetMime: 'image/webp' as const, quality: 0.9, lossless: true, padding: 2, maxSize: 4096, maxEdge: 2048 };
+  const tiers = [{ scale: 1, suffix: '_1080p' }, { scale: 0.5, suffix: '_540p' }]; // validated ladder shape
+
+  /** A loose image carrying BOTH an oversize finding and a format finding (the two guarded passes). */
+  const oversizeAndFormat = (ref: string): AnalysisReport => ({
+    assets: [{ assetRef: ref, diskBytes: 1000, vramBytes: 4096 * 4096 * 4 }],
+    findings: [
+      { id: `${ref}:oversize`, rule: 'dimensions-oversize', severity: 'crit', assetRef: ref, title: '', detail: '', messageKey: 'oversize', params: { w: 4096, h: 4096, edge: 4096, budget: 2730, sev: 'crit', vram: 0 } },
+      { id: `${ref}:format`, rule: 'format', severity: 'warn', assetRef: ref, title: '', detail: '' },
+    ],
+    totals: { diskBytes: 1000, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+    thresholds: DEFAULT_THRESHOLDS,
+  });
+
+  it('empty/absent scaleTiers ⇒ today’s ops unchanged (resize wins over transcode, no tier op)', () => {
+    const report = oversizeAndFormat('hero.png');
+    const noField = planFix(report, { ...base, aggressive: false });
+    const empty = planFix(report, { ...base, aggressive: false, scaleTiers: [] });
+    for (const plan of [noField, empty]) {
+      expect(plan.ops.some((o) => o.kind === 'resize' && o.assetRef === 'hero.png')).toBe(true);
+      expect(plan.ops.some((o) => o.kind === 'transcode')).toBe(false); // resize precedence, as today
+    }
+    // byte-identical op stream between absent and empty ⇒ no drift introduced by the field
+    expect(JSON.stringify(empty.ops)).toBe(JSON.stringify(noField.ops));
+  });
+
+  it('a tier-eligible ref is EXCLUDED from the standalone resize AND transcode ops', () => {
+    // tiering on, default-allow eligibility ⇒ hero.png is owned by the tier loop, so neither a resize nor
+    // a transcode op should be emitted for it (the loop owns the oversize clamp + per-tier encode).
+    const plan = planFix(oversizeAndFormat('hero.png'), { ...base, aggressive: false, scaleTiers: tiers });
+    expect(plan.ops.some((o) => o.kind === 'resize' && o.assetRef === 'hero.png')).toBe(false);
+    expect(plan.ops.some((o) => o.kind === 'transcode' && o.assetRef === 'hero.png')).toBe(false);
+    expect(plan.ops.length).toBe(0); // no op at all — the worker tier loop does everything for this ref
+  });
+
+  it('a REFUSED ref (tierEligible=false) keeps its normal single-scale op', () => {
+    // e.g. a meshed atlas / multi-page Spine / already-tiered input — the worker refuses to tier it, so
+    // the plan must still emit its standalone resize (oversize precedence over transcode, as today).
+    const plan = planFix(oversizeAndFormat('mesh.png'), { ...base, aggressive: false, scaleTiers: tiers, tierEligible: () => false });
+    expect(plan.ops.some((o) => o.kind === 'resize' && o.assetRef === 'mesh.png')).toBe(true);
+    expect(plan.ops.some((o) => o.kind === 'transcode')).toBe(false); // resize still wins
+  });
+
+  it('partial eligibility: eligible ref tiered (no op), refused ref keeps its transcode', () => {
+    const report: AnalysisReport = {
+      assets: [{ assetRef: 'a.png', diskBytes: 100, vramBytes: 0 }, { assetRef: 'b.png', diskBytes: 100, vramBytes: 0 }],
+      findings: [
+        { id: 'a.png:format', rule: 'format', severity: 'warn', assetRef: 'a.png', title: '', detail: '' },
+        { id: 'b.png:format', rule: 'format', severity: 'warn', assetRef: 'b.png', title: '', detail: '' },
+      ],
+      totals: { diskBytes: 200, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+      thresholds: DEFAULT_THRESHOLDS,
+    };
+    const plan = planFix(report, { ...base, aggressive: false, scaleTiers: tiers, tierEligible: (r) => r === 'a.png' });
+    expect(plan.ops.some((o) => o.kind === 'transcode' && o.assetRef === 'a.png')).toBe(false); // a tiered → no transcode
+    expect(plan.ops.some((o) => o.kind === 'transcode' && o.assetRef === 'b.png')).toBe(true);  // b refused → still transcodes
+  });
+
+  it('a folder-scope format finding is never tiered (no single tier target) — still transcodes if applicable', () => {
+    // folder findings have no single assetRef target; they must not be added to `tiered`. A per-asset
+    // format finding on the SAME ref drives the (still-emitted) transcode when the ref is refused.
+    const report: AnalysisReport = {
+      assets: [{ assetRef: 'a.png', diskBytes: 100, vramBytes: 0 }],
+      findings: [
+        { id: 'folder:variants', rule: 'variants', severity: 'warn', scope: 'folder', assetRef: 'a.png', title: '', detail: '' },
+        { id: 'a.png:format', rule: 'format', severity: 'warn', assetRef: 'a.png', title: '', detail: '' },
+      ],
+      totals: { diskBytes: 100, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+      thresholds: DEFAULT_THRESHOLDS,
+    };
+    // refuse a.png so we can observe the per-asset transcode survives (folder finding alone never tiers).
+    const plan = planFix(report, { ...base, aggressive: false, scaleTiers: tiers, tierEligible: () => false });
+    expect(plan.ops.some((o) => o.kind === 'transcode' && o.assetRef === 'a.png')).toBe(true);
+  });
+
+  it('dropped/repacked/packed refs are never tiered (their owning transform keeps the ref)', () => {
+    // An under-filled atlas is repacked; tiering must NOT also claim it here (the repack output is what the
+    // worker tier loop runs on, not a standalone tier of the source). The repack op must still be emitted.
+    const report: AnalysisReport = {
+      assets: [{ assetRef: 'sheet.png', diskBytes: 100, vramBytes: 256 * 256 * 4, occupancy: 0.1 }],
+      findings: [{ id: 'sheet.png:occupancy', rule: 'occupancy', severity: 'crit', assetRef: 'sheet.png', title: '', detail: '' }],
+      totals: { diskBytes: 100, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+      thresholds: DEFAULT_THRESHOLDS,
+    };
+    const plan = planFix(report, { ...base, aggressive: false, scaleTiers: tiers });
+    expect(plan.ops.some((o) => o.kind === 'repack' && o.atlasRefs.includes('sheet.png'))).toBe(true);
+  });
+
+  it('aggressive + tiering DISABLES owner-aware manifest repoint (correction 8); drops still occur', () => {
+    const groups: DedupGroup[] = [
+      { contentHash: 'h', pool: 'pixi', skinGroup: 'general', owners: ['main/sheet.png'], consumers: [{ ref: 'extra/sheet.png', ownerRef: 'main/sheet.png', reason: 'eager-owner-cross-bundle' }] },
+    ];
+    const report: AnalysisReport = {
+      assets: [{ assetRef: 'main/sheet.png', diskBytes: 100, vramBytes: 0 }, { assetRef: 'extra/sheet.png', diskBytes: 100, vramBytes: 0 }],
+      findings: [],
+      totals: { diskBytes: 200, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+      thresholds: DEFAULT_THRESHOLDS,
+    };
+    const isAtlasRef = (r: string) => r.endsWith('.png');
+
+    // WITHOUT tiering: the atlas consumer's manifest is repointed (today's owner-aware behavior).
+    const noTier = planFix(report, { ...base, aggressive: true, isAtlasRef }, groups);
+    const dropNoTier = noTier.ops.find((o): o is Extract<FixOp, { kind: 'drop' }> => o.kind === 'drop' && o.assetRef === 'extra/sheet.png')!;
+    expect(dropNoTier.repointManifest).toBe(true);
+
+    // WITH tiering: the owner gets renamed, so the repoint is disabled — but the drop itself still fires.
+    const withTier = planFix(report, { ...base, aggressive: true, isAtlasRef, scaleTiers: tiers }, groups);
+    const dropTier = withTier.ops.find((o): o is Extract<FixOp, { kind: 'drop' }> => o.kind === 'drop' && o.assetRef === 'extra/sheet.png')!;
+    expect(dropTier).toBeDefined();
+    expect(dropTier.ownerRef).toBe('main/sheet.png');
+    expect('repointManifest' in dropTier).toBe(false); // disabled — no key emitted
+  });
+});
+
 describe('emitSpineAtlasText (inverse of the parser)', () => {
   const spineDir = fileURLToPath(new URL('../../../fixtures/sample-projects/spine-basic/', import.meta.url));
   it('round-trips: emit → parse → identical sprites', () => {

@@ -1,4 +1,4 @@
-import type { ImageMime, LazyMarking, SkinGuard } from '@asset-doctor/core';
+import type { ImageMime, LazyMarking, ScaleTier, SkinGuard } from '@asset-doctor/core';
 import type { PackMode, StaticGranularity } from '@asset-doctor/ingest';
 
 export interface FixInputFile {
@@ -41,8 +41,16 @@ export interface FixOptions {
   skinGuard?: SkinGuard;
   /** Per-folder + per-type overrides (folder-prefix or type:* key). Resolved in worker. */
   overrides?: FixOverride[];
-  /** RESERVED (deferred slice): multi-resolution tiers. Empty ⇒ single-scale (today). */
-  scaleTiers?: { scale: number; suffix: string }[];
+  /** Multi-resolution scale-tier export (own Pro toggle, DEFAULT OFF). Each entry emits one
+   *  downscaled copy of every eligible asset `<name><suffix>.<ext>` at `scale` (atlas via scaleAtlas,
+   *  loose via scaleLoose). REFERENCE-CHANGING: the game's loader must select a tier at runtime ⇒ sets
+   *  FixReceipt.referencesChanged. INVARIANTS (validated, fail-closed): every scale ∈ (0,1] (1.0 = the
+   *  source/top tier, NEVER upscale); suffix non-empty, unique, and a RESOLUTION token groupVariants
+   *  recognizes (/^[_-](\d{2,4}p|@?\d+x|hd|sd)$/i). Empty/absent ⇒ single-scale (byte-identical to today). */
+  scaleTiers?: ScaleTier[];
+  /** Bypass the already-tiered skip (per-asset AND whole-folder, design §8) for the rare legit case
+   *  where `*_hd`/`*_2x` art should still be re-tiered. Mirrors packForced. Default false. */
+  tierForce?: boolean;
 
   // ── Feature 4 (pack loose assets into spritesheets) — own Pro toggle, DEFAULT OFF (NOT folded under
   //    aggressive). Absent/false ⇒ no pack groups built, no pack ops, byte-identical to today. ──
@@ -107,6 +115,14 @@ export interface FixReceipt {
    *  (POT padding on NPOT loose images, the common case); the real win is fewer draw calls / texture binds.
    *  Mirrors dedupVramBytesSavedUpperBound's separate-honesty treatment. */
   packVramDelta?: number;
+  /** Scale-tier export summary. `tiers` = validated ladder size; `assets`/`filesEmitted` count ONLY
+   *  assets actually tiered (exclude already-tiered / mesh / multipage-spine / dedup-conflict skips).
+   *  referencesChanged is also set. Absent ⇒ no tiering ran (byte-identical to today). */
+  scaleTiered?: { tiers: number; filesEmitted: number; assets: number };
+  /** Per-tier loaded VRAM (Σ w×h×4 of TIERED assets AT that tier) — the honest "VRAM if the device
+   *  picks this tier" ladder. The runtime loads ONE tier, so this is NEVER summed into vramBytesAfter
+   *  (invariant 5); tiering contributes 0 to vramSaved (the top tier == the source footprint). */
+  tierVram?: { suffix: string; scale: number; vramBytes: number }[];
 }
 
 export type FixResponse =

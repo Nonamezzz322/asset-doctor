@@ -1,0 +1,19 @@
+spine_single.png
+size: 64,64
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+reg0
+  rotate: 0
+  xy: 0, 0
+  size: 30, 30
+  orig: 30, 30
+  offset: 0, 0
+  index: -1
+reg1
+  rotate: 0
+  xy: 32, 0
+  size: 28, 24
+  orig: 28, 24
+  offset: 0, 0
+  index: -1

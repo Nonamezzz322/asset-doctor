@@ -5,10 +5,10 @@
 // (native WebP, or AVIF via @jsquash with honest fallback), drop exact duplicates, and zip a drop-in
 // optimized folder. Assets never leave the device. Every fix the browser can't do lands in skipped[].
 
-import type { Asset, Atlas, Blit, ImageMime, ImageFeatures, PackGroup, Rect, TrimRect } from '@asset-doctor/core';
+import type { Asset, Atlas, Blit, ImageMime, ImageFeatures, PackGroup, Rect, Size, TrimRect } from '@asset-doctor/core';
 import { groupFiles, groupLooseForPacking, keyOf, type LooseImage, type RawFile } from '@asset-doctor/ingest';
 import { parseAtlas, parseImage, parseSpineAtlasText, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
-import { analyze, buildDedupGroups, mergeSharedAtlases, type EncodeSizer } from '@asset-doctor/analysis';
+import { analyze, buildDedupGroups, hasResolutionToken, mergeSharedAtlases, type EncodeSizer } from '@asset-doctor/analysis';
 import {
   emitSpineAtlasText,
   emitTexturePackerJson,
@@ -25,6 +25,12 @@ import {
   scaleAwareQuality,
   type EffectiveOptions,
   type FixAssetKind,
+  // PURE scale-tier helpers (design docs/scale-tiers-design.md §3b) — the loose-image geometry analogue
+  // of scaleAtlas (scaleLoose), tier suffix naming (tieredName), and fail-closed ladder validation
+  // (validateTiers). The tier loop below OWNS oversize clamping + stamps `.scale`; these stay pure.
+  scaleLoose,
+  tieredName,
+  validateTiers,
   // PURE owner-aware dedup repoint path math (design §3d) — SINGLE source of truth, Vitest-covered in
   // packages/fix, so the meta.image repoint resolves back through @asset-doctor/parsers and can't drift.
   dirOf,
@@ -148,12 +154,17 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
   const merged = mergeSharedAtlases(assets);
   const atlasByRef = new Map<string, Atlas>();
   const vramByRef = new Map<string, number>();
+  // Source pixel dimensions per ref (atlas sheet size or loose image size). The tier loop reads this to
+  // own oversize clamping (clamp the top tier once, derive every lower tier from it) — see design §7.
+  const sizeByRef = new Map<string, Size>();
   for (const a of merged) {
     if (a.kind === 'atlas') {
       atlasByRef.set(a.atlas.name, a.atlas);
       vramByRef.set(a.atlas.name, a.atlas.size.w * a.atlas.size.h * 4);
+      sizeByRef.set(a.atlas.name, { w: a.atlas.size.w, h: a.atlas.size.h });
     } else {
       vramByRef.set(a.image.name, a.image.size.w * a.image.size.h * 4);
+      sizeByRef.set(a.image.name, { w: a.image.size.w, h: a.image.size.h });
     }
   }
 
@@ -190,9 +201,53 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
     for (const c of grouped2.collisions) packCollisionSkips.push({ assetRef: c.refs.join(' | '), reason: `pack skipped: two files map to one region name '${c.name}' — kept the first` });
   }
 
+  // ── Scale-tier export (design docs/scale-tiers-design.md §5/§7) — own Pro toggle, DEFAULT OFF ─────────
+  // Validate the requested ladder ONCE (fail-closed). An invalid/empty ladder arrives at planFix as
+  // absent so today's single-scale path reproduces byte-identically. A whole-folder skip flag + the
+  // per-asset eligibility predicate (mesh / multi-page Spine / already-tiered gates) are computed here so
+  // both planFix (the resize/transcode/dedup guards) and the worker tier loop below share ONE decision.
+  const tierReq = opts.scaleTiers ?? [];
+  const tierValidation = tierReq.length > 0 ? validateTiers(tierReq) : null;
+  const tiers = tierValidation?.ok ? tierValidation.tiers : [];
+  const tieringOn = tiers.length > 0;
+  // Whole-folder already-tiered: if any cluster already differs by a resolution token, the folder ships
+  // tiers — skip tiering globally (design §8). A png+webp same-size folder does NOT trip this (format
+  // tokens are excluded from hasResolutionToken). tierForce (mirrors packForced) bypasses the skip.
+  const folderAlreadyTiered = tieringOn && !opts.tierForce && merged.some((a) => hasResolutionToken(a.kind === 'atlas' ? a.atlas.name : a.image.name));
+  /** Refuse-tiering reason for a ref, or null when it is eligible. Data-driven gates only (design §8/§10):
+   *  already-tiered (resolution token in the name), atlases carrying a source mesh (scaleAtlas drops mesh),
+   *  and multi-page Spine (per-page emit would clobber one info.path). Loose/single-page-atlas/single-page
+   *  Spine are eligible. The result is shared by planFix (excludes eligible refs from resize/transcode) and
+   *  the tier loop (a refused ref is surfaced in skipped[] and never tiered). */
+  const tierRefusal = (ref: string): string | null => {
+    if (!opts.tierForce && hasResolutionToken(ref)) return 'tier skipped: asset is already a resolution tier';
+    const atlas = atlasByRef.get(ref);
+    if (atlas) {
+      if (atlas.sprites.some((s) => s.mesh)) return 'tier skipped: meshed atlas not supported (scaleAtlas drops mesh)';
+      if (spineRefs.has(ref)) {
+        const info = spineInfoOf(ref);
+        if (info && info.pages > 1) return 'tier skipped: multi-page Spine not supported in v1';
+      }
+    }
+    return null;
+  };
+  const tierEligible = (ref: string): boolean => tierRefusal(ref) === null;
+
   const plan = planFix(
     report,
-    { targetMime: opts.targetMime, quality: opts.quality, lossless: true, padding: opts.padding, maxSize: opts.maxSize, maxEdge: opts.maxEdge, aggressive: opts.aggressive, isAtlasRef: (ref) => atlasByRef.has(ref) },
+    {
+      targetMime: opts.targetMime,
+      quality: opts.quality,
+      lossless: true,
+      padding: opts.padding,
+      maxSize: opts.maxSize,
+      maxEdge: opts.maxEdge,
+      aggressive: opts.aggressive,
+      isAtlasRef: (ref) => atlasByRef.has(ref),
+      // Only fold tier-eligible refs into the plan's `tiered` guard when the FOLDER isn't already tiered;
+      // a globally-skipped folder keeps every asset on its normal single-scale resize/transcode op.
+      ...(tieringOn && !folderAlreadyTiered ? { scaleTiers: tiers, tierEligible } : {}),
+    },
     dedupGroups,
     packGroups,
   );
@@ -257,6 +312,19 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
   let packVerified = 0;
   let packUnmatched = 0;
   let packUnverified = 0;
+  // Scale-tier receipt counters (design §5/§6). tieredAssets/tierFilesEmitted count ONLY assets actually
+  // tiered (refused/skipped assets excluded). tierVramBytes[i] = Σ w×h×4 of tiered assets AT tier i — the
+  // honest "VRAM if the device picks this tier" ladder; NEVER folded into vramBytesAfter (invariant 5),
+  // and tiering contributes 0 to vramSaved (the top tier == the source footprint, tiers are alternatives).
+  let tieredAssets = 0;
+  let tierFilesEmitted = 0;
+  const tierVramBytes = tiers.map(() => 0);
+  // Refs claimed by a repack / atlas-merge / Feature-4 pack pass. In v1 the tier loop runs over the
+  // PRE-transform asset list (`merged`), so a repacked/merged/packed asset's EMITTED sheet is not re-fed
+  // into tiering (design §7 scopes this out for v1). Tracking the refs here lets the tier loop surface an
+  // HONEST skipped[] note instead of a silent no-op on the headline case (an under-filled atlas the user
+  // enabled tiers on gets repacked → no tiers). Empty unless a repack/merge/pack op runs.
+  const tierTransformed = new Set<string>();
   // Surface file→region collisions detected during grouping (a region dropped from its group).
   for (const s of packCollisionSkips) skipped.push(s);
 
@@ -422,6 +490,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
         replaced.add(imagePath);
         replaced.add(info.path);
         vramSaved += r.vramBytesBefore - r.vramBytesAfter;
+        if (tieringOn) tierTransformed.add(ref); // repacked → tier loop surfaces an honest skip (§7 v1 scope)
         operations.push(`repack ${basename(ref)} (spine) → ${na.size.w}×${na.size.h}`);
         continue;
       }
@@ -525,6 +594,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
         for (const rf of refs) skipped.push({ assetRef: rf, reason: 'source sheet unavailable' });
         continue;
       }
+      // repacked/merged refs → tier loop surfaces an honest skip rather than a silent no-op (§7 v1 scope).
+      if (tieringOn) for (const rf of refs) tierTransformed.add(rf);
       if (merge) {
         for (const rf of refs) {
           const ip = pathByRef.get(rf);
@@ -830,6 +901,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
       for (const r of regions) {
         const p = pathByRef.get(r.ref);
         if (p) dropped.add(p);
+        // packed loose source → tier loop surfaces an honest skip rather than silently dropping its tiers
+        // (the packed SHEET itself is not re-fed into tiering in v1 — design §7 scope).
+        if (tieringOn) tierTransformed.add(r.ref);
       }
       referencesChanged = true;
       packedGroups++;
@@ -857,6 +931,16 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
     // Owner missing, or its actual emitted name diverged from the plan prediction (e.g. a transcode
     // PNG-fallback) → KEEP the consumer rather than point it at a name that may not exist.
     if (!consumerPath) continue;
+    // keepConsumer (design correction 8): scale tiering renames the owner away from its predicted name, so
+    // owner-aware repoint is impossible. Short-circuit to keep-the-consumer here — drop NOTHING, surface a
+    // skip. WITHOUT this, an atlas consumer (repointManifest suppressed) would fall through to the loose/
+    // atlas repoint branch, repoint+drop against the owner's PRE-tier name, and dangle once the tier loop
+    // renames + drops the owner. The kept consumer keeps its original image+manifest untouched.
+    if (op.keepConsumer) {
+      looseRepathSkipped++;
+      skipped.push({ assetRef: consumerRef, reason: `dedup skipped: owner ${basename(ownerRef)} renamed by scale tiering — kept duplicate` });
+      continue;
+    }
     if (!predicted || !actual || actual.image !== predicted.image) {
       looseRepathSkipped++;
       skipped.push({ assetRef: consumerRef, reason: `dedup skipped: owner ${basename(ownerRef)} final name diverged — kept duplicate` });
@@ -925,6 +1009,153 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
     operations.push(`dedup ${basename(consumerRef)} → ${basename(ownerRef)} (repoint meta.image)`);
   }
 
+  // ── SCALE-TIER MULTIPLIER (design docs/scale-tiers-design.md §5/§7) ─────────────────────────────────
+  // The OUTERMOST per-asset multiplier: for each tier-eligible asset that no earlier transform claimed
+  // (its source path is neither `replaced` nor `dropped`), emit one downscaled copy per validated tier
+  // and rename the source away (every original path → `dropped`, so the pass-through never ships an
+  // un-suffixed original beside `_1080p`). This loop OWNS oversize clamping: it clamps the top tier to
+  // maxEdge ONCE, then derives EVERY tier from the SAME source bitmap with one high-quality drawImage
+  // each (single resample chain, never tier-from-tier; NEVER upscales). Tiering is REFERENCE-CHANGING
+  // (the game must select a tier at runtime) and contributes 0 to vramSaved (tiers are alternatives — the
+  // top tier == the source footprint). The folder-already-tiered case skips the whole loop honestly.
+  if (tieringOn && folderAlreadyTiered) {
+    skipped.push({ assetRef: '(folder)', reason: 'tier skipped: folder already ships resolution tiers' });
+  }
+  // Dedup × tiering (design correction 8): when both are on, plan.ts disables owner-aware repoint (tiering
+  // renames owners, so a repoint would target a name that no longer exists). Surface it once, honestly.
+  if (tieringOn && !folderAlreadyTiered && opts.aggressive && dedupGroups && dedupGroups.length > 0) {
+    skipped.push({ assetRef: '(dedup)', reason: 'dedup repoint disabled: scale tiering renames owners (kept duplicate consumers)' });
+  }
+  if (tieringOn && !folderAlreadyTiered) {
+    // Edge-clamp source dimensions to maxEdge (same longest-edge math as plan.ts pass-1 oversize). NEVER
+    // upscales — only the longest edge over maxEdge is shrunk; otherwise identity.
+    const clampToMaxEdge = (size: Size): Size => {
+      const longest = Math.max(size.w, size.h);
+      if (!(longest > opts.maxEdge)) return { w: size.w, h: size.h };
+      const s = opts.maxEdge / longest;
+      return { w: Math.max(1, Math.round(size.w * s)), h: Math.max(1, Math.round(size.h * s)) };
+    };
+    for (const a of merged) {
+      const ref = a.kind === 'atlas' ? a.atlas.name : a.image.name;
+      const refusal = tierRefusal(ref);
+      if (refusal) {
+        skipped.push({ assetRef: ref, reason: refusal });
+        continue;
+      }
+      const imagePath = pathByRef.get(ref);
+      if (!imagePath) continue;
+      // A repack / atlas-merge / Feature-4 pack pass claimed this asset. In v1 the tier loop does NOT
+      // re-feed the emitted sheet into tiering (design §7 scope), so be HONEST rather than a silent no-op:
+      // surface a skipped[] entry so the receipt count reflects it. (This is the common headline case — an
+      // under-filled atlas the user enabled tiers on gets repacked.) Checked BEFORE the generic
+      // replaced/dropped guard so dedup-dropped duplicates stay correctly silent (they're redundant).
+      if (tierTransformed.has(ref)) {
+        skipped.push({ assetRef: ref, reason: 'tier skipped: asset was repacked/merged/packed (its sheet is not tiered in v1)' });
+        continue;
+      }
+      // An earlier transform already owns this asset (resize/transcode/dedup) — it is NOT in the plan's
+      // `tiered` set, so it kept its single-scale op. Never double-emit a tier of it.
+      if (replaced.has(imagePath) || dropped.has(imagePath)) continue;
+      const bytes = bytesByRef.get(ref);
+      const srcSize = sizeByRef.get(ref);
+      if (!bytes || !srcSize) continue;
+      const isSpine = spineRefs.has(ref);
+      const atlas = atlasByRef.get(ref);
+
+      const srcBmp = await createImageBitmap(new Blob([bytes]));
+      const srcW = srcBmp.width;
+      const srcH = srcBmp.height;
+      // Top-tier (full-source) size after the oversize clamp — every tier derives from THIS, scaled.
+      const top = clampToMaxEdge(srcSize);
+
+      const manifestPath = !isSpine ? manifestPathOf(ref) : undefined;
+      const spineInfo = isSpine ? spineInfoOf(ref) : undefined;
+      // Spine skeleton (.json/.skel) lives in bytesByRefAll (a marker file), not pathByRef — read it so we
+      // can emit one copy per tier under the suffixed name (design §3c), then drop the original.
+      const skelPath = isSpine ? findSpineSkeletonPath(files, imagePath) : undefined;
+      const skelBytes = skelPath ? bytesByRefAll.get(skelPath) : undefined;
+
+      let emittedAny = false;
+      let composeFailed = false;
+      for (let ti = 0; ti < tiers.length; ti++) {
+        const tier = tiers[ti]!;
+        // Atlas geometry FIRST (so the pixel canvas matches scaleAtlas's sheet dims EXACTLY — same as the
+        // resize-atlas path). scaleAtlas is the PURE primitive (NEVER stamps .scale); effectiveScale folds
+        // the oversize clamp (top.w/srcSize.w) into the tier scale, mirroring resize's `op.to.w/size.w`.
+        // The TIER LOOP sets scaled.scale = tier.scale (exact ladder value only). Loose: the 1px-floor
+        // scaleLoose of the clamped top. For an un-oversized top tier at scale 1 both are the identity.
+        const effectiveScale = (top.w / srcSize.w) * tier.scale;
+        const scaled = atlas ? scaleAtlas(atlas, effectiveScale) : undefined;
+        const dst: Size = scaled ? { w: scaled.size.w, h: scaled.size.h } : scaleLoose(top, tier.scale);
+        const canvas = new OffscreenCanvas(dst.w, dst.h);
+        const c2d = canvas.getContext('2d');
+        if (!c2d) {
+          skipped.push({ assetRef: ref, reason: 'tier skipped: no 2D context' });
+          composeFailed = true;
+          break;
+        }
+        c2d.imageSmoothingQuality = 'high'; // best-effort resample — kernel/pre-blur disclosed honestly
+        // ONE drawImage from the SAME source bitmap (never tier-from-tier): src full rect → dst.
+        c2d.drawImage(srcBmp, 0, 0, srcW, srcH, 0, 0, dst.w, dst.h);
+
+        // Effective per-asset encode options + scale-aware quality on the downscale (folds folder/type
+        // overrides). The tiered output uses the POST-transcode mime so a format+tiered asset is one
+        // encode per tier at the target. Spine pages stay PNG (runtime-safe), mirroring repack/resize.
+        const eff = effectiveFor(ref, tier.scale);
+        const tierMime: ImageMime = isSpine ? 'image/png' : eff.targetMime;
+        const enc = await encodeCanvas(canvas, c2d, tierMime, encOptsFor(eff, true));
+        if (!enc) {
+          skipped.push({ assetRef: ref, reason: `tier skipped: encode to ${tierMime} unavailable` });
+          composeFailed = true;
+          break;
+        }
+
+        // Image path: insert the tier suffix before the extension, swapping ext for the emitted mime.
+        const tierImagePath = tieredName(imagePath, tier.suffix, enc.mime);
+        out.push({ path: tierImagePath, bytes: enc.bytes });
+        tierFilesEmitted++;
+
+        if (scaled) {
+          // Repoint imageRef at THIS tier's own image + stamp the exact ladder scale, so the per-tier
+          // manifest's meta.image/meta.scale describe THIS tier (emitTexturePackerJson / emitSpineAtlasText).
+          scaled.scale = tier.scale;
+          scaled.imageRef = basename(tierImagePath);
+          if (isSpine && spineInfo) {
+            out.push({ path: tieredName(spineInfo.path, tier.suffix), bytes: te.encode(emitSpineAtlasText(scaled)) });
+            tierFilesEmitted++;
+            if (skelBytes && skelPath) {
+              out.push({ path: tieredName(skelPath, tier.suffix), bytes: new Uint8Array(skelBytes) });
+              tierFilesEmitted++;
+            }
+          } else if (manifestPath) {
+            out.push({ path: tieredName(manifestPath, tier.suffix), bytes: te.encode(emitTexturePackerJson(scaled)) });
+            tierFilesEmitted++;
+          }
+        }
+
+        tierVramBytes[ti] = (tierVramBytes[ti] ?? 0) + dst.w * dst.h * 4;
+        emittedAny = true;
+      }
+      srcBmp.close();
+      if (composeFailed || !emittedAny) continue;
+
+      // Rename the source away: drop EVERY original path for this asset (image + manifest/.atlas +
+      // skeleton) so the pass-through can't ship an un-suffixed original next to the tiers.
+      dropped.add(imagePath);
+      if (atlas) {
+        if (isSpine) {
+          if (spineInfo) dropped.add(spineInfo.path);
+          if (skelPath) dropped.add(skelPath);
+        } else if (manifestPath) {
+          dropped.add(manifestPath);
+        }
+      }
+      referencesChanged = true; // tiering renames the source ⇒ NOT a drop-in replacement
+      tieredAssets++;
+      operations.push(`tier ${basename(ref)} → ${tiers.length} resolution${tiers.length === 1 ? '' : 's'}`);
+    }
+  }
+
   // ── pass-through untouched files → drop-in optimized folder ──
   for (const f of files) {
     if (replaced.has(f.path) || dropped.has(f.path)) continue;
@@ -980,6 +1211,12 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
     // Pack VRAM delta (invariant 5): present SEPARATELY, never folded into vramBytesAfter. Emitted only on
     // an actual pack run with a non-zero delta — a positive value means packing RAISED VRAM (POT padding).
     ...(packedGroups > 0 && packVramDelta !== 0 ? { packVramDelta } : {}),
+    // Scale-tier export (additive, optional — absent in non-tier runs ⇒ receipt byte-identical to today).
+    // Counts ONLY assets actually tiered (refused/skipped excluded). tierVram exposes the per-tier loaded
+    // footprint ladder; it is NEVER folded into vramBytesAfter (invariant 5) and tiering adds 0 to vramSaved
+    // (the top tier == the source footprint — tiers are alternatives, the runtime loads exactly one).
+    ...(tieredAssets > 0 ? { scaleTiered: { tiers: tiers.length, filesEmitted: tierFilesEmitted, assets: tieredAssets } } : {}),
+    ...(tieredAssets > 0 ? { tierVram: tiers.map((t, i) => ({ suffix: t.suffix, scale: t.scale, vramBytes: tierVramBytes[i]! })) } : {}),
   };
   post({ type: 'fix-done', receipt, zip });
 }
@@ -1127,6 +1364,35 @@ async function transcode(bytes: ArrayBuffer, target: ImageMime, enc: EncodeOpts)
   c2d.drawImage(bmp, 0, 0);
   bmp.close();
   return encodeCanvas(canvas, c2d, target, { ...enc, allowPngFallback: false });
+}
+
+/** Locate the Spine skeleton (.skel, or a .json that parses as a skeleton — top-level skeleton+bones+slots,
+ *  NOT a TexturePacker/Pixi manifest) that sits in the SAME directory as the page image. Mirrors ingest's
+ *  spine-root detection (lexicographically-first marker, deterministic). Returns the file path or null —
+ *  the tier loop emits one copy per tier under the suffixed name and drops the original (design §3c). */
+function findSpineSkeletonPath(files: FixInputFile[], pageImagePath: string): string | null {
+  const dir = pageImagePath.includes('/') ? pageImagePath.slice(0, pageImagePath.lastIndexOf('/')) : '';
+  const inDir = (p: string): boolean => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '') === dir;
+  let best: string | null = null;
+  const consider = (p: string): void => {
+    if (best === null || p.localeCompare(best) < 0) best = p;
+  };
+  for (const f of files) {
+    if (!inDir(f.path)) continue;
+    if (/\.skel$/i.test(f.name)) {
+      consider(f.path);
+      continue;
+    }
+    if (!/\.json$/i.test(f.name)) continue;
+    try {
+      const o = JSON.parse(td.decode(f.bytes)) as Record<string, unknown>;
+      if ('frames' in o || 'meta' in o) continue; // TexturePacker / Pixi, not a skeleton
+      if (typeof o.skeleton === 'object' && o.skeleton !== null && o.bones != null && o.slots != null) consider(f.path);
+    } catch {
+      /* not JSON */
+    }
+  }
+  return best;
 }
 
 // ── Polygon mode: impure pixel read, PURE extraction ──────────────────────────────────────────────

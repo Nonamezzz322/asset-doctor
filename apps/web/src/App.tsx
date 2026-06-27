@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AnalysisReport, BundleAvailability, LazyMarking, SkinGuard } from '@asset-doctor/core';
+import type { AnalysisReport, BundleAvailability, LazyMarking, ScaleTier, SkinGuard } from '@asset-doctor/core';
 import type { PackMode, StaticGranularity } from '@asset-doctor/ingest';
 import { bundleOf, cmp } from '@asset-doctor/analysis';
+import { DEFAULT_SCALE_TIERS } from '@asset-doctor/fix';
 import {
   filesFromDataTransfer,
   filesFromInput,
@@ -567,6 +568,94 @@ function PackPanel({
   );
 }
 
+// Scale-tier export — emit downscaled copies (_1080p/_720p/_540p…) so the game loads the resolution
+// that fits the device. Its OWN explicit Pro opt-in, DEFAULT OFF (NOT under aggressive): a default Pro
+// run never multiplies a folder into resolution variants. Tiering is REFERENCE-CHANGING (the game's
+// loader must pick a tier at runtime; the source is renamed to the top tier) — surfaced INLINE here and
+// again via fix.tierWarn in the receipt. The top tier (scale 1) is always implied: it is the source
+// footprint and validateTiers requires it; the user picks which LOWER tiers to also ship. Downscale
+// uses the browser's resampler (no kernel/pre-blur control) — disclosed via the existing whyNoKernel/
+// whyNoPreBlur honesty notes. Off / no lower tiers checked beyond the implied top ⇒ scaleTiers stays
+// empty ⇒ byte-identical to today.
+function TierPanel({
+  tierEnable,
+  setTierEnable,
+  tierSuffixes,
+  setTierSuffixes,
+}: {
+  tierEnable: boolean;
+  setTierEnable: (b: boolean) => void;
+  /** Suffixes of the lower tiers the user opted into (the scale-1 top tier is always implied). */
+  tierSuffixes: Set<string>;
+  setTierSuffixes: (s: Set<string>) => void;
+}) {
+  const { t } = useI18n();
+  // Map each default tier's suffix → a label key ("_720p" → "fix.tier.label.720p").
+  const labelKey = (suffix: string): string => `fix.tier.label.${suffix.replace(/^[_-]/, '')}`;
+  const toggle = (suffix: string, on: boolean): void => {
+    const next = new Set(tierSuffixes);
+    if (on) next.add(suffix);
+    else next.delete(suffix);
+    setTierSuffixes(next);
+  };
+  return (
+    <details className="mt-2 rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
+      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">{t('fix.tier.title')}</summary>
+
+      <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.tier.hint')}</p>
+
+      <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
+        <input type="checkbox" checked={tierEnable} onChange={(e) => setTierEnable(e.target.checked)} className="accent-teal" />
+        {t('fix.tier.enable')}
+      </label>
+
+      {/* Reference-changing warning shown INLINE (before run), not only in the receipt. */}
+      <p className="mt-2 font-mono text-[10px] leading-relaxed text-warn">⚠ {t('fix.tier.inlineWarn')}</p>
+
+      {tierEnable ? (
+        <div className="mt-2 space-y-2">
+          <div className="space-y-1">
+            {DEFAULT_SCALE_TIERS.map((tier) => {
+              const top = tier.scale >= 1; // top tier is implied — always shipped, can't be unchecked.
+              return (
+                <label
+                  key={tier.suffix}
+                  title={top ? t('fix.tier.inlineWarn') : undefined}
+                  className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft"
+                >
+                  <input
+                    type="checkbox"
+                    checked={top || tierSuffixes.has(tier.suffix)}
+                    disabled={top}
+                    onChange={(e) => toggle(tier.suffix, e.target.checked)}
+                    className="accent-teal disabled:opacity-60"
+                  />
+                  {t(labelKey(tier.suffix))}
+                </label>
+              );
+            })}
+          </div>
+
+          {/* Disk-grows note: tiering ships every tier ⇒ total disk increases by design; the win is
+              per-device download + per-device VRAM, never total disk (invariant 5). */}
+          <p className="font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.tier.diskNote')}</p>
+
+          {/* v1 scope: an asset that gets repacked/merged/packed is NOT also tiered (its emitted sheet is
+              not re-fed into tiering yet) — surfaced as a skip in the receipt. State it up front so the
+              under-filled-atlas case isn't a confusing silent single-resolution result. */}
+          <p className="font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.tier.repackNote')}</p>
+
+          {/* Downscale honesty — REUSE the existing browser-limit notes (no kernel / no pre-blur control). */}
+          <ul className="space-y-1 border-t border-line pt-2 font-mono text-[10px] leading-relaxed text-ink-soft/80">
+            <li>{t('fix.skipped.whyNoKernel')}</li>
+            <li>{t('fix.skipped.whyNoPreBlur')}</li>
+          </ul>
+        </div>
+      ) : null}
+    </details>
+  );
+}
+
 // The Phase-2 fix: repack + transcode the loaded folder in a worker, then download a drop-in
 // optimized .zip. Assets never leave the device. The Pro gate is OFF by default (free) and only
 // engages when VITE_PRO_GATE === 'true' — then a valid offline-verified entitlement is required.
@@ -595,6 +684,21 @@ function FixCard({ files }: { files: PickedFile[] }) {
   const [packMode, setPackMode] = useState<PackMode>('auto');
   const [packGranularity, setPackGranularity] = useState<StaticGranularity>('per-leaf-folder');
   const [packTrim, setPackTrim] = useState(true);
+
+  // Scale-tier export — own Pro opt-in, DEFAULT OFF (NOT under aggressive). `tierSuffixes` holds the
+  // LOWER tiers the user opted into; the scale-1 top tier is always implied (added when building the
+  // ladder). Default selection mirrors the design preset (720p + 540p). Off OR no enabled tier beyond
+  // the implied top ⇒ scaleTiers stays empty ⇒ no tiering ⇒ byte-identical to today.
+  const [tierEnable, setTierEnable] = useState(false);
+  const [tierSuffixes, setTierSuffixes] = useState<Set<string>>(
+    () => new Set(DEFAULT_SCALE_TIERS.filter((tt) => tt.scale < 1).map((tt) => tt.suffix)),
+  );
+  // The validated ladder: always include the scale-1 top tier (validateTiers requires it) plus every
+  // checked lower tier, in the canonical high→low order of DEFAULT_SCALE_TIERS. Empty when disabled.
+  const scaleTiers: ScaleTier[] = useMemo(
+    () => (tierEnable ? DEFAULT_SCALE_TIERS.filter((tt) => tt.scale >= 1 || tierSuffixes.has(tt.suffix)) : []),
+    [tierEnable, tierSuffixes],
+  );
 
   // Top-level bundles with REAL folder structure: a ref with no "/" is its own singleton (a flat,
   // root-level loose file), which makes per-bundle marking meaningless noise. We collect only segments
@@ -653,6 +757,10 @@ function FixCard({ files }: { files: PickedFile[] }) {
           packMode: packLoose ? packMode : undefined,
           packGranularity: packLoose ? packGranularity : undefined,
           packTrim: packLoose ? packTrim : undefined,
+          // Scale-tier export — only forwarded when enabled AND a real lower tier is selected (the
+          // implied scale-1 top tier alone would just rename, not downscale). Off / top-only ⇒ undefined
+          // ⇒ no tiering ⇒ byte-identical to today. The worker validates the ladder fail-closed.
+          scaleTiers: scaleTiers.length > 1 ? scaleTiers : undefined,
         },
         (p) => setPhase({ t: 'running', p }),
       );
@@ -719,6 +827,13 @@ function FixCard({ files }: { files: PickedFile[] }) {
             setPackTrim={setPackTrim}
           />
 
+          <TierPanel
+            tierEnable={tierEnable}
+            setTierEnable={setTierEnable}
+            tierSuffixes={tierSuffixes}
+            setTierSuffixes={setTierSuffixes}
+          />
+
           <button
             type="button"
             onClick={run}
@@ -782,6 +897,32 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
           {(receipt.packVramDelta ?? 0) > 0 ? (
             <p className="font-mono text-[10px] text-warn">{t('fix.pack.vramDelta', { bytes: receipt.packVramDelta ?? 0 })}</p>
           ) : null}
+        </>
+      ) : null}
+      {/* Scale-tier export receipt: tiers/files/assets actually emitted, a reference-changing banner (the
+          source was renamed to the top tier; the loader must pick a tier at runtime), the per-device VRAM
+          ladder + per-tier sizes (NEVER summed into the headline VRAM row — the runtime loads ONE tier,
+          invariant 5), and the explicit disk-grows-by-design note. */}
+      {(receipt.scaleTiered?.assets ?? 0) > 0 ? (
+        <>
+          <p className="font-mono text-[10px] text-warn">⚠ {t('fix.tierWarn')}</p>
+          <p className="font-mono text-[10px] text-ink-soft">
+            {t('fix.tier.scaleTiered', {
+              tiers: receipt.scaleTiered?.tiers ?? 0,
+              filesEmitted: receipt.scaleTiered?.filesEmitted ?? 0,
+              assets: receipt.scaleTiered?.assets ?? 0,
+            })}
+          </p>
+          {(receipt.tierVram?.length ?? 0) > 0 ? (
+            <p className="font-mono text-[10px] text-ink-soft">
+              {t('fix.tier.vramLadder', {
+                ladder: (receipt.tierVram ?? [])
+                  .map((tv) => `${tv.suffix.replace(/^[_-]/, '')} ${fmtBytes(tv.vramBytes)}`)
+                  .join(' · '),
+              })}
+            </p>
+          ) : null}
+          <p className="font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.tier.diskNote')}</p>
         </>
       ) : null}
       {/* Owner-aware dedup honesty (design §5a / Task 7): surface how many references were repointed, how

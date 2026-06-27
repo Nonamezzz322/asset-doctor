@@ -1,0 +1,58 @@
+{
+  "kind": "tier-source",
+  "feature": "scale-tiers",
+  "loose": {
+    "banner.png": {
+      "size": {
+        "w": 100,
+        "h": 50
+      },
+      "tiers": {
+        "_1080p": {
+          "w": 100,
+          "h": 50
+        },
+        "_720p": {
+          "w": 75,
+          "h": 38
+        },
+        "_540p": {
+          "w": 50,
+          "h": 25
+        }
+      }
+    }
+  },
+  "atlas": {
+    "sheet": {
+      "size": {
+        "w": 128,
+        "h": 128
+      },
+      "frameCount": 3,
+      "tier": "allowed"
+    }
+  },
+  "meshed": {
+    "size": {
+      "w": 128,
+      "h": 64
+    },
+    "frameCount": 2,
+    "tier": "refused",
+    "why": "sprites carry a source mesh; scaleAtlas drops mesh → refuse tiering (correction 2)",
+    "expectMeshedSprites": 2
+  },
+  "spine": {
+    "single": {
+      "pages": 1,
+      "tier": "allowed"
+    },
+    "multi": {
+      "pages": 2,
+      "tier": "skipped",
+      "why": "multi-page Spine pages share one info.path; per-page tier emit would clobber → skip in v1 (correction 4)"
+    }
+  },
+  "note": "Mixed inputs for scale-tier export: an odd loose banner (tier round-trip), a TP atlas (tier), a meshed atlas (refuse), a single-page Spine (tier) and a 2-page Spine (skip)."
+}

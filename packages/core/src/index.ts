@@ -91,6 +91,19 @@ export type Asset =
   | { kind: 'atlas'; atlas: Atlas; image: ImageAsset }
   | { kind: 'image'; image: ImageAsset };
 
+/* ── Scale-tier export (multi-resolution variant generation) ──────────────────────────────────
+ * One resolution tier of a scale-tier export. The worker emits one downscaled copy of every
+ * eligible asset `<name><suffix>.<ext>` at `scale` (atlas via scaleAtlas, loose via scaleLoose).
+ * REFERENCE-CHANGING: the game's loader must select a tier at runtime (sets referencesChanged). */
+
+/** `scale` ∈ (0,1] (1 = full source; NEVER upscale). `suffix` is appended to the basename stem
+ *  before the extension and MUST be a groupVariants resolution token (e.g. '_1080p', '@2x') so the
+ *  generated tiers round-trip back into one variant cluster on re-ingest. */
+export interface ScaleTier {
+  scale: number;
+  suffix: string;
+}
+
 /* ── Feature 4: pack loose assets into spritesheets ───────────────────────────────────────────
  * Turns OWNED loose images into ONE logical sheet (TP JSON) or ONE logical Spine atlas (.atlas,
  * N page blocks). REFERENCE-CHANGING (FixReceipt.referencesChanged): the game must load the
@@ -304,7 +317,13 @@ export type FixOp =
       ownerRef?: string;
       /** True when this consumer is a whole atlas image+manifest pair identical to the owner's; the
        *  worker keeps the consumer manifest, repoints meta.image → owner image, drops only the image. */
-      repointManifest?: boolean }
+      repointManifest?: boolean;
+      /** True iff owner-aware repoint is disabled for this drop (scale tiering renames the owner, so the
+       *  owner's predicted name won't exist post-tier — design correction 8). Phase C MUST short-circuit
+       *  to keep-consumer (surface skipped[], drop NOTHING) rather than fall through to the loose/atlas
+       *  repoint branch (which would still repoint+drop against the owner's pre-tier name and dangle once
+       *  the tier loop renames the owner). Absent ⇒ normal owner-aware execution. */
+      keepConsumer?: boolean }
   | { kind: 'pack';
       /** ONE PackGroup → ONE sheet (static) or ONE multi-page .atlas (spine). Carries only OWNED
        *  loose refs — never a dedup consumer scheduled for drop (enforced in plan.ts). */

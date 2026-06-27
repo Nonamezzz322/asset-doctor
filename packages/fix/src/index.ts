@@ -24,6 +24,12 @@ export { planFix } from './plan';
 export type { PlanOptions } from './plan';
 export { scaleAwareQuality, resolveOptions, SCALE_QUALITY_FLOOR } from './settings';
 export type { EffectiveOptions, FixOverride, FixAssetKind } from './settings';
+// PURE scale-tier helpers (design docs/scale-tiers-design.md §1/§2) — the loose-image analogue of
+// scaleAtlas (scaleLoose), tier suffix naming, fail-closed ladder validation, the default ladder, and the
+// resolution-token regex. scaleAtlas stays the atlas primitive; the worker's tier loop owns oversize +
+// `.scale`. Imported by the worker so its tier geometry/names can't drift from the tested pure source.
+export { scaleLoose, tieredName, validateTiers, DEFAULT_SCALE_TIERS, RESOLUTION_TOKEN } from './scale';
+export type { TierValidation } from './scale';
 // PURE owner-aware dedup repoint path math (design §3d) — single source of truth, imported by fix.worker
 // so the meta.image repoint round-trips through @asset-doctor/parsers (no hand-rolled copy can drift).
 export { dirOf, normalize, resolveImageRef, relativeImageRef } from './dedup-repoint';
