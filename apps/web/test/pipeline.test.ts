@@ -44,7 +44,7 @@ describe('end-to-end pipeline over the real fixtures folder', () => {
 
     const report = await analyze(assets);
     const verdicts = (ref: string): string[] =>
-      report.findings.filter((f) => f.assetRef === ref).map((f) => `${f.rule}:${f.severity}`).sort();
+      report.findings.filter((f) => f.assetRef === ref && f.scope !== 'folder').map((f) => `${f.rule}:${f.severity}`).sort();
 
     expect(verdicts('symbols.png')).toEqual(['occupancy:crit', 'wasted-regions:info']);
     expect(verdicts('sheet.png')).toEqual(['dimensions-npot:info', 'dimensions-oversize:crit']);

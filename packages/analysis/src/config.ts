@@ -10,4 +10,6 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   duplicates: { similarHammingMax: 6 }, // dHash bits that may differ for "near-identical"
   shouldAtlas: { minLooseImages: 8, maxSpriteEdgePx: 512 }, // loose sprites worth packing
   atlasMerge: { occupancyBelow: 0.5, minAtlases: 2 }, // under-filled atlases worth merging
+  mipmap: { warn: 4_194_304 }, // total conditional mip overhead (bytes) before the aggregate info fires.
+  // One 2048² atlas alone is +5.59 MB and trips it; small UI-only sets (a 1024² page is only +1.33 MB) stay quiet.
 };

@@ -157,7 +157,15 @@ export type Rule =
   | 'should-atlas'
   | 'atlas-merge'
   | 'integrity-missing-image'
-  | 'variants';
+  | 'variants'
+  | 'mipmap-cost';
+
+/** Mipmap chain multiplier on base texture VRAM: a full chain adds Σ(1/4ⁿ) for n≥1 → 4/3 (+33%).
+ *  The ONE place this factor lives — both the static analysis path AND the runtime probe import it
+ *  and BOTH apply it CONDITIONALLY (the probe charges it per actual generateMipmap call; static
+ *  surfaces it as an explicit "if mipmaps are enabled" ceiling). Never assume mipmaps are universal —
+ *  that would be a guess, not a measurement (Invariant 3). */
+export const MIP_OVERHEAD = 4 / 3;
 
 /** Highlight zones drawn on the film-viewer snapshot, in atlas pixel coords. */
 export interface OverlayZone {
@@ -267,8 +275,13 @@ export interface DedupGroup {
 export interface AssetMetrics {
   assetRef: string;
   diskBytes: number;
-  /** GPU footprint: Σ w×h×4 (RGBA8888). Disk weight ≠ VRAM. */
+  /** BASE GPU footprint: Σ w×h×4 (RGBA8888). Disk weight ≠ VRAM. Residency without mipmaps;
+   *  see vramBytesMipmapped for the conditional "if mipmapped" ceiling. */
   vramBytes: number;
+  /** GPU footprint IF mipmaps are enabled: ceil(w×h×4 × 4/3). An upper bound, NOT asserted residency —
+   *  static analysis cannot observe whether the engine calls generateMipmap. Pixi/Phaser make mipmaps
+   *  opt-in per texture source, so this is conditional, never guaranteed. See vramBytes for the base. */
+  vramBytesMipmapped: number;
   /** 0..1, atlases only. */
   occupancy?: number;
 }
@@ -284,6 +297,10 @@ export interface ThresholdConfig {
   duplicates: { similarHammingMax: number };
   shouldAtlas: { minLooseImages: number; maxSpriteEdgePx: number };
   atlasMerge: { occupancyBelow: number; minAtlases: number };
+  /** Total CONDITIONAL mipmap overhead (Σ vramBytesMipmapped − vramBytes) across the folder before the
+   *  aggregate mipmap-cost info finding fires. Geometry only; no pixel read. Optional: absent ⇒ the
+   *  mipmap-cost finding is suppressed (e.g. a budget/CLI config that doesn't opt into it). */
+  mipmap?: { warn: number };
 }
 
 export interface AnalysisReport {
@@ -293,8 +310,13 @@ export interface AnalysisReport {
     diskBytes: number;
     /** Σ w×h×4 over every asset (variants summed — the naive footprint). */
     vramBytes: number;
+    /** Σ vramBytesMipmapped — the same naive footprint IF every texture mipmaps (the +33% ceiling).
+     *  Conditional, not asserted residency: static analysis cannot observe generateMipmap. */
+    vramBytesMipmapped: number;
     /** Realistic upper bound: one variant per logical asset (format-deduped, highest resolution tier). */
     loadedVramBytes: number;
+    /** loadedVramBytes × 4/3 — the loaded-set ceiling IF mipmaps are enabled. Conditional, not residency. */
+    loadedVramBytesMipmapped: number;
     potentialDiskSaved: number;
   };
   /** The thresholds actually applied (for transparency in the UI). */

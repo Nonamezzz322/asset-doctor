@@ -120,6 +120,25 @@
   "fix.optimized": "optimiert",
   "fix.download": "ZIP herunterladen",
   "fix.skipped": "übersprungen",
+  "fix.changes.title": {
+    "$count": "n",
+    "one": "{n} Änderung",
+    "other": "{n} Änderungen"
+  },
+  "fix.skipped.title": {
+    "$count": "n",
+    "one": "{n} übersprungen",
+    "other": "{n} übersprungen"
+  },
+  "fix.op.repack": "Neu gepackte Atlanten",
+  "fix.op.merge": "Zusammengeführte Atlanten (Referenzen geändert)",
+  "fix.op.pack": "Einzelbilder gepackt (Referenzen geändert)",
+  "fix.op.dedup": "Dedupliziert (Referenzen umgeleitet)",
+  "fix.op.resize": "Verkleinert",
+  "fix.op.transcode": "Transkodiert",
+  "fix.op.drop": "Duplikate entfernt",
+  "fix.op.tier": "Auflösungsstufen (Referenzen geändert)",
+  "fix.op.other": "Weitere Änderungen",
   "fix.merge": "Aggressiv: zusammenführen + dedupe (kein Drop-in)",
   "fix.mergeWarn": "Referenzen geändert — Loader aktualisieren",
   "fix.packWarn": "Packed loose images into sheets — your game must load the sheet manifest(s)/atlas, not the individual files",

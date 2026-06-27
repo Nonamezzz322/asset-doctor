@@ -123,6 +123,25 @@
   "fix.optimized": "ottimizzato",
   "fix.download": "Scarica .zip",
   "fix.skipped": "saltato",
+  "fix.changes.title": {
+    "$count": "n",
+    "one": "{n} modifica",
+    "other": "{n} modifiche"
+  },
+  "fix.skipped.title": {
+    "$count": "n",
+    "one": "{n} saltato",
+    "other": "{n} saltati"
+  },
+  "fix.op.repack": "Atlas riconfezionati",
+  "fix.op.merge": "Atlas uniti (riferimenti modificati)",
+  "fix.op.pack": "Immagini singole impacchettate (riferimenti modificati)",
+  "fix.op.dedup": "Deduplicato (riferimenti reindirizzati)",
+  "fix.op.resize": "Ridimensionato",
+  "fix.op.transcode": "Transcodificato",
+  "fix.op.drop": "Duplicati rimossi",
+  "fix.op.tier": "Livelli di risoluzione (riferimenti modificati)",
+  "fix.op.other": "Altre modifiche",
   "fix.merge": "Aggressivo: unione + dedup (non drop-in)",
   "fix.mergeWarn": "Riferimenti cambiati — aggiorna il loader",
   "fix.packWarn": "Packed loose images into sheets — your game must load the sheet manifest(s)/atlas, not the individual files",

@@ -5,6 +5,8 @@
 // device-independent, valid from headless, the runtime profiler, or an extension. The accounting is
 // pure and unit-tested against a mock GL context; no real WebGL is required to verify correctness.
 
+import { MIP_OVERHEAD } from '@asset-doctor/core';
+
 export interface GlStats {
   drawCalls: number;
   drawElementsCalls: number;
@@ -138,7 +140,9 @@ export function instrument(gl: GlLike): InstrumentHandle {
   function vram(): number {
     let total = 0;
     for (const t of textures.values()) {
-      if (t.w > 0 && t.h > 0) total += t.w * t.h * 4 * (t.mip ? 4 / 3 : 1);
+      // CONDITIONAL: the +33% chain is charged only for textures we actually saw mipmapped — the same
+      // factor (MIP_OVERHEAD, shared with static analysis) applied per measured generateMipmap call.
+      if (t.w > 0 && t.h > 0) total += t.w * t.h * 4 * (t.mip ? MIP_OVERHEAD : 1);
     }
     return Math.round(total);
   }

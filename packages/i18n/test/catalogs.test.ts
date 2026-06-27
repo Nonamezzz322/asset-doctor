@@ -35,4 +35,12 @@ describe('catalog completeness (all 9 locales)', () => {
       expect(translate(loc, 'find.occupancy.title', { occ: 0.4, wasted: 0.6 })).toMatch(/40%/);
     }
   });
+
+  it('every locale renders the receipt change-manifest keys without leftover braces', () => {
+    for (const loc of LOCALES) {
+      expect(translate(loc, 'fix.changes.title', { n: 2 })).not.toContain('{');
+      expect(translate(loc, 'fix.skipped.title', { n: 2 })).not.toContain('{');
+      expect(translate(loc, 'fix.op.merge')).not.toContain('{');
+    }
+  });
 });

@@ -15,6 +15,7 @@ import { runAnalysis, type Progress } from './lib/worker-client';
 import { runFix, type FixOutcome, type FixProgress } from './lib/fix-client';
 import type { FixReceipt } from './worker/fix-protocol';
 import { fmtBytes, SEVERITY_TEXT } from './lib/format';
+import { groupOps } from './lib/op-manifest';
 import { LOCALES, NATIVE_NAME, useI18n } from './lib/i18n';
 import { isProUnlocked, maybeRefresh, PRO_GATE_ENABLED } from './lib/license';
 import { ActivatePanel, ProBadge } from './components/LicensePanel';
@@ -862,6 +863,11 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
         <ReceiptRow label={t('metric.disk')} before={receipt.diskBytesBefore} after={receipt.diskBytesAfter} pct={pct(receipt.diskBytesBefore, receipt.diskBytesAfter)} />
         <ReceiptRow label="VRAM" before={receipt.vramBytesBefore} after={receipt.vramBytesAfter} pct={pct(receipt.vramBytesBefore, receipt.vramBytesAfter)} />
       </div>
+      {/* Per-file change manifest — the existing receipt.operations[] trail, grouped by verb, collapsed
+          by default (instant-wow headline stays first). Reference-changing verbs (merge/dedup/pack/tier)
+          coloured warn, reinforcing the aggregate ⚠ banners at the per-row level. Pure presentation of
+          existing data — no faked numbers (op strings carry dims/format, not per-file bytes). */}
+      <OpManifest operations={receipt.operations} />
       {(receipt.meshSprites ?? 0) > 0 ? (
         <p className="font-mono text-[10px] text-ink-soft">
           {t('fix.meshedCount', { n: receipt.meshSprites ?? 0 })} ·{' '}
@@ -940,11 +946,59 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
       {(receipt.dedupVramBytesSavedUpperBound ?? 0) > 0 ? (
         <p className="font-mono text-[10px] text-ink-soft">{t('fix.dedup.vramUpperBound', { bytes: receipt.dedupVramBytesSavedUpperBound ?? 0 })}</p>
       ) : null}
-      {receipt.skipped.length > 0 ? <p className="font-mono text-[10px] text-ink-soft">{receipt.skipped.length} {t('fix.skipped')}</p> : null}
+      {/* Skipped → first-class list of the honest per-asset reason strings (was a bare count). Skips are
+          informational (what the fix REFUSED to touch / couldn't do), not warnings → text-ink-soft. */}
+      {receipt.skipped.length > 0 ? (
+        <details className="rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
+          <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">
+            {t('fix.skipped.title', { n: receipt.skipped.length })}
+          </summary>
+          <ul className="mt-1.5 space-y-1">
+            {receipt.skipped.map((s, i) => (
+              <li key={i} className="font-mono text-[10px] leading-relaxed text-ink-soft">
+                <span className="break-all">{s.assetRef}</span> — {s.reason}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
       <button type="button" onClick={onRedownload} className="w-full rounded-lg border border-line px-3 py-1.5 font-mono text-[11px] text-teal transition hover:border-teal">
         ↓ {t('fix.download')}
       </button>
     </div>
+  );
+}
+
+// Per-file change manifest — renders the existing receipt.operations[] free-text trail, grouped by verb
+// (groupOps is pure/deterministic), inside a collapsed <details> (precedent: SettingsPanel/PackPanel/…).
+// Op strings rendered VERBATIM in mono (they carry the filenames/dims/mime); group headers are the only
+// translated chrome. Reference-changing groups (merge/dedup/pack/tier) → text-warn; the rest → text-ink.
+function OpManifest({ operations }: { operations: string[] }) {
+  const { t } = useI18n();
+  if (operations.length === 0) return null;
+  const groups = groupOps(operations);
+  return (
+    <details className="rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
+      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">
+        {t('fix.changes.title', { n: operations.length })}
+      </summary>
+      <div className="mt-1.5 space-y-2">
+        {groups.map((g) => (
+          <div key={g.kind ?? 'other'}>
+            <p className="font-mono text-[9px] uppercase tracking-[0.06em] text-ink-soft">
+              {t(`fix.op.${g.kind ?? 'other'}`)} · {g.rows.length}
+            </p>
+            <ul className="mt-0.5 space-y-0.5">
+              {g.rows.map((row, i) => (
+                <li key={i} className={`min-w-0 break-all font-mono text-[10px] leading-relaxed ${g.refChanging ? 'text-warn' : 'text-ink'}`}>
+                  {row.text}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </details>
   );
 }
 

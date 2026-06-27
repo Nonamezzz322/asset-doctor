@@ -14,6 +14,7 @@ import type {
   Severity,
   ThresholdConfig,
 } from '@asset-doctor/core';
+import { MIP_OVERHEAD } from '@asset-doctor/core';
 import { DEFAULT_THRESHOLDS } from './config';
 import {
   dimensionFindings,
@@ -21,6 +22,7 @@ import {
   occupancyFinding,
   occupancyValue,
   vramBytes,
+  vramBytesMipmapped,
   wastedRegions,
   type EncodeSizer,
 } from './rules';
@@ -30,6 +32,7 @@ import {
   duplicateSimilarFindings,
   formatAggregateFinding,
   integrityFindings,
+  mipmapCostFinding,
   shouldAtlasFinding,
 } from './folder';
 import { groupVariants, variantsFinding } from './variants';
@@ -74,6 +77,7 @@ export async function analyze(
         assetRef: atlas.name,
         diskBytes: image.byteSize,
         vramBytes: vramBytes(atlas.size),
+        vramBytesMipmapped: vramBytesMipmapped(atlas.size),
         occupancy: occupancyValue(atlas),
       });
       const occ = occupancyFinding(atlas, cfg);
@@ -88,6 +92,7 @@ export async function analyze(
         assetRef: image.name,
         diskBytes: image.byteSize,
         vramBytes: vramBytes(image.size),
+        vramBytesMipmapped: vramBytesMipmapped(image.size),
       });
       findings.push(...dimensionFindings(image.name, image.size, cfg));
       await addFormat(image.name, image);
@@ -114,6 +119,8 @@ export async function analyze(
   const variants = groupVariants(assets);
   const vf = variantsFinding(variants);
   if (vf) folder.push(vf);
+  const mip = mipmapCostFinding(metrics, cfg);
+  if (mip) folder.push(mip);
   findings.push(...folder);
 
   findings.sort((a, b) => RANK[a.severity] - RANK[b.severity] || a.id.localeCompare(b.id));
@@ -124,7 +131,9 @@ export async function analyze(
     totals: {
       diskBytes: metrics.reduce((s, m) => s + m.diskBytes, 0),
       vramBytes: metrics.reduce((s, m) => s + m.vramBytes, 0),
+      vramBytesMipmapped: metrics.reduce((s, m) => s + m.vramBytesMipmapped, 0),
       loadedVramBytes: variants.loadedVramMax,
+      loadedVramBytesMipmapped: Math.ceil(variants.loadedVramMax * MIP_OVERHEAD),
       potentialDiskSaved,
     },
     thresholds: cfg,

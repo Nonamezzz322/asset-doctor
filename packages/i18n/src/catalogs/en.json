@@ -120,6 +120,25 @@
   "fix.optimized": "optimized",
   "fix.download": "Download .zip",
   "fix.skipped": "skipped",
+  "fix.changes.title": {
+    "$count": "n",
+    "one": "{n} change",
+    "other": "{n} changes"
+  },
+  "fix.skipped.title": {
+    "$count": "n",
+    "one": "{n} skipped",
+    "other": "{n} skipped"
+  },
+  "fix.op.repack": "Repacked atlases",
+  "fix.op.merge": "Merged atlases (references changed)",
+  "fix.op.pack": "Packed loose images (references changed)",
+  "fix.op.dedup": "De-duplicated (references repointed)",
+  "fix.op.resize": "Resized",
+  "fix.op.transcode": "Transcoded",
+  "fix.op.drop": "Dropped duplicates",
+  "fix.op.tier": "Resolution tiers (references changed)",
+  "fix.op.other": "Other changes",
   "fix.merge": "Aggressive: merge + dedupe (not drop-in)",
   "fix.mergeWarn": "References changed — update your loader",
   "fix.packWarn": "Packed loose images into sheets — your game must load the sheet manifest(s)/atlas, not the individual files",

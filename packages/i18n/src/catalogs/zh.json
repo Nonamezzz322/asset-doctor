@@ -117,6 +117,23 @@
   "fix.optimized": "已优化",
   "fix.download": "下载 .zip",
   "fix.skipped": "已跳过",
+  "fix.changes.title": {
+    "$count": "n",
+    "other": "{n} 项更改"
+  },
+  "fix.skipped.title": {
+    "$count": "n",
+    "other": "已跳过 {n} 项"
+  },
+  "fix.op.repack": "重新打包的图集",
+  "fix.op.merge": "已合并图集（引用已更改）",
+  "fix.op.pack": "已打包的散图（引用已更改）",
+  "fix.op.dedup": "已去重（引用已重定向）",
+  "fix.op.resize": "已缩放",
+  "fix.op.transcode": "已转码",
+  "fix.op.drop": "已删除重复项",
+  "fix.op.tier": "分辨率层级（引用已更改）",
+  "fix.op.other": "其他更改",
   "fix.merge": "激进模式：合并 + 去重（非直接替换）",
   "fix.mergeWarn": "引用已更改 — 请更新加载器",
   "fix.packWarn": "Packed loose images into sheets — your game must load the sheet manifest(s)/atlas, not the individual files",

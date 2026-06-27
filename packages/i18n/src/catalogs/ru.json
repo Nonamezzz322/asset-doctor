@@ -126,6 +126,25 @@
   "fix.optimized": "оптимизировано",
   "fix.download": "Скачать .zip",
   "fix.skipped": "пропущено",
+  "fix.changes.title": {
+    "$count": "n",
+    "one": "{n} изменение",
+    "other": "{n} изменений"
+  },
+  "fix.skipped.title": {
+    "$count": "n",
+    "one": "{n} пропущено",
+    "other": "{n} пропущено"
+  },
+  "fix.op.repack": "Перепакованные атласы",
+  "fix.op.merge": "Объединённые атласы (ссылки изменены)",
+  "fix.op.pack": "Упакованные одиночные изображения (ссылки изменены)",
+  "fix.op.dedup": "Дедупликация (ссылки перенаправлены)",
+  "fix.op.resize": "Уменьшено",
+  "fix.op.transcode": "Транскодировано",
+  "fix.op.drop": "Удалённые дубликаты",
+  "fix.op.tier": "Уровни разрешения (ссылки изменены)",
+  "fix.op.other": "Прочие изменения",
   "fix.merge": "Агрессивно: слияние + дедуп (не drop-in)",
   "fix.mergeWarn": "Ссылки изменились — обновите загрузчик",
   "fix.packWarn": "Packed loose images into sheets — your game must load the sheet manifest(s)/atlas, not the individual files",

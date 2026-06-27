@@ -120,6 +120,25 @@
   "fix.optimized": "अनुकूलित",
   "fix.download": ".zip डाउनलोड करें",
   "fix.skipped": "छोड़ा गया",
+  "fix.changes.title": {
+    "$count": "n",
+    "one": "{n} बदलाव",
+    "other": "{n} बदलाव"
+  },
+  "fix.skipped.title": {
+    "$count": "n",
+    "one": "{n} छोड़ा गया",
+    "other": "{n} छोड़े गए"
+  },
+  "fix.op.repack": "पुनः पैक किए गए एटलस",
+  "fix.op.merge": "मर्ज किए गए एटलस (संदर्भ बदले गए)",
+  "fix.op.pack": "पैक की गई अलग छवियाँ (संदर्भ बदले गए)",
+  "fix.op.dedup": "डुप्लिकेट हटाए गए (संदर्भ पुनर्निर्देशित)",
+  "fix.op.resize": "आकार बदला गया",
+  "fix.op.transcode": "ट्रांसकोड किया गया",
+  "fix.op.drop": "डुप्लिकेट हटाए गए",
+  "fix.op.tier": "रिज़ॉल्यूशन स्तर (संदर्भ बदले गए)",
+  "fix.op.other": "अन्य बदलाव",
   "fix.merge": "आक्रामक: मर्ज + डीडुप (ड्रॉप-इन नहीं)",
   "fix.mergeWarn": "संदर्भ बदले — अपना लोडर अपडेट करें",
   "fix.packWarn": "Packed loose images into sheets — your game must load the sheet manifest(s)/atlas, not the individual files",

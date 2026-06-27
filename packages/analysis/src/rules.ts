@@ -2,13 +2,18 @@
 // Finding(s) with a verdict, the proof (numbers), a fix, and — where visual — overlay zones.
 // We measure; we never fabricate. Thresholds come from config, never inline magic numbers.
 
-import type { Atlas, Finding, ImageAsset, ImageMime, Severity, Size, ThresholdConfig } from '@asset-doctor/core';
+import { MIP_OVERHEAD, type Atlas, type Finding, type ImageAsset, type ImageMime, type Severity, type Size, type ThresholdConfig } from '@asset-doctor/core';
 import { buildCoverage, defaultCell, mergeEmptyRects } from './grid';
 
 const BYTES_PER_PX = 4; // RGBA8888
 
-/** GPU footprint of a texture: w × h × 4. Disk weight ≠ VRAM. */
+/** BASE GPU footprint of a texture: w × h × 4. Disk weight ≠ VRAM. */
 export const vramBytes = (size: Size): number => size.w * size.h * BYTES_PER_PX;
+
+/** GPU footprint of a texture IF mipmaps are enabled: ceil(w × h × 4 × 4/3) — the base + the +33% mip
+ *  chain. An "if mipmapped" ceiling, not asserted residency (the engine decides per source). Pure
+ *  geometry: no pixel read, shares MIP_OVERHEAD with the runtime probe so the two paths can't drift. */
+export const vramBytesMipmapped = (size: Size): number => Math.ceil(vramBytes(size) * MIP_OVERHEAD);
 
 const isPowerOfTwo = (n: number): boolean => n > 0 && (n & (n - 1)) === 0;
 const nextPot = (n: number): number => {

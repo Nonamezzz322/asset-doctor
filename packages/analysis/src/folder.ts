@@ -2,7 +2,7 @@
 // sprites that should be atlased, under-filled atlases that could merge, integrity, and the
 // aggregate transcode win. All folder findings carry scope: 'folder' and relatedRefs.
 
-import type { Asset, Atlas, Finding, ImageAsset, ImageFeatures, ThresholdConfig } from '@asset-doctor/core';
+import type { Asset, AssetMetrics, Atlas, Finding, ImageAsset, ImageFeatures, ThresholdConfig } from '@asset-doctor/core';
 import { fmtBytes, occupancyValue, vramBytes } from './rules';
 
 function imageByRef(assets: Asset[]): Map<string, ImageAsset> {
@@ -188,5 +188,45 @@ export function formatAggregateFinding(formatFindings: Finding[]): Finding | nul
     estimate: { diskBytesSaved: totalSaved },
     messageKey: 'format-aggregate',
     params: { n: formatFindings.length, saved: totalSaved },
+  };
+}
+
+/** Aggregate, CONDITIONAL mipmap-cost finding. Sums the per-asset "if mipmapped" overhead
+ *  (vramBytesMipmapped − vramBytes) and fires a single `info` folder finding only when that total
+ *  exceeds cfg.mipmap.warn. States a CEILING ("if mipmaps are enabled"), never asserts residency —
+ *  static analysis cannot observe generateMipmap, so this discloses a real GPU cost class honestly
+ *  without claiming it's paid. Returns null below the gate (quiet for small / UI-only sets). */
+export function mipmapCostFinding(metrics: AssetMetrics[], cfg: ThresholdConfig): Finding | null {
+  if (!cfg.mipmap) return null;
+  let base = 0;
+  let mip = 0;
+  let n = 0;
+  const refs: string[] = [];
+  for (const m of metrics) {
+    const over = m.vramBytesMipmapped - m.vramBytes;
+    if (over <= 0) continue;
+    base += m.vramBytes;
+    mip += m.vramBytesMipmapped;
+    n++;
+    refs.push(m.assetRef);
+  }
+  const overhead = mip - base;
+  if (overhead <= cfg.mipmap.warn) return null;
+  refs.sort();
+  return {
+    id: 'folder:mipmap-cost',
+    rule: 'mipmap-cost',
+    severity: 'info',
+    scope: 'folder',
+    assetRef: refs[0]!,
+    relatedRefs: refs,
+    title: `Mipmaps would add ${fmtBytes(overhead)} VRAM (+33%) if enabled`,
+    detail:
+      `If mipmaps are on (Pixi/Phaser autoGenerateMipmaps), ${n} textures grow from ${fmtBytes(base)} ` +
+      `to ${fmtBytes(mip)} — a ${fmtBytes(overhead)} GPU cost the disk size doesn't show. ` +
+      `Disabled mipmaps cost nothing here.`,
+    fix: 'Leave mipmaps off for UI/atlas textures never minified; budget the +33% only where you enable them.',
+    messageKey: 'mipmap',
+    params: { n, base, mip, overhead },
   };
 }
