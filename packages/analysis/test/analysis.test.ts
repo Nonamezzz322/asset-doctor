@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { Asset, Atlas, Rect } from '@asset-doctor/core';
 import { parseAtlas, parseImage } from '@asset-doctor/parsers';
-import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyFinding, wastedRegions, formatFinding, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -489,6 +489,47 @@ describe('atlas fragmentation (dispersion of empty space)', () => {
     const occ = occupancyFinding(shredded, DEFAULT_THRESHOLDS, { fragmentation: 0.125, largestPct: 0.0625 });
     expect(occ?.params?.frag).toBe(0.125);
     expect(occ?.params?.largestPct).toBe(0.0625);
+  });
+
+  // occupancyValue clamp: aliased TexturePacker frames / shared Spine regions double-count Σ, so the
+  // naive sum can exceed the sheet area. Clamping kills the impossible ">100% packed" verdict; for
+  // non-aliased atlases min(1,x)=x so behavior (and every occupancy golden) is unchanged.
+  it('occupancyValue: overlapping frames (Σ frame area > sheet) clamp to exactly 1.0, never >1', () => {
+    // Two identical 30×30 frames aliased onto the same 40×40 sheet: Σ = 1800 / 1600 = 1.125 → clamps to 1.
+    const overlap = atlasOf('alias', 40, 40, [
+      { x: 0, y: 0, w: 30, h: 30 },
+      { x: 0, y: 0, w: 30, h: 30 },
+    ]);
+    const occ = occupancyValue(overlap);
+    expect(occ).toBe(1); // exactly 1.0, never the impossible 1.125
+    expect(occ).toBeLessThanOrEqual(1);
+    // The finding's wasted is correspondingly 0, never negative.
+    const f = occupancyFinding(overlap, DEFAULT_THRESHOLDS);
+    expect(f).toBeNull(); // occ 1.0 ≥ warn → ok → no finding
+  });
+
+  it('occupancyValue: non-overlapping atlas unchanged (clamp inert, min(1,x)=x)', () => {
+    const normal = atlasOf('normal', 40, 40, [{ x: 0, y: 0, w: 20, h: 20 }]); // 400 / 1600 = 0.25
+    expect(occupancyValue(normal)).toBe(0.25);
+    expect(occupancyValue(atlasOf('empty', 16, 16, []))).toBe(0); // no sprites → 0
+    expect(occupancyValue(atlasOf('zero', 0, 0, [{ x: 0, y: 0, w: 4, h: 4 }]))).toBe(0); // total 0 guard
+  });
+
+  it('occupancyFinding: wasted never negative on an over-summed atlas', () => {
+    const overlap = atlasOf('alias2', 40, 40, [
+      { x: 0, y: 0, w: 30, h: 30 },
+      { x: 0, y: 0, w: 30, h: 30 },
+    ]);
+    // Verdict ok at occ 1.0, so verify the guard directly: a partial-overlap atlas that still trips warn.
+    const partial = atlasOf('partial', 40, 40, [
+      { x: 0, y: 0, w: 20, h: 30 }, // 600
+      { x: 10, y: 0, w: 20, h: 30 }, // 600, overlaps the first column band → Σ 1200/1600 = 0.75 (no clamp)
+    ]);
+    const f = occupancyFinding(partial, DEFAULT_THRESHOLDS);
+    expect(f?.params?.wasted).toBeGreaterThanOrEqual(0);
+    expect(f?.title).not.toContain('-'); // no "-X% wasted" leaks
+    // And the clamp keeps wasted at 0 (not negative) for the fully-over-summed case if it ever fired.
+    expect(occupancyValue(overlap)).toBe(1);
   });
 
   // B1 (default): an atlas where occupancy fires (occ < warn) but mergeEmptyRects returns [] — frag is

@@ -32,7 +32,12 @@ export function fmtBytes(n: number): string {
 export function occupancyValue(atlas: Atlas): number {
   const total = atlas.size.w * atlas.size.h;
   if (total <= 0) return 0;
-  return atlas.sprites.reduce((s, sp) => s + sp.frame.w * sp.frame.h, 0) / total;
+  const sum = atlas.sprites.reduce((s, sp) => s + sp.frame.w * sp.frame.h, 0);
+  // Clamp to ≤1: aliased TexturePacker frames / shared Spine regions double-count Σ, which can push
+  // the naive sum past the sheet area (impossible ">100% packed"). For non-aliased atlases min(1,x)=x,
+  // so every existing occupancy golden is unchanged. The exact union would need the grid — rejected as
+  // a systematic over-claim on normal sheets (see docs/improvements/occupancy-clamp.md).
+  return Math.min(1, sum / total);
 }
 
 export function occupancyFinding(
@@ -44,7 +49,7 @@ export function occupancyFinding(
   const severity: Severity =
     occ < cfg.occupancy.crit ? 'crit' : occ < cfg.occupancy.warn ? 'warn' : 'ok';
   if (severity === 'ok') return null;
-  const wasted = 1 - occ;
+  const wasted = Math.max(0, 1 - occ); // belt-and-suspenders: occ is now clamped ≤1, but guard hand-built callers
   // B1: frag/largestPct can be undefined (no empty rects mapped) while occupancy still fires. Default
   // to frag = 1 (contiguous) / largestPct = wasted so the dispersion clause is never an empty
   // interpolation and stays truthful (frag = 1 ⇒ "one hole", a contiguous-waste reading).
