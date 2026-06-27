@@ -118,6 +118,31 @@ export type FixRequest = {
   mode?: FixMode;
 };
 
+/** ONE loader-CALL change this fix performed (loader-migration guide, docs/improvements/loader-migration.md).
+ *  `from` = the path the game's loader called BEFORE; `to` = the path(s) it must call NOW — a SET because a
+ *  multi-page merge/pack sheet or a scale-tier ladder is genuinely set→set (B2/B3), never a fabricated 1:1
+ *  target; `to: []` ⇒ the file was REMOVED (bare drop). Captured ONLY for events that change a real load
+ *  call — merge / pack / scale-tier / a loose resize-or-transcode rename / a bare drop. DEDUP IS EXCLUDED
+ *  (B1): it rewrites an AD-owned consumer manifest IN PLACE (same-named .json re-emitted with a patched
+ *  meta.image, only the redundant image dropped), so the game's load call is UNCHANGED — dedup contributes
+ *  ZERO rows (referencesRewritten + the fix.mergeWarn banner already cover it). `kind` is for display/
+ *  grouping only (reuses the op-manifest OpKind vocabulary). HONEST (invariant 3): from/to are real paths the
+ *  loader called / will call, never invented. */
+export interface FixChange {
+  from: string;
+  /** New load target(s): [] ⇒ removed; ≥1 ⇒ the path(s) the loader must call now (>1 for a multi-page
+   *  sheet/atlas or a tier ladder). */
+  to: string[];
+  /** Map of a TexturePacker `.json` manifest path in `to[]` → the REAL page-image path the worker wrote +
+   *  recorded in that manifest's `meta.image` (e.g. `atlas-merged.webp`, NOT a `.png` guessed by ext-swap).
+   *  Phaser's `this.load.atlas(key, textureURL, atlasURL)` needs the actual textureURL; Pixi reads meta.image
+   *  itself so it never consults this. Present ONLY for static `.json` targets whose page image the worker
+   *  knows (merge/pack); Spine `.atlas` + loose images omit it. HONEST (invariant 3): the textureURL is a
+   *  real file on disk, never fabricated. */
+  pageImages?: Record<string, string>;
+  kind: OpKind;
+}
+
 /** Lightweight receipt (no bytes — the optimized files live in the zip Blob). */
 export interface FixReceipt {
   diskBytesBefore: number;
@@ -130,6 +155,13 @@ export interface FixReceipt {
   skipped: { assetRef: string; reason: string }[];
   /** True when a merge rewrote manifest references — the folder is NOT a drop-in replacement. */
   referencesChanged: boolean;
+  /** Loader-migration guide (additive, optional; docs/improvements/loader-migration.md): the concrete
+   *  loader-CALL rewrites this run made, so the UI can list real repointings + emit engine-aware
+   *  (Pixi/Phaser) loader snippets. Emitted ONLY on referencesChanged runs that have ≥1 genuine load-call
+   *  change; DEDUP IS EXCLUDED (B1 — manifest rewritten in place, no load-call change). Deterministic
+   *  (OP_KIND_ORDER then from). Absent ⇒ no guide; drop-in / no-op runs omit it ⇒ receipt byte-identical to
+   *  today. */
+  changes?: FixChange[];
   /** Owner-aware dedup: consumer references repointed to an owner (meta.image rewrites + external). */
   referencesRewritten?: number;
   /** Whole duplicates that could NOT be safely repathed (reference may live in game code) — KEPT. */

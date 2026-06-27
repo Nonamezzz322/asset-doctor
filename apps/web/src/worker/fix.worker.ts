@@ -76,7 +76,12 @@ import { makeZip, type ZipEntry } from './zip';
 // the execute path would run + the worker-side tier multiplier into the receipt's OpKind vocabulary. No
 // byte/VRAM number (honesty, invariant 5). The worker only assembles the pixel-free gate facts.
 import { dedupKeepConsumerSkip, deselectedSkips, fixOpKind, summarizePlan, type OpKind, type PlanGateInputs } from '../lib/op-manifest';
-import type { FixInputFile, FixMode, FixOptions, FixReceipt, FixRequest, FixResponse } from './fix-protocol';
+// PURE loader-migration row builders (docs/improvements/loader-migration.md). The worker captures only
+// GENUINE loader-CALL changes (merge/pack/tier/loose-rename/bare-drop — NOT dedup, which rewrites the
+// consumer manifest in place) as one-line builder calls; finalizeChanges sorts+dedups deterministically.
+// SAME constructors the unit test drives directly (the worker can't run in Node — createImageBitmap).
+import { dropChange, finalizeChanges, looseRenameChange, mergeChanges, packChanges, tierChanges } from '../lib/loader-migration';
+import type { FixChange, FixInputFile, FixMode, FixOptions, FixReceipt, FixRequest, FixResponse } from './fix-protocol';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 const post = (m: FixResponse): void => ctx.postMessage(m);
@@ -465,6 +470,12 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   const skipped: { assetRef: string; reason: string }[] = [];
   const operations: string[] = [];
   let referencesChanged = false;
+  // Loader-migration guide (docs/improvements/loader-migration.md): accumulate ONLY genuine loader-CALL
+  // changes here — merge/pack (old refs → the new manifest SET), tier (source load target → the tier
+  // ladder), loose resize/transcode RENAME (logo.png → logo.webp), bare drop (removal). DEDUP IS EXCLUDED
+  // (B1: it rewrites the consumer manifest in place ⇒ the load call is unchanged). Pushed in execution
+  // order; finalizeChanges sorts/dedups before the receipt. Empty ⇒ `changes` omitted (byte-identical).
+  const changeRows: FixChange[] = [];
   // Owner-aware dedup receipt counters (Feature 1 / Tasks 6+7). DISK saving is REAL; VRAM saving is an
   // UPPER BOUND (only realized if the runtime shares one GPU upload across the dropped copies) — reported
   // as a SEPARATE flagged field, never folded into the hard vramBytesAfter claim (invariant 5).
@@ -817,6 +828,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
 
       let composeOk = true;
       const baseDir = merge ? dirOf(pathByRef.get(refs[0]!) ?? '') : '';
+      // Loader-migration: every NEW merged-page manifest the game must load (collected as pages compose),
+      // plus the REAL page-image path for each (parallel) so Phaser's textureURL is the file that exists.
+      const mergedManifestPaths: string[] = [];
+      const mergedPageImages: string[] = [];
       // Extrude only the RECTANGLE result — a selected polygon result emits meshed blits (never extruded);
       // feeding eff there would just surface a meshed no-op skip per sprite. eff already gated the gutter.
       const composeExtrude = polySelected ? 0 : eff;
@@ -837,6 +852,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           na.imageRef = `${stem}${ext}`;
           out.push({ path: `${baseDir}${stem}${ext}`, bytes: sheet!.bytes });
           out.push({ path: `${baseDir}${stem}.json`, bytes: te.encode(emitTexturePackerJson(na)) });
+          mergedManifestPaths.push(`${baseDir}${stem}.json`); // loader-migration: a NEW manifest to load
+          mergedPageImages.push(`${baseDir}${stem}${ext}`); // ...and its REAL page image (na.imageRef on disk)
         } else {
           const ref = refs[0]!;
           const origPath = pathByRef.get(ref)!;
@@ -868,6 +885,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         }
         referencesChanged = true;
         operations.push(`merge ${refs.length} atlases → ${r.atlases.length} sheet${r.atlases.length === 1 ? '' : 's'}`);
+        // Loader-migration (SET→SET): each OLD atlas manifest the game loaded → the merged manifest set.
+        changeRows.push(...mergeChanges(refs.map((rf) => manifestPathOf(rf)).filter((m): m is string => !!m), mergedManifestPaths, mergedPageImages));
       }
       vramSaved += r.vramBytesBefore - r.vramBytesAfter;
       // HONESTY (invariant 5): a symmetric gutter CAN grow a sheet to the next POT ⇒ MORE VRAM. When the
@@ -944,7 +963,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         const newPath = renamedTo(path, enc!.mime); // same rename the owner-final-name prediction uses
         out.push({ path: newPath, bytes: enc!.bytes });
         replaced.add(path);
-        if (newPath !== path) referencesChanged = true; // a loose-image rename is NOT drop-in
+        if (newPath !== path) {
+          referencesChanged = true; // a loose-image rename is NOT drop-in
+          changeRows.push(looseRenameChange(path, newPath, 'resize')); // loader-migration: logo.png → logo.webp
+        }
         vramSaved += Math.max(0, (origPx - op.to.w * op.to.h) * 4);
         operations.push(`resize ${basename(path)} → ${op.to.w}×${op.to.h} ${enc!.mime.replace('image/', '')}`);
       }
@@ -972,7 +994,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       // Phase B bookkeeping: if this transcoded image is a retained dedup OWNER, record its ACTUAL final
       // image path so Phase C points consumers at the real (possibly PNG-fallback) name, not the guess.
       if (ownerActualName.has(ref)) ownerActualName.get(ref)!.image = newPath;
-      if (newPath !== path) referencesChanged = true; // a loose-image rename is NOT drop-in
+      if (newPath !== path) {
+        referencesChanged = true; // a loose-image rename is NOT drop-in
+        changeRows.push(looseRenameChange(path, newPath, 'transcode')); // loader-migration: logo.png → logo.webp
+      }
       operations.push(`transcode ${basename(path)} → ${enc.mime.replace('image/', '')}`);
     } else if (op.kind === 'drop' && op.ownerRef == null) {
       // Legacy bare-drop (no owner-aware repoint): today's behavior — delete every copy after the first.
@@ -986,6 +1011,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         const sInfo = spineInfoOf(op.assetRef);
         if (sInfo) dropped.add(sInfo.path);
         referencesChanged = true; // removing a file changes the folder's references
+        changeRows.push(dropChange(path)); // loader-migration: a file the loader called was REMOVED (to: [])
         vramSaved += vramByRef.get(op.assetRef) ?? 0;
         operations.push(`drop duplicate ${basename(path)}`);
       }
@@ -1104,6 +1130,11 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       const encOpts: EncodeOpts = isSpine ? { allowPngFallback: true } : encOptsFor(eff, true);
       const emitted: { path: string; bytes: Uint8Array }[] = [];
       const spineBlocks: string[] = [];
+      // Loader-migration: the NEW manifest(s) the game must load instead of the loose files — one TP JSON
+      // per static page (collected below), or the single Spine `.atlas` (added after the compose loop) —
+      // plus the REAL page-image path parallel to each static `.json` (Spine `.atlas` carries none).
+      const packManifestPaths: string[] = [];
+      const packPageImages: string[] = [];
       let composeOk = true;
       for (let i = 0; i < pl.atlases.length && composeOk; i++) {
         const na = pl.atlases[i]!;
@@ -1124,6 +1155,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           spineBlocks.push(emitSpineAtlasText(na));
         } else {
           emitted.push({ path: join(group.outDir, `${pageBase}.json`), bytes: te.encode(emitTexturePackerJson(na)) });
+          packManifestPaths.push(join(group.outDir, `${pageBase}.json`)); // loader-migration: a NEW sheet manifest
+          packPageImages.push(join(group.outDir, `${pageBase}${ext}`)); // ...and its REAL page image (na.imageRef on disk)
         }
       }
       if (!composeOk) {
@@ -1134,6 +1167,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         // ONE `.atlas` = the per-page blocks concatenated (blank line between), each region already under
         // ITS page header (per-bin atlases). The skeleton .json/.skel is passed through untouched below.
         emitted.push({ path: join(group.outDir, `${stem}.atlas`), bytes: te.encode(spineBlocks.join('\n')) });
+        packManifestPaths.push(join(group.outDir, `${stem}.atlas`)); // loader-migration: the NEW Spine .atlas
+        packPageImages.push(''); // Spine .atlas has no static-JSON page image (setChanges skips non-.json entries)
       }
 
       // (8b) Spine verifier — read the UNTOUCHED skeleton .json and assert every attachment that needs a
@@ -1178,6 +1213,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         if (tieringOn) tierTransformed.add(r.ref);
       }
       referencesChanged = true;
+      // Loader-migration (SET→SET): each packed LOOSE file the game loaded → the new sheet/atlas manifest set.
+      changeRows.push(...packChanges(regions.map((r) => pathByRef.get(r.ref)).filter((p): p is string => !!p), packManifestPaths, packPageImages));
       packedGroups++;
       packedSheetCount += pl.atlases.length;
       packedRegionCount += regions.length;
@@ -1358,6 +1395,11 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       const skelPath = isSpine ? findSpineSkeletonPath(files, imagePath) : undefined;
       const skelBytes = skelPath ? bytesByRefAll.get(skelPath) : undefined;
 
+      // Loader-migration: the path the game's loader CALLED before tiering — the MANIFEST for an atlas/Spine
+      // asset (the loader loads thing.json/.atlas, which tieredName renames), the IMAGE for a loose tiered
+      // image (B3). Falls back to the image only when no AD-emitted manifest exists (rare parsed-atlas case).
+      const tierSourceLoad = (isSpine ? spineInfo?.path : manifestPath) ?? imagePath;
+      const tierTargetPaths: string[] = []; // the tier ladder of NEW load targets (one per emitted tier)
       let emittedAny = false;
       let composeFailed = false;
       for (let ti = 0; ti < tiers.length; ti++) {
@@ -1417,6 +1459,15 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         }
 
         tierVramBytes[ti] = (tierVramBytes[ti] ?? 0) + dst.w * dst.h * 4;
+        // Loader-migration: this tier's NEW load target — mirror the source (suffixed MANIFEST for an
+        // atlas/Spine asset, suffixed IMAGE for a loose one), so it matches what the loader actually calls.
+        tierTargetPaths.push(
+          scaled && isSpine && spineInfo
+            ? tieredName(spineInfo.path, tier.suffix)
+            : scaled && manifestPath
+              ? tieredName(manifestPath, tier.suffix)
+              : tierImagePath,
+        );
         emittedAny = true;
       }
       srcBmp.close();
@@ -1434,6 +1485,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         }
       }
       referencesChanged = true; // tiering renames the source ⇒ NOT a drop-in replacement
+      // Loader-migration (SET→SET): the source load target → the full tier ladder of new load targets.
+      changeRows.push(...tierChanges(tierSourceLoad, tierTargetPaths));
       tieredAssets++;
       operations.push(`tier ${basename(ref)} → ${tiers.length} resolution${tiers.length === 1 ? '' : 's'}`);
     }
@@ -1471,6 +1524,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   const diskBefore = files.reduce((s, f) => s + f.bytes.byteLength, 0);
   const diskAfter = dedupedOut.reduce((s, e) => s + e.bytes.byteLength, 0);
   const vramBefore = report.totals.vramBytes;
+  // Loader-migration guide (docs/improvements/loader-migration.md): the genuine loader-CALL changes this
+  // run made, sorted+deduped deterministically. DEDUP contributed ZERO rows (B1). Attached ONLY when
+  // referencesChanged AND ≥1 real row exists — drop-in / no-op runs omit it ⇒ receipt byte-identical.
+  const changes = finalizeChanges(changeRows);
   const receipt: FixReceipt = {
     diskBytesBefore: diskBefore,
     diskBytesAfter: diskAfter,
@@ -1481,6 +1538,11 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     operations,
     skipped,
     referencesChanged,
+    // Loader-migration guide (additive, optional): the concrete loader-CALL rewrites this run made, so the
+    // UI can list real repointings + emit engine-aware (Pixi/Phaser) snippets. Emitted ONLY when references
+    // genuinely changed AND ≥1 real load-call row exists (dedup contributes none — B1). Absent ⇒ no guide;
+    // drop-in / no-op runs omit it ⇒ receipt byte-identical to today.
+    ...(referencesChanged && changes.length > 0 ? { changes } : {}),
     // Owner-aware dedup (additive, optional — absent in non-dedup runs ⇒ receipt byte-identical to today).
     // referencesRewritten / looseRepathSkipped count Phase-C outcomes. dedupDiskBytesSaved is REAL; the
     // VRAM saving is an UPPER BOUND (realized only if the runtime shares one GPU upload across the dropped

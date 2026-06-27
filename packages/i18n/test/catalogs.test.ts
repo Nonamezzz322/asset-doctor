@@ -46,4 +46,24 @@ describe('catalog completeness (all 9 locales)', () => {
       expect(translate(loc, 'fix.op.merge')).not.toContain('{');
     }
   });
+
+  it('every locale renders the loader-migration chrome keys without leftover braces', () => {
+    for (const loc of LOCALES) {
+      expect(translate(loc, 'fix.migrate.title')).not.toContain('{');
+      expect(translate(loc, 'fix.migrate.note')).not.toContain('{');
+      expect(translate(loc, 'fix.migrate.removed')).not.toContain('{');
+      expect(translate(loc, 'fix.migrate.copy')).not.toContain('{');
+    }
+  });
+
+  it('every locale renders the loader-migration chrome keys without leftover braces', () => {
+    // Chrome only — the Pixi/Phaser engine labels + the load-call snippet bodies are generated as CODE
+    // (loader-migration.ts), never translated, so they are deliberately NOT catalog keys here.
+    for (const loc of LOCALES) {
+      expect(translate(loc, 'fix.migrate.title')).not.toContain('{');
+      expect(translate(loc, 'fix.migrate.note')).not.toContain('{');
+      expect(translate(loc, 'fix.migrate.removed')).not.toContain('{');
+      expect(translate(loc, 'fix.migrate.copy')).not.toContain('{');
+    }
+  });
 });

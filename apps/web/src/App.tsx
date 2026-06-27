@@ -14,9 +14,10 @@ import { keyOf } from './lib/group';
 import { attachProbeReadings } from './lib/probe-run';
 import { runAnalysis, type Progress } from './lib/worker-client';
 import { planFix, runFix, type FixOutcome, type FixProgress } from './lib/fix-client';
-import type { FixOptions, FixPlanSummary, FixReceipt } from './worker/fix-protocol';
+import type { FixChange, FixOptions, FixPlanSummary, FixReceipt } from './worker/fix-protocol';
 import { fmtBytes, SEVERITY_TEXT } from './lib/format';
 import { groupOps, OP_KIND_ORDER, REFERENCE_CHANGING, type OpKind } from './lib/op-manifest';
+import { migrationSnippet, type Engine } from './lib/loader-migration';
 import { LOCALES, NATIVE_NAME, useI18n } from './lib/i18n';
 import { isProUnlocked, maybeRefresh, PRO_GATE_ENABLED } from './lib/license';
 import { ActivatePanel, ProBadge } from './components/LicensePanel';
@@ -1050,6 +1051,10 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
         </p>
       ) : null}
       {receipt.referencesChanged ? <p className="font-mono text-[10px] text-warn">⚠ {t('fix.mergeWarn')}</p> : null}
+      {/* Loader-migration guide (docs/improvements/loader-migration.md): when the fix recorded genuine
+          loader-CALL rewrites, surface a concrete repointing list + an engine-aware copy-pasteable snippet
+          below the bare ⚠ banner. ADDITIVE — absent/empty changes render exactly as today. */}
+      {(receipt.changes?.length ?? 0) > 0 ? <LoaderMigration changes={receipt.changes ?? []} /> : null}
       {/* Feature 4 receipt: groups/sheets/regions packed, Spine path-verification, and a dedicated
           reference-changing banner (NOT a drop-in: the game must load the new sheet/atlas). */}
       {(receipt.packedSheets?.groups ?? 0) > 0 ? (
@@ -1284,6 +1289,99 @@ function OpManifest({ operations }: { operations: string[] }) {
       </div>
     </details>
   );
+}
+
+// Loader-migration guide (docs/improvements/loader-migration.md) — rendered below the fix.mergeWarn banner
+// when a reference-changing fix recorded genuine loader-CALL rewrites (receipt.changes[]). Three parts:
+// (1) a Pixi/Phaser engine toggle, (2) an honest from → to repointing list (warn token; removed rows show
+// the fix.migrate.removed label, never a fabricated target), and (3) a copy-pasteable snippet generated as
+// CODE via migrationSnippet(changes, engine) — verbatim identifiers, NOT i18n (only the heading/intro/
+// removed/copy chrome translates, design M5). The snippet is hidden when every change is a removal (empty
+// snippet ⇒ nothing to load). Collapsed by default so the instant-wow headline stays first.
+function LoaderMigration({ changes }: { changes: FixChange[] }) {
+  const { t } = useI18n();
+  const [engine, setEngine] = useState<Engine>('pixi');
+  const [copied, setCopied] = useState(false);
+  // Code, not t() — verbatim identifiers from loader-migration.ts (design M5). Recompute per engine.
+  const snippet = useMemo(() => migrationSnippet(changes, engine), [changes, engine]);
+  const copy = (): void => {
+    const done = (): void => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    };
+    // navigator.clipboard is undefined on insecure origins / older browsers → fall back to execCommand.
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(snippet).then(done, () => fallbackCopy(snippet) && done());
+    } else if (fallbackCopy(snippet)) {
+      done();
+    }
+  };
+  return (
+    <details className="rounded-md border border-warn/40 bg-bg p-2 text-left open:pb-2.5">
+      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-warn">
+        {t('fix.migrate.title')} · {changes.length}
+      </summary>
+      <p className="mt-1.5 font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.migrate.note')}</p>
+      {/* Engine toggle — product names are CODE (untranslated, design M5), not catalog entries. */}
+      <div className="mt-1.5 flex gap-1">
+        {(['pixi', 'phaser'] as const).map((e) => (
+          <button
+            key={e}
+            type="button"
+            onClick={() => setEngine(e)}
+            aria-pressed={engine === e}
+            className={`rounded px-2 py-0.5 font-mono text-[10px] transition ${engine === e ? 'bg-teal text-white' : 'border border-line text-ink-soft hover:border-teal'}`}
+          >
+            {e === 'pixi' ? 'PixiJS' : 'Phaser'}
+          </button>
+        ))}
+      </div>
+      {/* Honest from → to repointing list. `to: []` ⇒ a removal (no fabricated target). Multi-target sets
+          (multi-page merge/pack, tier ladder) join with ', '. Warn token reinforces "not a drop-in". */}
+      <ul className="mt-1.5 space-y-1">
+        {changes.map((ch, i) => (
+          <li key={i} className="min-w-0 break-all font-mono text-[10px] leading-relaxed text-warn">
+            {ch.from} → {ch.to.length > 0 ? ch.to.join(', ') : t('fix.migrate.removed')}
+          </li>
+        ))}
+      </ul>
+      {/* Copy-pasteable snippet — CODE (verbatim identifiers). Hidden when every change is a removal. */}
+      {snippet ? (
+        <div className="mt-1.5">
+          <div className="flex items-center justify-end">
+            <button
+              type="button"
+              onClick={copy}
+              className="rounded border border-line px-2 py-0.5 font-mono text-[10px] text-teal transition hover:border-teal"
+            >
+              {copied ? '✓ ' : ''}
+              {t('fix.migrate.copy')}
+            </button>
+          </div>
+          <pre className="mt-1 overflow-x-auto rounded bg-film p-2 font-mono text-[10px] leading-relaxed text-white/90">
+            <code>{snippet}</code>
+          </pre>
+        </div>
+      ) : null}
+    </details>
+  );
+}
+
+// Clipboard fallback for insecure origins / browsers without navigator.clipboard (textarea + execCommand).
+function fallbackCopy(text: string): boolean {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
 }
 
 function ReceiptRow({ label, before, after, pct }: { label: string; before: number; after: number; pct: number }) {
