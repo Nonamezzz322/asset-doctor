@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AssetMetrics, Finding, OverlayZone } from '@asset-doctor/core';
-import { fmtBytes } from '../lib/format';
+import { fmtBytes, fmtSignedBytes } from '../lib/format';
 import { useI18n } from '../lib/i18n';
 
 // Overlay styles (§5): empty = red, transparent = yellow, bleeding = teal.
@@ -95,6 +95,12 @@ export function FilmViewer({
   // MEASURED render-probe reading (real offscreen-WebGL). Present only after the host probe ran on the
   // main thread with WebGL available; absent for loose assets / no-WebGL ⇒ today's 4-cell readout.
   const probe = metrics?.probe;
+  // BREAKDOWN block (additive, below the two strips): surfaces already-measured/already-computed fields.
+  // Gate the whole block on a local narrow `m` (avoids non-null `!`) plus per-row guards. When BOTH the
+  // probe reading and the mip-ceiling gap are absent the block renders nothing ⇒ byte-identical to today.
+  const m = metrics;
+  // Mip ceiling is a CONDITIONAL upper bound (+33%), shown only when it exceeds the base (nonzero size).
+  const showMip = m !== undefined && m.vramBytesMipmapped > m.vramBytes;
 
   return (
     <div className="relative ad-clip ad-viewer-shadow rounded-2xl border border-film-border bg-film p-3.5">
@@ -144,6 +150,73 @@ export function FilmViewer({
             sub={frameCount > 0 ? t('readout.batched', { n: frameCount }) : undefined}
             color="text-ok"
           />
+        </div>
+      ) : null}
+
+      {/* VRAM BREAKDOWN — additive surfacing of fields we already measured/computed. Three independently
+          gated rows; renders nothing when both the probe and the mip gap are absent (byte-identical to
+          today). (1) mip ceiling: the +33% upper bound IF mipmaps are on — a ceiling, never asserted
+          residency. (2) probe internals from the first render. (3) a SINGLE signed declared-vs-measured
+          delta — two measurements (manifest geometry vs decoded pixels), never a saving (Invariant 5).
+          Declared/measured themselves are already on the card above and are NOT re-printed here. */}
+      {m && (showMip || probe) ? (
+        <div className="mt-2.5">
+          <div className="mb-1.5 px-1 font-mono text-[9px] uppercase tracking-[0.08em] text-film-soft">
+            {t('readout.breakdown')}
+          </div>
+
+          {showMip ? (
+            <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-film-border bg-film-border">
+              <ReadCell label="VRAM" value={fmtBytes(m.vramBytes)} color="text-info" />
+              <ReadCell
+                label={t('readout.mipCeiling')}
+                value={fmtBytes(m.vramBytesMipmapped)}
+                sub="+33%"
+                color="text-warn"
+                title={t('readout.mipCeilingTooltip')}
+              />
+            </div>
+          ) : null}
+
+          {probe ? (
+            <div className="mt-px grid grid-cols-3 gap-px overflow-hidden rounded-lg border border-film-border bg-film-border">
+              {probe.liveTextures !== 0 ? (
+                <ReadCell
+                  label={t('readout.liveTextures')}
+                  value={`${probe.liveTextures}`}
+                  sub={t('readout.onFirstRender')}
+                  color="text-info"
+                />
+              ) : null}
+              {probe.textureUploads !== 0 ? (
+                <ReadCell
+                  label={t('readout.uploads')}
+                  value={`${probe.textureUploads}`}
+                  sub={t('readout.onFirstRender')}
+                  color="text-info"
+                />
+              ) : null}
+              {probe.shaderCompiles !== 0 ? (
+                <ReadCell
+                  label={t('readout.shaders')}
+                  value={`${probe.shaderCompiles}`}
+                  sub={t('readout.onFirstRender')}
+                  color="text-info"
+                />
+              ) : null}
+            </div>
+          ) : null}
+
+          {probe ? (
+            <div className="mt-px overflow-hidden rounded-lg border border-film-border bg-film-border">
+              <ReadCell
+                label={t('readout.declaredVsMeasured')}
+                value={fmtSignedBytes(probe.vramBytes - m.vramBytes)}
+                color="text-film-soft"
+                title={t('readout.deltaTooltip')}
+              />
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

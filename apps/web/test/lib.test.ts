@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { groupFiles, type RawFile } from '../src/lib/group';
-import { fmtBytes } from '../src/lib/format';
+import { fmtBytes, fmtSignedBytes } from '../src/lib/format';
 
 const enc = (o: unknown): ArrayBuffer => new TextEncoder().encode(JSON.stringify(o)).buffer as ArrayBuffer;
 const empty: ArrayBuffer = new ArrayBuffer(0);
@@ -55,5 +55,19 @@ describe('fmtBytes', () => {
     expect(fmtBytes(512)).toBe('512 B');
     expect(fmtBytes(2048)).toBe('2.0 KB');
     expect(fmtBytes(16_810_000)).toBe('16.0 MB');
+  });
+});
+
+describe('fmtSignedBytes', () => {
+  it('prefixes a positive delta with "+" and reuses fmtBytes magnitude', () => {
+    expect(fmtSignedBytes(2048)).toBe('+2.0 KB');
+    expect(fmtSignedBytes(16_810_000)).toBe('+16.0 MB');
+  });
+  it('prefixes a negative delta with U+2212 minus, never implying a saving', () => {
+    expect(fmtSignedBytes(-2048)).toBe('−2.0 KB');
+    expect(fmtSignedBytes(-512)).toBe('−512 B');
+  });
+  it('renders zero unsigned (the two methods agree)', () => {
+    expect(fmtSignedBytes(0)).toBe('0 B');
   });
 });
