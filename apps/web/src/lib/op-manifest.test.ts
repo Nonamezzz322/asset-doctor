@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FixOp, PackGroup } from '@asset-doctor/core';
-import { classifyOp, groupOps, OP_KIND_ORDER, REFERENCE_CHANGING, summarizeOpCounts, summarizePlan, dedupKeepConsumerSkip, type DedupConsumerFacts, type OpKind, type PlanGateInputs } from './op-manifest';
+import { classifyOp, groupOps, OP_KIND_ORDER, REFERENCE_CHANGING, summarizeOpCounts, summarizePlan, dedupKeepConsumerSkip, fixOpKind, deselectedSkips, type DedupConsumerFacts, type OpKind, type PlanGateInputs } from './op-manifest';
 
 // Real worker strings sampled from each operations.push site in fix.worker.ts (verbatim formats).
 const SAMPLES: Record<string, OpKind | null> = {
@@ -247,5 +247,93 @@ describe('dedupKeepConsumerSkip (pixel-free keep-consumer predicate ↔ execute 
     expect(summarizeOpCounts(counted, 0)).toEqual({ dedup: 1 });
     // WITHOUT the exclusion the naive tally would over-count to 3 (the bug this fixes).
     expect(summarizeOpCounts(all, 0)).toEqual({ dedup: 3 });
+  });
+});
+
+/* ── SELECTIVE FIX (docs/improvements/selective-fix.md) ─────────────────────────────────────────────────
+ * fixOpKind + deselectedSkips are the PURE half of the kind-filter the worker's execute path runs: the
+ * single source of truth that classifies a structured FixOp into the OpKind the plan tally, the receipt
+ * change-manifest, AND the selective `runs(op)` predicate all key on (so the filter can't drift from the
+ * count), plus the deterministic honest skip-note emitter. 100% canvas-free (no worker, no DOM). */
+
+const dropOwnedTier = (assetRef: string, ownerRef: string): FixOp => ({ kind: 'drop', assetRef, reason: 'duplicate-exact', ownerRef, keepConsumer: true });
+
+describe('fixOpKind (the single-source-of-truth FixOp → OpKind classifier the worker `runs` filter shares)', () => {
+  it('splits repack vs merge by atlasRefs.length (1 ⇒ repack, >1 ⇒ merge)', () => {
+    expect(fixOpKind(repack(['a']))).toBe('repack');
+    expect(fixOpKind(repack(['b', 'c']))).toBe('merge');
+    expect(fixOpKind(repack(['d', 'e', 'f']))).toBe('merge');
+  });
+
+  it('splits drop vs dedup by ownerRef presence (legacy bare-drop ⇒ drop, owner-aware ⇒ dedup)', () => {
+    expect(fixOpKind(dropLegacy('x'))).toBe('drop');
+    expect(fixOpKind(dropOwned('y', 'owner'))).toBe('dedup');
+    expect(fixOpKind(dropOwnedTier('z', 'owner'))).toBe('dedup'); // keepConsumer still owner-aware
+  });
+
+  it('classifies resize / transcode / pack literally (never tier — tier is a worker multiplier, not a FixOp)', () => {
+    expect(fixOpKind(resize('a'))).toBe('resize');
+    expect(fixOpKind(transcode('b'))).toBe('transcode');
+    expect(fixOpKind(pack('g'))).toBe('pack');
+  });
+
+  it('agrees with summarizeOpCounts on EVERY FixOp variant (so `runs` can never disagree with the tally)', () => {
+    const ops = [repack(['a']), repack(['b', 'c']), resize('r'), transcode('t'), dropLegacy('d'), dropOwned('y', 'o'), pack('g')];
+    // recount independently via fixOpKind, then assert it equals summarizeOpCounts (the same classifier).
+    const byKind: Partial<Record<OpKind, number>> = {};
+    for (const op of ops) byKind[fixOpKind(op)] = (byKind[fixOpKind(op)] ?? 0) + 1;
+    expect(byKind).toEqual(summarizeOpCounts(ops, 0));
+  });
+
+  it('is total + pure: every kind maps to a defined OpKind, same input ⇒ same output', () => {
+    const ops = [repack(['a']), repack(['a', 'b']), resize('r'), transcode('t'), dropLegacy('d'), dropOwned('y', 'o'), pack('g')];
+    for (const op of ops) {
+      expect(OP_KIND_ORDER.includes(fixOpKind(op))).toBe(true);
+      expect(fixOpKind(op)).toBe(fixOpKind(op));
+    }
+  });
+});
+
+describe('deselectedSkips (honest "<kind> skipped: deselected in plan" notes the worker surfaces)', () => {
+  it('empty excludeKinds ⇒ NO skips (the additive default — byte-identical to today)', () => {
+    const wouldRun = new Set<OpKind>(['repack', 'transcode', 'tier']);
+    expect(deselectedSkips(new Set<OpKind>(), wouldRun)).toEqual([]);
+  });
+
+  it('surfaces one honest note per deselected-AND-would-run kind', () => {
+    const wouldRun = new Set<OpKind>(['repack', 'transcode', 'dedup', 'tier']);
+    const excluded = new Set<OpKind>(['transcode', 'dedup']);
+    expect(deselectedSkips(excluded, wouldRun)).toEqual([
+      { assetRef: '(deselected)', reason: 'transcode skipped: deselected in plan' },
+      { assetRef: '(deselected)', reason: 'dedup skipped: deselected in plan' },
+    ]);
+  });
+
+  it('NEVER surfaces a phantom skip for a deselected kind the run had no work for', () => {
+    // 'merge'/'pack' are excluded but absent from wouldRun ⇒ no note (we only surface what WOULD have run).
+    const wouldRun = new Set<OpKind>(['repack', 'transcode']);
+    const excluded = new Set<OpKind>(['merge', 'pack', 'transcode']);
+    expect(deselectedSkips(excluded, wouldRun)).toEqual([{ assetRef: '(deselected)', reason: 'transcode skipped: deselected in plan' }]);
+  });
+
+  it('emits notes in OP_KIND_ORDER regardless of Set insertion order (deterministic)', () => {
+    const wouldRun = new Set<OpKind>(OP_KIND_ORDER);
+    // insert excluded kinds OUT of canonical order — output must still follow OP_KIND_ORDER.
+    const excluded = new Set<OpKind>(['tier', 'repack', 'dedup', 'resize']);
+    const reasons = deselectedSkips(excluded, wouldRun).map((s) => s.reason);
+    expect(reasons).toEqual([
+      'repack skipped: deselected in plan',
+      'resize skipped: deselected in plan',
+      'dedup skipped: deselected in plan',
+      'tier skipped: deselected in plan',
+    ]);
+    // every assetRef is the neutral sentinel (no real asset is named — the WHOLE kind was deselected).
+    expect(deselectedSkips(excluded, wouldRun).every((s) => s.assetRef === '(deselected)')).toBe(true);
+  });
+
+  it('is pure: same input ⇒ deep-equal output', () => {
+    const wouldRun = new Set<OpKind>(['repack', 'tier']);
+    const excluded = new Set<OpKind>(['repack', 'tier']);
+    expect(deselectedSkips(excluded, wouldRun)).toEqual(deselectedSkips(excluded, wouldRun));
   });
 });

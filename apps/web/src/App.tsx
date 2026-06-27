@@ -314,7 +314,10 @@ type FixPhase =
   // (cheap/pure — no compose/encode/zip), shows the Plan card, then "Run fix" re-posts mode:'execute'
   // with the IDENTICAL options (today's auto-download path).
   | { t: 'planning' }
-  | { t: 'plan'; summary: FixPlanSummary }
+  // `pending` marks a re-preview triggered by a PlanCard checkbox toggle: the card stays MOUNTED (no
+  // flicker, checkbox focus kept) showing the last summary with a subtle "updating…" hint while the worker
+  // recomputes the masked plan. A fresh preview (from idle) uses the 'planning' spinner instead.
+  | { t: 'plan'; summary: FixPlanSummary; pending?: boolean }
   | { t: 'running'; p: FixProgress }
   | { t: 'done'; out: FixOutcome }
   | { t: 'error'; message: string };
@@ -734,6 +737,14 @@ function FixCard({ files }: { files: PickedFile[] }) {
   // ⇒ more VRAM, surfaced honestly in the receipt (invariant 5).
   const [extrude, setExtrude] = useState(0);
 
+  // Selective fix (docs/improvements/selective-fix.md) — the OpKinds the user DESELECTED in the Plan card.
+  // INTRA-PLAN state (a per-row checkbox; default = nothing excluded ⇒ full fix). Forwarded VERBATIM through
+  // buildOptions to BOTH plan and execute as `excludeKinds`, so a re-previewed plan and its committed run
+  // share the mask byte-for-byte. DELIBERATELY ABSENT from the stale-plan reset deps below: toggling a row
+  // re-previews IN PLACE via togglePlanKind (it does NOT invalidate the plan), unlike every other option.
+  // Reset to empty on every fresh preview(). Empty ⇒ byte-identical to today (no excludeKinds forwarded).
+  const [excludeKinds, setExcludeKinds] = useState<Set<OpKind>>(() => new Set());
+
   // Scale-tier export — own Pro opt-in, DEFAULT OFF (NOT under aggressive). `tierSuffixes` holds the
   // LOWER tiers the user opted into; the scale-1 top tier is always implied (added when building the
   // ladder). Default selection mirrors the design preset (720p + 540p). Off OR no enabled tier beyond
@@ -782,8 +793,10 @@ function FixCard({ files }: { files: PickedFile[] }) {
 
   // ONE source of truth for the FixOptions both the dry-run preview (mode:'plan') and the execute run
   // (mode:'execute') send — so "Run fix" commits the EXACT plan the preview described, byte-for-byte.
-  // All omitted/false/empty values reproduce today's behavior in the worker.
-  function buildOptions(): FixOptions {
+  // All omitted/false/empty values reproduce today's behavior in the worker. `over` lets a toggle pass the
+  // NEXT exclude set explicitly (no async setState-batching dependency); absent ⇒ the live `excludeKinds`.
+  function buildOptions(over?: Set<OpKind>): FixOptions {
+    const exclude = over ?? excludeKinds;
     return {
       targetMime: 'image/avif',
       quality: 0.85,
@@ -813,19 +826,50 @@ function FixCard({ files }: { files: PickedFile[] }) {
       // to today. The plan sets each repack/pack op's symmetric gutter >= extrude (invariant 5: a
       // gutter can grow a sheet ⇒ VRAM reported honestly via extrudeVramDelta).
       extrude: extrude > 0 ? extrude : undefined,
+      // Selective fix — the deselected OpKinds (empty ⇒ undefined ⇒ full fix, byte-identical to today).
+      // The worker SKIPS each excluded kind and surfaces an honest skipped[] note (never a silent drop).
+      excludeKinds: exclude.size > 0 ? [...exclude] : undefined,
     };
   }
 
+  // Monotonic preview request id — guards against an out-of-order worker resolve when rapid toggles spawn
+  // overlapping plan passes (each toggle starts one planFix; only the LATEST resolve may write the phase).
+  const previewSeq = useRef(0);
+
   // Dry-run preview: post mode:'plan' (cheap/pure — no compose/encode/zip) and show the Plan card. The
-  // user confirms with "Run fix" (re-posts the SAME options with mode:'execute' via run()).
-  async function preview() {
-    setPhase({ t: 'planning' });
+  // user confirms with "Run fix" (re-posts the SAME options with mode:'execute' via run()). `over` lets a
+  // PlanCard toggle re-preview with the explicit next exclude set (no setState-batching dependency); a fresh
+  // preview (no `over`) resets the selection to empty unconditionally, so re-entering the plan starts full.
+  // A FRESH preview (over absent) flips to the 'planning' spinner; a TOGGLE re-preview (over present) keeps
+  // the PlanCard MOUNTED with a subtle pending hint (no flicker, no lost checkbox focus) — design B1/S4.
+  async function preview(over?: Set<OpKind>) {
+    if (!over) setExcludeKinds(new Set());
+    const seq = ++previewSeq.current;
+    if (over) setPhase((p) => (p.t === 'plan' ? { ...p, pending: true } : { t: 'planning' }));
+    else setPhase({ t: 'planning' });
     try {
-      const summary = await planFix(files, buildOptions());
+      const summary = await planFix(files, buildOptions(over));
+      if (seq !== previewSeq.current) return; // a newer toggle superseded this preview — drop the stale resolve
       setPhase({ t: 'plan', summary });
     } catch (e) {
+      if (seq !== previewSeq.current) return;
       setPhase({ t: 'error', message: e instanceof Error ? e.message : String(e) });
     }
+  }
+
+  // Toggle one OpKind in/out of the deselected set and re-preview IN PLACE with the explicit next set (so a
+  // mid-flight toggle is never dropped to a stale guard, and Run commits exactly the previewed mask). The
+  // worker recomputes the MASKED plan (design S4) — opCounts/refs/skips reflect the chosen subset, never a
+  // faked client-side recount. The selection is intra-plan: this does NOT reset to idle (excludeKinds is
+  // intentionally out of the stale-plan reset deps below).
+  function togglePlanKind(kind: OpKind) {
+    setExcludeKinds((prev) => {
+      const next = new Set(prev);
+      if (next.has(kind)) next.delete(kind);
+      else next.add(kind);
+      void preview(next);
+      return next;
+    });
   }
 
   async function run() {
@@ -842,6 +886,8 @@ function FixCard({ files }: { files: PickedFile[] }) {
   // Stale-plan invalidation: if any option toggle changes after a preview, the shown plan no longer
   // matches what "Run fix" would commit — reset to the options view so the user re-previews. Deps are
   // EXACTLY the live FixCard option state (skinGuard is a const {}, not state). Skips the first render.
+  // `excludeKinds` is DELIBERATELY ABSENT here (selective fix): a Plan-card row toggle re-previews IN PLACE
+  // via togglePlanKind — it does NOT invalidate the plan. Do NOT add it, or every toggle resets to idle.
   const sawPlan = useRef(false);
   useEffect(() => {
     if (sawPlan.current) setPhase({ t: 'idle' });
@@ -868,7 +914,7 @@ function FixCard({ files }: { files: PickedFile[] }) {
       ) : phase.t === 'running' ? (
         <p className="mt-2.5 font-mono text-xs text-teal">{t('fix.optimizing')} {phase.p.total > 1 ? `${phase.p.done}/${phase.p.total}` : ''} {phase.p.label}</p>
       ) : phase.t === 'plan' ? (
-        <PlanCard summary={phase.summary} onRun={run} onBack={() => setPhase({ t: 'idle' })} disabled={files.length === 0} />
+        <PlanCard summary={phase.summary} excluded={excludeKinds} pending={phase.pending ?? false} onToggle={togglePlanKind} onRun={run} onBack={() => setPhase({ t: 'idle' })} disabled={files.length === 0} />
       ) : phase.t === 'done' ? (
         <Receipt receipt={phase.out.receipt} onRedownload={() => downloadZip(phase.out.zip)} />
       ) : (
@@ -923,7 +969,7 @@ function FixCard({ files }: { files: PickedFile[] }) {
               fix shouldn't run blind. "Run fix" in the Plan card then commits the IDENTICAL options. */}
           <button
             type="button"
-            onClick={preview}
+            onClick={() => void preview()}
             disabled={files.length === 0}
             className="mt-2 w-full rounded-lg bg-cta px-3 py-2 font-sans text-xs font-semibold text-white shadow-[0_2px_6px_rgba(21,160,106,0.32)] transition hover:bg-cta-hover disabled:opacity-55"
           >
@@ -1084,25 +1130,54 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
 // reference-changing banner (reused fix.mergeWarn), and the honesty note (counts only — byte/VRAM savings
 // appear AFTER Run; the refs flag is a prediction; tiers are an upper bound). "Run fix" commits the
 // IDENTICAL options via the execute path (auto-download); "Back" returns to the options view.
-function PlanCard({ summary, onRun, onBack, disabled }: { summary: FixPlanSummary; onRun: () => void; onBack: () => void; disabled: boolean }) {
+//
+// SELECTIVE FIX (docs/improvements/selective-fix.md): each opCounts row is a checkbox, DEFAULT checked (the
+// kind runs). Unchecking adds the kind to `excluded` and re-previews IN PLACE via onToggle (counts/refs/skips
+// update to reflect the masked plan the worker re-computes — never recomputed client-side, no faked numbers).
+// The card stays MOUNTED across a toggle's re-preview (`pending` shows a subtle "updating…" hint, no flicker,
+// checkbox focus kept); the worker's masked summary then replaces it. REFERENCE_CHANGING kinds keep the warn
+// token; a deselected row is struck through. If EVERY kind is unchecked there is nothing to run ⇒ Run is
+// disabled with an honest note (the worker would only emit deselected-skips).
+function PlanCard({ summary, excluded, pending, onToggle, onRun, onBack, disabled }: { summary: FixPlanSummary; excluded: Set<OpKind>; pending: boolean; onToggle: (kind: OpKind) => void; onRun: () => void; onBack: () => void; disabled: boolean }) {
   const { t } = useI18n();
   // Counts grouped by kind in the canonical OP_KIND_ORDER (zero kinds were already omitted by the worker).
   const rows = OP_KIND_ORDER.map((k) => [k, summary.opCounts[k]] as const).filter((e): e is readonly [OpKind, number] => (e[1] ?? 0) > 0);
+  // Nothing left to run when every shown kind is deselected (the committed run would be a pass-through). Run
+  // is disabled with an honest note rather than committing a no-op fix. summary.totalOps>0 ⇒ rows non-empty.
+  const allDeselected = rows.length > 0 && rows.every(([kind]) => excluded.has(kind));
   return (
     <div className="mt-2.5 space-y-1.5 text-left">
       <div className="flex items-center justify-center gap-1.5 font-mono text-xs text-teal">
         <span className="h-2 w-2 rounded-full bg-teal" /> {t('fix.plan.title', { n: summary.totalOps })}
+        {/* Re-preview in flight after a checkbox toggle: subtle hint, card stays mounted (no flicker). Reuses
+            the existing dropzone.analyzing string so no new 9-catalog key is needed (design N3). */}
+        {pending ? <span className="font-mono text-[10px] text-ink-soft/70">· {t('dropzone.analyzing')}</span> : null}
       </div>
       {summary.totalOps === 0 ? (
         <p className="font-mono text-[11px] leading-relaxed text-ink-soft">{t('fix.plan.empty')}</p>
       ) : (
         <div className="space-y-0.5 rounded-md bg-bg p-2 font-mono text-[11px]">
-          {rows.map(([kind, n]) => (
-            <div key={kind} className="flex items-center justify-between gap-2">
-              <span className={REFERENCE_CHANGING.has(kind) ? 'text-warn' : 'text-ink-soft'}>{t(`fix.op.${kind}`)}</span>
-              <span className={REFERENCE_CHANGING.has(kind) ? 'text-warn' : 'text-ink'}>{n}</span>
-            </div>
-          ))}
+          {rows.map(([kind, n]) => {
+            const off = excluded.has(kind);
+            const ref = REFERENCE_CHANGING.has(kind);
+            const label = t(`fix.op.${kind}`);
+            return (
+              <label key={kind} className="flex cursor-pointer items-center justify-between gap-2">
+                <span className="flex items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    checked={!off}
+                    onChange={() => onToggle(kind)}
+                    aria-label={t('fix.plan.include', { op: label })}
+                    className="accent-teal"
+                  />
+                  <span className={`${ref ? 'text-warn' : 'text-ink-soft'} ${off ? 'line-through opacity-55' : ''}`}>{label}</span>
+                  {off ? <span className="text-[9px] uppercase tracking-[0.06em] text-warn">{t('fix.plan.deselected')}</span> : null}
+                </span>
+                <span className={`${ref ? 'text-warn' : 'text-ink'} ${off ? 'line-through opacity-55' : ''}`}>{n}</span>
+              </label>
+            );
+          })}
         </div>
       )}
       {/* Prominent reference-changing warning — REUSED receipt banner (fix.mergeWarn): committing this plan
@@ -1126,11 +1201,14 @@ function PlanCard({ summary, onRun, onBack, disabled }: { summary: FixPlanSummar
       {/* Honesty note (invariant 5): counts only — byte/VRAM savings appear after Run; refs flag is a
           prediction; tiers are an upper bound; some checks run only at execute. */}
       <p className="font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.plan.deferredNote')}</p>
-      {/* Primary commit: re-post the IDENTICAL options with mode:'execute' (today's auto-download path). */}
+      {/* All kinds deselected ⇒ nothing to run; honest note + disabled Run (no no-op commit, no faked work). */}
+      {allDeselected ? <p className="font-mono text-[10px] text-warn">{t('fix.plan.noneSelected')}</p> : null}
+      {/* Primary commit: re-post the IDENTICAL options (incl. the selected excludeKinds mask) with
+          mode:'execute' (today's auto-download path). Disabled when nothing is loaded OR all kinds are off. */}
       <button
         type="button"
         onClick={onRun}
-        disabled={disabled}
+        disabled={disabled || allDeselected}
         className="mt-1 w-full rounded-lg bg-cta px-3 py-2 font-sans text-xs font-semibold text-white shadow-[0_2px_6px_rgba(21,160,106,0.32)] transition hover:bg-cta-hover disabled:opacity-55"
       >
         {t('fix.plan.run')}

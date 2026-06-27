@@ -1,5 +1,9 @@
 import type { ImageMime, LazyMarking, ScaleTier, SkinGuard } from '@asset-doctor/core';
 import type { PackMode, StaticGranularity } from '@asset-doctor/ingest';
+// Type-only import (erased under verbatimModuleSyntax ⇒ no runtime cycle with op-manifest, which already
+// type-imports FixPlanSummary/PlanOpCounts from here). op-manifest.ts is the documented OWNER of the OpKind
+// vocabulary (the closed verb set + REFERENCE_CHANGING + OP_KIND_ORDER); selective-fix reuses it verbatim.
+import type { OpKind } from '../lib/op-manifest';
 
 export interface FixInputFile {
   path: string;
@@ -74,6 +78,17 @@ export interface FixOptions {
    *  CAN grow a sheet to the next POT ⇒ MORE VRAM — reported honestly (extrudeVramDelta + existing
    *  vramBytes*), never claimed free (invariant 5). Absent/0 ⇒ no extrude (byte-identical to today). */
   extrude?: number;
+
+  // ── Selective fix (docs/improvements/selective-fix.md) — let the dev deselect op categories in the
+  //    dry-run Plan card and execute only the chosen subset. ──
+  /** Op KINDS (OpKind, op-manifest.ts) the user DESELECTED in the Plan card → the worker SKIPS them and
+   *  surfaces an honest `skipped[]` note (never a silent drop; counts/receipt reflect what actually ran).
+   *  Reuses the SAME OpKind vocabulary the plan tally + receipt change-manifest key on, incl. the worker-
+   *  side `tier` multiplier (gated, not a FixOp). Forwarded VERBATIM through buildOptions to BOTH plan and
+   *  execute so a re-previewed plan and its committed run share the mask byte-for-byte. ADDITIVE:
+   *  absent/empty ⇒ full fix, byte-identical to today (no behavior change). Deterministic (a set of OpKind;
+   *  skip notes ordered by OP_KIND_ORDER). */
+  excludeKinds?: OpKind[];
 }
 
 export interface FixOverride {

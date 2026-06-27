@@ -80,26 +80,44 @@ export interface PlanGateInputs {
   referencesChanged: boolean;
 }
 
-/** Tally the STRUCTURED plan into per-kind op counts (the receipt's OpKind vocabulary). Splits match the
- *  worker execute path: a `repack` with one atlasRef → repack, with >1 → merge; a `drop` carrying an
- *  `ownerRef` → dedup, else legacy drop; resize/transcode/pack are literal. The worker-side `tier`
- *  multiplier is folded in from `g.tierAssets`. Zero-count kinds are OMITTED. Pure, deterministic. */
+/** Classify ONE structured FixOp into the OpKind the plan tally + receipt key on — the SAME split the
+ *  worker execute path makes: a `repack` with one atlasRef → repack, with >1 → merge; a `drop` carrying an
+ *  `ownerRef` → dedup, else legacy drop; resize/transcode/pack are literal. SINGLE SOURCE OF TRUTH so the
+ *  selective-fix worker filter (skip ops whose kind is deselected) and `summarizeOpCounts` can't drift on
+ *  the repack/merge + drop/dedup splits. Total (covers every FixOp variant); the worker-side `tier`
+ *  multiplier is NOT a FixOp (gated separately). Pure, deterministic. */
+export function fixOpKind(op: FixOp): Exclude<OpKind, 'tier'> {
+  if (op.kind === 'repack') return op.atlasRefs.length > 1 ? 'merge' : 'repack';
+  if (op.kind === 'drop') return op.ownerRef != null ? 'dedup' : 'drop';
+  return op.kind; // 'resize' | 'transcode' | 'pack' — literal
+}
+
+/** Tally the STRUCTURED plan into per-kind op counts (the receipt's OpKind vocabulary). Splits route
+ *  through `fixOpKind` (the single source of truth). The worker-side `tier` multiplier is folded in from
+ *  `g.tierAssets`. Zero-count kinds are OMITTED. Pure, deterministic. */
 export function summarizeOpCounts(ops: readonly FixOp[], tierAssets: number): PlanOpCounts {
   const counts: Record<OpKind, number> = { repack: 0, merge: 0, resize: 0, transcode: 0, drop: 0, pack: 0, dedup: 0, tier: 0 };
-  for (const op of ops) {
-    if (op.kind === 'repack') {
-      if (op.atlasRefs.length > 1) counts.merge++;
-      else counts.repack++;
-    } else if (op.kind === 'drop') {
-      if (op.ownerRef != null) counts.dedup++;
-      else counts.drop++;
-    } else if (op.kind === 'resize') counts.resize++;
-    else if (op.kind === 'transcode') counts.transcode++;
-    else if (op.kind === 'pack') counts.pack++;
-  }
+  for (const op of ops) counts[fixOpKind(op)]++;
   counts.tier += Math.max(0, tierAssets);
   const out: PlanOpCounts = {};
   for (const k of OP_KIND_ORDER) if (counts[k] > 0) out[k] = counts[k];
+  return out;
+}
+
+/** Honest skip notes (selective fix, docs/improvements/selective-fix.md) for the op KINDS the user
+ *  DESELECTED in the Plan card that WOULD have run this fix. The worker pushes these into `skipped[]` so a
+ *  deselected op is SURFACED (never silently dropped) and the receipt reflects exactly what ran. Emitted in
+ *  OP_KIND_ORDER (deterministic), one note per deselected-and-would-run kind. `wouldRunByKind` is the set of
+ *  kinds the run actually has work for (incl. the worker-side `tier` multiplier when tiering would run), so
+ *  we never surface a skip for a kind that had nothing to do. Pure: same input ⇒ deep-equal output. */
+export function deselectedSkips(
+  excluded: ReadonlySet<OpKind>,
+  wouldRunByKind: ReadonlySet<OpKind>,
+): { assetRef: string; reason: string }[] {
+  const out: { assetRef: string; reason: string }[] = [];
+  for (const k of OP_KIND_ORDER) {
+    if (excluded.has(k) && wouldRunByKind.has(k)) out.push({ assetRef: '(deselected)', reason: `${k} skipped: deselected in plan` });
+  }
   return out;
 }
 

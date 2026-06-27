@@ -75,7 +75,7 @@ import { makeZip, type ZipEntry } from './zip';
 // PURE dry-run plan summary (docs/improvements/dry-run-plan-preview.md): tallies the STRUCTURED FixOp[]
 // the execute path would run + the worker-side tier multiplier into the receipt's OpKind vocabulary. No
 // byte/VRAM number (honesty, invariant 5). The worker only assembles the pixel-free gate facts.
-import { dedupKeepConsumerSkip, summarizePlan, type PlanGateInputs } from '../lib/op-manifest';
+import { dedupKeepConsumerSkip, deselectedSkips, fixOpKind, summarizePlan, type OpKind, type PlanGateInputs } from '../lib/op-manifest';
 import type { FixInputFile, FixMode, FixOptions, FixReceipt, FixRequest, FixResponse } from './fix-protocol';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
@@ -271,6 +271,27 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     packGroups,
   );
 
+  // ── SELECTIVE FIX (docs/improvements/selective-fix.md) ────────────────────────────────────────────
+  // The dev can DESELECT op categories in the dry-run Plan card; the deselected OpKinds arrive in
+  // opts.excludeKinds and the worker SKIPS them (no pixel work) while surfacing an honest skipped[] note.
+  // `runs(op)` classifies a FixOp through the SHARED fixOpKind (op-manifest.ts — same repack/merge +
+  // drop/dedup split as the plan tally + receipt) and returns false when its kind is excluded; the execute
+  // loop / Phase A prediction / dedup-drop deferral all gate on it. `tierExcluded` gates the worker-side
+  // `tier` multiplier (a gated loop, never a FixOp). ADDITIVE: empty/absent excludeKinds ⇒ everything runs
+  // ⇒ byte-identical to today (no behavior change). Deterministic (a Set of OpKind; skip notes ordered by
+  // OP_KIND_ORDER via deselectedSkips). The plan-mode short-circuit BELOW honors the SAME mask (design S4):
+  // it predicts refs/counts/skips over the SUBSET that still runs, so a re-preview after a toggle reflects
+  // the masked plan the committed run will execute (honest preview, not the full plan).
+  const excluded = new Set<OpKind>(opts.excludeKinds ?? []);
+  const runs = (op: FixOp): boolean => !excluded.has(fixOpKind(op));
+  const tierExcluded = excluded.has('tier');
+  // The set of OpKinds this run actually has work for (BEFORE exclusion) — so deselectedSkips surfaces a
+  // skip ONLY for a deselected kind that WOULD have run, never a phantom skip for a kind with nothing to do.
+  // Covers the structured FixOps (via fixOpKind) PLUS the worker-side `tier` multiplier (gated, not a FixOp)
+  // when the tier loop would be entered. Deterministic; computed once from the unfiltered plan.
+  const wouldRunByKind = new Set<OpKind>(plan.ops.map(fixOpKind));
+  if (tieringOn && !folderAlreadyTiered) wouldRunByKind.add('tier');
+
   // ── per-asset effective encode options (Feature 2, design §4c/§6) ─────────────────────────────────
   // Resolve the EFFECTIVE quality/effort/target per asset: fold the per-folder/per-type overrides onto
   // the request base (resolveOptions, pure), then lower quality on downscaled output (scaleAwareQuality).
@@ -311,6 +332,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   // gates), post the `fix-plan` summary, and STOP before the pixel loop. mode 'execute' (the default) falls
   // straight through ⇒ byte-identical to today. HONESTY (invariant 5): the summary carries op COUNTS only —
   // no byte/VRAM number is computed here.
+  // SELECTIVE FIX (design S4): this block honors the SAME mask the execute path does — every prediction
+  // below gates on runs()/tierExcluded, so the previewed opCounts / referencesChanged / skipped reflect the
+  // SUBSET the committed run will execute, and deselectedSkips() appends one honest note per deselected kind.
+  // Empty/absent excludeKinds ⇒ runs() always true, tierExcluded false, no notes ⇒ byte-identical to today.
   if (mode === 'plan') {
     // Refs a repack/merge/pack op claims (mirrors the execute path's `tierTransformed`): their emitted
     // sheet is not re-fed into tiering in v1, so the tier loop would surface an honest skip, not a tier.
@@ -321,6 +346,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     const planReplaced = new Set<string>();
     let predictRefsChanged = false;
     for (const op of plan.ops) {
+      // SELECTIVE FIX (design S4): a DESELECTED op does no work at execute, so it must NOT drive the
+      // transformed/dropped/replaced tracking NOR the reference-changing prediction. Mask with runs(op) —
+      // empty/absent excludeKinds ⇒ runs() always true ⇒ today's full-plan prediction, byte-identical.
+      if (!runs(op)) continue;
       if (op.kind === 'repack') {
         for (const rf of op.atlasRefs) planTransformed.add(rf);
         if (op.atlasRefs.length > 1) predictRefsChanged = true; // a merge rewrites manifest references
@@ -350,6 +379,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     // repack branch refuses a >1-page Spine before any pixel work).
     for (const op of plan.ops) {
       if (op.kind !== 'repack' || op.atlasRefs.length !== 1) continue;
+      if (!runs(op)) continue; // deselected repack ⇒ no repack runs ⇒ no per-op repack skip (deselectedSkips covers it)
       const ref = op.atlasRefs[0]!;
       if (!spineRefs.has(ref)) continue;
       const info = spineInfoOf(ref);
@@ -366,6 +396,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     const dedupSkipped = new Set<FixOp>();
     for (const op of plan.ops) {
       if (!isOwnerAwareDrop(op)) continue;
+      if (!runs(op)) continue; // deselected dedup ⇒ Phase C drops nothing ⇒ no keep-consumer skip (deselectedSkips covers it)
       const consumerRef = op.assetRef;
       const reason = dedupKeepConsumerSkip(basename(op.ownerRef!), {
         keepConsumer: op.keepConsumer ?? false,
@@ -380,16 +411,21 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         planDropped.delete(consumerRef); // kept ⇒ source survives ⇒ tier-eligible like execute
       }
     }
-    const countedOps = dedupSkipped.size > 0 ? plan.ops.filter((op) => !dedupSkipped.has(op)) : plan.ops;
-    // Tier gates (same emission as the tier multiplier loop, pixel-free subset).
+    // SELECTIVE FIX (design S4): count only the ops the committed run will actually execute — drop the
+    // no-op keep-consumer dedup drops AND every DESELECTED op (runs()). Empty/absent excludeKinds ⇒ runs()
+    // always true ⇒ exactly today's `plan.ops` (minus the keep-consumer no-ops), byte-identical.
+    const countedOps = plan.ops.filter((op) => !dedupSkipped.has(op) && runs(op));
+    // Tier gates (same emission as the tier multiplier loop, pixel-free subset). DESELECTING `tier` gates the
+    // whole multiplier off (tierExcluded), so its tier count AND its tier-context skips (folder-already-tiered,
+    // dedup-disabled, per-asset refusals/transformed) are all suppressed — they describe tiering that won't run.
     let tierAssets = 0;
-    if (tieringOn && folderAlreadyTiered) {
+    if (tieringOn && !tierExcluded && folderAlreadyTiered) {
       planSkips.push({ assetRef: '(folder)', reason: 'tier skipped: folder already ships resolution tiers' });
     }
-    if (tieringOn && !folderAlreadyTiered && opts.aggressive && dedupGroups && dedupGroups.length > 0) {
+    if (tieringOn && !tierExcluded && !folderAlreadyTiered && opts.aggressive && dedupGroups && dedupGroups.length > 0) {
       planSkips.push({ assetRef: '(dedup)', reason: 'dedup repoint disabled: scale tiering renames owners (kept duplicate consumers)' });
     }
-    if (tieringOn && !folderAlreadyTiered) {
+    if (tieringOn && !tierExcluded && !folderAlreadyTiered) {
       for (const a of merged) {
         const ref = a.kind === 'atlas' ? a.atlas.name : a.image.name;
         const refusal = tierRefusal(ref);
@@ -408,6 +444,11 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       }
     }
     if (tieringOn && tierAssets > 0) predictRefsChanged = true; // tiering renames the source ⇒ reference-changing
+
+    // SELECTIVE FIX (design S4): surface ONE honest "<kind> skipped: deselected in plan" note per deselected
+    // kind that WOULD have run — the SAME deterministic (OP_KIND_ORDER) emitter the execute path appends to
+    // the receipt, so the preview's skip list mirrors the committed run. Empty mask ⇒ no notes ⇒ today.
+    for (const s of deselectedSkips(excluded, wouldRunByKind)) planSkips.push(s);
 
     const gate: PlanGateInputs = { ops: countedOps, tierAssets, skipped: planSkips, referencesChanged: predictRefsChanged };
     post({ type: 'fix-plan', summary: summarizePlan(gate) });
@@ -487,7 +528,11 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   // op facts so the helper stays browser-API-free. Same logic the Node round-trip test drives.
   const ownerFinalName = predictOwnerFinalNames(dedupGroups, (ref) => {
     const op = plan.ops.find((o) => 'assetRef' in o && o.assetRef === ref);
-    const transcoded = op?.kind === 'transcode';
+    // Selective fix: a DESELECTED transcode op will NOT rename this owner at execute, so it must NOT be
+    // predicted as transcoded — else the owner's actual name (original) would diverge from the prediction
+    // (renamed) and Phase C would silently degrade an otherwise-running dedup to keep-consumer. Mask with
+    // runs(op). When transcode is NOT excluded this is exactly today's `op?.kind === 'transcode'`.
+    const transcoded = op?.kind === 'transcode' && runs(op);
     return {
       imagePath: pathByRef.get(ref),
       manifestPath: manifestPathOf(ref),
@@ -501,7 +546,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   const ownerActualName = new Map<string, OwnerFinalName>();
   for (const [ref, fn] of ownerFinalName) ownerActualName.set(ref, { ...fn });
   // Owner-aware drops are DEFERRED to Phase C (executed after all transforms settle the owner names).
-  const dedupDrops = plan.ops.filter(isOwnerAwareDrop);
+  // Selective fix: a deselected `dedup` kind drops NONE of these (filtered out here ⇒ no repoint/drop work
+  // in Phase C); the honest skip is surfaced once via deselectedSkips below (not per consumer). When dedup
+  // is NOT excluded `runs` is always true here ⇒ today's `plan.ops.filter(isOwnerAwareDrop)` exactly.
+  const dedupDrops = plan.ops.filter(isOwnerAwareDrop).filter(runs);
 
   const bmpCache = new Map<string, ImageBitmap>();
   const bitmapOf = async (ref: string): Promise<ImageBitmap | null> => {
@@ -631,7 +679,11 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   let polyVramBefore = 0; // Σ vramBytesBefore of polygon-WON ops (basis for the honest saved-% figure)
   let polyVramAfter = 0; // Σ vramBytesAfter of those same ops
   let done = 0;
-  const total = plan.ops.length + 1;
+  // Selective fix: count ONLY the ops that will actually run (+1 for the zip step) so the progress bar
+  // fills to 100% when kinds are excluded. excludeKinds empty ⇒ plan.ops.filter(runs).length === plan.ops
+  // .length ⇒ today's `plan.ops.length + 1` exactly. Owner-aware drops are deferred to Phase C (the main
+  // loop `continue`s past them), but they were already counted by today's total too — identical here.
+  const total = plan.ops.filter(runs).length + 1;
 
   // Edge-extrude (bleed, design OPTION A) per-op resolution. The symmetric packing gutter must be ≥ the
   // requested extrude (so the bleed never crosses into a neighbor — pack.ts owns the band on all 4 sides),
@@ -645,6 +697,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   };
 
   for (const op of plan.ops) {
+    // Selective fix: this op's KIND was deselected in the Plan card → do NO pixel work for it. The honest
+    // skip is surfaced once-per-kind via deselectedSkips after the loop (not per op). `total` already
+    // excludes these, so the progress bar stays accurate. excludeKinds empty ⇒ runs() always true ⇒ today.
+    if (!runs(op)) continue;
     // Owner-aware dedup drops are executed in Phase C (after transforms settle owner names) — skip here.
     if (op.kind === 'drop' && op.ownerRef != null) continue;
     post({ type: 'fix-progress', label: op.kind, done: done++, total });
@@ -1241,15 +1297,19 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   // each (single resample chain, never tier-from-tier; NEVER upscales). Tiering is REFERENCE-CHANGING
   // (the game must select a tier at runtime) and contributes 0 to vramSaved (tiers are alternatives — the
   // top tier == the source footprint). The folder-already-tiered case skips the whole loop honestly.
-  if (tieringOn && folderAlreadyTiered) {
+  // Selective fix: when `tier` is DESELECTED the whole tier multiplier is skipped (no pixel work); the
+  // honest "tier skipped: deselected in plan" note is surfaced once via deselectedSkips below, so the
+  // tier-context skips here (folder-already-tiered / dedup-disabled) — which describe tiering behavior that
+  // will NOT happen — are gated off. tierExcluded false ⇒ identical to today.
+  if (tieringOn && !tierExcluded && folderAlreadyTiered) {
     skipped.push({ assetRef: '(folder)', reason: 'tier skipped: folder already ships resolution tiers' });
   }
   // Dedup × tiering (design correction 8): when both are on, plan.ts disables owner-aware repoint (tiering
   // renames owners, so a repoint would target a name that no longer exists). Surface it once, honestly.
-  if (tieringOn && !folderAlreadyTiered && opts.aggressive && dedupGroups && dedupGroups.length > 0) {
+  if (tieringOn && !tierExcluded && !folderAlreadyTiered && opts.aggressive && dedupGroups && dedupGroups.length > 0) {
     skipped.push({ assetRef: '(dedup)', reason: 'dedup repoint disabled: scale tiering renames owners (kept duplicate consumers)' });
   }
-  if (tieringOn && !folderAlreadyTiered) {
+  if (tieringOn && !tierExcluded && !folderAlreadyTiered) {
     // Edge-clamp source dimensions to maxEdge (same longest-edge math as plan.ts pass-1 oversize). NEVER
     // upscales — only the longest edge over maxEdge is shrunk; otherwise identity.
     const clampToMaxEdge = (size: Size): Size => {
@@ -1378,6 +1438,14 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       operations.push(`tier ${basename(ref)} → ${tiers.length} resolution${tiers.length === 1 ? '' : 's'}`);
     }
   }
+
+  // ── SELECTIVE FIX honest skips (docs/improvements/selective-fix.md) ───────────────────────────────
+  // For every op KIND the dev DESELECTED in the Plan card that WOULD have run, surface ONE honest skipped[]
+  // note ("<kind> skipped: deselected in plan"), in OP_KIND_ORDER. No pixel work ran for these (the loops
+  // above already `continue`d/gated past them), so the receipt now reflects exactly what executed — a
+  // deselected op is SURFACED, never silently dropped (no faked savings). excludeKinds empty ⇒ this is a
+  // no-op ⇒ skipped[] / receipt byte-identical to today.
+  for (const s of deselectedSkips(excluded, wouldRunByKind)) skipped.push(s);
 
   // ── pass-through untouched files → drop-in optimized folder ──
   for (const f of files) {

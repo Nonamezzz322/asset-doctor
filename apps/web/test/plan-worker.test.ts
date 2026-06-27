@@ -32,7 +32,7 @@ import { groupFiles, keyOf, type RawFile } from '@asset-doctor/ingest';
 import { parseAtlas, parseImage, parseSpineAtlasText, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
 import { analyze, mergeSharedAtlases, hasResolutionToken } from '@asset-doctor/analysis';
 import { planFix, validateTiers, DEFAULT_SCALE_TIERS, resolveImageRef, renamedTo, EXT, isOwnerAwareDrop } from '@asset-doctor/fix';
-import { summarizePlan, summarizeOpCounts, dedupKeepConsumerSkip, type PlanGateInputs } from '../src/lib/op-manifest';
+import { summarizePlan, summarizeOpCounts, dedupKeepConsumerSkip, deselectedSkips, fixOpKind, type OpKind, type PlanGateInputs } from '../src/lib/op-manifest';
 import type { FixOptions, FixPlanSummary } from '../src/worker/fix-protocol';
 
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects/tier-source');
@@ -189,12 +189,22 @@ function assemblePlanGate(b: Built, opts: FixOptions): { gate: PlanGateInputs; p
   // scenarios) to the request base — so the loose-image rename check below uses opts.targetMime directly.
   const targetMimeFor = (ref: string): ImageMime => (opts.overrides?.find((o) => ref.startsWith(o.match))?.targetMime ?? opts.targetMime);
 
-  // ── PLAN short-circuit gate assembly (fix.worker.ts ~311-382), pixel-free ──
+  // ── SELECTIVE FIX mask (fix.worker.ts:283-291) — mirrored IDENTICALLY (design B2). The plan block honors
+  // the SAME runs()/tierExcluded/wouldRunByKind the execute path does. Empty/absent excludeKinds ⇒ runs()
+  // always true, tierExcluded false, no deselected notes ⇒ byte-identical to the pre-mask gate. ──
+  const excluded = new Set<OpKind>(opts.excludeKinds ?? []);
+  const runs = (op: FixOp): boolean => !excluded.has(fixOpKind(op));
+  const tierExcluded = excluded.has('tier');
+  const wouldRunByKind = new Set<OpKind>(plan.ops.map(fixOpKind));
+  if (tieringOn && !folderAlreadyTiered) wouldRunByKind.add('tier');
+
+  // ── PLAN short-circuit gate assembly (fix.worker.ts ~336-446), pixel-free + mask-aware ──
   const planTransformed = new Set<string>();
   const planDropped = new Set<string>();
   const planReplaced = new Set<string>();
   let predictRefsChanged = false;
   for (const op of plan.ops) {
+    if (!runs(op)) continue; // deselected op does no work ⇒ not tracked / not ref-changing
     if (op.kind === 'repack') {
       for (const rf of op.atlasRefs) planTransformed.add(rf);
       if (op.atlasRefs.length > 1) predictRefsChanged = true;
@@ -217,6 +227,7 @@ function assemblePlanGate(b: Built, opts: FixOptions): { gate: PlanGateInputs; p
   // (no packCollisionSkips in these scenarios — packLoose off)
   for (const op of plan.ops) {
     if (op.kind !== 'repack' || op.atlasRefs.length !== 1) continue;
+    if (!runs(op)) continue; // deselected repack ⇒ no per-op repack skip (deselectedSkips covers it)
     const ref = op.atlasRefs[0]!;
     if (!spineRefs.has(ref)) continue;
     const info = spineInfoOf(ref);
@@ -228,6 +239,7 @@ function assemblePlanGate(b: Built, opts: FixOptions): { gate: PlanGateInputs; p
   const dedupSkipped = new Set<FixOp>();
   for (const op of plan.ops) {
     if (!isOwnerAwareDrop(op)) continue;
+    if (!runs(op)) continue; // deselected dedup ⇒ no keep-consumer skip (deselectedSkips covers it)
     const consumerRef = op.assetRef;
     const reason = dedupKeepConsumerSkip(basename(op.ownerRef!), {
       keepConsumer: op.keepConsumer ?? false,
@@ -242,10 +254,10 @@ function assemblePlanGate(b: Built, opts: FixOptions): { gate: PlanGateInputs; p
       planDropped.delete(consumerRef);
     }
   }
-  const countedOps = dedupSkipped.size > 0 ? plan.ops.filter((op) => !dedupSkipped.has(op)) : plan.ops;
+  const countedOps = plan.ops.filter((op) => !dedupSkipped.has(op) && runs(op));
   let tierAssets = 0;
-  if (tieringOn && folderAlreadyTiered) planSkips.push({ assetRef: '(folder)', reason: 'tier skipped: folder already ships resolution tiers' });
-  if (tieringOn && !folderAlreadyTiered) {
+  if (tieringOn && !tierExcluded && folderAlreadyTiered) planSkips.push({ assetRef: '(folder)', reason: 'tier skipped: folder already ships resolution tiers' });
+  if (tieringOn && !tierExcluded && !folderAlreadyTiered) {
     for (const a of merged) {
       const ref = a.kind === 'atlas' ? a.atlas.name : a.image.name;
       const refusal = tierRefusal(ref);
@@ -262,6 +274,10 @@ function assemblePlanGate(b: Built, opts: FixOptions): { gate: PlanGateInputs; p
     }
   }
   if (tieringOn && tierAssets > 0) predictRefsChanged = true;
+
+  // SELECTIVE FIX (design S4): one honest deselected-skip note per deselected-and-would-run kind, in
+  // OP_KIND_ORDER — the SAME emitter the worker plan block + execute receipt use.
+  for (const s of deselectedSkips(excluded, wouldRunByKind)) planSkips.push(s);
 
   const gate: PlanGateInputs = { ops: countedOps, tierAssets, skipped: planSkips, referencesChanged: predictRefsChanged };
   return { gate, plan, summary: summarizePlan(gate) };
@@ -378,5 +394,52 @@ describe('dry-run plan preview — worker plan short-circuit (T6)', () => {
     expect(renamedTo('a/banner.png', 'image/webp')).not.toBe('a/banner.png'); // ext changes ⇒ rename ⇒ ref-changing
     expect(renamedTo('a/banner.webp', 'image/webp')).toBe('a/banner.webp'); // same ext ⇒ no rename ⇒ drop-in
     expect(EXT['image/webp']).toBe('.webp'); // single source of truth for the rename
+  });
+
+  // ── SELECTIVE FIX masked-preview contract (docs/improvements/selective-fix.md S4 + reviewer B2) ──────
+  // The plan-mode short-circuit HONORS the mask (design S4): the previewed opCounts/referencesChanged/skipped
+  // reflect the SUBSET the committed run will execute. Two halves:
+  //   (a) additive-default regression pin — an absent/empty mask leaves the summary byte-identical to today.
+  //   (b) the mask actually masks — a non-empty mask changes the previewed counts/refs/skips coherently.
+  it('additive default: excludeKinds absent === explicitly-empty (preview byte-identical to pre-mask)', async () => {
+    const b = await buildWorkerState(loadRawFiles());
+    const base = assemblePlanGate(b, baseOptions({ scaleTiers: ladder }));
+    const emptyMask = assemblePlanGate(b, baseOptions({ scaleTiers: ladder, excludeKinds: [] }));
+    expect(emptyMask.summary).toEqual(base.summary);
+  });
+
+  it('a non-empty mask re-previews the SUBSET: deselected counts drop, deselected-skips appended, refs recomputed', async () => {
+    const b = await buildWorkerState(loadRawFiles());
+    const base = assemblePlanGate(b, baseOptions({ scaleTiers: ladder }));
+    // sanity: the unmasked plan HAS repack + tier (so masking them is meaningful) and predicts refs changed.
+    expect((base.summary.opCounts.repack ?? 0)).toBeGreaterThan(0);
+    expect((base.summary.opCounts.tier ?? 0)).toBeGreaterThan(0);
+    expect(base.summary.referencesChanged).toBe(true);
+
+    // deselect repack + tier — both gate the execute path here, so the masked preview must DIFFER.
+    const masked = assemblePlanGate(b, baseOptions({ scaleTiers: ladder, excludeKinds: ['repack', 'tier'] }));
+    expect(masked.summary).not.toEqual(base.summary);
+    // deselected kinds drop OUT of opCounts (they won't run) …
+    expect(masked.summary.opCounts.repack ?? 0).toBe(0);
+    expect(masked.summary.opCounts.tier ?? 0).toBe(0);
+    expect(masked.summary.totalOps).toBeLessThan(base.summary.totalOps);
+    // … and each surfaces ONE honest deselected-skip note in OP_KIND_ORDER (repack before tier).
+    const deselected = masked.summary.skipped.filter((s) => s.reason.endsWith('deselected in plan')).map((s) => s.reason);
+    expect(deselected).toEqual(['repack skipped: deselected in plan', 'tier skipped: deselected in plan']);
+  });
+
+  it('deselecting the ONLY reference-changing driver flips the previewed referencesChanged to false (honest banner)', async () => {
+    // A plain repack of an under-filled sheet is drop-in (refs unchanged); add tiering and tiering becomes the
+    // sole ref-changing driver. Deselect `tier` ⇒ the only remaining ops are the drop-in repacks ⇒ the
+    // previewed refs flag must be FALSE, so the PlanCard banner no longer over-warns on the chosen subset.
+    const b = await buildWorkerState(loadRawFiles());
+    const withTier = assemblePlanGate(b, baseOptions({ scaleTiers: ladder }));
+    expect(withTier.summary.referencesChanged).toBe(true); // tiering renames the source
+
+    const tierOff = assemblePlanGate(b, baseOptions({ scaleTiers: ladder, excludeKinds: ['tier'] }));
+    // with tier deselected, no remaining op rewrites references (the repacks are single-ref same-name drop-ins).
+    expect(tierOff.summary.referencesChanged).toBe(false);
+    // and the full-plan (tier-on) preview WITHOUT the mask still warns — so this is a real flip, not a constant.
+    expect(withTier.summary.referencesChanged).not.toBe(tierOff.summary.referencesChanged);
   });
 });
