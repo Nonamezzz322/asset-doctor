@@ -162,6 +162,16 @@
   "fix.tighter": "紧凑 {pct}%",
   "fix.tighterPlain": "更紧凑的打包",
   "fix.meshNote": "所示百分比为实测的打包收益。减少过绘需引擎侧网格（需自行启用）。",
+  "fix.extrude": "边缘扩展（出血）以消除接缝",
+  "fix.extrudeHint": "将每个精灵的边缘像素向打包间隙复制 {px}px——消除双线性/mipmap 接缝。会添加对称间隙，因此图集可能增长到下一个 2 的幂（显存更多，见下方）。",
+  "fix.extrudeVramDelta": "边缘扩展的间隙使某图集增加了 +{bytes:bytes} 显存（下一个 2 的幂）——修复接缝并非免费",
+  "fix.extrudeSkipped": {
+    "$count": "n",
+    "other": "{n} 个网格化/旋转的精灵已跳过——v1 不支持多边形边缘扩展"
+  },
+  "fix.extrude.off": "关闭",
+  "fix.extrude.px": "{n} px",
+  "fix.extrude.receipt": "已对 {blits} 个精灵进行 {px} px 边缘扩展",
   "fix.settings.title": "优化设置",
   "fix.settings.effort": "编码器强度",
   "fix.settings.effortHint": "0 = 快 · 6 = 最高。最高强度慢得多，尤其是 AVIF。",

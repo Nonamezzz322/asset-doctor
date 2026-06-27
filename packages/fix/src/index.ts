@@ -4,6 +4,10 @@
 
 export { pack } from './pack';
 export type { PackItem, Placement, PackBin, PackOptions } from './pack';
+// PURE edge-extrude (bleed) geometry — the drawImage src/dst rects the worker replicates into the
+// symmetric packing gutter (pack.ts OPTION A) to kill bilinear/mipmap seams. Geometry only, no canvas.
+export { effectiveExtrude, canExtrude, extrudePlan } from './extrude';
+export type { ExtrudeRect } from './extrude';
 export { repackAtlases, repackAtlasesPolygon, polygonWins, scaleAtlas } from './repack';
 export type { RepackOptions, PolygonRepackOptions } from './repack';
 export { emitTexturePackerJson, emitSpineAtlasText } from './manifest';

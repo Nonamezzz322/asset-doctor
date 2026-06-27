@@ -171,6 +171,17 @@
   "fix.tighter": "{pct}% più compatto",
   "fix.tighterPlain": "impacchettamento più compatto",
   "fix.meshNote": "La % mostrata è il guadagno di impacchettamento misurato. Il risparmio di overdraw richiede una mesh lato motore (opzionale).",
+  "fix.extrude": "Edge-extrude (bleed) per eliminare le giunzioni",
+  "fix.extrudeHint": "Replica i pixel di bordo di ogni sprite per {px}px nel margine di impacchettamento — elimina le giunzioni bilineari/mipmap. Aggiunge un margine simmetrico, quindi un foglio può crescere alla potenza di due successiva (più VRAM, mostrato sotto).",
+  "fix.extrudeVramDelta": "Il margine dell'edge-extrude ha fatto crescere un foglio di +{bytes:bytes} di VRAM (potenza di due successiva) — correggere le giunzioni non è gratis",
+  "fix.extrudeSkipped": {
+    "$count": "n",
+    "one": "{n} sprite con mesh/ruotato saltato — nessun extrude del bordo del poligono in v1",
+    "other": "{n} sprite con mesh/ruotati saltati — nessun extrude del bordo del poligono in v1"
+  },
+  "fix.extrude.off": "Off",
+  "fix.extrude.px": "{n} px",
+  "fix.extrude.receipt": "Bordi estrusi su {blits} sprite di {px} px",
   "fix.settings.title": "Impostazioni di ottimizzazione",
   "fix.settings.effort": "Sforzo dell'encoder",
   "fix.settings.effortHint": "0 = veloce · 6 = max. Lo sforzo massimo è molto più lento, soprattutto per l'AVIF.",

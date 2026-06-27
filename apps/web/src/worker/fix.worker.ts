@@ -17,6 +17,14 @@ import {
   repackAtlases,
   repackAtlasesPolygon,
   scaleAtlas,
+  // PURE edge-extrude (bleed) geometry (design OPTION A / docs/improvements/edge-extrude.md). The worker
+  // reserves a symmetric gutter in pack()/packLoose()/repackAtlases() via `gutter`, then turns each
+  // ExtrudeRect into ONE drawImage AFTER the main blit. effectiveExtrude clamps the bleed to the op's
+  // gutter; extrudePlan internally gates to rectangle blits (returns [] for meshed/rotated — the worker
+  // surfaces those honestly). No drift — the worker imports the SAME tested geometry the Vitest goldens cover.
+  effectiveExtrude,
+  extrudePlan,
+  type ExtrudeRect,
   scaleMeshToFrame,
   traceMesh,
   // PURE settings helpers (design §4b): per-asset effective-option resolution (folder/type overrides)
@@ -244,6 +252,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
       maxEdge: opts.maxEdge,
       aggressive: opts.aggressive,
       isAtlasRef: (ref) => atlasByRef.has(ref),
+      // Edge-extrude (bleed, design OPTION A): forward the UI knob. planFix floors it to a non-negative
+      // int and STAMPS it onto every repack/pack op (the only ops whose worker compose blits a rectangle
+      // the gutter can wrap). 0/absent ⇒ no op carries `extrude` ⇒ byte-identical to today (default OFF).
+      ...(opts.extrude && opts.extrude > 0 ? { extrude: opts.extrude } : {}),
       // Only fold tier-eligible refs into the plan's `tiered` guard when the FOLDER isn't already tiered;
       // a globally-skipped folder keeps every asset on its normal single-scale resize/transcode op.
       ...(tieringOn && !folderAlreadyTiered ? { scaleTiers: tiers, tierEligible } : {}),
@@ -312,6 +324,19 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
   let packVerified = 0;
   let packUnmatched = 0;
   let packUnverified = 0;
+  // Edge-extrude (bleed) receipt counters (design OPTION A). extrudePxApplied = the requested width (the
+  // first op that actually extrudes records it); extrudedBlits = rectangle blits that got a bleed;
+  // extrudeSkipped = blits where extrude was REQUESTED but skipped (meshed clip / rotated — no polygon-edge
+  // extrude in v1). extrudeVramDelta = HONEST VRAM growth from the symmetric gutter pushing a bin to the
+  // next POT (invariant 5: a gutter CAN grow a sheet ⇒ MORE VRAM — never claimed free; ALSO reflected in
+  // vramBytes* via vramSaved). All 0/absent unless extrude>0 actually ran ⇒ receipt byte-identical to today.
+  let extrudePxApplied = 0;
+  let extrudedBlits = 0;
+  let extrudeSkippedCount = 0;
+  let extrudeVramDelta = 0;
+  // dir-aware blit ids already surfaced as an extrude no-op skip — surface each meshed/rotated blit's
+  // skip at most once per op group (mirrors rotatedSkipped's once-only honesty for mesh skips).
+  const extrudeSkipped = new Set<string>();
   // Scale-tier receipt counters (design §5/§6). tieredAssets/tierFilesEmitted count ONLY assets actually
   // tiered (refused/skipped assets excluded). tierVramBytes[i] = Σ w×h×4 of tiered assets AT tier i — the
   // honest "VRAM if the device picks this tier" ladder; NEVER folded into vramBytesAfter (invariant 5),
@@ -369,18 +394,26 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
 
   // ── Shared compose-page-and-encode helper (design §6 step 4–5) ───────────────────────────────────────
   // Composes one POT page from its blits (straight drawImage, source-over) and encodes it. FACTORED so the
-  // `repack` and `pack` branches use ONE compose+encode path and can't drift. Each blit's source rect is
-  // cropped from its own source via bitmapOf (correct across merged/loose pages). A blit.clip polygon
-  // (polygon-repack only — pack blits never carry one) clips the drawImage so an interlocked neighbor's
-  // bbox can overlap this one's transparent margin without overwriting opaque pixels. Returns null on any
-  // missing source / no-2D-context (the caller surfaces an honest skip). Mirrors the prior inline loop
-  // byte-for-byte (imageSmoothingQuality 'high', same clip handling) — no behavior change for repack.
+  // `repack` and `pack` branches use ONE compose+encode path and can't drift (so BOTH get edge-extrude).
+  // Each blit's source rect is cropped from its own source via bitmapOf (correct across merged/loose pages).
+  // A blit.clip polygon (polygon-repack only — pack blits never carry one) clips the drawImage so an
+  // interlocked neighbor's bbox can overlap this one's transparent margin without overwriting opaque pixels.
+  //
+  // EDGE-EXTRUDE (bleed, design OPTION A): when `extrude>0`, AFTER each RECTANGLE blit's main draw, replicate
+  // the sprite's outermost source rows/cols into the symmetric packing gutter (extrudePlan → up to 8 1px-slice
+  // drawImage calls). GATED to rectangle blits (`extrudePlan` returns [] for meshed/rotated — same gate as
+  // canExtrude): a meshed (`clip`) or rotated blit gets NO bleed (no polygon-edge extrude in v1) and is
+  // surfaced once as an honest no-op skip. `extrude` is the ALREADY-EFFECTIVE width the caller computed
+  // (effectiveExtrude(op.extrude, gutter)); the gutter room was reserved by pack()/packLoose(). extrude=0 ⇒
+  // the loop never runs ⇒ output is byte-identical to today (same drawImage order, imageSmoothingQuality).
+  // Returns null on any missing source / no-2D-context (the caller surfaces an honest skip).
   const composePageEncode = async (
     blits: Blit[],
     binW: number,
     binH: number,
     target: ImageMime,
     encOpts: EncodeOpts,
+    extrude = 0,
   ): Promise<{ bytes: Uint8Array; mime: ImageMime } | null> => {
     const canvas = new OffscreenCanvas(binW, binH);
     const c2d = canvas.getContext('2d');
@@ -398,11 +431,36 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
         c2d.clip();
         c2d.drawImage(bmp, blit.from.rect.x, blit.from.rect.y, blit.from.rect.w, blit.from.rect.h, blit.to.x, blit.to.y, blit.to.w, blit.to.h);
         c2d.restore();
+        // Meshed/clip blit + extrude requested: NO bleed in v1 (no polygon-edge extrude). Surface honestly.
+        if (extrude > 0) noteExtrudeSkip(blit);
       } else {
         c2d.drawImage(bmp, blit.from.rect.x, blit.from.rect.y, blit.from.rect.w, blit.from.rect.h, blit.to.x, blit.to.y, blit.to.w, blit.to.h);
+        if (extrude > 0) {
+          // extrudePlan internally gates via canExtrude → [] for a rotated blit (skip note below) or
+          // when clamped extrude is 0; non-empty ⇒ this rectangle blit got a real bleed.
+          const rects: ExtrudeRect[] = extrudePlan(blit, extrude, binW, binH);
+          if (rects.length > 0) {
+            for (const r of rects) c2d.drawImage(bmp, r.src.x, r.src.y, r.src.w, r.src.h, r.dst.x, r.dst.y, r.dst.w, r.dst.h);
+            extrudedBlits++;
+            if (extrudePxApplied === 0) extrudePxApplied = extrude;
+          } else {
+            // A rotated rectangle blit (from.rotated / rotate90) yields no plan in v1 — surface the no-op.
+            noteExtrudeSkip(blit);
+          }
+        }
       }
     }
     return encodeCanvas(canvas, c2d, target, encOpts);
+  };
+  /** Record an honest extrude no-op for a meshed/rotated/degenerate blit at most once (keyed by source
+   *  ref + name) — surfaced so the receipt never silently under-extrudes. */
+  const noteExtrudeSkip = (blit: Blit): void => {
+    const id = `${blit.from.atlasRef} ${blit.name}`;
+    if (extrudeSkipped.has(id)) return;
+    extrudeSkipped.add(id);
+    extrudeSkippedCount++;
+    const why = blit.clip && blit.clip.length > 0 ? 'meshed (clip polygon)' : blit.from.rotated || blit.rotate90 ? 'rotated' : 'degenerate';
+    skipped.push({ assetRef: id, reason: `edge-extrude skipped: ${why} blit — no polygon-edge/rotated extrude in v1` });
   };
 
   // Polygon-mode per-sprite extraction cache, keyed by the dir-aware id `${atlas.name} ${sprite.name}`
@@ -454,6 +512,17 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
   let done = 0;
   const total = plan.ops.length + 1;
 
+  // Edge-extrude (bleed, design OPTION A) per-op resolution. The symmetric packing gutter must be ≥ the
+  // requested extrude (so the bleed never crosses into a neighbor — pack.ts owns the band on all 4 sides),
+  // but also ≥ the op's padding budget so we never SHRINK the existing neighbor gap. `gutter` 0 ⇒ today's
+  // pack (no inflation/offset). `eff` is the bleed actually drawn (clamped to gutter). Pure, deterministic.
+  const extrudeOf = (op: { extrude?: number; padding: number }): { gutter: number; eff: number } => {
+    const e = Math.max(0, Math.floor(op.extrude ?? 0));
+    if (e <= 0) return { gutter: 0, eff: 0 };
+    const gutter = Math.max(op.padding, e);
+    return { gutter, eff: effectiveExtrude(e, gutter) };
+  };
+
   for (const op of plan.ops) {
     // Owner-aware dedup drops are executed in Phase C (after transforms settle owner names) — skip here.
     if (op.kind === 'drop' && op.ownerRef != null) continue;
@@ -471,7 +540,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
         }
         // Polygon mode has no mesh slot in the Spine `.atlas` format → rectangle repack, surfaced honestly.
         if (opts.polygon) skipped.push({ assetRef: ref, reason: 'polygon mode not supported for Spine (no mesh slot in .atlas)' });
-        const r = repackAtlases([atlas], { allowRotation: false, padding: op.padding, maxSize: op.maxSize });
+        // Edge-extrude: reserve a symmetric gutter so the bleed has room. gutter=0 ⇒ today's repack exactly.
+        const { gutter, eff } = extrudeOf(op);
+        const r = repackAtlases([atlas], { allowRotation: false, padding: op.padding, maxSize: op.maxSize, ...(gutter ? { gutter } : {}) });
         if (r.atlases.length !== 1) {
           skipped.push({ assetRef: ref, reason: 'Spine repack spilled into multiple sheets' });
           continue;
@@ -479,7 +550,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
         const na = r.atlases[0]!;
         // Compose + encode via the shared helper (Spine pages stay PNG, runtime-safe). encodeCanvas for PNG
         // with no recompress level returns the native PNG bytes — same result as the prior convertToBlob.
-        const enc = await composePageEncode(r.blits, na.size.w, na.size.h, 'image/png', { allowPngFallback: true });
+        // eff>0 ⇒ each rectangle blit's edge pixels are replicated into the reserved gutter (seam fix).
+        const enc = await composePageEncode(r.blits, na.size.w, na.size.h, 'image/png', { allowPngFallback: true }, eff);
         if (!enc) {
           skipped.push({ assetRef: ref, reason: 'source sheet unavailable' });
           continue;
@@ -490,6 +562,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
         replaced.add(imagePath);
         replaced.add(info.path);
         vramSaved += r.vramBytesBefore - r.vramBytesAfter;
+        // HONESTY (invariant 5): if the gutter grew this sheet's POT, the .atlas `size:` line + PNG dims
+        // changed — surface the VRAM growth (no "identical round-trip" claim when the bin grew). The delta
+        // is the gutter pack's footprint minus the SAME pack with no gutter.
+        if (gutter > 0) extrudeVramDelta += r.vramBytesAfter - repackAtlases([atlas], { allowRotation: false, padding: op.padding, maxSize: op.maxSize }).vramBytesAfter;
         if (tieringOn) tierTransformed.add(ref); // repacked → tier loop surfaces an honest skip (§7 v1 scope)
         operations.push(`repack ${basename(ref)} (spine) → ${na.size.w}×${na.size.h}`);
         continue;
@@ -502,6 +578,11 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
         continue;
       }
       const merge = group.length > 1; // multi-atlas op = the non-drop-in "merge atlases" mode
+
+      // Edge-extrude (bleed): reserve a symmetric gutter for the RECTANGLE repack path. Polygon mode emits
+      // meshed blits that are never extruded (the design's rectangle-only scope), so its nester takes no
+      // gutter; `eff` is only fed to compose when the selected result is the rectangle path (below).
+      const { gutter, eff } = extrudeOf(op);
 
       // Polygon mode: nest by silhouette and keep it only when it is a MEASURABLE VRAM win; otherwise
       // fall back to today's rectangle repack (honest no-op, surfaced in skipped[]). When opts.polygon
@@ -533,7 +614,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
           continue;
         }
         const poly = repackAtlasesPolygon(group, masks, meshById, { allowRotation: false, padding: 0, maxSize: op.maxSize, emitMesh: true });
-        const rect = repackAtlases(group, { allowRotation: false, padding: op.padding, maxSize: op.maxSize });
+        // The rectangle fallback owns the gutter (only it composes with extrude); the polygon nester never does.
+        const rect = repackAtlases(group, { allowRotation: false, padding: op.padding, maxSize: op.maxSize, ...(gutter ? { gutter } : {}) });
         if (polygonWins(poly, rect)) {
           r = poly;
           polySelected = true; // receipt stats are accrued only AFTER this op composes (below), never on a later skip
@@ -542,7 +624,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
           for (const rf of refs) skipped.push({ assetRef: rf, reason: 'polygon mode: no measurable VRAM win, used rectangle packing' });
         }
       } else {
-        r = repackAtlases(group, { allowRotation: false, padding: op.padding, maxSize: op.maxSize });
+        r = repackAtlases(group, { allowRotation: false, padding: op.padding, maxSize: op.maxSize, ...(gutter ? { gutter } : {}) });
       }
 
       if (!merge && r.atlases.length !== 1) {
@@ -558,12 +640,16 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
 
       let composeOk = true;
       const baseDir = merge ? dirOf(pathByRef.get(refs[0]!) ?? '') : '';
+      // Extrude only the RECTANGLE result — a selected polygon result emits meshed blits (never extruded);
+      // feeding eff there would just surface a meshed no-op skip per sprite. eff already gated the gutter.
+      const composeExtrude = polySelected ? 0 : eff;
       for (let i = 0; i < r.atlases.length && composeOk; i++) {
         const na = r.atlases[i]!;
         const naNames = new Set(na.sprites.map((s) => s.name));
         // Compose + encode this page via the shared helper (same clip/imageSmoothing handling as before).
         // null ⇒ source sheet / no-2D-context — surfaced as the honest skip below (composeOk false).
-        const sheet = await composePageEncode(r.blits.filter((b) => naNames.has(b.name)), na.size.w, na.size.h, 'image/webp', { lossless: true, allowPngFallback: true });
+        // composeExtrude>0 ⇒ each rectangle blit's edge pixels are replicated into the reserved gutter.
+        const sheet = await composePageEncode(r.blits.filter((b) => naNames.has(b.name)), na.size.w, na.size.h, 'image/webp', { lossless: true, allowPngFallback: true }, composeExtrude);
         if (!sheet) {
           composeOk = false;
           break;
@@ -607,6 +693,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
         operations.push(`merge ${refs.length} atlases → ${r.atlases.length} sheet${r.atlases.length === 1 ? '' : 's'}`);
       }
       vramSaved += r.vramBytesBefore - r.vramBytesAfter;
+      // HONESTY (invariant 5): a symmetric gutter CAN grow a sheet to the next POT ⇒ MORE VRAM. When the
+      // rectangle path shipped WITH a gutter, surface the truthful delta (gutter pack footprint − the SAME
+      // pack with no gutter). The growth is ALSO already inside vramSaved/vramBytes* — never claimed free.
+      if (composeExtrude > 0 && gutter > 0) extrudeVramDelta += r.vramBytesAfter - repackAtlases(group, { allowRotation: false, padding: op.padding, maxSize: op.maxSize }).vramBytesAfter;
       // Accrue polygon receipt stats only now that the op has fully composed (skips above never reach here),
       // so meshSprites / polygonAreaSavedPct reflect ONLY sheets that actually shipped.
       if (polySelected) {
@@ -815,6 +905,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
 
       // (3) Pack (pure). Spine sheets default to PNG (runtime-safe); static uses the effective target.
       const effTarget = isSpine ? 'image/png' : resolveOptions(group.outDir, 'loose', baseEffective, opts.overrides).targetMime;
+      // Edge-extrude (bleed): reserve a symmetric gutter so each packed region's edge pixels have room to
+      // replicate into. gutter=0 ⇒ today's pack exactly (byte-identical placements + output).
+      const { gutter: extGutter, eff: extEff } = extrudeOf(op);
       const pl = packLoose(regions, {
         kind: group.kind,
         imageBase: stem,
@@ -824,6 +917,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
         maxSize: op.maxSize,
         allowRotation: false,
         ...(isSpine ? { format: 'RGBA8888' } : {}),
+        ...(extGutter ? { gutter: extGutter } : {}),
       });
 
       // (4–6) Compose + encode + emit each page. Static: sheet image + ONE TP JSON per bin (meta.image =
@@ -837,7 +931,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
       for (let i = 0; i < pl.atlases.length && composeOk; i++) {
         const na = pl.atlases[i]!;
         const naNames = new Set(na.sprites.map((s) => s.name));
-        const enc = await composePageEncode(pl.blits.filter((b) => naNames.has(b.name)), na.size.w, na.size.h, effTarget, encOpts);
+        // extEff>0 ⇒ each packed region's edge pixels are replicated into the reserved gutter (seam fix).
+        const enc = await composePageEncode(pl.blits.filter((b) => naNames.has(b.name)), na.size.w, na.size.h, effTarget, encOpts, extEff);
         if (!enc) {
           composeOk = false;
           break;
@@ -913,6 +1008,13 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
       // headline vramSaved. delta = new-sheet footprint − summed loose footprint; positive ⇒ packing RAISED
       // VRAM (POT padding), which is the common case for NPOT loose images. Surfaced as its own receipt row.
       packVramDelta += pl.vramBytesAfter - regions.reduce((s, r) => s + (vramByRef.get(r.ref) ?? 0), 0);
+      // HONESTY (invariant 5): the extrude gutter alone may have pushed this sheet to a larger POT. Surface
+      // ONLY the gutter-attributable growth (gutter pack footprint − the SAME pack with no gutter), kept
+      // distinct from packVramDelta (the pack-vs-loose delta). Never claimed free; also inside packVramDelta.
+      if (extGutter > 0) {
+        const base = packLoose(regions, { kind: group.kind, imageBase: stem, targetMime: effTarget, trim: op.trim, padding: op.padding, maxSize: op.maxSize, allowRotation: false, ...(isSpine ? { format: 'RGBA8888' } : {}) });
+        extrudeVramDelta += pl.vramBytesAfter - base.vramBytesAfter;
+      }
       operations.push(`pack ${regions.length} loose → ${isSpine ? `${stem}.atlas` : `${stem} sheet`} (${pl.atlases.length} page${pl.atlases.length === 1 ? '' : 's'})`);
     }
   }
@@ -1217,6 +1319,15 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
     // (the top tier == the source footprint — tiers are alternatives, the runtime loads exactly one).
     ...(tieredAssets > 0 ? { scaleTiered: { tiers: tiers.length, filesEmitted: tierFilesEmitted, assets: tieredAssets } } : {}),
     ...(tieredAssets > 0 ? { tierVram: tiers.map((t, i) => ({ suffix: t.suffix, scale: t.scale, vramBytes: tierVramBytes[i]! })) } : {}),
+    // Edge-extrude (bleed, design OPTION A — additive, optional). extrudePx = the requested bleed width;
+    // extrudedBlits = rectangle blits that got a real bleed; extrudeSkipped = blits where extrude was
+    // REQUESTED but skipped (meshed clip / rotated — no polygon-edge/rotated extrude in v1). extrudeVramDelta
+    // = HONEST VRAM growth from the symmetric gutter pushing a sheet to a larger POT (invariant 5: a gutter
+    // CAN grow a bin ⇒ MORE VRAM — never claimed free; the growth is ALSO already inside vramBytes*). All
+    // absent unless extrude>0 actually ran ⇒ receipt byte-identical to today (default OFF).
+    ...(extrudedBlits > 0 ? { extrudePx: extrudePxApplied, extrudedBlits } : {}),
+    ...(extrudeSkippedCount > 0 ? { extrudeSkipped: extrudeSkippedCount } : {}),
+    ...(extrudeVramDelta !== 0 ? { extrudeVramDelta } : {}),
   };
   post({ type: 'fix-done', receipt, zip });
 }

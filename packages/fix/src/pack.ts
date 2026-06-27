@@ -29,6 +29,14 @@ export interface PackOptions {
   allowRotation: boolean;
   /** Gap added around each sprite's footprint (prevents bleeding). */
   padding: number;
+  /** SYMMETRIC packing gutter (px) reserved on ALL FOUR sides of every sprite, so edge-extrude (bleed)
+   *  has its own room to replicate edge pixels into without overwriting a neighbor. Each item is
+   *  inflated by `2*gutter` and the sprite is placed at `(best.x + gutter, best.y + gutter)`; the
+   *  effective extrude is constrained to `extrude <= gutter`. Absent/0 ⇒ placements are BYTE-IDENTICAL
+   *  to today (no inflation, no offset). Distinct from `padding` (the right/bottom-only neighbor gap):
+   *  a `gutter` band is OWNED by the sprite on every side, which is what makes order-independent extrude
+   *  correct. See docs/improvements/edge-extrude.md (OPTION A). */
+  gutter?: number;
 }
 
 const itemArea = (it: PackItem): number => it.w * it.h;
@@ -62,12 +70,22 @@ function splitFree(free: Rect[], used: Rect): void {
   }
 }
 
+/** Inflation added to BOTH dimensions of every item: the right/bottom-only neighbor gap (`padding`)
+ *  plus TWICE the symmetric `gutter` (a `gutter`-wide band owned by the sprite on all four sides). At
+ *  `gutter=0` this is exactly `padding` ⇒ today's reserved-block size (byte-identical placements). */
+const inflation = (opts: PackOptions): number => opts.padding + 2 * Math.max(0, Math.floor(opts.gutter ?? 0));
+
 /** Place sorted items into a W×H bin via best-short-side-fit. Returns placements + whatever didn't fit. */
 function placeInBin(items: PackItem[], W: number, H: number, opts: PackOptions): { placements: Placement[]; unplaced: PackItem[] } {
   const free: Rect[] = [{ x: 0, y: 0, w: W, h: H }];
   const placements: Placement[] = [];
   const unplaced: PackItem[] = [];
-  const pad = opts.padding;
+  // Reserve `padding` (right/bottom neighbor gap, today) + 2*gutter (symmetric, owned all four sides).
+  // The sprite is then placed `gutter` px in from the reserved block's top-left corner (best.x/y), so it
+  // owns `gutter` px of empty band on every side — the room edge-extrude replicates into. gutter=0 ⇒
+  // pad === today's inflation AND the +gutter offset vanishes ⇒ placements are byte-identical to today.
+  const pad = inflation(opts);
+  const gutter = Math.max(0, Math.floor(opts.gutter ?? 0));
   for (const it of items) {
     const iw = it.w + pad;
     const ih = it.h + pad;
@@ -103,7 +121,10 @@ function placeInBin(items: PackItem[], W: number, H: number, opts: PackOptions):
     }
     const usedW = bestRot ? ih : iw;
     const usedH = bestRot ? iw : ih;
-    placements.push({ id: it.id, x: best.x, y: best.y, w: it.w, h: it.h, rotated: bestRot });
+    // Sprite sits `gutter` px in from the reserved block's corner ⇒ it owns a `gutter` band on all four
+    // sides. The whole `usedW×usedH` block (sprite + symmetric gutter + neighbor pad) is removed from the
+    // free list, so no two sprites' gutters can overlap. gutter=0 ⇒ (best.x, best.y), today's placement.
+    placements.push({ id: it.id, x: best.x + gutter, y: best.y + gutter, w: it.w, h: it.h, rotated: bestRot });
     splitFree(free, { x: best.x, y: best.y, w: usedW, h: usedH });
   }
   return { placements, unplaced };
@@ -135,7 +156,8 @@ export function binCandidates(totalArea: number, maxDim: number, minDim: number,
 
 /** Smallest-area POT bin that fits ALL items, else null. */
 function fitOneBin(sorted: PackItem[], opts: PackOptions): PackBin | null {
-  const pad = opts.padding;
+  // Inflated reserved-block dims (padding + 2*gutter). gutter=0 ⇒ +pad ⇒ today's bounds exactly.
+  const pad = inflation(opts);
   const totalArea = sorted.reduce((s, it) => s + (it.w + pad) * (it.h + pad), 0);
   const maxDim = Math.max(...sorted.map((it) => Math.max(it.w + pad, it.h + pad)));
   const minDim = Math.max(...sorted.map((it) => Math.min(it.w + pad, it.h + pad)));

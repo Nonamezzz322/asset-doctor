@@ -168,6 +168,17 @@
   "fix.tighter": "{pct}% tighter",
   "fix.tighterPlain": "tighter packing",
   "fix.meshNote": "% shown is the measured packing win. Overdraw savings need an engine-side mesh (opt-in).",
+  "fix.extrude": "Edge-extrude (bleed) to kill seams",
+  "fix.extrudeHint": "Replicates each sprite's edge pixels {px}px into the packing gutter — stops bilinear/mipmap seams. Adds a symmetric gutter, so a sheet can grow to the next power-of-two (more VRAM, shown below).",
+  "fix.extrudeVramDelta": "Edge-extrude's gutter grew a sheet by +{bytes:bytes} VRAM (next power-of-two) — the seam fix is not free",
+  "fix.extrudeSkipped": {
+    "$count": "n",
+    "one": "{n} meshed/rotated sprite skipped — no polygon-edge extrude in v1",
+    "other": "{n} meshed/rotated sprites skipped — no polygon-edge extrude in v1"
+  },
+  "fix.extrude.off": "Off",
+  "fix.extrude.px": "{n} px",
+  "fix.extrude.receipt": "Edge-extruded {blits} sprites by {px} px",
   "fix.settings.title": "Optimization settings",
   "fix.settings.effort": "Encoder effort",
   "fix.settings.effortHint": "0 = fast · 6 = max. Max effort is much slower, especially for AVIF.",

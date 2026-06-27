@@ -427,6 +427,77 @@ describe('planFix — pack pass (packGroups)', () => {
   });
 });
 
+// ── Edge-extrude threading (T6 / docs/improvements/edge-extrude.md OPTION A) ──────────────────────
+// planFix stamps the requested bleed px (floored, non-negative) onto EVERY repack + pack op — the only
+// ops whose worker compose blits a rectangle the symmetric gutter can wrap. resize/transcode/drop ops
+// are never touched. extrude unset/0/negative ⇒ NO op carries `extrude` ⇒ ops byte-identical to today
+// (default OFF). The plan does NOT size the gutter (the worker derives gutter = max(padding, extrude)).
+describe('planFix — edge-extrude threading', () => {
+  const base = { targetMime: 'image/webp' as const, quality: 0.9, lossless: true, padding: 2, maxSize: 4096, maxEdge: 2048, aggressive: false };
+  // One occupancy atlas (→ pass-1 repack) + one should-atlas group (→ pack) + one oversized loose image
+  // (→ resize) + one format-only loose image (→ transcode): all four op kinds in one plan.
+  const report: AnalysisReport = {
+    assets: [
+      { assetRef: 'sheet.png', diskBytes: 100, vramBytes: 256 * 256 * 4, occupancy: 0.1 },
+      { assetRef: 'icons/a.png', diskBytes: 100, vramBytes: 0 },
+      { assetRef: 'icons/b.png', diskBytes: 100, vramBytes: 0 },
+      { assetRef: 'hero.png', diskBytes: 100, vramBytes: 0 },
+      { assetRef: 'logo.png', diskBytes: 100, vramBytes: 0 },
+    ],
+    findings: [
+      { id: 'sheet.png:occupancy', rule: 'occupancy', severity: 'crit', assetRef: 'sheet.png', title: '', detail: '' },
+      { id: 'folder:should-atlas', rule: 'should-atlas', severity: 'warn', scope: 'folder', assetRef: 'icons/a.png', relatedRefs: ['icons/a.png', 'icons/b.png'], title: '', detail: '' },
+      { id: 'hero.png:oversize', rule: 'dimensions-oversize', severity: 'crit', assetRef: 'hero.png', title: '', detail: '', messageKey: 'oversize', params: { w: 4096, h: 4096, edge: 4096, budget: 2730, sev: 'crit', vram: 0 } },
+      { id: 'logo.png:format', rule: 'format', severity: 'warn', assetRef: 'logo.png', title: '', detail: '' },
+    ],
+    totals: { diskBytes: 500, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+    thresholds: DEFAULT_THRESHOLDS,
+  };
+  const packGroups: PackGroup[] = [{ id: 'icons', kind: 'static', root: 'icons', outDir: 'icons', stem: 'icons', regions: [{ ref: 'icons/a.png', name: 'a', sourceSize: { w: 64, h: 64 } }, { ref: 'icons/b.png', name: 'b', sourceSize: { w: 64, h: 64 } }] }];
+
+  it('stamps extrude on repack + pack ops only (never resize/transcode)', () => {
+    const plan = planFix(report, { ...base, extrude: 2 }, undefined, packGroups);
+    const repack = plan.ops.find((o) => o.kind === 'repack');
+    const packOp = plan.ops.find((o) => o.kind === 'pack');
+    const resize = plan.ops.find((o) => o.kind === 'resize');
+    const transcode = plan.ops.find((o) => o.kind === 'transcode');
+    expect(repack?.kind === 'repack' && repack.extrude).toBe(2);
+    expect(packOp?.kind === 'pack' && packOp.extrude).toBe(2);
+    // resize/transcode ops have no `extrude` field at all.
+    expect(resize && 'extrude' in resize).toBe(false);
+    expect(transcode && 'extrude' in transcode).toBe(false);
+  });
+
+  it('also stamps the aggressive atlas-merge repack op', () => {
+    const mergeReport: AnalysisReport = {
+      assets: [{ assetRef: 'a.png', diskBytes: 1, vramBytes: 0, occupancy: 0.1 }, { assetRef: 'b.png', diskBytes: 1, vramBytes: 0, occupancy: 0.1 }],
+      findings: [
+        { id: 'a.png:occupancy', rule: 'occupancy', severity: 'crit', assetRef: 'a.png', title: '', detail: '' },
+        { id: 'b.png:occupancy', rule: 'occupancy', severity: 'crit', assetRef: 'b.png', title: '', detail: '' },
+        { id: 'folder:atlas-merge', rule: 'atlas-merge', severity: 'warn', scope: 'folder', assetRef: 'a.png', relatedRefs: ['a.png', 'b.png'], title: '', detail: '' },
+      ],
+      totals: { diskBytes: 2, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+      thresholds: DEFAULT_THRESHOLDS,
+    };
+    const merge = planFix(mergeReport, { ...base, aggressive: true, extrude: 1 }).ops.find((o) => o.kind === 'repack' && o.atlasRefs.length > 1);
+    expect(merge?.kind === 'repack' && merge.extrude).toBe(1);
+  });
+
+  it('extrude is floored to a non-negative integer (2.9 → 2; -3 → none)', () => {
+    const frac = planFix(report, { ...base, extrude: 2.9 }, undefined, packGroups).ops.find((o) => o.kind === 'repack');
+    expect(frac?.kind === 'repack' && frac.extrude).toBe(2);
+    const neg = planFix(report, { ...base, extrude: -3 }, undefined, packGroups).ops;
+    expect(neg.every((o) => !('extrude' in o))).toBe(true);
+  });
+
+  it('default OFF: extrude unset/0 ⇒ NO op carries extrude AND ops are deep-equal to today', () => {
+    const todayOps = planFix(report, base, undefined, packGroups).ops;
+    const zeroOps = planFix(report, { ...base, extrude: 0 }, undefined, packGroups).ops;
+    expect(todayOps.every((o) => !('extrude' in o))).toBe(true);
+    expect(zeroOps).toEqual(todayOps); // extrude:0 is byte-identical to the legacy path
+  });
+});
+
 // ── Scale-tier guard (Task 8 / design §7) ────────────────────────────────────────────────────────
 // When opts.scaleTiers is non-empty, every tier-eligible ref the worker's tier loop will own is folded
 // into a `tiered` set that EXCLUDES it from the standalone pass-1 oversize-resize AND pass-2 transcode

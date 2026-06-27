@@ -569,6 +569,43 @@ function PackPanel({
   );
 }
 
+// Edge-extrude (bleed) — replicate each rectangle sprite's outermost edge rows/cols into the symmetric
+// packing gutter (pack.ts OPTION A) so bilinear/mipmap filtering can't sample transparent gutter pixels
+// at sprite borders ⇒ no seams. Its OWN Pro knob, DEFAULT OFF (0): off ⇒ no op carries `extrude`, no
+// gutter reserved ⇒ byte-identical to today. HONESTY (invariant 5): a symmetric gutter can push a sheet
+// to the next power-of-two ⇒ MORE VRAM — disclosed inline here and surfaced truthfully in the receipt
+// (extrudeVramDelta), never claimed free. Rectangle sprites only (meshed/rotated blits are skipped and
+// reported). The `{px}` in the hint reflects the current selection.
+function ExtrudePanel({ extrude, setExtrude }: { extrude: number; setExtrude: (n: number) => void }) {
+  const { t } = useI18n();
+  const opts = [0, 1, 2];
+  return (
+    <details className="mt-2 rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
+      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">{t('fix.extrude')}</summary>
+
+      <label className="mt-2 flex items-center justify-between gap-2 font-mono text-[10px] text-ink-soft">
+        {t('fix.extrude')}
+        <select
+          aria-label={t('fix.extrude')}
+          title={t('fix.extrudeHint', { px: extrude || 1 })}
+          value={extrude}
+          onChange={(e) => setExtrude(Number(e.target.value))}
+          className="rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink-soft transition hover:border-teal focus:border-teal focus:outline-none"
+        >
+          {opts.map((n) => (
+            <option key={n} value={n}>
+              {n === 0 ? t('fix.extrude.off') : t('fix.extrude.px', { n })}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {/* Honest disclosure (invariant 5): bleed can grow a sheet to the next POT ⇒ more VRAM. */}
+      <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.extrudeHint', { px: extrude || 1 })}</p>
+    </details>
+  );
+}
+
 // Scale-tier export — emit downscaled copies (_1080p/_720p/_540p…) so the game loads the resolution
 // that fits the device. Its OWN explicit Pro opt-in, DEFAULT OFF (NOT under aggressive): a default Pro
 // run never multiplies a folder into resolution variants. Tiering is REFERENCE-CHANGING (the game's
@@ -686,6 +723,12 @@ function FixCard({ files }: { files: PickedFile[] }) {
   const [packGranularity, setPackGranularity] = useState<StaticGranularity>('per-leaf-folder');
   const [packTrim, setPackTrim] = useState(true);
 
+  // Edge-extrude (bleed) — own Pro knob, DEFAULT OFF (0). 0 ⇒ no op carries `extrude`, no gutter
+  // reserved ⇒ byte-identical to today. >0 ⇒ the worker reserves a symmetric gutter and bleeds rect
+  // sprite edges into it (kills bilinear/mipmap seams); a gutter bump can grow a sheet to the next POT
+  // ⇒ more VRAM, surfaced honestly in the receipt (invariant 5).
+  const [extrude, setExtrude] = useState(0);
+
   // Scale-tier export — own Pro opt-in, DEFAULT OFF (NOT under aggressive). `tierSuffixes` holds the
   // LOWER tiers the user opted into; the scale-1 top tier is always implied (added when building the
   // ladder). Default selection mirrors the design preset (720p + 540p). Off OR no enabled tier beyond
@@ -762,6 +805,10 @@ function FixCard({ files }: { files: PickedFile[] }) {
           // implied scale-1 top tier alone would just rename, not downscale). Off / top-only ⇒ undefined
           // ⇒ no tiering ⇒ byte-identical to today. The worker validates the ladder fail-closed.
           scaleTiers: scaleTiers.length > 1 ? scaleTiers : undefined,
+          // Edge-extrude (bleed) — only forwarded when > 0; off ⇒ undefined ⇒ no gutter, byte-identical
+          // to today. The plan sets each repack/pack op's symmetric gutter >= extrude (invariant 5: a
+          // gutter can grow a sheet ⇒ VRAM reported honestly via extrudeVramDelta).
+          extrude: extrude > 0 ? extrude : undefined,
         },
         (p) => setPhase({ t: 'running', p }),
       );
@@ -827,6 +874,8 @@ function FixCard({ files }: { files: PickedFile[] }) {
             packTrim={packTrim}
             setPackTrim={setPackTrim}
           />
+
+          <ExtrudePanel extrude={extrude} setExtrude={setExtrude} />
 
           <TierPanel
             tierEnable={tierEnable}
@@ -904,6 +953,19 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
             <p className="font-mono text-[10px] text-warn">{t('fix.pack.vramDelta', { bytes: receipt.packVramDelta ?? 0 })}</p>
           ) : null}
         </>
+      ) : null}
+      {/* Edge-extrude (bleed) receipt: how many rectangle sprites got a bleed (+ the px width), how many
+          meshed/rotated sprites were skipped (no polygon-edge extrude in v1), and the HONEST VRAM delta
+          when a symmetric gutter pushed a sheet to the next POT (invariant 5 — surfaced separately, the
+          growth is already in the headline VRAM row, never claimed free). */}
+      {(receipt.extrudedBlits ?? 0) > 0 ? (
+        <p className="font-mono text-[10px] text-ink-soft">{t('fix.extrude.receipt', { blits: receipt.extrudedBlits ?? 0, px: receipt.extrudePx ?? 0 })}</p>
+      ) : null}
+      {(receipt.extrudeSkipped ?? 0) > 0 ? (
+        <p className="font-mono text-[10px] text-ink-soft/80">{t('fix.extrudeSkipped', { n: receipt.extrudeSkipped ?? 0 })}</p>
+      ) : null}
+      {(receipt.extrudeVramDelta ?? 0) > 0 ? (
+        <p className="font-mono text-[10px] text-warn">{t('fix.extrudeVramDelta', { bytes: receipt.extrudeVramDelta ?? 0 })}</p>
       ) : null}
       {/* Scale-tier export receipt: tiers/files/assets actually emitted, a reference-changing banner (the
           source was renamed to the top tier; the loader must pick a tier at runtime), the per-device VRAM

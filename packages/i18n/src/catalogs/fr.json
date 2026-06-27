@@ -171,6 +171,17 @@
   "fix.tighter": "{pct}% plus compact",
   "fix.tighterPlain": "empaquetage plus compact",
   "fix.meshNote": "Le % affiché est le gain d'empaquetage mesuré. Les économies d'overdraw nécessitent un maillage côté moteur (en option).",
+  "fix.extrude": "Edge-extrude (débordement) pour éliminer les coutures",
+  "fix.extrudeHint": "Réplique les pixels de bord de chaque sprite sur {px}px dans la gouttière d'empaquetage — supprime les coutures bilinéaires/mipmap. Ajoute une gouttière symétrique, donc une planche peut croître jusqu'à la puissance de deux suivante (plus de VRAM, indiqué ci-dessous).",
+  "fix.extrudeVramDelta": "La gouttière de l'edge-extrude a fait croître une planche de +{bytes:bytes} de VRAM (puissance de deux suivante) — corriger les coutures n'est pas gratuit",
+  "fix.extrudeSkipped": {
+    "$count": "n",
+    "one": "{n} sprite maillé/pivoté ignoré — pas d'extrude de bord de polygone en v1",
+    "other": "{n} sprites maillés/pivotés ignorés — pas d'extrude de bord de polygone en v1"
+  },
+  "fix.extrude.off": "Désactivé",
+  "fix.extrude.px": "{n} px",
+  "fix.extrude.receipt": "Bords extrudés sur {blits} sprites de {px} px",
   "fix.settings.title": "Paramètres d'optimisation",
   "fix.settings.effort": "Effort de l'encodeur",
   "fix.settings.effortHint": "0 = rapide · 6 = max. L'effort maximal est bien plus lent, surtout pour l'AVIF.",

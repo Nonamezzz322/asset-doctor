@@ -171,6 +171,17 @@
   "fix.tighter": "{pct}% más compacto",
   "fix.tighterPlain": "empaque más compacto",
   "fix.meshNote": "El % mostrado es la ganancia de empaque medida. Ahorrar overdraw requiere una malla del lado del motor (opcional).",
+  "fix.extrude": "Edge-extrude (sangrado) para eliminar costuras",
+  "fix.extrudeHint": "Replica los píxeles del borde de cada sprite {px}px en el margen de empaque — elimina las costuras bilineales/de mipmap. Añade un margen simétrico, así que una hoja puede crecer a la siguiente potencia de dos (más VRAM, mostrado abajo).",
+  "fix.extrudeVramDelta": "El margen del edge-extrude hizo crecer una hoja en +{bytes:bytes} de VRAM (siguiente potencia de dos) — corregir las costuras no es gratis",
+  "fix.extrudeSkipped": {
+    "$count": "n",
+    "one": "{n} sprite con malla/rotado omitido — sin extrude de borde de polígono en v1",
+    "other": "{n} sprites con malla/rotados omitidos — sin extrude de borde de polígono en v1"
+  },
+  "fix.extrude.off": "Desactivado",
+  "fix.extrude.px": "{n} px",
+  "fix.extrude.receipt": "Bordes extruidos en {blits} sprites por {px} px",
   "fix.settings.title": "Ajustes de optimización",
   "fix.settings.effort": "Esfuerzo del codificador",
   "fix.settings.effortHint": "0 = rápido · 6 = máx. El esfuerzo máximo es mucho más lento, sobre todo en AVIF.",

@@ -168,6 +168,17 @@
   "fix.tighter": "{pct}% kompakter",
   "fix.tighterPlain": "kompaktere Packung",
   "fix.meshNote": "Der gezeigte % ist der gemessene Pack-Gewinn. Overdraw-Einsparungen brauchen ein Mesh auf Engine-Seite (optional).",
+  "fix.extrude": "Edge-Extrude (Bleed) gegen Nähte",
+  "fix.extrudeHint": "Repliziert die Randpixel jedes Sprites {px}px in den Pack-Gutter — beseitigt bilineare/Mipmap-Nähte. Fügt einen symmetrischen Gutter hinzu, daher kann ein Sheet zur nächsten Zweierpotenz wachsen (mehr VRAM, siehe unten).",
+  "fix.extrudeVramDelta": "Der Gutter des Edge-Extrude ließ ein Sheet um +{bytes:bytes} VRAM wachsen (nächste Zweierpotenz) — die Naht-Korrektur ist nicht kostenlos",
+  "fix.extrudeSkipped": {
+    "$count": "n",
+    "one": "{n} vermeshtes/rotiertes Sprite übersprungen — kein Polygon-Kanten-Extrude in v1",
+    "other": "{n} vermeshte/rotierte Sprites übersprungen — kein Polygon-Kanten-Extrude in v1"
+  },
+  "fix.extrude.off": "Aus",
+  "fix.extrude.px": "{n} px",
+  "fix.extrude.receipt": "{blits} Sprites um {px} px edge-extrudiert",
   "fix.settings.title": "Optimierungseinstellungen",
   "fix.settings.effort": "Encoder-Aufwand",
   "fix.settings.effortHint": "0 = schnell · 6 = max. Maximaler Aufwand ist viel langsamer, besonders bei AVIF.",

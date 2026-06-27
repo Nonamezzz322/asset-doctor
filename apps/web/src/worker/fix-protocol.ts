@@ -65,6 +65,15 @@ export interface FixOptions {
   packTrim?: boolean;
   /** Bypass the minLooseImages floor (a forced 1-region sheet is valid). Default false. */
   packForced?: boolean;
+
+  // ── Edge-extrude (bleed) — own Pro toggle, DEFAULT OFF (0). ──
+  /** Replicate each rectangle sprite's outermost edge rows/cols into the symmetric packing gutter (px),
+   *  to kill bilinear/mipmap seams in packed sheets. UI knob 0(off)/1/2. The plan sets each repack/pack
+   *  op's symmetric gutter to >= extrude; the worker clamps the effective extrude to that gutter and
+   *  applies it to RECTANGLE blits only (meshed/rotated blits skipped + surfaced). A symmetric gutter
+   *  CAN grow a sheet to the next POT ⇒ MORE VRAM — reported honestly (extrudeVramDelta + existing
+   *  vramBytes*), never claimed free (invariant 5). Absent/0 ⇒ no extrude (byte-identical to today). */
+  extrude?: number;
 }
 
 export interface FixOverride {
@@ -123,6 +132,17 @@ export interface FixReceipt {
    *  picks this tier" ladder. The runtime loads ONE tier, so this is NEVER summed into vramBytesAfter
    *  (invariant 5); tiering contributes 0 to vramSaved (the top tier == the source footprint). */
   tierVram?: { suffix: string; scale: number; vramBytes: number }[];
+  /** Edge-extrude (bleed) summary. `extrudePx` = the requested extrude width; `extrudedBlits` = rectangle
+   *  blits that got an extrude; `extrudeSkipped` = blits where extrude was REQUESTED but skipped (meshed
+   *  clip / rotated — no polygon-edge extrude in v1). Descriptive only. Absent ⇒ no extrude ran. */
+  extrudePx?: number;
+  extrudedBlits?: number;
+  extrudeSkipped?: number;
+  /** HONEST VRAM delta caused by the symmetric gutter inflation pushing a sheet to the next POT
+   *  (vramBytesAfter WITH the extrude gutter − the same pack WITHOUT it). POSITIVE ⇒ extrude RAISED VRAM
+   *  (invariant 5: a symmetric gutter can grow a bin — never claimed free). Reported SEPARATELY; the
+   *  growth is ALSO already reflected in vramBytes*. Absent/0 ⇒ no bin grew. */
+  extrudeVramDelta?: number;
 }
 
 export type FixResponse =

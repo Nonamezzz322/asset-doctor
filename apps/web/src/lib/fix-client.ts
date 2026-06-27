@@ -14,9 +14,10 @@ export interface FixOutcome {
 /** Run the fix worker. Bytes are structured-cloned (never uploaded); the optimized folder comes back
  *  as a zip Blob for direct download. `options` (incl. the Feature 2/3 fields — effort, scale-aware
  *  quality, near-lossless, oxipng level, overrides, lazy `marking`, `skinGuard` — the Feature 4 pack
- *  fields — `packLoose`/`packMode`/`packGranularity`/`packTrim`/`packForced` — and the scale-tier
- *  export fields `scaleTiers`/`tierForce`) is forwarded verbatim; this is a thin pass-through, no
- *  transformation. Absent/empty fields reproduce today (empty/absent scaleTiers ⇒ no tiering). */
+ *  fields — `packLoose`/`packMode`/`packGranularity`/`packTrim`/`packForced` — the scale-tier export
+ *  fields `scaleTiers`/`tierForce`, and the edge-extrude knob `extrude`) is forwarded verbatim; this is
+ *  a thin pass-through, no transformation. Absent/empty fields reproduce today (empty/absent scaleTiers
+ *  ⇒ no tiering; extrude unset/0 ⇒ no gutter, byte-identical). */
 export function runFix(files: PickedFile[], options: FixOptions, onProgress: (p: FixProgress) => void): Promise<FixOutcome> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('../worker/fix.worker.ts', import.meta.url), { type: 'module' });

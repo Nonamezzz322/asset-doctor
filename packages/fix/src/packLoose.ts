@@ -43,6 +43,10 @@ export interface PackLooseOptions {
   maxSize: number;
   allowRotation: false; // v1 invariant — typed literal
   format?: string; // Spine page `format:` (default RGBA8888) → Atlas.format
+  /** SYMMETRIC packing gutter (px) reserved on all four sides of every packed region so the worker's
+   *  edge-extrude (bleed) has its own room. Forwarded verbatim to `pack` (PackOptions.gutter). Absent/0
+   *  ⇒ placements byte-identical to today. */
+  gutter?: number;
 }
 
 export interface PackLooseResult {
@@ -69,7 +73,7 @@ export function packLoose(regions: LooseRegion[], opts: PackLooseOptions): PackL
     items.push({ id: r.name, w: trimmedDims.w, h: trimmedDims.h });
   }
 
-  const bins = pack(items, { maxSize: opts.maxSize, allowRotation: false, padding: opts.padding });
+  const bins = pack(items, { maxSize: opts.maxSize, allowRotation: false, padding: opts.padding, ...(opts.gutter ? { gutter: opts.gutter } : {}) });
 
   const atlases: Atlas[] = [];
   const blits: Blit[] = [];

@@ -36,6 +36,15 @@ export interface PlanOptions {
    *  is non-empty. Absent ⇒ every ref is eligible (the worker gates separately). A refused ref is NOT
    *  added to `tiered`, so it keeps its normal single-scale resize/transcode op. Pure predicate. */
   tierEligible?: (ref: string) => boolean;
+  /** Edge-extrude (bleed) px — replicate each RECTANGLE sprite's outermost rows/cols into the symmetric
+   *  packing gutter to kill bilinear/mipmap seams (docs/improvements/edge-extrude.md, OPTION A). When
+   *  >0 it is FLOORED to a non-negative integer and STAMPED onto every emitted `repack` and `pack` op
+   *  (the only ops whose worker compose blits a rectangle the gutter can wrap); resize/transcode/drop
+   *  ops are untouched. The plan does NOT compute the packing gutter — the worker derives it per op
+   *  (`gutter = max(op.padding, op.extrude)`, so the existing padding budget is respected) and clamps
+   *  the actual bleed to it (`effectiveExtrude = min(extrude, gutter)`). Absent/0/negative ⇒ NO op
+   *  carries `extrude` ⇒ the plan is byte-identical to today (default OFF). */
+  extrude?: number;
 }
 
 /**
@@ -70,9 +79,23 @@ export interface PlanOptions {
  * keep-consumer: drops still occur but no `repointManifest` is emitted, since the worker would no-op
  * the repoint against a renamed owner). Empty/absent scaleTiers ⇒ none of this runs ⇒ byte-identical
  * to today.
+ *
+ * EDGE-EXTRUDE (`opts.extrude` > 0, design OPTION A): the requested bleed px (floored, non-negative) is
+ * STAMPED onto every emitted `repack` and `pack` op — the only ops whose worker compose blits a
+ * rectangle the symmetric packing gutter can wrap. resize/transcode/drop ops are untouched. The plan
+ * does NOT size the gutter (that's a worker-side per-op decision: `gutter = max(op.padding, op.extrude)`,
+ * respecting the padding budget, then `effectiveExtrude = min(extrude, gutter)`). extrude unset/0 ⇒ NO
+ * op carries `extrude` ⇒ every op object is byte-identical to today (default OFF).
  */
 export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: DedupGroup[], packGroups?: PackGroup[]): FixPlan {
   const ops: FixOp[] = [];
+  // Edge-extrude (bleed), design OPTION A. Floored to a non-negative int and stamped on repack/pack ops
+  // only (their worker compose blits a rectangle the symmetric gutter can wrap). 0 ⇒ no op carries
+  // `extrude` ⇒ byte-identical to today (default OFF). The worker derives the actual packing gutter +
+  // clamps the bleed (effectiveExtrude = min(extrude, gutter)); the plan only carries the requested px.
+  const extrude = Math.max(0, Math.floor(opts.extrude ?? 0));
+  // Spread onto a repack/pack op only when >0, so an op object stays IDENTICAL to today at extrude=0.
+  const extrudeField = extrude > 0 ? { extrude } : {};
   const repacked = new Set<string>();
   const dropped = new Set<string>();
   const resized = new Set<string>();
@@ -161,6 +184,7 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
         padding: opts.padding,
         maxSize: opts.maxSize,
         allowRotation: false,
+        ...extrudeField,
       });
     }
   }
@@ -174,7 +198,7 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
       const fresh = (f.relatedRefs ?? []).filter((r) => !repacked.has(r) && !protectedOwners.has(r) && !dropped.has(r));
       if (fresh.length < 2) continue;
       fresh.forEach((r) => repacked.add(r));
-      ops.push({ kind: 'repack', atlasRefs: fresh, targetMime: opts.targetMime, pot: true, allowRotation: false, padding: opts.padding, maxSize: opts.maxSize });
+      ops.push({ kind: 'repack', atlasRefs: fresh, targetMime: opts.targetMime, pot: true, allowRotation: false, padding: opts.padding, maxSize: opts.maxSize, ...extrudeField });
     }
   }
 
@@ -206,7 +230,7 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
       // owners are never repack targets (guard before the existing repacked check).
       if (protectedOwners.has(f.assetRef) || repacked.has(f.assetRef)) continue;
       repacked.add(f.assetRef);
-      ops.push({ kind: 'repack', atlasRefs: [f.assetRef], targetMime: opts.targetMime, pot: true, allowRotation: false, padding: opts.padding, maxSize: opts.maxSize });
+      ops.push({ kind: 'repack', atlasRefs: [f.assetRef], targetMime: opts.targetMime, pot: true, allowRotation: false, padding: opts.padding, maxSize: opts.maxSize, ...extrudeField });
     } else if (f.rule === 'dimensions-oversize' && f.scope !== 'folder') {
       const w = Number(f.params?.w ?? 0);
       const h = Number(f.params?.h ?? 0);

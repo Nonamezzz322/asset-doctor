@@ -330,7 +330,13 @@ export interface AnalysisReport {
 
 /** A single optimization operation, derived mechanically from the diagnosis. */
 export type FixOp =
-  | { kind: 'repack'; atlasRefs: string[]; targetMime: ImageMime; pot: boolean; allowRotation: boolean; padding: number; maxSize: number }
+  | { kind: 'repack'; atlasRefs: string[]; targetMime: ImageMime; pot: boolean; allowRotation: boolean; padding: number; maxSize: number;
+      /** Edge-extrude (bleed) px replicated from each rect sprite's outermost rows/cols into the
+       *  surrounding symmetric packing gutter, to kill bilinear/mipmap seams. The worker clamps the
+       *  effective extrude to the op's symmetric gutter (effectiveExtrude = min(extrude, gutter)).
+       *  Rectangle blits only — meshed/rotated blits are skipped + surfaced honestly. Absent/0 ⇒ no
+       *  extrude (today's behavior, byte-identical). */
+      extrude?: number }
   | { kind: 'transcode'; assetRef: string; targetMime: ImageMime; quality: number; lossless: boolean }
   | { kind: 'resize'; assetRef: string; to: Size; targetMime: ImageMime; quality: number }
   | { kind: 'drop'; assetRef: string; reason: 'duplicate-exact' | 'duplicate-similar';
@@ -357,7 +363,12 @@ export type FixOp =
       padding: number;
       maxSize: number;
       /** ALWAYS false in v1 — the worker compose path cannot rotate a blit (verified). Typed literal. */
-      allowRotation: false };
+      allowRotation: false;
+      /** Edge-extrude (bleed) px replicated from each packed loose region's outermost rows/cols into the
+       *  surrounding symmetric packing gutter, to kill bilinear/mipmap seams. Clamped in the worker to
+       *  the op's gutter (effectiveExtrude = min(extrude, gutter)). Rectangle blits only. Absent/0 ⇒ no
+       *  extrude (today's behavior, byte-identical). */
+      extrude?: number };
 
 export interface FixPlan {
   ops: FixOp[];
