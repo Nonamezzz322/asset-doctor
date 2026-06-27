@@ -251,14 +251,12 @@ export function groupLooseForPacking(
   const conventions = opts.spineConventions ?? ['animations', 'spine'];
   const { maxSpriteEdgePx, minLooseImages } = opts.thresholds.shouldAtlas;
 
-  // 1) Re-apply the should-atlas size predicate per image (§4): a candidate iff max(w,h) <= edge.
-  //    Sorted by ref so all downstream iteration is order-independent (determinism §10a).
-  const candidates = images
-    .filter((im) => Math.max(im.size.w, im.size.h) <= maxSpriteEdgePx)
-    .slice()
-    .sort((a, b) => a.ref.localeCompare(b.ref));
-
-  // 2) Detect spine roots from markers (skeleton .skel / .json + folder convention). force-static skips.
+  // 1) Detect spine roots FIRST, over ALL images (NOT size-filtered): a Spine atlas must contain EVERY
+  //    region the skeleton references regardless of size, so spine membership must never depend on the
+  //    should-atlas size heuristic (else a large background/logo region is silently dropped — the `fss`
+  //    bug). From markers (.skel / skeleton .json) + the folder convention. force-static skips spine.
+  //    `allImages` sorted by ref so all downstream iteration is order-independent (determinism §10a).
+  const allImages = images.slice().sort((a, b) => a.ref.localeCompare(b.ref));
   const spineRoots = new Set<string>();
   if (mode !== 'force-static') {
     for (const m of markers) {
@@ -278,18 +276,18 @@ export function groupLooseForPacking(
         if (looksLikeSkeleton(json)) spineRoots.add(dir);
       }
     }
-    // Folder-convention roots derived from the candidate image paths themselves.
-    for (const im of candidates) {
+    // Folder-convention roots derived from ALL image paths (not the size-filtered subset).
+    for (const im of allImages) {
       const root = conventionRoot(dirOf(im.ref), conventions);
       if (root !== null) spineRoots.add(root);
     }
   }
   // force-spine with no detected root ⇒ treat the whole input as one spine root at the common ancestor.
-  if (mode === 'force-spine' && spineRoots.size === 0 && candidates.length > 0) {
-    spineRoots.add(commonAncestorDir(candidates.map((c) => c.ref)));
+  if (mode === 'force-spine' && spineRoots.size === 0 && allImages.length > 0) {
+    spineRoots.add(commonAncestorDir(allImages.map((c) => c.ref)));
   }
 
-  // Map each candidate to its spine root (the LONGEST matching root dir; '' matches everything).
+  // Map a ref to its spine root (the LONGEST matching root dir; '' matches everything).
   const sortedRoots = [...spineRoots].sort((a, b) => b.length - a.length || a.localeCompare(b));
   const rootOf = (ref: string): string | null => {
     for (const r of sortedRoots) {
@@ -297,6 +295,13 @@ export function groupLooseForPacking(
     }
     return null;
   };
+
+  // 2) Candidate filter (§4): a SPINE-root image is ALWAYS a candidate (the skeleton dictates membership —
+  //    never drop a large region by size); a NON-spine (static) image is a candidate only if it passes the
+  //    should-atlas size heuristic max(w,h) <= maxSpriteEdgePx. Order-independent (allImages pre-sorted).
+  const candidates = allImages.filter(
+    (im) => rootOf(im.ref) !== null || Math.max(im.size.w, im.size.h) <= maxSpriteEdgePx,
+  );
 
   // skeletonRef per spine root: the lexicographically-first skeleton marker under that root (deterministic).
   const skeletonByRoot = new Map<string, string>();

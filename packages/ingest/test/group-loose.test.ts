@@ -145,6 +145,23 @@ describe('static grouping (one sheet per leaf folder)', () => {
     expect(groups[0]!.regions).toHaveLength(8);
   });
 
+  it('keeps LARGE regions in a SPINE group — the skeleton dictates membership, no maxSpriteEdgePx drop (fss bug)', () => {
+    // A real Spine animation (raw/animations/fss) has region images >512px (backgrounds/logos). The
+    // should-atlas size heuristic must NOT apply to spine regions, or the atlas is missing regions.
+    const images = [
+      img('animations/fss/small.png', 64, 64),
+      img('animations/fss/LS_BG.png', 573, 92), // > 512 — the static heuristic would wrongly drop it
+      img('animations/fss/light_2.png', 543, 564), // > 512
+    ];
+    const { groups } = groupLooseForPacking(images, [skelJson('animations/fss/FSS.json')], {
+      thresholds: DEFAULTS,
+    });
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.kind).toBe('spine');
+    // ALL three regions present — including the two over maxSpriteEdgePx.
+    expect(groups[0]!.regions.map((r) => r.name).sort()).toEqual(['LS_BG', 'light_2', 'small']);
+  });
+
   it('one-sheet-for-all uses the common ancestor as outDir and keeps relative names', () => {
     const images = [
       ...Array.from({ length: 4 }, (_, i) => img(`pkg/a/x${i}.png`)),
