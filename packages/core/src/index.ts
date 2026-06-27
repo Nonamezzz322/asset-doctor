@@ -78,6 +78,11 @@ export interface Atlas {
 
 export type ImageMime = 'image/png' | 'image/webp' | 'image/jpeg' | 'image/avif';
 
+/** Coarse visual content class for format-suitability, measured from a 9×8 RGBA sample
+ *  (grayStdDev band + alpha-pole histogram). Drives the lossy-vs-lossless VERDICT in analysis and
+ *  the Pro transcode lossless flag in the fix engine. 'unknown' ⇒ undecoded ⇒ today's lossy path. */
+export type ContentClass = 'flat' | 'alpha-art' | 'photographic' | 'unknown';
+
 export interface ImageAsset {
   name: string;
   imageRef: string;
@@ -217,6 +222,10 @@ export interface ImageFeatures {
   contentHash: string;
   /** 64-bit perceptual hash as 16 hex chars — near-duplicate detection. Absent if decode failed. */
   dHash?: string;
+  /** Coarse visual content class from the SAME 9×8 RGBA sample as dHash (zero extra decode). Drives the
+   *  lossy-vs-lossless format verdict for LOOSE images (atlases pass 'unknown'). Additive: absent/'unknown'
+   *  ⇒ today's lossy path, byte-identical. */
+  contentClass?: ContentClass;
 }
 
 /* ── Bundle / lazy marking (Feature 3 — UI-sourced) ────────────────────────────────────────

@@ -260,7 +260,12 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
   // transcode ops; a ref with both should-atlas and format yields one pack, zero transcode.
   for (const f of report.findings) {
     if (f.rule === 'format' && f.scope !== 'folder' && !resized.has(f.assetRef) && !dropped.has(f.assetRef) && !packed.has(f.assetRef) && !tiered.has(f.assetRef)) {
-      ops.push({ kind: 'transcode', assetRef: f.assetRef, targetMime: opts.targetMime, quality: opts.quality, lossless: opts.lossless });
+      // Flat / alpha-art findings (messageKey:'format-lossless', rule still 'format') carry
+      // params.contentClass — encode THEM lossless even when the global opts.lossless is off, because
+      // lossy q0.9 frays hard edges + flat fills. This is where the honest lossless byte delta the
+      // analysis path deferred (Inv 4) is actually produced. Photographic/unknown follow opts.lossless.
+      const wantsLossless = f.params?.contentClass === 'flat' || f.params?.contentClass === 'alpha-art';
+      ops.push({ kind: 'transcode', assetRef: f.assetRef, targetMime: opts.targetMime, quality: opts.quality, lossless: opts.lossless || wantsLossless });
     }
   }
   return { ops, thresholds: report.thresholds };

@@ -7,7 +7,8 @@ import type { Asset, ImageFeatures, ImageMime } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
 import { analyze, mergeSharedAtlases, type EncodeSizer } from '@asset-doctor/analysis';
 import { groupFiles, keyOf, type RawFile } from '../lib/group';
-import { dHashFromGray, isFlat, luma } from '../lib/perceptual';
+import { classifyContent, dHashFromGray, isFlat, luma } from '../lib/perceptual';
+import type { ContentClass } from '@asset-doctor/core';
 import type { WorkerRequest, WorkerResponse } from './protocol';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
@@ -50,12 +51,16 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       }
     }
 
-    // Per-image features for folder-level duplicate detection.
+    // Per-image features for folder-level duplicate detection + the content-class format verdict.
+    // ONE decode per image yields both the dHash AND the content class (zero extra getImageData).
     const features: ImageFeatures[] = [];
     for (const [assetRef, bytes] of imageBytes) {
       const contentHash = await sha256Hex(bytes);
-      const dHash = await dHashHex(bytes);
-      features.push(dHash ? { assetRef, contentHash, dHash } : { assetRef, contentHash });
+      const { dHash, contentClass } = await decodeFeatures(bytes);
+      const feat: ImageFeatures = { assetRef, contentHash };
+      if (dHash) feat.dHash = dHash;
+      if (contentClass !== 'unknown') feat.contentClass = contentClass;
+      features.push(feat);
     }
 
     const report = await analyze(mergeSharedAtlases(assets), undefined, {
@@ -74,24 +79,27 @@ async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** 64-bit difference hash (dHash) of the image, as 16 hex chars. Null if it can't decode or is
- *  too featureless (flat fills collapse to one hash → false near-dup matches). */
-async function dHashHex(bytes: ArrayBuffer): Promise<string | null> {
-  if (typeof OffscreenCanvas === 'undefined') return null;
+/** ONE 9×8 decode → BOTH the dHash (near-dup detection) AND the content class (format verdict). The
+ *  9×8 RGBA sample is read once with getImageData; `dHash` is null for featureless fills (they collapse
+ *  to one hash → false near-dup matches), `contentClass` is the lossy-vs-lossless hint (Inv 4: NO
+ *  encode here — the class is pure math over the already-decoded sample). 'unknown' on any decode
+ *  failure or when OffscreenCanvas is unavailable. */
+async function decodeFeatures(bytes: ArrayBuffer): Promise<{ dHash: string | null; contentClass: ContentClass }> {
+  if (typeof OffscreenCanvas === 'undefined') return { dHash: null, contentClass: 'unknown' };
   try {
     const bmp = await createImageBitmap(new Blob([bytes]));
     const canvas = new OffscreenCanvas(9, 8);
     const c2d = canvas.getContext('2d');
-    if (!c2d) return null;
+    if (!c2d) return { dHash: null, contentClass: 'unknown' };
     c2d.drawImage(bmp, 0, 0, 9, 8);
     bmp.close();
     const data = c2d.getImageData(0, 0, 9, 8).data;
     const gray: number[] = [];
     for (let p = 0; p < 9 * 8; p++) gray.push(luma(data, p * 4));
-    if (isFlat(gray)) return null; // featureless → would false-match; skip perceptual matching
-    return dHashFromGray(gray);
+    const dHash = isFlat(gray) ? null : dHashFromGray(gray); // featureless → skip perceptual matching
+    return { dHash, contentClass: classifyContent(gray, data) };
   } catch {
-    return null;
+    return { dHash: null, contentClass: 'unknown' };
   }
 }
 

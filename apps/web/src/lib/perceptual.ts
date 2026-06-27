@@ -1,8 +1,21 @@
 // Pure perceptual-hash helpers (testable headless). The worker decodes an image to a 9×8
 // grayscale and calls these; keeping the math here means it can be unit-tested without a canvas.
 
+import type { ContentClass } from '@asset-doctor/core';
+
 const DW = 9; // sample width
 const DH = 8; // sample height
+
+// ── Content-class consts (docs/improvements/content-class.md §4, calibrated above dedup's minStdDev=6).
+/** grayStdDev below this ⇒ genuinely low-variance fill ⇒ 'flat'. Mid/high-variance (incl. smooth
+ *  gradients) falls to 'photographic' — gradients are deliberately OUT of the confident set (M2). */
+export const FLAT_STD = 12;
+/** Alpha ≥ this counts toward the near-opaque pole. */
+export const OPAQUE = 250;
+/** Alpha ≤ this counts toward the near-clear pole. */
+export const CLEAR = 8;
+/** Minimum fraction of samples each pole must hold for a hard-alpha verdict. */
+export const minPole = 0.12;
 
 /** Grayscale luma from RGBA pixel data at byte index i. */
 export function luma(data: Uint8ClampedArray | number[], i: number): number {
@@ -41,4 +54,41 @@ export function grayStdDev(gray: number[]): number {
  *  "near-duplicate" matches — exclude them from perceptual matching. */
 export function isFlat(gray: number[], minStdDev = 6): boolean {
   return grayStdDev(gray) < minStdDev;
+}
+
+/** Hard alpha present iff BOTH alpha poles are populated in the sample: a meaningful fraction of
+ *  pixels are near-opaque (α ≥ OPAQUE) AND a meaningful fraction near-clear (α ≤ CLEAR). HISTOGRAM
+ *  form (NOT edge-adjacency) — robust to the 9×8 bilinear resample that smears hard cutout edges into
+ *  alpha ramps (design M3). A soft vignette keeps most α in the mid band ⇒ at most one pole is
+ *  populated ⇒ false. `rgba` is interleaved RGBA bytes; the alpha channel is every 4th byte. */
+export function hasHardAlpha(
+  rgba: Uint8ClampedArray | number[],
+  opaque = OPAQUE,
+  clear = CLEAR,
+  pole = minPole,
+): boolean {
+  const n = Math.floor(rgba.length / 4);
+  if (n === 0) return false;
+  let opaqueCount = 0;
+  let clearCount = 0;
+  for (let p = 0; p < n; p++) {
+    const a = rgba[p * 4 + 3] ?? 0;
+    if (a >= opaque) opaqueCount++;
+    else if (a <= clear) clearCount++;
+  }
+  return opaqueCount / n >= pole && clearCount / n >= pole;
+}
+
+/** Classify a 9×8 RGBA sample into a coarse content class for the format-suitability verdict.
+ *  Order (design §4): hard alpha first (a flat icon WITH a hard cutout is 'alpha-art', so checking
+ *  alpha before variance keeps it out of the 'flat' bucket) → low-variance fill ('flat') → else
+ *  'photographic'. Empty / short sample ⇒ 'unknown' (caller falls back to today's lossy path). */
+export function classifyContent(
+  gray: number[],
+  rgba: Uint8ClampedArray | number[],
+): ContentClass {
+  if (gray.length === 0 || rgba.length < 4) return 'unknown';
+  if (hasHardAlpha(rgba)) return 'alpha-art';
+  if (grayStdDev(gray) < FLAT_STD) return 'flat';
+  return 'photographic';
 }

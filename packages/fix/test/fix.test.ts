@@ -135,6 +135,24 @@ describe('planFix', () => {
     expect(dropIn.ops.some((o) => o.kind === 'repack' && o.atlasRefs.length > 1)).toBe(false);
   });
 
+  it('a flat/alpha-art format finding ⇒ transcode lossless:true even when opts.lossless is false', () => {
+    const report: AnalysisReport = {
+      assets: [{ assetRef: 'flat.png', diskBytes: 1000, vramBytes: 0 }, { assetRef: 'photo.png', diskBytes: 1000, vramBytes: 0 }],
+      findings: [
+        { id: 'flat.png:format', rule: 'format', severity: 'warn', assetRef: 'flat.png', title: '', detail: '', messageKey: 'format-lossless', params: { contentClass: 'flat' } },
+        { id: 'photo.png:format', rule: 'format', severity: 'warn', assetRef: 'photo.png', title: '', detail: '' },
+      ],
+      totals: { diskBytes: 2000, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+      thresholds: DEFAULT_THRESHOLDS,
+    };
+    const plan = planFix(report, { targetMime: 'image/webp', quality: 0.9, lossless: false, padding: 2, maxSize: 4096, maxEdge: 2048, aggressive: false });
+    const transcodes = plan.ops.filter((o): o is Extract<FixOp, { kind: 'transcode' }> => o.kind === 'transcode');
+    const flat = transcodes.find((o) => o.assetRef === 'flat.png');
+    const photo = transcodes.find((o) => o.assetRef === 'photo.png');
+    expect(flat?.lossless).toBe(true); // class forces lossless despite opts.lossless:false
+    expect(photo?.lossless).toBe(false); // photographic follows opts.lossless
+  });
+
   it('drops near-duplicates only in aggressive mode', () => {
     const report: AnalysisReport = {
       assets: [{ assetRef: 'a.png', diskBytes: 100, vramBytes: 0 }, { assetRef: 'b.png', diskBytes: 100, vramBytes: 0 }],

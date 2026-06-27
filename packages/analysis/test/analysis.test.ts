@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { Asset, Atlas, Rect } from '@asset-doctor/core';
 import { parseAtlas, parseImage } from '@asset-doctor/parsers';
-import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyFinding, wastedRegions, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyFinding, wastedRegions, formatFinding, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -159,6 +159,71 @@ describe('format audit — injected encoder', () => {
 
     const small = await analyze([r.asset], undefined, { encodeImage: async () => Math.round(disk * 0.95) });
     expect(small.findings.some((f) => f.rule === 'format')).toBe(false);
+  });
+});
+
+describe('format audit — content-class lossless verdict', () => {
+  const looseImg = (name: string): Asset => ({
+    kind: 'image',
+    image: { name, imageRef: name, size: { w: 256, h: 256 }, mime: 'image/png', byteSize: 10000 },
+  });
+
+  it('photographic / unknown ⇒ byte-identical to today (rule format, messageKey format, no contentClass)', async () => {
+    const photo = (await formatFinding('p.png', looseImg('p.png').image, DEFAULT_THRESHOLDS, async () => 4000, 'photographic'))!;
+    const unknown = (await formatFinding('u.png', looseImg('u.png').image, DEFAULT_THRESHOLDS, async () => 4000))!;
+    for (const f of [photo, unknown]) {
+      expect(f.rule).toBe('format');
+      expect(f.messageKey).toBe('format');
+      expect(f.params?.contentClass).toBeUndefined();
+    }
+  });
+
+  it('flat / alpha-art ⇒ rule stays format (B2), messageKey switches, lossy saving + contentClass param', async () => {
+    for (const cls of ['flat', 'alpha-art'] as const) {
+      const f = (await formatFinding('a.png', looseImg('a.png').image, DEFAULT_THRESHOLDS, async () => 4000, cls))!;
+      expect(f.rule).toBe('format'); // plan.ts + aggregate key off this
+      expect(f.messageKey).toBe('format-lossless');
+      expect(f.params?.contentClass).toBe(cls);
+      // Inv 4: the shown saving is today's LOSSY delta (10000 − 4000), NOT a lossless number.
+      expect(f.estimate?.diskBytesSaved).toBe(6000);
+    }
+  });
+
+  it('analyze threads contentClass to LOOSE images via features', async () => {
+    const report = await analyze([looseImg('flat.png')], undefined, {
+      encodeImage: async () => 4000,
+      features: [{ assetRef: 'flat.png', contentHash: 'h', contentClass: 'flat' }],
+    });
+    const fmt = report.findings.find((f) => f.rule === 'format');
+    expect(fmt?.messageKey).toBe('format-lossless');
+    expect(fmt?.params?.contentClass).toBe('flat');
+  });
+
+  it('analyze NEVER drives a lossless verdict for an ATLAS, even if a feature classes it flat (M1)', async () => {
+    const atlasAsset: Asset = {
+      kind: 'atlas',
+      atlas: {
+        name: 'sheet.png',
+        imageRef: 'sheet.png',
+        size: { w: 256, h: 256 },
+        sprites: [{ name: 's0', frame: { x: 0, y: 0, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 32, h: 32 } }],
+        source: { kind: 'pixi' },
+      },
+      image: { name: 'sheet.png', imageRef: 'sheet.png', size: { w: 256, h: 256 }, mime: 'image/png', byteSize: 10000 },
+    };
+    const report = await analyze([atlasAsset], undefined, {
+      encodeImage: async () => 4000,
+      features: [{ assetRef: 'sheet.png', contentHash: 'h', contentClass: 'flat' }],
+    });
+    const fmt = report.findings.find((f) => f.rule === 'format' && f.scope !== 'folder');
+    expect(fmt?.messageKey).toBe('format'); // atlas keeps today's lossy verdict
+    expect(fmt?.params?.contentClass).toBeUndefined();
+  });
+
+  it('absent features ⇒ every format finding is today\'s lossy verdict (CLI / headless unaffected)', async () => {
+    const report = await analyze([looseImg('x.png')], undefined, { encodeImage: async () => 4000 });
+    const fmt = report.findings.find((f) => f.rule === 'format');
+    expect(fmt?.messageKey).toBe('format');
   });
 });
 

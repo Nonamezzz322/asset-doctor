@@ -8,6 +8,7 @@ import type {
   Asset,
   AssetMetrics,
   Atlas,
+  ContentClass,
   Finding,
   ImageAsset,
   ImageFeatures,
@@ -66,8 +67,15 @@ export async function analyze(
   const atlasFrames: Record<string, Rect[]> = {};
   let potentialDiskSaved = 0;
 
-  const addFormat = async (ref: string, image: ImageAsset) => {
-    const fmt = await formatFinding(ref, image, cfg, deps.encodeImage);
+  // Content-class verdict drives lossy-vs-lossless ONLY for LOOSE images (design M1: a 72-px average
+  // of a packed atlas collage is meaningless, so atlases pass 'unknown' below and keep today's lossy
+  // verdict). Built from the host-supplied features; absent ⇒ empty ⇒ every call 'unknown' ⇒
+  // byte-identical to today (CLI / headless tests unaffected).
+  const classByRef = new Map<string, ContentClass>();
+  for (const f of deps.features ?? []) if (f.contentClass) classByRef.set(f.assetRef, f.contentClass);
+
+  const addFormat = async (ref: string, image: ImageAsset, contentClass: ContentClass = 'unknown') => {
+    const fmt = await formatFinding(ref, image, cfg, deps.encodeImage, contentClass);
     if (fmt) {
       findings.push(fmt);
       formatFindings.push(fmt);
@@ -97,7 +105,7 @@ export async function analyze(
       if (occ) findings.push(occ);
       if (waste) findings.push(waste);
       findings.push(...dimensionFindings(atlas.name, atlas.size, cfg));
-      await addFormat(atlas.name, image);
+      await addFormat(atlas.name, image, 'unknown'); // M1: atlases keep today's lossy verdict
       // The packed rects the host render-probe replays as sprites. Keyed by atlas.name === the
       // assetRef pushed above. `frame` is the rect AS PLACED in the atlas image (already w/h-swapped
       // when rotated), which is exactly what probeAtlas wants.
@@ -113,7 +121,7 @@ export async function analyze(
         vramBytesMipmapped: vramBytesMipmapped(image.size),
       });
       findings.push(...dimensionFindings(image.name, image.size, cfg));
-      await addFormat(image.name, image);
+      await addFormat(image.name, image, classByRef.get(image.name) ?? 'unknown');
     }
   }
 

@@ -1,0 +1,33 @@
+{
+  "kind": "content-classes",
+  "feature": "content-class-format-verdict",
+  "grid": {
+    "w": 9,
+    "h": 8,
+    "cell": 20
+  },
+  "images": [
+    {
+      "name": "flat-fill.png",
+      "w": 180,
+      "h": 160,
+      "contentClass": "flat",
+      "why": "one solid opaque color → grayStdDev ≈ 0 < FLAT_STD (12)"
+    },
+    {
+      "name": "photographic.png",
+      "w": 180,
+      "h": 160,
+      "contentClass": "photographic",
+      "why": "distinct luminance per 9×8 cell → grayStdDev far above FLAT_STD, opaque (no alpha poles)"
+    },
+    {
+      "name": "alpha-art.png",
+      "w": 180,
+      "h": 160,
+      "contentClass": "alpha-art",
+      "why": "hard cutout: ≈44% opaque + ≈44% clear → both alpha poles past minPole (0.12), checked before the flat branch"
+    }
+  ],
+  "note": "Three loose images, one per content class, for the lossy-vs-lossless format verdict. Drawn on a 9×8-aligned grid so a box-average downsample to the dHash sample is deterministic and the class survives the resample. flat/alpha-art ⇒ messageKey:format-lossless (rule stays format); photographic ⇒ today's lossy verdict."
+}

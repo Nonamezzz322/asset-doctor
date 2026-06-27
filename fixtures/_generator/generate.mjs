@@ -1305,4 +1305,113 @@ round-trip is real.
   );
 }
 
+/* ── Case 15: format-classes — content-class format-suitability goldens (docs/improvements/content-class.md) ──
+ * Three LOOSE images, one per content class, each with a hand-authored golden `contentClass`. These cross-
+ * check `classifyContent` (apps/web/src/lib/perceptual.ts) the same way every other expected.json cross-
+ * checks the analysis core: the class is authored HERE, independently of the classifier.
+ *
+ * The classifier runs on a 9×8 downsample of the decoded RGBA (the dHash sample the worker reuses; Inv 4 —
+ * no encode). So the fixtures are drawn on a grid that is an exact multiple of 9×8 (180×160 = 20×20 px
+ * cells) and aligned to cell boundaries, so a box-average downsample to 9×8 is deterministic and the class
+ * survives the resample:
+ *   • flat-fill   — one solid opaque color → grayStdDev ≈ 0 (< FLAT_STD 12) → 'flat'.
+ *   • photographic — every 9×8 cell a DISTINCT high-contrast luminance → grayStdDev far above FLAT_STD,
+ *                    fully opaque (no alpha poles) → 'photographic'. (A per-cell pattern, not pixel noise,
+ *                    so the box-average to 9×8 preserves the inter-cell variance exactly.)
+ *   • alpha-art   — a hard cutout: a solid opaque block over the LEFT ~half (cells 0–3 of 9), fully
+ *                    transparent over the RIGHT ~half (cells 5–8), one smeared column between → both alpha
+ *                    poles populated well past minPole (0.12) ⇒ hasHardAlpha ⇒ 'alpha-art' (checked before
+ *                    the flat-variance branch, so an otherwise-flat opaque block with a cutout is alpha-art). */
+{
+  const GW = 9; // sample-grid columns (matches the dHash 9×8)
+  const GH = 8; // sample-grid rows
+  const CELL = 20; // px per grid cell → 180×160 source, an exact multiple of 9×8
+  const W = GW * CELL; // 180
+  const H = GH * CELL; // 160
+
+  // flat-fill: one solid opaque mid color. grayStdDev ≈ 0.
+  const flat = solidPng(W, H, [60, 120, 90]);
+
+  // photographic: each 9×8 cell a distinct luminance via a deterministic high-spread ramp. Opaque.
+  const photoPng = (() => {
+    const png = new PNG({ width: W, height: H });
+    png.data.fill(0);
+    for (let gy = 0; gy < GH; gy++) {
+      for (let gx = 0; gx < GW; gx++) {
+        // Spread cell indices across the full 0..255 range with a coprime stride so neighbours differ a lot.
+        const idx = gy * GW + gx;
+        const v = (idx * 97 + 13) % 256;
+        fillRect(png, gx * CELL, gy * CELL, CELL, CELL, [v, (v * 5 + 40) % 256, (v * 11 + 80) % 256]);
+      }
+    }
+    return PNG.sync.write(png);
+  })();
+
+  // alpha-art: hard cutout — opaque LEFT block (cols 0–3), transparent RIGHT (cols 5–8), col 4 smeared.
+  const alphaPng = (() => {
+    const png = new PNG({ width: W, height: H });
+    png.data.fill(0); // transparent background = the clear pole
+    fillRect(png, 0, 0, 4 * CELL, H, [200, 60, 60]); // 4/9 of width fully opaque (≈44% ≥ minPole)
+    // a single half-alpha smear column (col 4) so the edge isn't a perfect step — the histogram test
+    // must still see both poles (cols 0–3 opaque, cols 5–8 clear) past minPole.
+    for (let y = 0; y < H; y++) {
+      for (let x = 4 * CELL; x < 5 * CELL; x++) {
+        const i = (W * y + x) << 2;
+        png.data[i] = 200;
+        png.data[i + 1] = 60;
+        png.data[i + 2] = 60;
+        png.data[i + 3] = 128; // mid alpha → lands in the ramp band, NOT a pole
+      }
+    }
+    // right half (cols 5–8) stays alpha 0 (the clear pole, ≈44%).
+    return PNG.sync.write(png);
+  })();
+
+  writeCase(
+    'format-classes',
+    {
+      'flat-fill.png': flat,
+      'photographic.png': photoPng,
+      'alpha-art.png': alphaPng,
+      'expected.json': {
+        kind: 'content-classes',
+        feature: 'content-class-format-verdict',
+        grid: { w: GW, h: GH, cell: CELL },
+        // Golden contentClass per image — authored by hand, the independent cross-check of classifyContent.
+        images: [
+          { name: 'flat-fill.png', w: W, h: H, contentClass: 'flat', why: 'one solid opaque color → grayStdDev ≈ 0 < FLAT_STD (12)' },
+          { name: 'photographic.png', w: W, h: H, contentClass: 'photographic', why: 'distinct luminance per 9×8 cell → grayStdDev far above FLAT_STD, opaque (no alpha poles)' },
+          { name: 'alpha-art.png', w: W, h: H, contentClass: 'alpha-art', why: 'hard cutout: ≈44% opaque + ≈44% clear → both alpha poles past minPole (0.12), checked before the flat branch' },
+        ],
+        note:
+          'Three loose images, one per content class, for the lossy-vs-lossless format verdict. Drawn on a '
+          + '9×8-aligned grid so a box-average downsample to the dHash sample is deterministic and the class '
+          + 'survives the resample. flat/alpha-art ⇒ messageKey:format-lossless (rule stays format); '
+          + 'photographic ⇒ today\'s lossy verdict.',
+      },
+    },
+    `# format-classes
+
+Three **loose** images, one per **content class**, for the content-class format-suitability verdict
+(\`docs/improvements/content-class.md\`). Each carries a hand-authored golden \`contentClass\` in
+\`expected.json\` — the independent cross-check of \`classifyContent\` (the classifier runs on the **9×8
+dHash sample** the worker already decodes; Invariant 4 — no encode).
+
+The images are drawn on a grid that is an exact multiple of **9×8** (180×160, 20px cells) and aligned to
+cell boundaries, so a box-average downsample to 9×8 is deterministic and the class survives the resample:
+
+- **\`flat-fill.png\`** — one solid opaque color → \`grayStdDev\` ≈ 0 (below \`FLAT_STD\` = 12) → **flat**.
+- **\`photographic.png\`** — every 9×8 cell a distinct high-contrast luminance → \`grayStdDev\` far above
+  \`FLAT_STD\`, fully opaque (no alpha poles) → **photographic**. A per-cell pattern (not pixel noise) so the
+  box-average preserves the inter-cell variance.
+- **\`alpha-art.png\`** — a **hard cutout**: a solid opaque block over the left ~half, fully transparent over
+  the right ~half (one mid-alpha smear column between) → both alpha poles populated past \`minPole\` (0.12)
+  ⇒ \`hasHardAlpha\` ⇒ **alpha-art** (checked before the flat-variance branch).
+
+flat / alpha-art ⇒ \`messageKey:'format-lossless'\` (rule stays \`format\`); photographic ⇒ today's lossy
+verdict (gradients are deliberately out of the confident set, M2).
+`,
+  );
+}
+
 console.log('Done.');

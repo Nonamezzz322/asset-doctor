@@ -2,7 +2,7 @@
 // Finding(s) with a verdict, the proof (numbers), a fix, and — where visual — overlay zones.
 // We measure; we never fabricate. Thresholds come from config, never inline magic numbers.
 
-import { MIP_OVERHEAD, type Atlas, type Finding, type ImageAsset, type ImageMime, type Severity, type Size, type ThresholdConfig } from '@asset-doctor/core';
+import { MIP_OVERHEAD, type Atlas, type ContentClass, type Finding, type ImageAsset, type ImageMime, type Severity, type Size, type ThresholdConfig } from '@asset-doctor/core';
 import { buildCoverage, defaultCell, mergeEmptyRects, summarizeEmpty } from './grid';
 
 const BYTES_PER_PX = 4; // RGBA8888
@@ -168,6 +168,7 @@ export async function formatFinding(
   image: ImageAsset,
   cfg: ThresholdConfig,
   encode?: EncodeSizer,
+  contentClass: ContentClass = 'unknown',
 ): Promise<Finding | null> {
   // AVIF is already the best target — nothing to suggest.
   if (image.mime === 'image/avif' || !encode || image.byteSize <= 0) return null;
@@ -181,6 +182,30 @@ export async function formatFinding(
   const saved = image.byteSize - best.bytes;
   const frac = saved / image.byteSize;
   if (frac < cfg.formatSaving.warn) return null;
+  // Flat / alpha-art compresses better lossless (lossy q0.9 frays hard edges + flat fills), so the
+  // VERDICT recommends lossless. INVARIANT 4: the diagnosis path does NO lossless encode — the shown
+  // saving stays today's lossy q0.9 estimate, the COPY marks it as such, and the real lossless byte
+  // delta materializes only in the Pro fix (plan.ts → FixOp.transcode.lossless). `rule` stays 'format'
+  // (B2: plan.ts + formatAggregateFinding key off it); only `messageKey` switches. Atlases never reach
+  // here as flat/alpha-art — the caller passes 'unknown' for them (M1), keeping today's lossy verdict.
+  const wantsLossless = contentClass === 'flat' || contentClass === 'alpha-art';
+  if (wantsLossless) {
+    return {
+      id: `${ref}:format`,
+      rule: 'format',
+      severity: 'warn',
+      assetRef: ref,
+      title: `${FORMAT_LABEL[best.mime]} (lossless) suits this ${contentClass}`,
+      detail:
+        `${contentClass} compresses better lossless — lossy q0.9 would fray hard edges. ` +
+        `Prefer lossless ${FORMAT_LABEL[best.mime]}. Lossy estimate −${fmtBytes(saved)}; ` +
+        `the Pro fix encodes lossless, so bytes will differ.`,
+      fix: `Transcode to lossless ${FORMAT_LABEL[best.mime]} for delivery.`,
+      estimate: { diskBytesSaved: saved },
+      messageKey: 'format-lossless',
+      params: { target: FORMAT_LABEL[best.mime], frac, srcLabel: FORMAT_LABEL[image.mime], srcBytes: image.byteSize, bestBytes: best.bytes, saved, contentClass },
+    };
+  }
   return {
     id: `${ref}:format`,
     rule: 'format',
