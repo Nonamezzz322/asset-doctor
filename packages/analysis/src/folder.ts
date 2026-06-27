@@ -4,6 +4,20 @@
 
 import type { Asset, AssetMetrics, Atlas, Finding, ImageAsset, ImageFeatures, ThresholdConfig } from '@asset-doctor/core';
 import { fmtBytes, occupancyValue, vramBytes } from './rules';
+import { buildCoverage, defaultCell, mergeEmptyRects, summarizeEmpty } from './grid';
+
+/** Pure dispersion of one atlas's empty space: { frag, largestPct } over the grid-merged empty rects.
+ *  Defaults to frag = 1 (contiguous) / largestPct = wasted-fraction when no empty rects map (B1) —
+ *  never an undefined that would render as an empty interpolation. SHAPE of waste, not a savings claim. */
+function atlasDispersion(atlas: Atlas): { frag: number; largestPct: number } {
+  const atlasPx = atlas.size.w * atlas.size.h;
+  const rects = mergeEmptyRects(buildCoverage(atlas, defaultCell(atlas.size)), atlas.size);
+  const empty = summarizeEmpty(rects);
+  if (empty.fragmentation === undefined || atlasPx <= 0) {
+    return { frag: 1, largestPct: Math.max(0, 1 - occupancyValue(atlas)) };
+  }
+  return { frag: empty.fragmentation, largestPct: empty.largestArea / atlasPx };
+}
 
 function imageByRef(assets: Asset[]): Map<string, ImageAsset> {
   const m = new Map<string, ImageAsset>();
@@ -135,6 +149,17 @@ export function atlasMergeFinding(atlases: Atlas[], cfg: ThresholdConfig): Findi
   const refs = under.map((a) => a.name).sort();
   const currentVram = under.reduce((s, a) => s + vramBytes(a.size), 0);
   const mergedVram = minAtlases * capacity * 4;
+  // F5: dispersion of the under-filled set = the MOST-shredded atlas (min frag). Default frag=1 when
+  // no atlas has mappable empty rects (B1) — never an empty interpolation; SHAPE, not savings (M1). The
+  // caveat is dispersion-AWARE (not a categorical "scattered" claim): the recommendation scales with the
+  // measured dispersion, so it reads truthfully at any frag — high frag (one contiguous hole) and low
+  // frag (shredded) alike. Mirrors the occupancy clause and the en catalog template EXACTLY (the
+  // renderFinding drift guard requires byte parity between baked + en).
+  const disp = under
+    .map(atlasDispersion)
+    .reduce((min, d) => (d.frag < min.frag ? d : min), { frag: 1, largestPct: 0 });
+  const lp = Math.round(disp.largestPct * 1000) / 10;
+  const fr = Math.round(disp.frag * 1000) / 10;
   return {
     id: 'folder:atlas-merge',
     rule: 'atlas-merge',
@@ -146,11 +171,13 @@ export function atlasMergeFinding(atlases: Atlas[], cfg: ThresholdConfig): Findi
     detail:
       `${refs.join(', ')} are each under ${Math.round(cfg.atlasMerge.occupancyBelow * 100)}% full. ` +
       `Their content fits in ~${minAtlases} sheet${minAtlases === 1 ? '' : 's'} — merging cuts ` +
-      `texture binds, draw calls and VRAM.`,
+      `texture binds, draw calls and VRAM. ` +
+      `Largest contiguous empty hole is ${lp}% of its sheet (dispersion ${fr}%); ` +
+      `the lower the dispersion, the more a full repack — not a trim — is needed.`,
     fix: 'Re-pack these atlases together.',
     estimate: { vramBytesSaved: Math.max(0, currentVram - mergedVram) },
     messageKey: 'atlas-merge',
-    params: { n: under.length, merged: minAtlases, refs: refs.join(', '), pct: Math.round(cfg.atlasMerge.occupancyBelow * 100) },
+    params: { n: under.length, merged: minAtlases, refs: refs.join(', '), pct: Math.round(cfg.atlasMerge.occupancyBelow * 100), frag: disp.frag, largestPct: disp.largestPct },
   };
 }
 

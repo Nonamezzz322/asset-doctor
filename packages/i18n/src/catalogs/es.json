@@ -32,7 +32,7 @@
   "severity.ok": "ok",
   "severity.info": "info",
   "find.occupancy.title": "Atlas {occ:pct} empaquetado — {wasted:pct} desperdiciado",
-  "find.occupancy.detail": "{frames} frames cubren el {occ:pct} de {w}×{h}. Un empaquetado más ajustado reduce la hoja y la VRAM que fija ({vram:bytes}).",
+  "find.occupancy.detail": "{frames} frames cubren el {occ:pct} de {w}×{h}. Un empaquetado más ajustado reduce la hoja y la VRAM que fija ({vram:bytes}). El mayor hueco vacío contiguo es el {largestPct:pct} de la hoja (dispersión {frag:pct}); cuanto menor la dispersión, más se necesita un reempaquetado completo, no un recorte.",
   "find.occupancy.fix": "Reempaqueta con MaxRects + trim, o divide en una hoja más pequeña.",
   "find.oversize.title": "Sobredimensionado {w}×{h} (borde {edge}px)",
   "find.oversize.detail": "El borde más largo {edge}px supera el presupuesto {sev:sev} de {budget}px. Fija {vram:bytes} de VRAM y puede exceder los límites de GPU de gama baja.",
@@ -46,7 +46,7 @@
     "many": "{n} de regiones vacías mapeadas",
     "other": "{n} regiones vacías mapeadas"
   },
-  "find.wasted-regions.detail": "≈{pct:pct} del atlas es espacio vacío contiguo (mapeado por grid).",
+  "find.wasted-regions.detail": "≈{pct:pct} del atlas es espacio vacío (mapeado por grid), el mayor hueco contiguo es el {largestPct:pct} de la hoja.",
   "find.format.title": "{target} recortaría {frac:pct}",
   "find.format.detail": "{srcLabel} {srcBytes:bytes} → {target} ~{bestBytes:bytes} (−{saved:bytes}). Estimación por canvas; la paridad sin pérdidas requiere códecs wasm.",
   "find.format.fix": "Transcodifica a AVIF (o WebP) para la entrega.",
@@ -62,9 +62,9 @@
   "find.atlas-merge.title": "{n} atlas infrautilizados → fusiona en ~{merged}",
   "find.atlas-merge.detail": {
     "$count": "merged",
-    "one": "{refs} están cada uno por debajo del {pct}% de llenado. Su contenido cabe en ~{merged} hoja: fusionar reduce binds de textura, draw calls y VRAM.",
-    "many": "{refs} están cada uno por debajo del {pct}% de llenado. Su contenido cabe en ~{merged} de hojas: fusionar reduce binds de textura, draw calls y VRAM.",
-    "other": "{refs} están cada uno por debajo del {pct}% de llenado. Su contenido cabe en ~{merged} hojas: fusionar reduce binds de textura, draw calls y VRAM."
+    "one": "{refs} están cada uno por debajo del {pct}% de llenado. Su contenido cabe en ~{merged} hoja: fusionar reduce binds de textura, draw calls y VRAM. El mayor hueco vacío contiguo es el {largestPct:pct} de su hoja (dispersión {frag:pct}); cuanto menor la dispersión, más se necesita un reempaquetado completo, no un recorte.",
+    "many": "{refs} están cada uno por debajo del {pct}% de llenado. Su contenido cabe en ~{merged} de hojas: fusionar reduce binds de textura, draw calls y VRAM. El mayor hueco vacío contiguo es el {largestPct:pct} de su hoja (dispersión {frag:pct}); cuanto menor la dispersión, más se necesita un reempaquetado completo, no un recorte.",
+    "other": "{refs} están cada uno por debajo del {pct}% de llenado. Su contenido cabe en ~{merged} hojas: fusionar reduce binds de textura, draw calls y VRAM. El mayor hueco vacío contiguo es el {largestPct:pct} de su hoja (dispersión {frag:pct}); cuanto menor la dispersión, más se necesita un reempaquetado completo, no un recorte."
   },
   "find.atlas-merge.fix": "Reempaqueta estos atlas juntos.",
   "find.integrity.title": "Falta la imagen del atlas: {image}",

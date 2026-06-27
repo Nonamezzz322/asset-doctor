@@ -32,7 +32,7 @@
   "severity.ok": "ok",
   "severity.info": "info",
   "find.occupancy.title": "Atlas riempito al {occ:pct} — {wasted:pct} sprecato",
-  "find.occupancy.detail": "{frames} frame coprono il {occ:pct} di {w}×{h}. Una packing più stretta riduce lo sheet e la VRAM che impegna ({vram:bytes}).",
+  "find.occupancy.detail": "{frames} frame coprono il {occ:pct} di {w}×{h}. Una packing più stretta riduce lo sheet e la VRAM che impegna ({vram:bytes}). Il più grande buco vuoto contiguo è il {largestPct:pct} dello sheet (dispersione {frag:pct}); più bassa è la dispersione, più serve un repack completo, non un semplice trim.",
   "find.occupancy.fix": "Riassembla con MaxRects + trim, oppure dividi in uno sheet più piccolo.",
   "find.oversize.title": "Sovradimensionato {w}×{h} (bordo {edge}px)",
   "find.oversize.detail": "Il bordo più lungo {edge}px supera il budget {sev:sev} di {budget}px. Impegna {vram:bytes} di VRAM e può superare i limiti delle GPU di fascia bassa.",
@@ -46,7 +46,7 @@
     "many": "{n} di regioni vuote mappate",
     "other": "{n} regioni vuote mappate"
   },
-  "find.wasted-regions.detail": "≈{pct:pct} dell'atlas è spazio vuoto contiguo (mappato a griglia).",
+  "find.wasted-regions.detail": "≈{pct:pct} dell'atlas è spazio vuoto (mappato a griglia), il più grande buco contiguo è il {largestPct:pct} dello sheet.",
   "find.format.title": "{target} ridurrebbe del {frac:pct}",
   "find.format.detail": "{srcLabel} {srcBytes:bytes} → {target} ~{bestBytes:bytes} (−{saved:bytes}). Stima Canvas; la parità lossless richiede codec wasm.",
   "find.format.fix": "Transcodifica in AVIF (o WebP) per la distribuzione.",
@@ -62,9 +62,9 @@
   "find.atlas-merge.title": "{n} atlas poco riempiti → unisci in ~{merged}",
   "find.atlas-merge.detail": {
     "$count": "merged",
-    "one": "{refs} sono riempiti ciascuno sotto il {pct}%. Il loro contenuto sta in ~{merged} sheet — unirli riduce i bind di texture, le draw call e la VRAM.",
-    "many": "{refs} sono riempiti ciascuno sotto il {pct}%. Il loro contenuto sta in ~{merged} di sheet — unirli riduce i bind di texture, le draw call e la VRAM.",
-    "other": "{refs} sono riempiti ciascuno sotto il {pct}%. Il loro contenuto sta in ~{merged} sheet — unirli riduce i bind di texture, le draw call e la VRAM."
+    "one": "{refs} sono riempiti ciascuno sotto il {pct}%. Il loro contenuto sta in ~{merged} sheet — unirli riduce i bind di texture, le draw call e la VRAM. Il più grande buco vuoto contiguo è il {largestPct:pct} del suo sheet (dispersione {frag:pct}); più bassa è la dispersione, più serve un repack completo, non un semplice trim.",
+    "many": "{refs} sono riempiti ciascuno sotto il {pct}%. Il loro contenuto sta in ~{merged} di sheet — unirli riduce i bind di texture, le draw call e la VRAM. Il più grande buco vuoto contiguo è il {largestPct:pct} del suo sheet (dispersione {frag:pct}); più bassa è la dispersione, più serve un repack completo, non un semplice trim.",
+    "other": "{refs} sono riempiti ciascuno sotto il {pct}%. Il loro contenuto sta in ~{merged} sheet — unirli riduce i bind di texture, le draw call e la VRAM. Il più grande buco vuoto contiguo è il {largestPct:pct} del suo sheet (dispersione {frag:pct}); più bassa è la dispersione, più serve un repack completo, non un semplice trim."
   },
   "find.atlas-merge.fix": "Riassembla questi atlas insieme.",
   "find.integrity.title": "Immagine atlas mancante: {image}",

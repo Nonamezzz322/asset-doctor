@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { Asset, Atlas, Rect } from '@asset-doctor/core';
 import { parseAtlas, parseImage } from '@asset-doctor/parsers';
-import { analyze, buildCoverage, mergeEmptyRects, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyFinding, wastedRegions, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -310,5 +310,106 @@ describe('variant grouping (VRAM inflation)', () => {
     ]);
     expect(rep.findings.some((f) => f.rule === 'variants' && f.scope === 'folder')).toBe(true);
     expect(rep.totals.loadedVramBytes).toBeLessThan(rep.totals.vramBytes);
+  });
+});
+
+describe('atlas fragmentation (dispersion of empty space)', () => {
+  // Synthetic atlases built directly on the model (pure: no pixel read — frag operates on the rects
+  // already merged). `cell` is fixed explicitly where the unit test asserts an exact frag so the grid
+  // is deterministic and independent of defaultCell's size heuristic.
+  const atlasOf = (name: string, w: number, h: number, frames: Rect[]): Atlas => ({
+    name,
+    imageRef: `${name}.png`,
+    size: { w, h },
+    sprites: frames.map((f, i) => ({
+      name: `f${i}`,
+      frame: f,
+      rotated: false,
+      trimmed: false,
+      sourceSize: { w: f.w, h: f.h },
+    })),
+    source: { kind: 'pixi' },
+  });
+  const asset = (atlas: Atlas): Asset => ({
+    kind: 'atlas',
+    atlas,
+    image: { name: atlas.name, imageRef: atlas.imageRef, size: atlas.size, mime: 'image/png', byteSize: 100 },
+  });
+
+  // CONTIGUOUS waste: one wide strip covers the whole top row → the remainder is ONE empty block.
+  const contiguous = atlasOf('contig', 40, 40, [{ x: 0, y: 0, w: 40, h: 10 }]);
+  // SHREDDED waste: a checkerboard of 10×10 sprites leaves 8 disjoint single-cell gaps, none dominant.
+  const shreddedFrames: Rect[] = [];
+  for (let r = 0; r < 4; r++)
+    for (let c = 0; c < 4; c++) if ((r + c) % 2 === 0) shreddedFrames.push({ x: c * 10, y: r * 10, w: 10, h: 10 });
+  const shredded = atlasOf('shred', 40, 40, shreddedFrames);
+
+  it('summarizeEmpty: [] → fragmentation undefined (no dispersion to describe)', () => {
+    const e = summarizeEmpty([]);
+    expect(e.n).toBe(0);
+    expect(e.totalArea).toBe(0);
+    expect(e.largestArea).toBe(0);
+    expect(e.fragmentation).toBeUndefined();
+  });
+
+  it('summarizeEmpty: one rect → frag 1; many equal rects → frag = 1/n', () => {
+    expect(summarizeEmpty([{ x: 0, y: 0, w: 10, h: 10 }]).fragmentation).toBe(1);
+    const four: Rect[] = [
+      { x: 0, y: 0, w: 5, h: 5 },
+      { x: 10, y: 0, w: 5, h: 5 },
+      { x: 0, y: 10, w: 5, h: 5 },
+      { x: 10, y: 10, w: 5, h: 5 },
+    ];
+    expect(summarizeEmpty(four).fragmentation).toBe(0.25); // largest 25 / total 100
+  });
+
+  it('contiguous waste → frag near 1; shredded waste → frag well below 1', () => {
+    const c = summarizeEmpty(mergeEmptyRects(buildCoverage(contiguous, 10), contiguous.size));
+    expect(c.n).toBe(1); // one merged empty block
+    expect(c.fragmentation).toBe(1);
+
+    const s = summarizeEmpty(mergeEmptyRects(buildCoverage(shredded, 10), shredded.size));
+    expect(s.n).toBeGreaterThan(1); // many scattered gaps
+    expect(s.fragmentation).toBe(0.125); // largest 100 / total 800 — 8 equal cells
+    expect(s.fragmentation!).toBeLessThan(0.5);
+  });
+
+  it('analyze populates AssetMetrics.fragmentation (defined when wasted-regions fires)', async () => {
+    // Default cell (defaultCell(40)=8 → 5×5 grid): contiguous frag = 1, shredded frag < 1, both populated.
+    const contigFrag = (await analyze([asset(contiguous)])).assets[0]?.fragmentation;
+    const shredFrag = (await analyze([asset(shredded)])).assets[0]?.fragmentation;
+    expect(contigFrag).toBe(1);
+    expect(typeof shredFrag).toBe('number');
+    expect(shredFrag!).toBeLessThan(1);
+    // The dispersion ordering is the whole point: shredded is more fragmented than contiguous.
+    expect(shredFrag!).toBeLessThan(contigFrag!);
+  });
+
+  it('occupancyFinding carries the frag/largestPct params it was given', () => {
+    const occ = occupancyFinding(shredded, DEFAULT_THRESHOLDS, { fragmentation: 0.125, largestPct: 0.0625 });
+    expect(occ?.params?.frag).toBe(0.125);
+    expect(occ?.params?.largestPct).toBe(0.0625);
+  });
+
+  // B1 (default): an atlas where occupancy fires (occ < warn) but mergeEmptyRects returns [] — frag is
+  // undefined yet the occupancy finding MUST still render a coherent, brace-free clause (frag defaults to
+  // 1 = contiguous), never an empty interpolation. The 2×2 frame straddles every cell of the 2×2 grid.
+  const degenerate = atlasOf('tiny', 16, 16, [{ x: 7, y: 7, w: 2, h: 2 }]); // touches all 4 cells, area 4/256
+  it('B1: zero empty rects → wasted-regions null, occupancy still fires, metrics.fragmentation undefined', async () => {
+    const cell = Math.max(8, Math.round(16 / 64)); // 8 → 2×2 grid
+    expect(mergeEmptyRects(buildCoverage(degenerate, cell), degenerate.size)).toHaveLength(0);
+    expect(wastedRegions(degenerate, DEFAULT_THRESHOLDS)).toBeNull();
+
+    const occ = occupancyFinding(degenerate, DEFAULT_THRESHOLDS, {}); // no frag supplied → must default
+    expect(occ).not.toBeNull();
+    expect(occ?.severity).toBe('crit'); // occ 1.6% < crit 0.6 → fires
+    expect(occ?.params?.frag).toBe(1); // B1: defaults to contiguous, never undefined
+    expect(occ?.detail).not.toContain('{'); // no empty/missing interpolation leaked
+    expect(occ?.detail).not.toContain('  '); // and no double-space artifact from a dropped value
+
+    const rep = await analyze([asset(degenerate)]);
+    expect(rep.assets[0]?.fragmentation).toBeUndefined(); // no empty rects ⇒ no measured dispersion
+    expect(rep.findings.some((f) => f.rule === 'occupancy')).toBe(true);
+    expect(rep.findings.some((f) => f.rule === 'wasted-regions')).toBe(false);
   });
 });

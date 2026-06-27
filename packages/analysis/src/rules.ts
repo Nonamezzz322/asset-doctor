@@ -3,7 +3,7 @@
 // We measure; we never fabricate. Thresholds come from config, never inline magic numbers.
 
 import { MIP_OVERHEAD, type Atlas, type Finding, type ImageAsset, type ImageMime, type Severity, type Size, type ThresholdConfig } from '@asset-doctor/core';
-import { buildCoverage, defaultCell, mergeEmptyRects } from './grid';
+import { buildCoverage, defaultCell, mergeEmptyRects, summarizeEmpty } from './grid';
 
 const BYTES_PER_PX = 4; // RGBA8888
 
@@ -35,24 +35,39 @@ export function occupancyValue(atlas: Atlas): number {
   return atlas.sprites.reduce((s, sp) => s + sp.frame.w * sp.frame.h, 0) / total;
 }
 
-export function occupancyFinding(atlas: Atlas, cfg: ThresholdConfig): Finding | null {
+export function occupancyFinding(
+  atlas: Atlas,
+  cfg: ThresholdConfig,
+  opts: { fragmentation?: number; largestPct?: number } = {},
+): Finding | null {
   const occ = occupancyValue(atlas);
   const severity: Severity =
     occ < cfg.occupancy.crit ? 'crit' : occ < cfg.occupancy.warn ? 'warn' : 'ok';
   if (severity === 'ok') return null;
+  const wasted = 1 - occ;
+  // B1: frag/largestPct can be undefined (no empty rects mapped) while occupancy still fires. Default
+  // to frag = 1 (contiguous) / largestPct = wasted so the dispersion clause is never an empty
+  // interpolation and stays truthful (frag = 1 ⇒ "one hole", a contiguous-waste reading).
+  const frag = typeof opts.fragmentation === 'number' ? opts.fragmentation : 1;
+  const largestPct = typeof opts.largestPct === 'number' ? opts.largestPct : wasted;
+  // M1/M3: dispersion is a SHAPE clause, NEVER a savings claim — phrased to read truthfully at any frag
+  // (the lower the dispersion, the more a full repack rather than a trim is the real fix). The baked
+  // string mirrors the en catalog template EXACTLY (the renderFinding drift guard requires byte parity).
   return {
     id: `${atlas.name}:occupancy`,
     rule: 'occupancy',
     severity,
     assetRef: atlas.name,
-    title: `Atlas ${pct1(occ)}% packed — ${pct1(1 - occ)}% wasted`,
+    title: `Atlas ${pct1(occ)}% packed — ${pct1(wasted)}% wasted`,
     detail:
       `${atlas.sprites.length} frames cover ${pct1(occ)}% of ${atlas.size.w}×${atlas.size.h}. ` +
-      `Tighter packing shrinks the sheet and the VRAM it pins (${fmtBytes(vramBytes(atlas.size))}).`,
+      `Tighter packing shrinks the sheet and the VRAM it pins (${fmtBytes(vramBytes(atlas.size))}). ` +
+      `Largest contiguous empty hole is ${pct1(largestPct)}% of the sheet (dispersion ${pct1(frag)}%); ` +
+      `the lower the dispersion, the more a full repack — not a trim — is needed.`,
     fix: 'Repack with MaxRects + trim, or split into a smaller sheet.',
     estimate: { occupancyPct: occ },
     messageKey: 'occupancy',
-    params: { occ, wasted: 1 - occ, frames: atlas.sprites.length, w: atlas.size.w, h: atlas.size.h, vram: vramBytes(atlas.size) },
+    params: { occ, wasted, frames: atlas.sprites.length, w: atlas.size.w, h: atlas.size.h, vram: vramBytes(atlas.size), frag, largestPct },
   };
 }
 
@@ -112,18 +127,23 @@ export function wastedRegions(
   const cell = opts.cell ?? defaultCell(atlas.size);
   const rects = mergeEmptyRects(buildCoverage(atlas, cell), atlas.size);
   if (rects.length === 0) return null;
-  const emptyPx = rects.reduce((s, r) => s + r.w * r.h, 0);
+  const empty = summarizeEmpty(rects); // reuse the rects already merged — no second mergeEmptyRects
   const atlasPx = atlas.size.w * atlas.size.h;
+  // M2: largestPct lives in the caller (it has atlasPx); summarizeEmpty stays Size-free.
+  const frag = empty.fragmentation ?? 1; // rects.length>0 here, so totalArea>0 ⇒ frag always defined
+  const largestPct = atlasPx > 0 ? empty.largestArea / atlasPx : 0;
   return {
     id: `${atlas.name}:wasted-regions`,
     rule: 'wasted-regions',
     severity: 'info',
     assetRef: atlas.name,
     title: `${rects.length} empty region${rects.length === 1 ? '' : 's'} mapped`,
-    detail: `≈${pct1(emptyPx / atlasPx)}% of the atlas is contiguous empty space (grid-mapped).`,
+    detail:
+      `≈${pct1(empty.totalArea / atlasPx)}% of the atlas is empty space (grid-mapped), ` +
+      `largest contiguous hole ${pct1(largestPct)}% of the sheet.`,
     overlay: [{ kind: 'empty', rects }],
     messageKey: 'wasted-regions',
-    params: { n: rects.length, pct: emptyPx / atlasPx },
+    params: { n: rects.length, pct: empty.totalArea / atlasPx, frag, largestPct },
   };
 }
 

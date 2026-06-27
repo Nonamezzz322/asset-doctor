@@ -81,6 +81,11 @@ export function FilmViewer({
 
   const occ = metrics?.occupancy;
   const occColor = occ === undefined ? 'text-film-soft' : occ < 0.6 ? 'text-crit' : occ < 0.8 ? 'text-warn' : 'text-ok';
+  // FRAG: dispersion of empty space (1 = one contiguous hole, →0 = shredded). Higher is better, so
+  // the buckets read the opposite way to OCC: low frag = crit. Neutral when absent (no empty map).
+  const frag = metrics?.fragmentation;
+  const fragColor =
+    frag === undefined ? 'text-film-soft' : frag < 0.4 ? 'text-crit' : frag < 0.7 ? 'text-warn' : 'text-ok';
   const sizeStr = dims ? (dims.w === dims.h ? `${dims.w}²` : `${dims.w}×${dims.h}`) : '—';
 
   return (
@@ -104,8 +109,8 @@ export function FilmViewer({
       <div className="mt-3 grid grid-cols-4 gap-px overflow-hidden rounded-lg border border-film-border bg-film-border">
         <ReadCell label="VRAM" value={fmtBytes(metrics?.vramBytes ?? 0)} color="text-info" />
         <ReadCell label="DISK" value={fmtBytes(metrics?.diskBytes ?? 0)} color="text-ok" />
-        <ReadCell label="SIZE" value={sizeStr} color="text-[#cdd6df]" />
         <ReadCell label="OCC" value={occ === undefined ? '—' : `${Math.round(occ * 100)}%`} color={occColor} />
+        <ReadCell label="FRAG" value={frag === undefined ? '—' : `${Math.round(frag * 100)}%`} color={fragColor} />
       </div>
     </div>
   );

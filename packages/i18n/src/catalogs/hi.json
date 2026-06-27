@@ -31,7 +31,7 @@
   "severity.ok": "ठीक",
   "severity.info": "जानकारी",
   "find.occupancy.title": "Atlas {occ:pct} पैक्ड — {wasted:pct} बर्बाद",
-  "find.occupancy.detail": "{frames} frames {w}×{h} का {occ:pct} हिस्सा कवर करते हैं। सघन पैकिंग शीट और उससे पिन हुई VRAM ({vram:bytes}) दोनों घटाती है।",
+  "find.occupancy.detail": "{frames} frames {w}×{h} का {occ:pct} हिस्सा कवर करते हैं। सघन पैकिंग शीट और उससे पिन हुई VRAM ({vram:bytes}) दोनों घटाती है। सबसे बड़ा सतत खाली छेद शीट का {largestPct:pct} है (बिखराव {frag:pct}); बिखराव जितना कम, उतना ही पूर्ण repack — न कि केवल trim — की आवश्यकता होती है।",
   "find.occupancy.fix": "MaxRects + trim के साथ repack करें, या छोटी शीट में बाँटें।",
   "find.oversize.title": "ओवरसाइज़्ड {w}×{h} (किनारा {edge}px)",
   "find.oversize.detail": "सबसे लंबा किनारा {edge}px, {budget}px के {sev:sev} बजट से अधिक है। यह {vram:bytes} VRAM पिन करता है और लो-एंड GPU सीमाओं से बाहर जा सकता है।",
@@ -44,7 +44,7 @@
     "one": "{n} खाली region मैप किया",
     "other": "{n} खाली regions मैप किए"
   },
-  "find.wasted-regions.detail": "atlas का ≈{pct:pct} सतत खाली स्थान है (grid-mapped)।",
+  "find.wasted-regions.detail": "atlas का ≈{pct:pct} खाली स्थान है (grid-mapped), सबसे बड़ा सतत छेद शीट का {largestPct:pct} है।",
   "find.format.title": "{target} {frac:pct} घटा देगा",
   "find.format.detail": "{srcLabel} {srcBytes:bytes} → {target} ~{bestBytes:bytes} (−{saved:bytes})। Canvas अनुमान; lossless समानता के लिए wasm codecs चाहिए।",
   "find.format.fix": "डिलीवरी के लिए AVIF (या WebP) में ट्रांसकोड करें।",
@@ -60,8 +60,8 @@
   "find.atlas-merge.title": "{n} कम-भरे atlases → ~{merged} में मर्ज करें",
   "find.atlas-merge.detail": {
     "$count": "merged",
-    "one": "{refs} में से प्रत्येक {pct}% से कम भरा है। इनकी सामग्री ~{merged} शीट में आ जाती है — मर्ज करने से texture binds, draw calls और VRAM घटते हैं।",
-    "other": "{refs} में से प्रत्येक {pct}% से कम भरा है। इनकी सामग्री ~{merged} शीटों में आ जाती है — मर्ज करने से texture binds, draw calls और VRAM घटते हैं।"
+    "one": "{refs} में से प्रत्येक {pct}% से कम भरा है। इनकी सामग्री ~{merged} शीट में आ जाती है — मर्ज करने से texture binds, draw calls और VRAM घटते हैं। सबसे बड़ा सतत खाली छेद इसकी शीट का {largestPct:pct} है (बिखराव {frag:pct}); बिखराव जितना कम, उतना ही पूर्ण repack — न कि केवल trim — की आवश्यकता होती है।",
+    "other": "{refs} में से प्रत्येक {pct}% से कम भरा है। इनकी सामग्री ~{merged} शीटों में आ जाती है — मर्ज करने से texture binds, draw calls और VRAM घटते हैं। सबसे बड़ा सतत खाली छेद इसकी शीट का {largestPct:pct} है (बिखराव {frag:pct}); बिखराव जितना कम, उतना ही पूर्ण repack — न कि केवल trim — की आवश्यकता होती है।"
   },
   "find.atlas-merge.fix": "इन atlases को एक साथ फिर से repack करें।",
   "find.integrity.title": "गुम atlas इमेज: {image}",

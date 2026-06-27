@@ -32,7 +32,7 @@
   "severity.ok": "ok",
   "severity.info": "info",
   "find.occupancy.title": "Atlas rempli à {occ:pct} — {wasted:pct} gaspillé",
-  "find.occupancy.detail": "{frames} frames couvrent {occ:pct} de {w}×{h}. Un packing plus serré réduit la planche et la VRAM qu'elle immobilise ({vram:bytes}).",
+  "find.occupancy.detail": "{frames} frames couvrent {occ:pct} de {w}×{h}. Un packing plus serré réduit la planche et la VRAM qu'elle immobilise ({vram:bytes}). Le plus grand trou vide contigu représente {largestPct:pct} de la planche (dispersion {frag:pct}) ; plus la dispersion est faible, plus un repack complet — et non un simple trim — est nécessaire.",
   "find.occupancy.fix": "Repackez avec MaxRects + trim, ou découpez en une planche plus petite.",
   "find.oversize.title": "Surdimensionné {w}×{h} (bord {edge}px)",
   "find.oversize.detail": "Le plus grand bord {edge}px dépasse le budget {sev:sev} de {budget}px. Il immobilise {vram:bytes} de VRAM et peut dépasser les limites des GPU bas de gamme.",
@@ -46,7 +46,7 @@
     "many": "{n} de régions vides cartographiées",
     "other": "{n} régions vides cartographiées"
   },
-  "find.wasted-regions.detail": "≈{pct:pct} de l'atlas est un espace vide contigu (cartographié par grille).",
+  "find.wasted-regions.detail": "≈{pct:pct} de l'atlas est un espace vide (cartographié par grille), le plus grand trou contigu représente {largestPct:pct} de la planche.",
   "find.format.title": "{target} réduirait de {frac:pct}",
   "find.format.detail": "{srcLabel} {srcBytes:bytes} → {target} ~{bestBytes:bytes} (−{saved:bytes}). Estimation via canvas ; la parité sans perte nécessite des codecs wasm.",
   "find.format.fix": "Transcodez en AVIF (ou WebP) pour la distribution.",
@@ -62,9 +62,9 @@
   "find.atlas-merge.title": "{n} atlas sous-remplis → fusionner en ~{merged}",
   "find.atlas-merge.detail": {
     "$count": "merged",
-    "one": "{refs} sont chacun remplis à moins de {pct}%. Leur contenu tient dans ~{merged} planche — la fusion réduit les binds de texture, les draw calls et la VRAM.",
-    "many": "{refs} sont chacun remplis à moins de {pct}%. Leur contenu tient dans ~{merged} de planches — la fusion réduit les binds de texture, les draw calls et la VRAM.",
-    "other": "{refs} sont chacun remplis à moins de {pct}%. Leur contenu tient dans ~{merged} planches — la fusion réduit les binds de texture, les draw calls et la VRAM."
+    "one": "{refs} sont chacun remplis à moins de {pct}%. Leur contenu tient dans ~{merged} planche — la fusion réduit les binds de texture, les draw calls et la VRAM. Le plus grand trou vide contigu représente {largestPct:pct} de sa planche (dispersion {frag:pct}) ; plus la dispersion est faible, plus un repack complet — et non un simple trim — est nécessaire.",
+    "many": "{refs} sont chacun remplis à moins de {pct}%. Leur contenu tient dans ~{merged} de planches — la fusion réduit les binds de texture, les draw calls et la VRAM. Le plus grand trou vide contigu représente {largestPct:pct} de sa planche (dispersion {frag:pct}) ; plus la dispersion est faible, plus un repack complet — et non un simple trim — est nécessaire.",
+    "other": "{refs} sont chacun remplis à moins de {pct}%. Leur contenu tient dans ~{merged} planches — la fusion réduit les binds de texture, les draw calls et la VRAM. Le plus grand trou vide contigu représente {largestPct:pct} de sa planche (dispersion {frag:pct}) ; plus la dispersion est faible, plus un repack complet — et non un simple trim — est nécessaire."
   },
   "find.atlas-merge.fix": "Repackez ces atlas ensemble.",
   "find.integrity.title": "Image d'atlas manquante : {image}",

@@ -30,7 +30,7 @@
   "severity.ok": "正常",
   "severity.info": "提示",
   "find.occupancy.title": "图集已打包 {occ:pct} — 浪费 {wasted:pct}",
-  "find.occupancy.detail": "{frames} 个帧覆盖 {w}×{h} 的 {occ:pct}。更紧凑的打包可缩小图集及其占用的 VRAM（{vram:bytes}）。",
+  "find.occupancy.detail": "{frames} 个帧覆盖 {w}×{h} 的 {occ:pct}。更紧凑的打包可缩小图集及其占用的 VRAM（{vram:bytes}）。最大的连续空洞占图集的 {largestPct:pct}（离散度 {frag:pct}）；离散度越低，越需要完整重新打包，而非裁边。",
   "find.occupancy.fix": "用 MaxRects + trim 重新打包，或拆分为更小的图集。",
   "find.oversize.title": "尺寸过大 {w}×{h}（边长 {edge}px）",
   "find.oversize.detail": "最长边 {edge}px 超过 {budget}px 的 {sev:sev} 预算。它占用 {vram:bytes} 的 VRAM，并可能超出低端 GPU 上限。",
@@ -42,7 +42,7 @@
     "$count": "n",
     "other": "已映射 {n} 个空白区域"
   },
-  "find.wasted-regions.detail": "图集中约 ≈{pct:pct} 是连续的空白区域（网格映射）。",
+  "find.wasted-regions.detail": "图集中约 ≈{pct:pct} 是空白区域（网格映射），最大连续空洞占图集的 {largestPct:pct}。",
   "find.format.title": "{target} 可削减 {frac:pct}",
   "find.format.detail": "{srcLabel} {srcBytes:bytes} → {target} ~{bestBytes:bytes}（−{saved:bytes}）。Canvas 估算；无损一致需 wasm 编解码器。",
   "find.format.fix": "转码为 AVIF（或 WebP）用于分发。",
@@ -58,7 +58,7 @@
   "find.atlas-merge.title": "{n} 个未填满的图集 → 合并为约 {merged} 个",
   "find.atlas-merge.detail": {
     "$count": "merged",
-    "other": "{refs} 各自填充率不足 {pct}%。其内容可装入约 {merged} 个图集 — 合并可减少纹理绑定、draw call 和 VRAM。"
+    "other": "{refs} 各自填充率不足 {pct}%。其内容可装入约 {merged} 个图集 — 合并可减少纹理绑定、draw call 和 VRAM。最大的连续空洞占其图集的 {largestPct:pct}（离散度 {frag:pct}）；离散度越低，越需要完整重新打包，而非裁边。"
   },
   "find.atlas-merge.fix": "将这些图集重新打包到一起。",
   "find.integrity.title": "缺失图集图片：{image}",

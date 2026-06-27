@@ -26,8 +26,8 @@ export {
   integrityFindings,
   formatAggregateFinding,
 } from './folder';
-export { defaultCell, buildCoverage, mergeEmptyRects } from './grid';
-export type { Coverage } from './grid';
+export { defaultCell, buildCoverage, mergeEmptyRects, summarizeEmpty } from './grid';
+export type { Coverage, EmptySpace } from './grid';
 export {
   buildDedupGroups,
   cmp,

@@ -31,7 +31,7 @@
   "severity.ok": "ok",
   "severity.info": "info",
   "find.occupancy.title": "Atlas {occ:pct} packed — {wasted:pct} wasted",
-  "find.occupancy.detail": "{frames} frames cover {occ:pct} of {w}×{h}. Tighter packing shrinks the sheet and the VRAM it pins ({vram:bytes}).",
+  "find.occupancy.detail": "{frames} frames cover {occ:pct} of {w}×{h}. Tighter packing shrinks the sheet and the VRAM it pins ({vram:bytes}). Largest contiguous empty hole is {largestPct:pct} of the sheet (dispersion {frag:pct}); the lower the dispersion, the more a full repack — not a trim — is needed.",
   "find.occupancy.fix": "Repack with MaxRects + trim, or split into a smaller sheet.",
   "find.oversize.title": "Oversized {w}×{h} (edge {edge}px)",
   "find.oversize.detail": "Longest edge {edge}px exceeds the {budget}px {sev:sev} budget. It pins {vram:bytes} of VRAM and may exceed low-end GPU limits.",
@@ -44,7 +44,7 @@
     "one": "{n} empty region mapped",
     "other": "{n} empty regions mapped"
   },
-  "find.wasted-regions.detail": "≈{pct:pct} of the atlas is contiguous empty space (grid-mapped).",
+  "find.wasted-regions.detail": "≈{pct:pct} of the atlas is empty space (grid-mapped), largest contiguous hole {largestPct:pct} of the sheet.",
   "find.format.title": "{target} would cut {frac:pct}",
   "find.format.detail": "{srcLabel} {srcBytes:bytes} → {target} ~{bestBytes:bytes} (−{saved:bytes}). Canvas estimate; lossless parity needs wasm codecs.",
   "find.format.fix": "Transcode to AVIF (or WebP) for delivery.",
@@ -60,8 +60,8 @@
   "find.atlas-merge.title": "{n} under-filled atlases → merge into ~{merged}",
   "find.atlas-merge.detail": {
     "$count": "merged",
-    "one": "{refs} are each under {pct}% full. Their content fits in ~{merged} sheet — merging cuts texture binds, draw calls and VRAM.",
-    "other": "{refs} are each under {pct}% full. Their content fits in ~{merged} sheets — merging cuts texture binds, draw calls and VRAM."
+    "one": "{refs} are each under {pct}% full. Their content fits in ~{merged} sheet — merging cuts texture binds, draw calls and VRAM. Largest contiguous empty hole is {largestPct:pct} of its sheet (dispersion {frag:pct}); the lower the dispersion, the more a full repack — not a trim — is needed.",
+    "other": "{refs} are each under {pct}% full. Their content fits in ~{merged} sheets — merging cuts texture binds, draw calls and VRAM. Largest contiguous empty hole is {largestPct:pct} of its sheet (dispersion {frag:pct}); the lower the dispersion, the more a full repack — not a trim — is needed."
   },
   "find.atlas-merge.fix": "Re-pack these atlases together.",
   "find.integrity.title": "Missing atlas image: {image}",

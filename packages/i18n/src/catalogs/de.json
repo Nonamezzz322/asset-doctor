@@ -31,7 +31,7 @@
   "severity.ok": "ok",
   "severity.info": "info",
   "find.occupancy.title": "Atlas zu {occ:pct} gepackt — {wasted:pct} verschwendet",
-  "find.occupancy.detail": "{frames} Frames decken {occ:pct} von {w}×{h} ab. Engeres Packen verkleinert das Sheet und das VRAM, das es bindet ({vram:bytes}).",
+  "find.occupancy.detail": "{frames} Frames decken {occ:pct} von {w}×{h} ab. Engeres Packen verkleinert das Sheet und das VRAM, das es bindet ({vram:bytes}). Größtes zusammenhängendes leeres Loch ist {largestPct:pct} des Sheets (Streuung {frag:pct}); je geringer die Streuung, desto eher braucht es ein vollständiges Neupacken statt nur Trimmen.",
   "find.occupancy.fix": "Mit MaxRects + Trim neu packen oder in ein kleineres Sheet aufteilen.",
   "find.oversize.title": "Übergroß {w}×{h} (Kante {edge}px)",
   "find.oversize.detail": "Längste Kante {edge}px überschreitet das {budget}px-{sev:sev}-Budget. Sie bindet {vram:bytes} VRAM und kann Limits schwacher GPUs überschreiten.",
@@ -44,7 +44,7 @@
     "one": "{n} leere Region gemappt",
     "other": "{n} leere Regionen gemappt"
   },
-  "find.wasted-regions.detail": "≈{pct:pct} des Atlas ist zusammenhängender Leerraum (grid-gemappt).",
+  "find.wasted-regions.detail": "≈{pct:pct} des Atlas ist Leerraum (grid-gemappt), größtes zusammenhängendes Loch {largestPct:pct} des Sheets.",
   "find.format.title": "{target} würde {frac:pct} sparen",
   "find.format.detail": "{srcLabel} {srcBytes:bytes} → {target} ~{bestBytes:bytes} (−{saved:bytes}). Canvas-Schätzung; verlustfreie Parität benötigt WASM-Codecs.",
   "find.format.fix": "Für die Auslieferung nach AVIF (oder WebP) transkodieren.",
@@ -60,8 +60,8 @@
   "find.atlas-merge.title": "{n} unterfüllte Atlanten → zu ~{merged} zusammenführen",
   "find.atlas-merge.detail": {
     "$count": "merged",
-    "one": "{refs} sind jeweils unter {pct}% gefüllt. Ihr Inhalt passt in ~{merged} Sheet — Zusammenführen senkt Textur-Binds, draw calls und VRAM.",
-    "other": "{refs} sind jeweils unter {pct}% gefüllt. Ihr Inhalt passt in ~{merged} Sheets — Zusammenführen senkt Textur-Binds, draw calls und VRAM."
+    "one": "{refs} sind jeweils unter {pct}% gefüllt. Ihr Inhalt passt in ~{merged} Sheet — Zusammenführen senkt Textur-Binds, draw calls und VRAM. Größtes zusammenhängendes leeres Loch ist {largestPct:pct} seines Sheets (Streuung {frag:pct}); je geringer die Streuung, desto eher braucht es ein vollständiges Neupacken statt nur Trimmen.",
+    "other": "{refs} sind jeweils unter {pct}% gefüllt. Ihr Inhalt passt in ~{merged} Sheets — Zusammenführen senkt Textur-Binds, draw calls und VRAM. Größtes zusammenhängendes leeres Loch ist {largestPct:pct} seines Sheets (Streuung {frag:pct}); je geringer die Streuung, desto eher braucht es ein vollständiges Neupacken statt nur Trimmen."
   },
   "find.atlas-merge.fix": "Diese Atlanten gemeinsam neu packen.",
   "find.integrity.title": "Fehlendes Atlas-Bild: {image}",

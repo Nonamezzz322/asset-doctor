@@ -79,3 +79,35 @@ export function mergeEmptyRects(cov: Coverage, size: Size): Rect[] {
   for (const rect of open.values()) out.push(toPixelRect(rect, rows, cell, size));
   return out;
 }
+
+/** Dispersion summary of the merged empty rects — the SHAPE of the waste, not its recoverable amount.
+ *  Pure and Size-free (caller already knows the atlas size). `fragmentation` = largestArea / totalArea
+ *  ∈ (0,1]: 1 = one contiguous hole, →0 = many scattered gaps. `fragmentation` is `undefined` when
+ *  there is no empty area (totalArea === 0), i.e. there is no dispersion to describe — the caller
+ *  treats that as contiguous (frag = 1). */
+export interface EmptySpace {
+  /** Number of disjoint empty rects. */
+  n: number;
+  /** Σ w×h over the empty rects (px²). */
+  totalArea: number;
+  /** Largest single empty rect's area (px²); 0 when there are no rects. */
+  largestArea: number;
+  /** largestArea / totalArea ∈ (0,1]; undefined when totalArea === 0. */
+  fragmentation?: number;
+}
+
+export function summarizeEmpty(rects: Rect[]): EmptySpace {
+  let totalArea = 0;
+  let largestArea = 0;
+  for (const r of rects) {
+    const a = r.w * r.h;
+    totalArea += a;
+    if (a > largestArea) largestArea = a;
+  }
+  return {
+    n: rects.length,
+    totalArea,
+    largestArea,
+    ...(totalArea > 0 ? { fragmentation: largestArea / totalArea } : {}),
+  };
+}

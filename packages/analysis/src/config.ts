@@ -12,4 +12,9 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   atlasMerge: { occupancyBelow: 0.5, minAtlases: 2 }, // under-filled atlases worth merging
   mipmap: { warn: 4_194_304 }, // total conditional mip overhead (bytes) before the aggregate info fires.
   // One 2048² atlas alone is +5.59 MB and trips it; small UI-only sets (a 1024² page is only +1.33 MB) stay quiet.
+  fragmentation: { warn: 0.4 }, // empty-space dispersion (largest hole / total empty) at/below which the
+  // waste reads as shredded. The honest copy is dispersion-AWARE (scales the "full repack, not a trim"
+  // wording with the measured frag at any value); it does NOT switch on this threshold today — the
+  // value is the calibration hook for a future standalone fragmentation finding. PROVISIONAL — a
+  // display/copy gate ONLY, NOT a savings gate (a MaxRects repack reclaims waste at any dispersion).
 };

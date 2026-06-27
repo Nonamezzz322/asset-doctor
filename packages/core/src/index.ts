@@ -284,6 +284,13 @@ export interface AssetMetrics {
   vramBytesMipmapped: number;
   /** 0..1, atlases only. */
   occupancy?: number;
+  /** DISPERSION of empty space, atlases only: largestEmptyRectArea / totalEmptyArea, in (0,1].
+   *  1 = the waste is ONE contiguous hole; →0 = many scattered gaps. This describes the SHAPE of the
+   *  waste, NOT the recoverable amount — a MaxRects repack recovers empty space regardless of how
+   *  fragmented it is (it re-places sprites freely). Computed over the conservatively grid-merged empty
+   *  rects, so it inherits the coverage map's under-claim. Absent when there is no empty space to map
+   *  (treat as 1 = contiguous) or for loose (non-atlas) assets. */
+  fragmentation?: number;
 }
 
 /** Calibrated audit thresholds. Lives in config, never hardcoded inside rules. */
@@ -301,6 +308,13 @@ export interface ThresholdConfig {
    *  aggregate mipmap-cost info finding fires. Geometry only; no pixel read. Optional: absent ⇒ the
    *  mipmap-cost finding is suppressed (e.g. a budget/CLI config that doesn't opt into it). */
   mipmap?: { warn: number };
+  /** Dispersion threshold (atlas fragmentation): the empty-space `fragmentation` (largest hole /
+   *  total empty) at or below which the waste reads as SHREDDED. The honest copy is dispersion-AWARE
+   *  (scales the "full repack, not a trim" recommendation with the measured dispersion at any frag) —
+   *  it does NOT switch on this threshold today; the value is the calibration hook for a future
+   *  standalone fragmentation finding. PROVISIONAL — a display/copy gate only, NOT a savings gate
+   *  (a repack reclaims waste at any dispersion). Optional/additive: absent ⇒ no effect. */
+  fragmentation?: { warn: number };
 }
 
 export interface AnalysisReport {

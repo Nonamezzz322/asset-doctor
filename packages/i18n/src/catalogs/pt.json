@@ -32,7 +32,7 @@
   "severity.ok": "ok",
   "severity.info": "info",
   "find.occupancy.title": "Atlas {occ:pct} preenchido — {wasted:pct} desperdiçado",
-  "find.occupancy.detail": "{frames} frames cobrem {occ:pct} de {w}×{h}. Um empacotamento mais compacto reduz a folha e a VRAM que ela ocupa ({vram:bytes}).",
+  "find.occupancy.detail": "{frames} frames cobrem {occ:pct} de {w}×{h}. Um empacotamento mais compacto reduz a folha e a VRAM que ela ocupa ({vram:bytes}). O maior buraco vazio contíguo é {largestPct:pct} da folha (dispersão {frag:pct}); quanto menor a dispersão, mais é preciso um reempacotamento completo, não um trim.",
   "find.occupancy.fix": "Reempacote com MaxRects + trim, ou divida em uma folha menor.",
   "find.oversize.title": "Superdimensionado {w}×{h} (borda {edge}px)",
   "find.oversize.detail": "A borda mais longa de {edge}px excede o orçamento {sev:sev} de {budget}px. Ocupa {vram:bytes} de VRAM e pode exceder os limites de GPUs de baixo desempenho.",
@@ -46,7 +46,7 @@
     "many": "{n} de regiões vazias mapeadas",
     "other": "{n} regiões vazias mapeadas"
   },
-  "find.wasted-regions.detail": "≈{pct:pct} do atlas é espaço vazio contíguo (mapeado em grade).",
+  "find.wasted-regions.detail": "≈{pct:pct} do atlas é espaço vazio (mapeado em grade), o maior buraco contíguo é {largestPct:pct} da folha.",
   "find.format.title": "{target} cortaria {frac:pct}",
   "find.format.detail": "{srcLabel} {srcBytes:bytes} → {target} ~{bestBytes:bytes} (−{saved:bytes}). Estimativa via canvas; paridade sem perdas requer codecs wasm.",
   "find.format.fix": "Transcodifique para AVIF (ou WebP) para entrega.",
@@ -62,9 +62,9 @@
   "find.atlas-merge.title": "{n} atlases subpreenchidos → mesclar em ~{merged}",
   "find.atlas-merge.detail": {
     "$count": "merged",
-    "one": "{refs} estão cada um abaixo de {pct}% de preenchimento. O conteúdo deles cabe em ~{merged} folha — mesclar reduz binds de textura, draw calls e VRAM.",
-    "many": "{refs} estão cada um abaixo de {pct}% de preenchimento. O conteúdo deles cabe em ~{merged} de folhas — mesclar reduz binds de textura, draw calls e VRAM.",
-    "other": "{refs} estão cada um abaixo de {pct}% de preenchimento. O conteúdo deles cabe em ~{merged} folhas — mesclar reduz binds de textura, draw calls e VRAM."
+    "one": "{refs} estão cada um abaixo de {pct}% de preenchimento. O conteúdo deles cabe em ~{merged} folha — mesclar reduz binds de textura, draw calls e VRAM. O maior buraco vazio contíguo é {largestPct:pct} da folha dele (dispersão {frag:pct}); quanto menor a dispersão, mais é preciso um reempacotamento completo, não um trim.",
+    "many": "{refs} estão cada um abaixo de {pct}% de preenchimento. O conteúdo deles cabe em ~{merged} de folhas — mesclar reduz binds de textura, draw calls e VRAM. O maior buraco vazio contíguo é {largestPct:pct} da folha dele (dispersão {frag:pct}); quanto menor a dispersão, mais é preciso um reempacotamento completo, não um trim.",
+    "other": "{refs} estão cada um abaixo de {pct}% de preenchimento. O conteúdo deles cabe em ~{merged} folhas — mesclar reduz binds de textura, draw calls e VRAM. O maior buraco vazio contíguo é {largestPct:pct} da folha dele (dispersão {frag:pct}); quanto menor a dispersão, mais é preciso um reempacotamento completo, não um trim."
   },
   "find.atlas-merge.fix": "Reempacote esses atlases juntos.",
   "find.integrity.title": "Imagem de atlas ausente: {image}",

@@ -73,16 +73,22 @@ export async function analyze(
     if (asset.kind === 'atlas') {
       const { atlas, image } = asset;
       atlases.push(atlas);
+      // B3: call wastedRegions BEFORE metrics.push so the dispersion (frag/largestPct) it computes is
+      // available both to AssetMetrics.fragmentation and to occupancyFinding's honest copy.
+      const waste = wastedRegions(atlas, cfg);
+      const wasteFrag = waste && typeof waste.params?.frag === 'number' ? waste.params.frag : undefined;
+      const wasteLargestPct =
+        waste && typeof waste.params?.largestPct === 'number' ? waste.params.largestPct : undefined;
       metrics.push({
         assetRef: atlas.name,
         diskBytes: image.byteSize,
         vramBytes: vramBytes(atlas.size),
         vramBytesMipmapped: vramBytesMipmapped(atlas.size),
         occupancy: occupancyValue(atlas),
+        ...(wasteFrag !== undefined ? { fragmentation: wasteFrag } : {}),
       });
-      const occ = occupancyFinding(atlas, cfg);
+      const occ = occupancyFinding(atlas, cfg, { fragmentation: wasteFrag, largestPct: wasteLargestPct });
       if (occ) findings.push(occ);
-      const waste = wastedRegions(atlas, cfg);
       if (waste) findings.push(waste);
       findings.push(...dimensionFindings(atlas.name, atlas.size, cfg));
       await addFormat(atlas.name, image);
