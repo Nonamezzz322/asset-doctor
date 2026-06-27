@@ -196,6 +196,21 @@ function toPlacements(origins: { x: number; y: number }[], ordered: PackedMask[]
  *  the Σ mask-cell area (cells × ACC_CELL²), smaller than the bbox area, so a concave set may start at
  *  a smaller POT than rectangle packing. Bins explored in `binCandidates` order (area asc, then
  *  narrower width). */
+/** Trim an emitted bin down to its actual content extent (max placement right / bottom) so the POT
+ *  candidate's unused bottom and right margin is NOT shipped as empty sheet space — TexturePacker-style
+ *  tight output. The bottom-left fill packs upward/leftward, so the slack is always at the bottom/right;
+ *  width/height stay ≤ the candidate and placements are unchanged. Shrinking only lowers VRAM, so it
+ *  never weakens the polygon-vs-rectangle win gate. */
+function trimBin(maxW: number, maxH: number, placements: Placement[]): PackBin {
+  let usedW = 0;
+  let usedH = 0;
+  for (const p of placements) {
+    if (p.x + p.w > usedW) usedW = p.x + p.w;
+    if (p.y + p.h > usedH) usedH = p.y + p.h;
+  }
+  return { w: Math.min(maxW, usedW || maxW), h: Math.min(maxH, usedH || maxH), placements };
+}
+
 function fitOneBin(ordered: PackedMask[], opts: PackOptions): PackBin | null {
   let totalCells = 0;
   for (const p of ordered) totalCells += p.cellCount;
@@ -207,7 +222,7 @@ function fitOneBin(ordered: PackedMask[], opts: PackOptions): PackBin | null {
     const cols = Math.ceil(c.w / ACC_CELL);
     const rows = Math.ceil(c.h / ACC_CELL);
     const origins = placeAll(ordered, cols, rows);
-    if (origins) return { w: c.w, h: c.h, placements: toPlacements(origins, ordered) };
+    if (origins) return trimBin(c.w, c.h, toPlacements(origins, ordered));
   }
   return null;
 }
@@ -252,15 +267,12 @@ export function nestMasks(items: MaskItem[], opts: PackOptions): PackBin[] {
     if (placements.length === 0) {
       // a single item exceeds maxSize even at the cell grid — emit it clamped, alone (best effort).
       const it = remaining[0]!;
-      bins.push({
-        w: size,
-        h: size,
-        placements: [{ id: it.id, x: 0, y: 0, w: Math.min(it.w, size), h: Math.min(it.h, size), rotated: false }],
-      });
+      const solo: Placement = { id: it.id, x: 0, y: 0, w: Math.min(it.w, size), h: Math.min(it.h, size), rotated: false };
+      bins.push(trimBin(size, size, [solo]));
       remaining = remaining.slice(1);
       continue;
     }
-    bins.push({ w: size, h: size, placements });
+    bins.push(trimBin(size, size, placements));
     remaining = unplaced;
   }
   return bins;

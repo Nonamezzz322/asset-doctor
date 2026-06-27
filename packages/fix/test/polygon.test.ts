@@ -419,12 +419,20 @@ describe('(g) nesting', () => {
     expect(maskCellsOverlapFree(masks)).toBe(true);
   });
 
-  it('every placement snaps to the ACC_CELL grid and stays inside its POT bin', () => {
+  it('every placement snaps to the ACC_CELL grid and the bin is trimmed tight (no empty bottom/right)', () => {
     const masks = Array.from({ length: 5 }, (_, i) => maskItem(`s${i}`, 6, 6, (c, r) => c <= r));
     const bins = nestMasks(masks, PACK_OPTS);
     for (const bin of bins) {
-      expect(Number.isInteger(Math.log2(bin.w))).toBe(true);
-      expect(Number.isInteger(Math.log2(bin.h))).toBe(true);
+      // The bin is trimmed to its exact content extent (TexturePacker-style tight): the POT candidate's
+      // unused bottom/right margin is never shipped as empty sheet space.
+      let usedW = 0;
+      let usedH = 0;
+      for (const p of bin.placements) {
+        if (p.x + p.w > usedW) usedW = p.x + p.w;
+        if (p.y + p.h > usedH) usedH = p.y + p.h;
+      }
+      expect(bin.w).toBe(usedW);
+      expect(bin.h).toBe(usedH);
       for (const p of bin.placements) {
         expect(p.x % ACC_CELL).toBe(0);
         expect(p.y % ACC_CELL).toBe(0);
