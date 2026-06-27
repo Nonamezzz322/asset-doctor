@@ -12,10 +12,10 @@ import {
 } from './lib/import';
 import { keyOf } from './lib/group';
 import { runAnalysis, type Progress } from './lib/worker-client';
-import { runFix, type FixOutcome, type FixProgress } from './lib/fix-client';
-import type { FixReceipt } from './worker/fix-protocol';
+import { planFix, runFix, type FixOutcome, type FixProgress } from './lib/fix-client';
+import type { FixOptions, FixPlanSummary, FixReceipt } from './worker/fix-protocol';
 import { fmtBytes, SEVERITY_TEXT } from './lib/format';
-import { groupOps } from './lib/op-manifest';
+import { groupOps, OP_KIND_ORDER, REFERENCE_CHANGING, type OpKind } from './lib/op-manifest';
 import { LOCALES, NATIVE_NAME, useI18n } from './lib/i18n';
 import { isProUnlocked, maybeRefresh, PRO_GATE_ENABLED } from './lib/license';
 import { ActivatePanel, ProBadge } from './components/LicensePanel';
@@ -310,6 +310,11 @@ function AssetSelector({
 
 type FixPhase =
   | { t: 'idle' }
+  // Dry-run preview (docs/improvements/dry-run-plan-preview.md): the Pro CTA first posts mode:'plan'
+  // (cheap/pure — no compose/encode/zip), shows the Plan card, then "Run fix" re-posts mode:'execute'
+  // with the IDENTICAL options (today's auto-download path).
+  | { t: 'planning' }
+  | { t: 'plan'; summary: FixPlanSummary }
   | { t: 'running'; p: FixProgress }
   | { t: 'done'; out: FixOutcome }
   | { t: 'error'; message: string };
@@ -775,49 +780,75 @@ function FixCard({ files }: { files: PickedFile[] }) {
     };
   }, []);
 
+  // ONE source of truth for the FixOptions both the dry-run preview (mode:'plan') and the execute run
+  // (mode:'execute') send — so "Run fix" commits the EXACT plan the preview described, byte-for-byte.
+  // All omitted/false/empty values reproduce today's behavior in the worker.
+  function buildOptions(): FixOptions {
+    return {
+      targetMime: 'image/avif',
+      quality: 0.85,
+      padding: 2,
+      maxSize: 4096,
+      maxEdge: 2048,
+      aggressive,
+      polygon,
+      // Feature 2/3 — omitted/false/empty values reproduce today's behavior in the worker.
+      effort: effort > 0 ? effort : undefined,
+      scaleAwareQuality: scaleAwareQ || undefined,
+      webpNearLossless: webpNearLossless ? 60 : undefined,
+      pngRecompressLevel: pngRecompress ? 2 : undefined,
+      marking: aggressive && Object.keys(marking).length > 0 ? marking : undefined,
+      skinGuard: aggressive && Object.keys(skinGuard).length > 0 ? skinGuard : undefined,
+      overrides: overrides.length > 0 ? overrides.filter((o) => o.match.trim() !== '') : undefined,
+      // Feature 4 — only forwarded when explicitly enabled; off ⇒ undefined ⇒ no pack ops (today).
+      packLoose: packLoose || undefined,
+      packMode: packLoose ? packMode : undefined,
+      packGranularity: packLoose ? packGranularity : undefined,
+      packTrim: packLoose ? packTrim : undefined,
+      // Scale-tier export — only forwarded when enabled AND a real lower tier is selected (the
+      // implied scale-1 top tier alone would just rename, not downscale). Off / top-only ⇒ undefined
+      // ⇒ no tiering ⇒ byte-identical to today. The worker validates the ladder fail-closed.
+      scaleTiers: scaleTiers.length > 1 ? scaleTiers : undefined,
+      // Edge-extrude (bleed) — only forwarded when > 0; off ⇒ undefined ⇒ no gutter, byte-identical
+      // to today. The plan sets each repack/pack op's symmetric gutter >= extrude (invariant 5: a
+      // gutter can grow a sheet ⇒ VRAM reported honestly via extrudeVramDelta).
+      extrude: extrude > 0 ? extrude : undefined,
+    };
+  }
+
+  // Dry-run preview: post mode:'plan' (cheap/pure — no compose/encode/zip) and show the Plan card. The
+  // user confirms with "Run fix" (re-posts the SAME options with mode:'execute' via run()).
+  async function preview() {
+    setPhase({ t: 'planning' });
+    try {
+      const summary = await planFix(files, buildOptions());
+      setPhase({ t: 'plan', summary });
+    } catch (e) {
+      setPhase({ t: 'error', message: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
   async function run() {
     setPhase({ t: 'running', p: { label: '', done: 0, total: 1 } });
     try {
-      const out = await runFix(
-        files,
-        {
-          targetMime: 'image/avif',
-          quality: 0.85,
-          padding: 2,
-          maxSize: 4096,
-          maxEdge: 2048,
-          aggressive,
-          polygon,
-          // Feature 2/3 — omitted/false/empty values reproduce today's behavior in the worker.
-          effort: effort > 0 ? effort : undefined,
-          scaleAwareQuality: scaleAwareQ || undefined,
-          webpNearLossless: webpNearLossless ? 60 : undefined,
-          pngRecompressLevel: pngRecompress ? 2 : undefined,
-          marking: aggressive && Object.keys(marking).length > 0 ? marking : undefined,
-          skinGuard: aggressive && Object.keys(skinGuard).length > 0 ? skinGuard : undefined,
-          overrides: overrides.length > 0 ? overrides.filter((o) => o.match.trim() !== '') : undefined,
-          // Feature 4 — only forwarded when explicitly enabled; off ⇒ undefined ⇒ no pack ops (today).
-          packLoose: packLoose || undefined,
-          packMode: packLoose ? packMode : undefined,
-          packGranularity: packLoose ? packGranularity : undefined,
-          packTrim: packLoose ? packTrim : undefined,
-          // Scale-tier export — only forwarded when enabled AND a real lower tier is selected (the
-          // implied scale-1 top tier alone would just rename, not downscale). Off / top-only ⇒ undefined
-          // ⇒ no tiering ⇒ byte-identical to today. The worker validates the ladder fail-closed.
-          scaleTiers: scaleTiers.length > 1 ? scaleTiers : undefined,
-          // Edge-extrude (bleed) — only forwarded when > 0; off ⇒ undefined ⇒ no gutter, byte-identical
-          // to today. The plan sets each repack/pack op's symmetric gutter >= extrude (invariant 5: a
-          // gutter can grow a sheet ⇒ VRAM reported honestly via extrudeVramDelta).
-          extrude: extrude > 0 ? extrude : undefined,
-        },
-        (p) => setPhase({ t: 'running', p }),
-      );
+      const out = await runFix(files, buildOptions(), (p) => setPhase({ t: 'running', p }));
       downloadZip(out.zip);
       setPhase({ t: 'done', out });
     } catch (e) {
       setPhase({ t: 'error', message: e instanceof Error ? e.message : String(e) });
     }
   }
+
+  // Stale-plan invalidation: if any option toggle changes after a preview, the shown plan no longer
+  // matches what "Run fix" would commit — reset to the options view so the user re-previews. Deps are
+  // EXACTLY the live FixCard option state (skinGuard is a const {}, not state). Skips the first render.
+  const sawPlan = useRef(false);
+  useEffect(() => {
+    if (sawPlan.current) setPhase({ t: 'idle' });
+  }, [aggressive, polygon, marking, effort, scaleAwareQ, webpNearLossless, pngRecompress, overrides, packLoose, packMode, packGranularity, packTrim, extrude, tierEnable, tierSuffixes]);
+  useEffect(() => {
+    sawPlan.current = phase.t === 'plan';
+  }, [phase.t]);
 
   // Gated + not yet unlocked → show activation instead of the run button.
   if (PRO_GATE_ENABLED && !unlocked) {
@@ -832,8 +863,12 @@ function FixCard({ files }: { files: PickedFile[] }) {
   return (
     <div className="rounded-xl border-2 border-teal/70 bg-panel p-4 text-center">
       <p className="font-mono text-xs text-ink-soft">{t('pro.note')}</p>
-      {phase.t === 'running' ? (
+      {phase.t === 'planning' ? (
+        <p className="mt-2.5 font-mono text-xs text-teal">{t('dropzone.analyzing')}</p>
+      ) : phase.t === 'running' ? (
         <p className="mt-2.5 font-mono text-xs text-teal">{t('fix.optimizing')} {phase.p.total > 1 ? `${phase.p.done}/${phase.p.total}` : ''} {phase.p.label}</p>
+      ) : phase.t === 'plan' ? (
+        <PlanCard summary={phase.summary} onRun={run} onBack={() => setPhase({ t: 'idle' })} disabled={files.length === 0} />
       ) : phase.t === 'done' ? (
         <Receipt receipt={phase.out.receipt} onRedownload={() => downloadZip(phase.out.zip)} />
       ) : (
@@ -884,11 +919,22 @@ function FixCard({ files }: { files: PickedFile[] }) {
             setTierSuffixes={setTierSuffixes}
           />
 
+          {/* Default flow: PREVIEW the plan first (mode:'plan', cheap/pure) — a reference-changing paid
+              fix shouldn't run blind. "Run fix" in the Plan card then commits the IDENTICAL options. */}
+          <button
+            type="button"
+            onClick={preview}
+            disabled={files.length === 0}
+            className="mt-2 w-full rounded-lg bg-cta px-3 py-2 font-sans text-xs font-semibold text-white shadow-[0_2px_6px_rgba(21,160,106,0.32)] transition hover:bg-cta-hover disabled:opacity-55"
+          >
+            {t('fix.plan.cta')}
+          </button>
+          {/* Escape hatch: still go straight to execute + auto-download (today's one-click path) if desired. */}
           <button
             type="button"
             onClick={run}
             disabled={files.length === 0}
-            className="mt-2 w-full rounded-lg bg-cta px-3 py-2 font-sans text-xs font-semibold text-white shadow-[0_2px_6px_rgba(21,160,106,0.32)] transition hover:bg-cta-hover disabled:opacity-55"
+            className="mt-2 w-full rounded-lg border border-line px-3 py-1.5 font-mono text-[11px] text-teal transition hover:border-teal disabled:opacity-55"
           >
             {t('pro.cta')}
           </button>
@@ -1026,6 +1072,71 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
       ) : null}
       <button type="button" onClick={onRedownload} className="w-full rounded-lg border border-line px-3 py-1.5 font-mono text-[11px] text-teal transition hover:border-teal">
         ↓ {t('fix.download')}
+      </button>
+    </div>
+  );
+}
+
+// Dry-run plan preview (docs/improvements/dry-run-plan-preview.md). Shows the FixPlanSummary the worker
+// posted in mode:'plan' BEFORE committing a reference-changing paid fix: op COUNTS grouped by kind (the
+// SAME OpKind vocabulary + fix.op.<kind> labels + REFERENCE_CHANGING warn coloring as the receipt's
+// OpManifest), the pixel-free would-be-skipped list (reused skipped <details> styling), a prominent
+// reference-changing banner (reused fix.mergeWarn), and the honesty note (counts only — byte/VRAM savings
+// appear AFTER Run; the refs flag is a prediction; tiers are an upper bound). "Run fix" commits the
+// IDENTICAL options via the execute path (auto-download); "Back" returns to the options view.
+function PlanCard({ summary, onRun, onBack, disabled }: { summary: FixPlanSummary; onRun: () => void; onBack: () => void; disabled: boolean }) {
+  const { t } = useI18n();
+  // Counts grouped by kind in the canonical OP_KIND_ORDER (zero kinds were already omitted by the worker).
+  const rows = OP_KIND_ORDER.map((k) => [k, summary.opCounts[k]] as const).filter((e): e is readonly [OpKind, number] => (e[1] ?? 0) > 0);
+  return (
+    <div className="mt-2.5 space-y-1.5 text-left">
+      <div className="flex items-center justify-center gap-1.5 font-mono text-xs text-teal">
+        <span className="h-2 w-2 rounded-full bg-teal" /> {t('fix.plan.title', { n: summary.totalOps })}
+      </div>
+      {summary.totalOps === 0 ? (
+        <p className="font-mono text-[11px] leading-relaxed text-ink-soft">{t('fix.plan.empty')}</p>
+      ) : (
+        <div className="space-y-0.5 rounded-md bg-bg p-2 font-mono text-[11px]">
+          {rows.map(([kind, n]) => (
+            <div key={kind} className="flex items-center justify-between gap-2">
+              <span className={REFERENCE_CHANGING.has(kind) ? 'text-warn' : 'text-ink-soft'}>{t(`fix.op.${kind}`)}</span>
+              <span className={REFERENCE_CHANGING.has(kind) ? 'text-warn' : 'text-ink'}>{n}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {/* Prominent reference-changing warning — REUSED receipt banner (fix.mergeWarn): committing this plan
+          rewrites manifest/loader references (a prediction; a PNG fallback may still resolve drop-in). */}
+      {summary.referencesChanged ? <p className="font-mono text-[10px] text-warn">⚠ {t('fix.mergeWarn')}</p> : null}
+      {/* Pixel-free would-be-skips — REUSED skipped <details> styling (informational, text-ink-soft). */}
+      {summary.skipped.length > 0 ? (
+        <details className="rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
+          <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">
+            {t('fix.skipped.title', { n: summary.skipped.length })}
+          </summary>
+          <ul className="mt-1.5 space-y-1">
+            {summary.skipped.map((s, i) => (
+              <li key={i} className="font-mono text-[10px] leading-relaxed text-ink-soft">
+                <span className="break-all">{s.assetRef}</span> — {s.reason}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+      {/* Honesty note (invariant 5): counts only — byte/VRAM savings appear after Run; refs flag is a
+          prediction; tiers are an upper bound; some checks run only at execute. */}
+      <p className="font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.plan.deferredNote')}</p>
+      {/* Primary commit: re-post the IDENTICAL options with mode:'execute' (today's auto-download path). */}
+      <button
+        type="button"
+        onClick={onRun}
+        disabled={disabled}
+        className="mt-1 w-full rounded-lg bg-cta px-3 py-2 font-sans text-xs font-semibold text-white shadow-[0_2px_6px_rgba(21,160,106,0.32)] transition hover:bg-cta-hover disabled:opacity-55"
+      >
+        {t('fix.plan.run')}
+      </button>
+      <button type="button" onClick={onBack} className="w-full rounded-lg border border-line px-3 py-1.5 font-mono text-[11px] text-teal transition hover:border-teal">
+        ← {t('fix.plan.back')}
       </button>
     </div>
   );

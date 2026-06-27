@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { classifyOp, groupOps, OP_KIND_ORDER, REFERENCE_CHANGING, type OpKind } from './op-manifest';
+import type { FixOp, PackGroup } from '@asset-doctor/core';
+import { classifyOp, groupOps, OP_KIND_ORDER, REFERENCE_CHANGING, summarizeOpCounts, summarizePlan, dedupKeepConsumerSkip, type DedupConsumerFacts, type OpKind, type PlanGateInputs } from './op-manifest';
 
 // Real worker strings sampled from each operations.push site in fix.worker.ts (verbatim formats).
 const SAMPLES: Record<string, OpKind | null> = {
@@ -80,5 +81,171 @@ describe('groupOps', () => {
 
   it('returns [] for empty input', () => {
     expect(groupOps([])).toEqual([]);
+  });
+});
+
+/* ── DRY-RUN plan summary (docs/improvements/dry-run-plan-preview.md) ──────────────────────────────────
+ * The plan path tallies the STRUCTURED FixOp[] the execute path would run WITHOUT composing any pixels.
+ * These tests are 100% pure (no canvas, no worker) — they synthesize FixOp[] + gate facts directly. */
+
+const repack = (atlasRefs: string[]): FixOp => ({ kind: 'repack', atlasRefs, targetMime: 'image/webp', pot: true, allowRotation: false, padding: 2, maxSize: 4096 });
+const resize = (assetRef: string): FixOp => ({ kind: 'resize', assetRef, to: { w: 1024, h: 512 }, targetMime: 'image/webp', quality: 0.85 });
+const transcode = (assetRef: string): FixOp => ({ kind: 'transcode', assetRef, targetMime: 'image/webp', quality: 0.85, lossless: false });
+const dropLegacy = (assetRef: string): FixOp => ({ kind: 'drop', assetRef, reason: 'duplicate-exact' });
+const dropOwned = (assetRef: string, ownerRef: string): FixOp => ({ kind: 'drop', assetRef, reason: 'duplicate-exact', ownerRef });
+const pack = (id: string): FixOp => ({ kind: 'pack', group: { id, kind: 'static', regions: [] } as unknown as PackGroup, targetMime: 'image/webp', trim: true, padding: 2, maxSize: 4096, allowRotation: false });
+
+describe('summarizeOpCounts (structured FixOp[] tally)', () => {
+  it('splits repack vs merge by atlasRefs.length', () => {
+    const counts = summarizeOpCounts([repack(['a']), repack(['b', 'c']), repack(['d', 'e', 'f'])], 0);
+    expect(counts).toEqual({ repack: 1, merge: 2 });
+  });
+
+  it('splits drop vs dedup by ownerRef presence', () => {
+    const counts = summarizeOpCounts([dropLegacy('x'), dropOwned('y', 'owner'), dropOwned('z', 'owner')], 0);
+    expect(counts).toEqual({ drop: 1, dedup: 2 });
+  });
+
+  it('counts resize / transcode / pack literally', () => {
+    const counts = summarizeOpCounts([resize('a'), transcode('b'), transcode('c'), pack('g1')], 0);
+    expect(counts).toEqual({ resize: 1, transcode: 2, pack: 1 });
+  });
+
+  it('folds the worker tier multiplier into counts.tier', () => {
+    expect(summarizeOpCounts([], 4)).toEqual({ tier: 4 });
+    // tier coexists with real ops
+    expect(summarizeOpCounts([resize('a')], 3)).toEqual({ resize: 1, tier: 3 });
+  });
+
+  it('OMITS zero-count kinds (no key for an op kind that never appeared)', () => {
+    const counts = summarizeOpCounts([transcode('a')], 0);
+    expect(counts).toEqual({ transcode: 1 });
+    expect(Object.keys(counts)).toEqual(['transcode']); // nothing else present
+  });
+
+  it('clamps a negative tier multiplier to 0 (never emits a negative or NaN count)', () => {
+    expect(summarizeOpCounts([], -5)).toEqual({});
+  });
+
+  it('is deterministic + key order follows OP_KIND_ORDER (same input ⇒ deep-equal output)', () => {
+    const ops = [pack('g'), dropOwned('y', 'o'), repack(['a', 'b']), transcode('t'), resize('r'), dropLegacy('d'), repack(['x'])];
+    const a = summarizeOpCounts(ops, 2);
+    const b = summarizeOpCounts([...ops], 2);
+    expect(a).toEqual(b);
+    // emitted keys are a subsequence of the canonical order (repack→resize→transcode→drop→merge→pack→dedup→tier)
+    const present = Object.keys(a) as OpKind[];
+    expect(present).toEqual(OP_KIND_ORDER.filter((k) => present.includes(k)));
+    expect(a).toEqual({ repack: 1, resize: 1, transcode: 1, drop: 1, merge: 1, pack: 1, dedup: 1, tier: 2 });
+  });
+
+  it('returns {} for an empty plan with no tiering', () => {
+    expect(summarizeOpCounts([], 0)).toEqual({});
+  });
+});
+
+describe('summarizePlan (the fix-plan payload assembled in plan mode)', () => {
+  const gate = (over: Partial<PlanGateInputs> = {}): PlanGateInputs => ({
+    ops: [repack(['a']), repack(['b', 'c']), resize('r'), transcode('t'), dropOwned('y', 'o'), pack('g')],
+    tierAssets: 2,
+    skipped: [{ assetRef: '(folder)', reason: 'tier skipped: folder already ships resolution tiers' }],
+    referencesChanged: true,
+    ...over,
+  });
+
+  it('totalOps is the SUM of every per-kind count (tier included as its upper bound)', () => {
+    const s = summarizePlan(gate());
+    // repack 1, merge 1, resize 1, transcode 1, dedup 1, pack 1, tier 2 = 8
+    expect(s.opCounts).toEqual({ repack: 1, resize: 1, transcode: 1, merge: 1, pack: 1, dedup: 1, tier: 2 });
+    expect(s.totalOps).toBe(8);
+    expect(s.totalOps).toBe((Object.values(s.opCounts) as number[]).reduce((n, v) => n + v, 0));
+  });
+
+  it('passes the pixel-free skips + references-changed prediction through verbatim', () => {
+    const skips = [{ assetRef: 'm.png', reason: 'tier skipped: meshed atlas not supported (scaleAtlas drops mesh)' }];
+    const s = summarizePlan(gate({ skipped: skips, referencesChanged: false }));
+    expect(s.skipped).toEqual(skips);
+    expect(s.referencesChanged).toBe(false);
+  });
+
+  it('ALWAYS sets hasDeferredChecks (pixel-dependent skips, the refs caveat + the tier upper bound resolve only at execute)', () => {
+    expect(summarizePlan(gate()).hasDeferredChecks).toBe(true);
+    expect(summarizePlan(gate({ ops: [], tierAssets: 0, skipped: [], referencesChanged: false })).hasDeferredChecks).toBe(true);
+  });
+
+  it('HONESTY GUARD (invariant 5): the summary carries op COUNTS only — NO byte/VRAM savings field', () => {
+    const s = summarizePlan(gate());
+    // the structural contract: exactly these five keys, none of them a disk/VRAM number.
+    expect(Object.keys(s).sort()).toEqual(['hasDeferredChecks', 'opCounts', 'referencesChanged', 'skipped', 'totalOps']);
+    // defensively scan every key (incl. any future addition) for a bytes/vram/saving leak.
+    const FORBIDDEN = /(byte|vram|saved|saving|kb|mb|disk)/i;
+    for (const k of Object.keys(s)) expect(FORBIDDEN.test(k), `summary key "${k}" must not promise bytes/VRAM pre-execute`).toBe(false);
+    // opCounts is a tally of integers, never a savings map.
+    for (const v of Object.values(s.opCounts)) expect(Number.isInteger(v) && v > 0).toBe(true);
+  });
+
+  it('is pure: same gate input ⇒ deep-equal summary', () => {
+    expect(summarizePlan(gate())).toEqual(summarizePlan(gate()));
+  });
+
+  it('empty plan ⇒ empty opCounts, totalOps 0, still carries any pixel-free skips', () => {
+    const skips = [{ assetRef: 'p.png | q.png', reason: "pack skipped: two files map to one region name 'r' — kept the first" }];
+    const s = summarizePlan({ ops: [], tierAssets: 0, skipped: skips, referencesChanged: false });
+    expect(s.opCounts).toEqual({});
+    expect(s.totalOps).toBe(0);
+    expect(s.skipped).toEqual(skips);
+  });
+});
+
+/* ── dedupKeepConsumerSkip (the plan block's pixel-free keep-consumer predicate, fix.worker.ts Phase C) ──
+ * Reviewer M2: the plan must NOT count a dedup the execute path will SKIP for a pixel-free reason. This is
+ * the single source of truth the worker plan block + plan-worker.test.ts both call. */
+describe('dedupKeepConsumerSkip (pixel-free keep-consumer predicate ↔ execute Phase C)', () => {
+  // A "drop-in" atlas consumer that WILL actually dedup: repointable manifest + resolvable atlas.
+  const dropInAtlas: DedupConsumerFacts = { keepConsumer: false, repointManifest: true, isSpine: false, hasManifest: true, isAtlas: true };
+  // A "drop-in" loose consumer (no repointManifest) that WILL actually dedup: has an AD-emitted manifest.
+  const dropInLoose: DedupConsumerFacts = { keepConsumer: false, repointManifest: false, isSpine: false, hasManifest: true, isAtlas: true };
+
+  it('returns null for a consumer the execute path WILL dedup (atlas repoint + loose)', () => {
+    expect(dedupKeepConsumerSkip('owner.png', dropInAtlas)).toBeNull();
+    expect(dedupKeepConsumerSkip('owner.png', dropInLoose)).toBeNull();
+  });
+
+  it('keepConsumer (tiering renames the owner) ⇒ kept, names the owner (Phase C 1132)', () => {
+    const r = dedupKeepConsumerSkip('owner.png', { ...dropInAtlas, keepConsumer: true });
+    expect(r).toBe('dedup skipped: owner owner.png renamed by scale tiering — kept duplicate');
+  });
+
+  it('Spine consumer ⇒ kept (Phase C 1148), checked before the repointManifest branch', () => {
+    // even with repointManifest set (a Spine ref IS an atlas), Spine wins → cross-page keep.
+    expect(dedupKeepConsumerSkip('o', { ...dropInAtlas, isSpine: true })).toBe('dedup skipped: Spine cross-page dedup not drop-in — kept duplicate');
+  });
+
+  it('atlas-repoint consumer with no manifest / no atlas ⇒ kept (Phase C 1160)', () => {
+    expect(dedupKeepConsumerSkip('o', { ...dropInAtlas, hasManifest: false })).toBe('dedup skipped: atlas consumer manifest unavailable — kept duplicate');
+    expect(dedupKeepConsumerSkip('o', { ...dropInAtlas, isAtlas: false })).toBe('dedup skipped: atlas consumer manifest unavailable — kept duplicate');
+  });
+
+  it('loose consumer whose reference may live in game code (no manifest) ⇒ kept (Phase C 1183)', () => {
+    expect(dedupKeepConsumerSkip('o', { ...dropInLoose, hasManifest: false })).toBe('dedup skipped: loose duplicate reference may live in game code — kept duplicate');
+  });
+
+  it('loose consumer with a manifest but unresolvable atlas ⇒ kept (Phase C 1189)', () => {
+    expect(dedupKeepConsumerSkip('o', { ...dropInLoose, isAtlas: false })).toBe('dedup skipped: referencing manifest unavailable — kept duplicate');
+  });
+
+  it('the count EXCLUDES kept-consumer drops (plan block hands summarizeOpCounts only real dedups)', () => {
+    // Three owner-aware drops; one is a real dedup, two are pixel-free keeps. The plan block filters the
+    // keeps out BEFORE counting, so the dedup count is 1 — matching what execute would actually do.
+    const ownerAware = (assetRef: string): FixOp => dropOwned(assetRef, 'owner');
+    const all = [ownerAware('real'), ownerAware('spineKeep'), ownerAware('looseKeep')];
+    const facts: Record<string, DedupConsumerFacts> = {
+      real: dropInLoose,
+      spineKeep: { ...dropInLoose, isSpine: true },
+      looseKeep: { ...dropInLoose, hasManifest: false },
+    };
+    const counted = all.filter((op) => op.kind === 'drop' && dedupKeepConsumerSkip('owner', facts[op.assetRef]!) === null);
+    expect(summarizeOpCounts(counted, 0)).toEqual({ dedup: 1 });
+    // WITHOUT the exclusion the naive tally would over-count to 3 (the bug this fixes).
+    expect(summarizeOpCounts(all, 0)).toEqual({ dedup: 3 });
   });
 });

@@ -85,7 +85,23 @@ export interface FixOverride {
   webpNearLossless?: number;
 }
 
-export type FixRequest = { type: 'fix'; files: FixInputFile[]; options: FixOptions };
+/** Dry-run preview vs the real run. 'plan' runs parse + analyze + planFix + the pre-loop gates, posts a
+ *  `fix-plan` response (op COUNTS + would-be-skips determinable WITHOUT the compose loop + the
+ *  reference-changing prediction), then STOPS before the compose/pack/repack/tier PIXEL LOOP + zip. It is
+ *  NOT zero-pixel: the format-sizing encode pass + (aggressive) the dHash/SHA feature pass still run — the
+ *  same pre-loop costs execute pays — to count transcodes/dedups honestly. 'execute' (the DEFAULT, today's
+ *  one-click path) is byte-identical to today. Absent ⇒ 'execute'. */
+export type FixMode = 'plan' | 'execute';
+
+export type FixRequest = {
+  type: 'fix';
+  files: FixInputFile[];
+  options: FixOptions;
+  /** Dry-run preview vs commit. Absent/'execute' ⇒ byte-identical to today; 'plan' ⇒ the worker posts a
+   *  `fix-plan` summary and STOPS before the compose/pack/repack/tier PIXEL LOOP + zip (the format-sizing
+   *  encode + aggressive feature pass still run pre-loop, to count transcodes/dedups). */
+  mode?: FixMode;
+};
 
 /** Lightweight receipt (no bytes — the optimized files live in the zip Blob). */
 export interface FixReceipt {
@@ -145,7 +161,41 @@ export interface FixReceipt {
   extrudeVramDelta?: number;
 }
 
+/* ── Dry-run plan preview (docs/improvements/dry-run-plan-preview.md) ─────────────────────────
+ * The 'plan' mode payload. HONESTY (invariant 5): op COUNTS ONLY — NO byte/VRAM savings field exists
+ * here. The format-sizing pass DID encode to count transcodes, but nothing is COMPOSED/packed/zipped
+ * yet, so there is no real output footprint to report (disk ≠ VRAM; no faked numbers pre-compose). */
+
+/** Per-kind op tally, keyed by the SAME OpKind vocabulary as the receipt change-manifest (op-manifest.ts).
+ *  Counts the STRUCTURED FixOp[] the execute path would run (repack/merge split by atlasRefs.length;
+ *  drop/dedup split by ownerRef; resize/transcode/pack literal) PLUS the worker-side `tier` multiplier
+ *  (an upper bound — tiering can still be refused at pixel time). Zero-count kinds are OMITTED. */
+export type PlanOpCounts = Partial<Record<'repack' | 'resize' | 'transcode' | 'drop' | 'merge' | 'pack' | 'dedup' | 'tier', number>>;
+
+/** The dry-run preview the worker posts in 'plan' mode. Deterministic; carries NO pixels and — by
+ *  design — NO byte/VRAM savings (counts only, until execute). */
+export interface FixPlanSummary {
+  /** Op tally grouped by kind (zero kinds omitted). */
+  opCounts: PlanOpCounts;
+  /** Σ of opCounts — total ops the execute path would run (tier counted as its upper-bound). */
+  totalOps: number;
+  /** Skips DETERMINABLE WITHOUT composing pixels only (e.g. multi-page Spine, already-tiered,
+   *  name-collision, mesh-refusal). Pixel-dependent skips (polygon-no-win, near-dup dHash, codec-
+   *  unavailable, …) are NOT predicted here — they surface only in the execute receipt. */
+  skipped: { assetRef: string; reason: string }[];
+  /** Conservative-true PREDICTION: would committing this plan rewrite manifest/loader references (merge /
+   *  pack / owner-aware dedup / scale-tier / a loose image whose emitted ext differs)? A prediction — a
+   *  PNG fallback can still resolve drop-in at execute. NO byte/VRAM claim attached. */
+  referencesChanged: boolean;
+  /** True ⇒ some checks are deferred to execute (pixel-dependent skips, the refs-flag caveat, the tier
+   *  "up to N" upper bound). The UI surfaces this as the honesty note. */
+  hasDeferredChecks: boolean;
+}
+
 export type FixResponse =
   | { type: 'fix-progress'; label: string; done: number; total: number }
   | { type: 'fix-done'; receipt: FixReceipt; zip: Blob }
+  /** Dry-run preview (mode:'plan'). Additive: the execute path never emits this; fix-progress/fix-done
+   *  are unchanged. */
+  | { type: 'fix-plan'; summary: FixPlanSummary }
   | { type: 'fix-error'; error: string };

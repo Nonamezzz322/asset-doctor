@@ -5,7 +5,7 @@
 // (native WebP, or AVIF via @jsquash with honest fallback), drop exact duplicates, and zip a drop-in
 // optimized folder. Assets never leave the device. Every fix the browser can't do lands in skipped[].
 
-import type { Asset, Atlas, Blit, ImageMime, ImageFeatures, PackGroup, Rect, Size, TrimRect } from '@asset-doctor/core';
+import type { Asset, Atlas, Blit, FixOp, ImageMime, ImageFeatures, PackGroup, Rect, Size, TrimRect } from '@asset-doctor/core';
 import { groupFiles, groupLooseForPacking, keyOf, type LooseImage, type RawFile } from '@asset-doctor/ingest';
 import { parseAtlas, parseImage, parseSpineAtlasText, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
 import { analyze, buildDedupGroups, hasResolutionToken, mergeSharedAtlases, type EncodeSizer } from '@asset-doctor/analysis';
@@ -72,7 +72,11 @@ import {
 } from '@asset-doctor/fix';
 import { dHashFromGray, isFlat, luma } from '../lib/perceptual';
 import { makeZip, type ZipEntry } from './zip';
-import type { FixInputFile, FixOptions, FixReceipt, FixRequest, FixResponse } from './fix-protocol';
+// PURE dry-run plan summary (docs/improvements/dry-run-plan-preview.md): tallies the STRUCTURED FixOp[]
+// the execute path would run + the worker-side tier multiplier into the receipt's OpKind vocabulary. No
+// byte/VRAM number (honesty, invariant 5). The worker only assembles the pixel-free gate facts.
+import { dedupKeepConsumerSkip, summarizePlan, type PlanGateInputs } from '../lib/op-manifest';
+import type { FixInputFile, FixMode, FixOptions, FixReceipt, FixRequest, FixResponse } from './fix-protocol';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 const post = (m: FixResponse): void => ctx.postMessage(m);
@@ -86,13 +90,16 @@ const te = new TextEncoder();
 ctx.onmessage = async (e: MessageEvent<FixRequest>): Promise<void> => {
   if (e.data.type !== 'fix') return;
   try {
-    await runFix(e.data.files, e.data.options);
+    // Dry-run preview vs commit (docs/improvements/dry-run-plan-preview.md). Absent/'execute' ⇒
+    // byte-identical to today's one-click path; 'plan' ⇒ the worker posts a `fix-plan` summary and STOPS
+    // before the pixel loop (no compose/encode/zip).
+    await runFix(e.data.files, e.data.options, e.data.mode ?? 'execute');
   } catch (err) {
     post({ type: 'fix-error', error: err instanceof Error ? err.message : String(err) });
   }
 };
 
-async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
+async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): Promise<void> {
   post({ type: 'fix-progress', label: 'analyzing', done: 0, total: 1 });
 
   // ── parse + analyze (same pipeline as the diagnosis) ──
@@ -292,6 +299,120 @@ async function runFix(files: FixInputFile[], opts: FixOptions): Promise<void> {
     pngRecompressLevel: opts.pngRecompressLevel,
     allowPngFallback,
   });
+
+  // ── DRY-RUN PLAN SHORT-CIRCUIT (docs/improvements/dry-run-plan-preview.md) ──────────────────────────
+  // mode 'plan': everything above (parse + analyze + planFix + the PIXEL-FREE gates) has already run. NOTE
+  // it is NOT zero-pixel: the format-sizing pass (makeEncoder, line 189) decodes + WebP/AVIF-encodes every
+  // image to SIZE format findings → transcode counts, and aggressive mode runs computeFeatures (line 187,
+  // SHA-256 + dHash getImageData) for the dedup tally — both are the SAME pre-loop costs the execute path
+  // pays anyway. What plan SKIPS is the heavy half: the compose/pack/repack/resize/tier PIXEL LOOP + zip.
+  // Assemble the deterministic gate facts the summary needs (op counts from the structured plan; the
+  // would-be-skips + the reference-changing prediction + the tier UPPER BOUND from the plan ops × the pure
+  // gates), post the `fix-plan` summary, and STOP before the pixel loop. mode 'execute' (the default) falls
+  // straight through ⇒ byte-identical to today. HONESTY (invariant 5): the summary carries op COUNTS only —
+  // no byte/VRAM number is computed here.
+  if (mode === 'plan') {
+    // Refs a repack/merge/pack op claims (mirrors the execute path's `tierTransformed`): their emitted
+    // sheet is not re-fed into tiering in v1, so the tier loop would surface an honest skip, not a tier.
+    const planTransformed = new Set<string>();
+    // Refs a drop op removes (legacy or owner-aware) and refs a resize/transcode op replaces — neither is
+    // ever ALSO tiered (plan.ts already excluded resize/transcode refs from its `tiered` guard).
+    const planDropped = new Set<string>();
+    const planReplaced = new Set<string>();
+    let predictRefsChanged = false;
+    for (const op of plan.ops) {
+      if (op.kind === 'repack') {
+        for (const rf of op.atlasRefs) planTransformed.add(rf);
+        if (op.atlasRefs.length > 1) predictRefsChanged = true; // a merge rewrites manifest references
+      } else if (op.kind === 'pack') {
+        for (const r of op.group.regions) planTransformed.add(r.ref);
+        predictRefsChanged = true; // building a sheet is reference-changing (the game must load the sheet)
+      } else if (op.kind === 'drop') {
+        planDropped.add(op.assetRef);
+        predictRefsChanged = true; // dedup repoint / removing a file changes the folder's references
+      } else if (op.kind === 'resize' || op.kind === 'transcode') {
+        planReplaced.add(op.assetRef);
+        // A LOOSE image whose emitted ext differs from the source is renamed ⇒ NOT drop-in (conservative:
+        // a PNG fallback can still resolve drop-in at execute — disclosed in the deferred-checks note).
+        if (!atlasByRef.has(op.assetRef)) {
+          const path = pathByRef.get(op.assetRef);
+          if (path && renamedTo(path, effectiveFor(op.assetRef, 1).targetMime) !== path) predictRefsChanged = true;
+        }
+      }
+    }
+
+    // Pixel-free would-be-skips, in the same deterministic order the execute path surfaces them (limited to
+    // the subset knowable WITHOUT composing pixels). Pixel-dependent skips (polygon-no-win, near-dup dHash,
+    // codec-unavailable, post-compose name-collision, …) are NOT predicted — they surface only at execute.
+    const planSkips: { assetRef: string; reason: string }[] = [];
+    for (const s of packCollisionSkips) planSkips.push(s); // execute pushes these first (file→region collisions)
+    // Multi-page Spine single-atlas repack refusal — determinable pre-compose via spineInfoOf (the execute
+    // repack branch refuses a >1-page Spine before any pixel work).
+    for (const op of plan.ops) {
+      if (op.kind !== 'repack' || op.atlasRefs.length !== 1) continue;
+      const ref = op.atlasRefs[0]!;
+      if (!spineRefs.has(ref)) continue;
+      const info = spineInfoOf(ref);
+      if (info && info.pages > 1) planSkips.push({ assetRef: ref, reason: 'multi-page Spine repack not supported in v1' });
+    }
+    // Owner-aware dedup would-be-skips (Phase C, fix.worker.ts:1118-1203) — Phase C turns a subset of the
+    // owner-aware drop ops into NO-OP keeps for PIXEL-FREE, plan-determinable reasons (drops nothing). They
+    // must NOT be counted as `dedup` (they perform zero dedup) and must surface here as skips, in Phase C's
+    // emission order (after Phase B transforms, before the tier multiplier). The PIXEL-DEPENDENT keep —
+    // owner final name diverged via a transcode PNG-fallback (line 1137) — is NOT predicted here. Kept
+    // consumers are also un-marked from `planDropped` (their source survives ⇒ the tier loop CAN tier them,
+    // matching execute). `countedOps` is the plan with these no-op dedup drops removed → summarizeOpCounts
+    // tallies only the drops that actually dedup, so the count matches what execute would do.
+    const dedupSkipped = new Set<FixOp>();
+    for (const op of plan.ops) {
+      if (!isOwnerAwareDrop(op)) continue;
+      const consumerRef = op.assetRef;
+      const reason = dedupKeepConsumerSkip(basename(op.ownerRef!), {
+        keepConsumer: op.keepConsumer ?? false,
+        repointManifest: op.repointManifest ?? false,
+        isSpine: spineRefs.has(consumerRef),
+        hasManifest: manifestPathOf(consumerRef) != null,
+        isAtlas: atlasByRef.get(consumerRef) != null,
+      });
+      if (reason !== null) {
+        planSkips.push({ assetRef: consumerRef, reason });
+        dedupSkipped.add(op);
+        planDropped.delete(consumerRef); // kept ⇒ source survives ⇒ tier-eligible like execute
+      }
+    }
+    const countedOps = dedupSkipped.size > 0 ? plan.ops.filter((op) => !dedupSkipped.has(op)) : plan.ops;
+    // Tier gates (same emission as the tier multiplier loop, pixel-free subset).
+    let tierAssets = 0;
+    if (tieringOn && folderAlreadyTiered) {
+      planSkips.push({ assetRef: '(folder)', reason: 'tier skipped: folder already ships resolution tiers' });
+    }
+    if (tieringOn && !folderAlreadyTiered && opts.aggressive && dedupGroups && dedupGroups.length > 0) {
+      planSkips.push({ assetRef: '(dedup)', reason: 'dedup repoint disabled: scale tiering renames owners (kept duplicate consumers)' });
+    }
+    if (tieringOn && !folderAlreadyTiered) {
+      for (const a of merged) {
+        const ref = a.kind === 'atlas' ? a.atlas.name : a.image.name;
+        const refusal = tierRefusal(ref);
+        if (refusal) {
+          planSkips.push({ assetRef: ref, reason: refusal });
+          continue;
+        }
+        // Repacked/merged/packed assets are surfaced (their sheet isn't tiered in v1); transformed/
+        // dropped/replaced refs are never tiered ⇒ excluded from the upper-bound count.
+        if (planTransformed.has(ref)) {
+          planSkips.push({ assetRef: ref, reason: 'tier skipped: asset was repacked/merged/packed (its sheet is not tiered in v1)' });
+          continue;
+        }
+        if (planDropped.has(ref) || planReplaced.has(ref)) continue;
+        tierAssets++; // UPPER BOUND — tiering can still be refused at compose time (no 2D context / encode)
+      }
+    }
+    if (tieringOn && tierAssets > 0) predictRefsChanged = true; // tiering renames the source ⇒ reference-changing
+
+    const gate: PlanGateInputs = { ops: countedOps, tierAssets, skipped: planSkips, referencesChanged: predictRefsChanged };
+    post({ type: 'fix-plan', summary: summarizePlan(gate) });
+    return;
+  }
 
   // ── execute ──
   const out: { path: string; bytes: Uint8Array }[] = [];

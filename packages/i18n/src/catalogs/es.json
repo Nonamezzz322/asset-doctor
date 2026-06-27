@@ -142,6 +142,16 @@
   "fix.op.drop": "Duplicados eliminados",
   "fix.op.tier": "Niveles de resolución (referencias cambiadas)",
   "fix.op.other": "Otros cambios",
+  "fix.plan.title": {
+    "$count": "n",
+    "one": "{n} operación planificada",
+    "other": "{n} operaciones planificadas"
+  },
+  "fix.plan.cta": "Previsualizar plan",
+  "fix.plan.run": "Ejecutar corrección",
+  "fix.plan.back": "Atrás",
+  "fix.plan.empty": "Nada que cambiar — esta carpeta ya está limpia.",
+  "fix.plan.deferredNote": "Solo el número de operaciones — el ahorro en bytes y VRAM se muestra después de ejecutar (peso en disco ≠ carga de GPU). El indicador de «referencias cambiadas» es una predicción (un PNG de reserva aún puede ser drop-in) y los niveles de resolución son un límite superior; algunas comprobaciones solo se ejecutan al aplicar la corrección.",
   "fix.merge": "Agresivo: fusionar + dedup (no drop-in)",
   "fix.mergeWarn": "Referencias cambiadas — actualiza tu cargador",
   "fix.packWarn": "Packed loose images into sheets — your game must load the sheet manifest(s)/atlas, not the individual files",

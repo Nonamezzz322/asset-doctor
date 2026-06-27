@@ -139,6 +139,16 @@
   "fix.op.drop": "Duplikate entfernt",
   "fix.op.tier": "Auflösungsstufen (Referenzen geändert)",
   "fix.op.other": "Weitere Änderungen",
+  "fix.plan.title": {
+    "$count": "n",
+    "one": "{n} Vorgang geplant",
+    "other": "{n} Vorgänge geplant"
+  },
+  "fix.plan.cta": "Plan ansehen",
+  "fix.plan.run": "Fix ausführen",
+  "fix.plan.back": "Zurück",
+  "fix.plan.empty": "Nichts zu ändern — dieser Ordner ist bereits sauber.",
+  "fix.plan.deferredNote": "Nur die Anzahl der Vorgänge — Einsparungen bei Bytes und VRAM werden nach der Ausführung angezeigt (Speichergröße ≠ GPU-Last). Das Kennzeichen „Referenzen geändert“ ist eine Vorhersage (ein PNG-Fallback kann weiterhin Drop-in sein), und Auflösungsstufen sind eine Obergrenze; einige Prüfungen laufen erst zur Laufzeit.",
   "fix.merge": "Aggressiv: zusammenführen + dedupe (kein Drop-in)",
   "fix.mergeWarn": "Referenzen geändert — Loader aktualisieren",
   "fix.packWarn": "Packed loose images into sheets — your game must load the sheet manifest(s)/atlas, not the individual files",
