@@ -14,12 +14,13 @@ import { keyOf } from './lib/group';
 import { attachProbeReadings } from './lib/probe-run';
 import { runAnalysis, type Progress } from './lib/worker-client';
 import { planFix, runFix, type FixOutcome, type FixProgress } from './lib/fix-client';
-import type { FixChange, FixOptions, FixPlanSummary, FixReceipt, SheetDiff } from './worker/fix-protocol';
+import type { BackendOptions, FixChange, FixOptions, FixPlanSummary, FixReceipt, SheetDiff } from './worker/fix-protocol';
 import { fmtBytes } from './lib/format';
 import { groupOps, OP_KIND_ORDER, REFERENCE_CHANGING, type OpKind } from './lib/op-manifest';
 import { migrationSnippet, type Engine } from './lib/loader-migration';
 import { LOCALES, NATIVE_NAME, useI18n } from './lib/i18n';
-import { isProUnlocked, maybeRefresh, PRO_GATE_ENABLED } from './lib/license';
+import { API_BASE, isProUnlocked, loadStoredEntitlement, maybeRefresh, PRO_GATE_ENABLED } from './lib/license';
+import { backendReachable } from './lib/backend-client';
 import { ActivatePanel, ProBadge } from './components/LicensePanel';
 import { FilmViewer } from './components/FilmViewer';
 import { Findings } from './components/Findings';
@@ -738,6 +739,81 @@ function ExtrudePanel({ extrude, setExtrude }: { extrude: number; setExtrude: (n
   );
 }
 
+// OPT-IN backend native KTX2 (docs/improvements/round12-backend-processing.md, Phase 3) — the user-directed
+// carve-out of invariants 1 & 2. DEFAULT OFF. KTX2/UASTC is impossible in-browser, so it (and ONLY it, v1)
+// moves to an opt-in backend; assets leave the device ONLY on explicit per-run consent. The panel renders
+// nothing actionable unless a backend is configured (an API base + a stored entitlement token). It surfaces
+// THREE honest costs before any upload (round12 B3/B4): the zip gets bigger (ships both KTX2 and the raster
+// page), the VRAM win is conditional (only GPUs with BC7/ASTC/ETC2), and the game must add a KTX2 transcoder
+// bundle + Pixi loader. The consent checkbox is enabled ONLY when the gateway healthz probe succeeded; it is
+// the explicit "these images are uploaded to the server" acknowledgement, reset every run (never sticky).
+function BackendKtx2Panel({
+  configured,
+  ready,
+  ktx2Enable,
+  setKtx2Enable,
+  consent,
+  setConsent,
+}: {
+  configured: boolean;
+  ready: boolean;
+  ktx2Enable: boolean;
+  setKtx2Enable: (b: boolean) => void;
+  consent: boolean;
+  setConsent: (b: boolean) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <details className="mt-2 rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
+      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">{t('fix.backend.title')}</summary>
+
+      <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.backend.hint')}</p>
+
+      {!configured ? (
+        // No API base / no entitlement token ⇒ the whole path is unavailable. Stay honest, don't offer it.
+        <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft/70">{t('fix.backend.unconfigured')}</p>
+      ) : (
+        <>
+          <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.backend.ktx2Hint')}>
+            <input type="checkbox" checked={ktx2Enable} onChange={(e) => setKtx2Enable(e.target.checked)} className="accent-teal" />
+            {t('fix.backend.ktx2')}
+          </label>
+
+          {ktx2Enable ? (
+            <>
+              {/* Reachability status from the healthz probe (fired only after Pro unlock + this toggle). */}
+              <p className={`mt-2 font-mono text-[10px] ${ready ? 'text-ok' : 'text-warn'}`}>
+                {ready ? t('fix.backend.reachable') : t('fix.backend.unreachable')}
+              </p>
+
+              {/* The THREE honest costs (round12 B3/B4): bigger zip, conditional VRAM, transcoder dependency. */}
+              <ul className="mt-2 list-disc space-y-1 pl-4 font-mono text-[10px] leading-relaxed text-ink-soft/80">
+                <li>{t('fix.backend.costZip')}</li>
+                <li>{t('fix.backend.costVram')}</li>
+                <li>{t('fix.backend.costLoader')}</li>
+              </ul>
+
+              {/* CONSENT — the explicit "these images are uploaded to the server" acknowledgement. Enabled
+                  ONLY when the backend is reachable; unticking it (or losing the backend) cancels the upload
+                  path entirely. Default OFF, reset every run (never sticky). */}
+              <label className={`mt-2 flex items-start gap-1.5 font-mono text-[10px] ${ready ? 'text-ink' : 'text-ink-soft/50'}`}>
+                <input
+                  type="checkbox"
+                  checked={consent}
+                  disabled={!ready}
+                  onChange={(e) => setConsent(e.target.checked)}
+                  className="mt-0.5 accent-cta"
+                />
+                <span className="font-semibold">{t('fix.backend.consent')}</span>
+              </label>
+            </>
+          ) : null}
+        </>
+      )}
+    </details>
+  );
+}
+
 // Scale-tier export — emit downscaled copies (_1080p/_720p/_540p…) so the game loads the resolution
 // that fits the device. Its OWN explicit Pro opt-in, DEFAULT OFF (NOT under aggressive): a default Pro
 // run never multiplies a folder into resolution variants. Tiering is REFERENCE-CHANGING (the game's
@@ -1149,6 +1225,22 @@ function FixCard({ files }: { files: PickedFile[] }) {
   // meta.image / the loader-migration rows). Pairs with emitPixiManifest (the manifest is the guaranteed
   // referrer for pass-through loose images). OFF ⇒ buildOptions omits it ⇒ zip byte-identical to today.
   const [hashFilenames, setHashFilenames] = useState(false);
+
+  // ── OPT-IN backend native KTX2 (docs/improvements/round12-backend-processing.md, Phase 3) ───────────
+  // The user-directed amendment of invariants 1 & 2: native-only ops (KTX2/UASTC, impossible in-browser)
+  // move to an OPT-IN backend; assets leave the device ONLY on explicit per-run consent. SAFETY: when the
+  // backend is unconfigured (no VITE_API_BASE) OR not opted-in OR not consented, buildOptions omits the
+  // `backend` field ⇒ the worker's whole KTX2 path is dead ⇒ zip BYTE-IDENTICAL to today.
+  //
+  // `ktx2Enable` = the user turned the KTX2 toggle on (offer native compression). `backendConsent` = the
+  // per-run "these images are sent to the server" acknowledgement — RESET to false on every option change
+  // (and on a fresh preview) so consent is never sticky across runs. `backendReady` = the gateway healthz
+  // probe succeeded (fired ONLY after Pro unlock + a configured host). A backend is "configured" when an
+  // API base is set AND we hold a stored entitlement token (the gateway requires the Bearer token).
+  const backendConfigured = API_BASE !== '' && loadStoredEntitlement() != null;
+  const [ktx2Enable, setKtx2Enable] = useState(false);
+  const [backendConsent, setBackendConsent] = useState(false);
+  const [backendReady, setBackendReady] = useState(false);
   // Derive the ExportProfile the worker consumes. Formats kept in the canonical FORMAT_KEYS order (PNG,
   // WebP, AVIF) — deterministic. Tiers = the implied scale-1 top (validateProfile requires it) + any custom
   // rows. Per-format compression: PNG is native-lossless (no quality field); WebP/AVIF carry quality unless
@@ -1211,6 +1303,25 @@ function FixCard({ files }: { files: PickedFile[] }) {
     };
   }, []);
 
+  // OPT-IN backend healthz probe (round12 §4): fire the GET probe ONLY AFTER Pro unlock + a configured host
+  // + the KTX2 toggle ON, so a non-paying / pre-opt-in visitor's browser never pings the encoder host on
+  // page load. Re-probes whenever those preconditions flip. NO token, NO bytes (backendReachable is a bare
+  // GET). When unreachable, the consent step stays disabled with an honest "backend unreachable" note.
+  useEffect(() => {
+    if (!(unlocked && ktx2Enable && backendConfigured)) {
+      setBackendReady(false);
+      return;
+    }
+    let alive = true;
+    void (async () => {
+      const ok = await backendReachable(API_BASE);
+      if (alive) setBackendReady(ok);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [unlocked, ktx2Enable, backendConfigured]);
+
   // ONE source of truth for the FixOptions both the dry-run preview (mode:'plan') and the execute run
   // (mode:'execute') send — so "Run fix" commits the EXACT plan the preview described, byte-for-byte.
   // All omitted/false/empty values reproduce today's behavior in the worker. `over` lets a toggle pass the
@@ -1263,7 +1374,23 @@ function FixCard({ files }: { files: PickedFile[] }) {
       // Content-hash cache-busting (round9-cache-busting.md) — forwarded only when enabled; off ⇒ undefined
       // ⇒ no hashing branch runs in the worker ⇒ zip byte-identical to today.
       hashFilenames: hashFilenames || undefined,
+      // OPT-IN backend native KTX2 (round12-backend-processing.md, Phase 3) — the SOLE place a `backend`
+      // field is set. Forwarded ONLY when ALL of: KTX2 enabled, a backend configured (API base + stored
+      // token), the healthz probe succeeded, AND the user ticked per-run consent. Any missing precondition ⇒
+      // omitted ⇒ the worker's KTX2 path is dead ⇒ zip BYTE-IDENTICAL to today (the default browser fix).
+      // `consent` carries the explicit "these images are uploaded" acknowledgement to the worker; the worker
+      // double-checks it before any upload (defense in depth).
+      backend: buildBackendOptions(),
     };
+  }
+
+  /** The `backend` FixOptions field, or undefined when ANY precondition is unmet (default OFF). HONESTY: the
+   *  token comes from the stored entitlement; consent is the live per-run checkbox. */
+  function buildBackendOptions(): BackendOptions | undefined {
+    if (!(ktx2Enable && backendConfigured && backendReady && backendConsent)) return undefined;
+    const stored = loadStoredEntitlement();
+    if (!stored) return undefined; // configured implies a token, but never send without one
+    return { apiBase: API_BASE, token: stored.token, ops: ['ktx2'], consent: true };
   }
 
   // Monotonic preview request id — guards against an out-of-order worker resolve when rapid toggles spawn
@@ -1325,7 +1452,13 @@ function FixCard({ files }: { files: PickedFile[] }) {
   const sawPlan = useRef(false);
   useEffect(() => {
     if (sawPlan.current) setPhase({ t: 'idle' });
-  }, [aggressive, polygon, marking, effort, scaleAwareQ, webpNearLossless, pngRecompress, overrides, packLoose, packMode, packGranularity, packTrim, extrude, tierEnable, tierSuffixes, profileEnable, profileFormats, customTiers, profileOverrides]);
+  }, [aggressive, polygon, marking, effort, scaleAwareQ, webpNearLossless, pngRecompress, overrides, packLoose, packMode, packGranularity, packTrim, extrude, tierEnable, tierSuffixes, profileEnable, profileFormats, customTiers, profileOverrides, ktx2Enable]);
+  // Consent is NEVER sticky: drop the per-run "uploaded to server" acknowledgement the moment KTX2 is
+  // disabled OR the backend becomes unreachable, so a fresh run can't inherit a prior tick. The user must
+  // re-consent each time the upload path could engage.
+  useEffect(() => {
+    if (!(ktx2Enable && backendReady)) setBackendConsent(false);
+  }, [ktx2Enable, backendReady]);
   useEffect(() => {
     sawPlan.current = phase.t === 'plan';
   }, [phase.t]);
@@ -1424,6 +1557,18 @@ function FixCard({ files }: { files: PickedFile[] }) {
             {t('fix.hashFilenames')}
           </label>
 
+          {/* OPT-IN backend native KTX2 (round12-backend-processing.md, Phase 3) — DEFAULT OFF, gated behind
+              a configured backend + per-run consent. When unconfigured/unconsented, buildOptions omits the
+              `backend` field ⇒ the worker's KTX2 path is dead ⇒ zip byte-identical to today. */}
+          <BackendKtx2Panel
+            configured={backendConfigured}
+            ready={backendReady}
+            ktx2Enable={ktx2Enable}
+            setKtx2Enable={setKtx2Enable}
+            consent={backendConsent}
+            setConsent={setBackendConsent}
+          />
+
           {/* Default flow: PREVIEW the plan first (mode:'plan', cheap/pure) — a reference-changing paid
               fix shouldn't run blind. "Run fix" in the Plan card then commits the IDENTICAL options. */}
           <button
@@ -1495,6 +1640,28 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
           manifest. Names/structure only — no saving claimed (the manifest sums nothing, invariant 5). */}
       {receipt.pixiManifest ? (
         <p className="font-mono text-[10px] text-ink-soft">{t('fix.pixiManifestReceipt', { path: receipt.pixiManifest.path, n: receipt.pixiManifest.assets })}</p>
+      ) : null}
+      {/* OPT-IN backend native KTX2 receipt (round12-backend-processing.md §7): how many pages were uploaded /
+          produced / fell back to the browser image, the gateway host, the SEPARATE worst-case VRAM CEILING
+          (≤, never w·h·4 — invariant 5), and the honest disclosures (bigger zip + the required KTX2 transcoder
+          bundle the game must add). Present ONLY when the user consented + ≥1 page was offered. */}
+      {receipt.backendNative ? (
+        <div className="mt-1 space-y-1 rounded-md border border-line bg-bg p-2">
+          <p className="font-mono text-[10px] text-ink-soft">
+            {t('fix.backend.receipt', {
+              produced: receipt.backendNative.produced,
+              uploaded: receipt.backendNative.uploaded,
+              host: receipt.backendNative.host,
+            })}
+          </p>
+          {receipt.backendNative.failed > 0 ? (
+            <p className="font-mono text-[10px] text-warn">{t('fix.backend.receiptFailed', { failed: receipt.backendNative.failed })}</p>
+          ) : null}
+          {(receipt.ktx2VramBytesWorstCase ?? 0) > 0 ? (
+            <p className="font-mono text-[10px] text-ink-soft">{t('fix.backend.receiptVram', { bytes: receipt.ktx2VramBytesWorstCase ?? 0 })}</p>
+          ) : null}
+          <p className="font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.backend.receiptLoader')}</p>
+        </div>
       ) : null}
       {receipt.referencesChanged ? <p className="font-mono text-[10px] text-warn">⚠ {t('fix.mergeWarn')}</p> : null}
       {/* Loader-migration guide (docs/improvements/loader-migration.md): when the fix recorded genuine

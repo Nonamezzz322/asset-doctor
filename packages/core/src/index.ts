@@ -265,6 +265,32 @@ export type Rule =
  *  that would be a guess, not a measurement (Invariant 3). */
 export const MIP_OVERHEAD = 4 / 3;
 
+/* ── Compressed (GPU-block) texture residency — HONEST CEILING model (round12) ────────────────────
+ * A KTX2/block-compressed texture is NEVER charged w·h·4 and NEVER faked. Its resident VRAM is a
+ * worst-case CEILING that depends on the runtime transcode target the build cannot know:
+ *   - UASTC / BC7 / ASTC-4x4 = 8 bpp = 1 byte/px  ← we charge this WORST case as the headline.
+ *   - A GPU that transcodes down to BC1 / ETC1 = 4 bpp = 0.5 byte/px ⇒ real residency is ≤ the charge.
+ *   - A GPU with no block-compression support ⇒ raster fallback (w·h·4) — that is the raster path.
+ * So the number we surface is an upper bound ("GPU VRAM ≤ …"), not asserted residency (Invariant 3 +
+ * Invariant 5). Mip overhead reuses the ONE constant above (MIP_OVERHEAD = 4/3), charged ONLY when mips
+ * are baked into the .ktx2 (the round12 v1 profile bakes them) — same conditional rule as the raster path. */
+
+/** Compressed texture formats the fix path can emit. Additive: a value here NEVER changes the raster
+ *  (PNG/WebP/AVIF) accounting — those keep w·h·4. Today only UASTC-supercompressed KTX2 (round12 v1). */
+export type CompressedTextureFormat = 'ktx2-uastc';
+
+/** Worst-case GPU bytes-per-pixel CEILING per compressed format (the headline VRAM charge). For
+ *  'ktx2-uastc' = 1 (8 bpp = ASTC-4x4/BC7); real residency is ≤ this on GPUs that transcode to BC1/ETC1
+ *  (0.5 B/px). This is a CEILING, never an exact value, never w·h·4. Raster formats are NOT keyed here —
+ *  they stay on the w·h·4 (×4/3 if mipmapped) model unchanged. */
+export const COMPRESSED_BYTES_PER_PX_CEILING: Record<CompressedTextureFormat, number> = {
+  'ktx2-uastc': 1,
+};
+
+/** Texture footprint format used by the GPU-residency ceiling helper: the existing raster RGBA8888
+ *  model ('raster' ⇒ w·h·4) OR a compressed-block ceiling (CompressedTextureFormat ⇒ ≤ bpp·w·h). */
+export type TextureFootprintFormat = 'raster' | CompressedTextureFormat;
+
 /** Highlight zones drawn on the film-viewer snapshot, in atlas pixel coords. */
 export interface OverlayZone {
   kind: 'empty' | 'transparent' | 'bleeding';

@@ -4,6 +4,7 @@
 package httpapi
 
 import (
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -30,6 +31,15 @@ type Server struct {
 	allowOrigins []string
 	// trustedIPHeader: rate-limit key source set by a TRUSTED proxy (empty = use the TCP peer).
 	trustedIPHeader string
+
+	// --- native encode gateway (only live when cfg.NativeEnabled) ------------------------------------
+	// encodeQuota is the in-memory per-license concurrency + daily-quota limiter for the encode proxy. It
+	// deliberately never touches SQLite (the encode path must not contend the single-conn billing DB).
+	encodeQuota *licenseQuota
+	// encodeClient is the HTTP client used to reach the sidecar. Injectable so tests mock the sidecar.
+	encodeClient *http.Client
+	// encodeLogger receives encode-proxy diagnostics (never image bytes / raw license keys).
+	encodeLogger *log.Logger
 }
 
 func New(cfg *config.Config, st *store.Store) *Server {
@@ -48,6 +58,15 @@ func New(cfg *config.Config, st *store.Store) *Server {
 		},
 		allowOrigins:    splitOrigins(cfg),
 		trustedIPHeader: cfg.TrustedIPHeader,
+		encodeLogger:    log.Default(),
+		encodeClient: &http.Client{
+			// Generous: the encode itself can be slow. The handler also sets a per-request context timeout
+			// (cfg.EncodeTimeout); this is just an upper safety bound on the whole round-trip.
+			Timeout: cfg.EncodeTimeout + time.Minute,
+		},
+	}
+	if cfg.NativeEnabled {
+		s.encodeQuota = newLicenseQuota(cfg.EncodeMaxConcurrentPerLicense, cfg.EncodeDailyQuotaPerLicense, s.now)
 	}
 	return s
 }
@@ -104,6 +123,23 @@ func (s *Server) Router() http.Handler {
 		r.Get("/v1/key", s.handleKeyBySession)
 		r.Post("/v1/history", s.handleHistory)
 	})
+
+	// Native encode GATEWAY (opt-in). The whole group is registered ONLY when the operator enabled it AND
+	// pointed ENCODER_URL at the sidecar (config fail-closes if enabled-without-URL). When OFF, this route
+	// does not exist → POST /v1/encode is a plain 404 and the feature is completely dead (byte-identical
+	// build behavior). It runs OUTSIDE the per-IP billing limiter (it has its own per-license quota) and is
+	// NOT in the SQLite-touching group — it only verifies the entitlement and proxies to the sidecar.
+	if s.cfg.NativeEnabled && s.encodeQuota != nil {
+		// Liveness probe for the encode path (round12 T13). PUBLIC (no entitlement): the browser uses it
+		// to decide whether to even OFFER the opt-in consent step, BEFORE any token is on the wire. It
+		// exists ONLY when native encoding is enabled, so a 200 here genuinely means "the encode path is
+		// live + the sidecar is up" — when native is OFF the route is absent (404), exactly like /v1/encode.
+		r.Get("/v1/encode/healthz", s.handleEncodeHealthz)
+		r.Group(func(r chi.Router) {
+			r.Use(s.entitlement) // Bearer token → license.Verify + expiry → 402/403 BEFORE any work
+			r.Post("/v1/encode", s.handleEncode)
+		})
+	}
 	return r
 }
 

@@ -96,6 +96,10 @@ import {
   // FINAL emitted bytes) and threads the hashed name into out.push / the referrer (imageRef / .atlas line 0 /
   // recordVariant.src / the loader-migration rows). Off ⇒ never called ⇒ emitted paths byte-identical to today.
   hashedName,
+  // PURE GPU-residency CEILING helper (round12-backend-processing.md §7): a .ktx2 page's worst-case VRAM is
+  // ≤ ~1 B/px (UASTC/BC7), NEVER w·h·4; mips baked ⇒ ×4/3. The ONE source of truth for the receipt's
+  // ktx2VramBytesWorstCase so the worker can't drift from the honest ceiling model.
+  vramCeilingOfPage,
   type ManifestAsset,
   type EmittedVariant,
   type ManifestAssetKind,
@@ -112,7 +116,11 @@ import { dedupKeepConsumerSkip, deselectedSkips, fixOpKind, summarizePlan, type 
 // SAME constructors the unit test drives directly (the worker can't run in Node — createImageBitmap).
 import { dropChange, finalizeChanges, looseRenameChange, mergeChanges, packChanges, repackChanges, tierChanges } from '../lib/loader-migration';
 import { canKeepSheetDiff, sheetGeometryProof } from './sheet-diff';
-import type { FixChange, FixInputFile, FixMode, FixOptions, FixReceipt, FixRequest, FixResponse, SheetDiff } from './fix-protocol';
+import type { FixChange, FixInputFile, FixMode, FixOptions, FixReceipt, FixRequest, FixResponse, NativeOpKind, SheetDiff } from './fix-protocol';
+// OPT-IN backend native KTX2 (round12-backend-processing.md, Phase 3). encodeRemote is the ONLY network
+// call in the fix path and it fires ONLY behind opts.backend + per-run consent (backendOn). KTX2_PROFILE_
+// BAKES_MIPS keeps the wire profile + the VRAM-ceiling accounting (vramCeilingOfPage mips arg) in sync.
+import { encodeRemote, KTX2_PROFILE_BAKES_MIPS } from '../lib/backend-client';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 const post = (m: FixResponse): void => ctx.postMessage(m);
@@ -706,6 +714,39 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     }
     a.variants.push(v);
   };
+  // ── OPT-IN backend native KTX2 (round12-backend-processing.md, Phase 3) — GATED collector ─────────────
+  // SAFETY (load-bearing): the path is LIVE only when opts.backend is present AND consented AND ≥1 op opted
+  // in. ABSENT/declined ⇒ `backendOn` is false ⇒ recordKtx2Candidate is a no-op ⇒ the candidates array is
+  // never populated ⇒ the post-pass below is skipped ⇒ `out` is unchanged ⇒ zip BYTE-IDENTICAL to today.
+  // The browser fix stays the default; KTX2 is an additive native-only sibling page, never a replacement.
+  const backendOn =
+    opts.backend != null &&
+    opts.backend.consent === true &&
+    opts.backend.ops.includes('ktx2') &&
+    opts.backend.apiBase.trim() !== '' &&
+    opts.backend.token.trim() !== '';
+  // One emitted RASTER page the backend MAY also produce as .ktx2. `imagePath` = the page image already in
+  // `out` (KEPT — KTX2 is ADDITIVE, never a replacement); `pageBytes`/`pageMime` = the emitted raster page
+  // (the post-pass re-decodes it to a lossless PNG source the sidecar transcodes, so the .ktx2 matches the
+  // browser page); `w/h` = page dims (for the honest VRAM ceiling); `atlasSidecar` (atlas pages only) =
+  // { path, atlas } so the post-pass can emit a SECOND `.ktx2.json` sidecar (round8: a multi-format atlas
+  // needs TWO json sidecars, not a multi-format `src` array).
+  interface Ktx2Candidate {
+    ref: string;
+    imagePath: string;
+    pageBytes: Uint8Array;
+    pageMime: ImageMime;
+    w: number;
+    h: number;
+    atlasSidecar?: { path: string; atlas: Atlas };
+  }
+  const ktx2Candidates: Ktx2Candidate[] = [];
+  // Record a candidate ONLY when the backend path is live. A no-op when backendOn is false (the default) ⇒
+  // no allocation, no behavior change. Deterministic: candidates are processed in push order in the post-pass.
+  const recordKtx2Candidate = (c: Ktx2Candidate): void => {
+    if (!backendOn) return;
+    ktx2Candidates.push(c);
+  };
   const skipped: { assetRef: string; reason: string }[] = [];
   // ROUND7 T6: an invalid export profile rejected above ⇒ no emit + honest `(profile)` reasons. Seed
   // `skipped` with them so the receipt is honest (never a silent drop). Valid/absent profile ⇒ empty.
@@ -1258,6 +1299,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           const jsonBytes = te.encode(emitTexturePackerJson(na));
           const emittedJson = await hashEmit(`${baseDir}${stem}.json`, jsonBytes);
           out.push({ path: emittedJson, bytes: jsonBytes });
+          // OPT-IN KTX2 (round12): offer the merged page for a sibling .ktx2 + its own .ktx2.json sidecar.
+          // No-op unless the backend path is live; the raster page above is KEPT (additive).
+          recordKtx2Candidate({ ref: emittedJson, imagePath: emittedImage, pageBytes: sheet!.bytes, pageMime: sheet!.mime, w: na.size.w, h: na.size.h, atlasSidecar: { path: emittedJson, atlas: na } });
           // Pixi manifest: one entry per merged page `.json` (distinct ref per page so aliases never collide).
           recordVariant(emittedJson, 'atlas', emittedImage, { scale: 1, suffix: '', src: emittedJson });
           mergedManifestPaths.push(emittedJson); // loader-migration: a NEW manifest to load
@@ -1283,6 +1327,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
             const emittedJson = await hashEmit(mPath, jsonBytes);
             out.push({ path: emittedJson, bytes: jsonBytes });
             replaced.add(mPath);
+            // OPT-IN KTX2 (round12): offer the repacked page for a sibling .ktx2 + its own .ktx2.json sidecar
+            // (round8 two-sidecar rule). No-op unless the backend path is live; the raster page is KEPT (additive).
+            recordKtx2Candidate({ ref, imagePath: emittedImage, pageBytes: sheet!.bytes, pageMime: sheet!.mime, w: na.size.w, h: na.size.h, atlasSidecar: { path: emittedJson, atlas: na } });
             // Pixi manifest: a repacked sheet loads via its `.json` SIDECAR (Pixi reads meta.image), NOT the image.
             recordVariant(ref, 'atlas', emittedImage, { scale: 1, suffix: '', src: emittedJson });
             // Cache-bust (round9 K5): a single repack normally keeps the .json name (rewritten in place) so the
@@ -1444,6 +1491,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           out.push({ path: emittedPath, bytes: enc!.bytes });
           // Pixi manifest: a resized loose image loads directly (single format, single tier).
           recordVariant(ref, 'loose', path, { scale: 1, suffix: '', src: emittedPath });
+          // OPT-IN KTX2 (round12): offer the resized loose page for a direct-format sibling .ktx2 (no JSON
+          // sidecar — loose lists [x.ktx2, x.webp] in the manifest src). No-op unless the backend path is live.
+          recordKtx2Candidate({ ref, imagePath: emittedPath, pageBytes: enc!.bytes, pageMime: enc!.mime, w: op.to.w, h: op.to.h });
           replaced.add(path);
           if (emittedPath !== path) {
             referencesChanged = true; // a loose-image rename is NOT drop-in
@@ -1508,6 +1558,12 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       out.push({ path: emittedPath, bytes: enc.bytes });
       // Pixi manifest: a transcoded loose image loads directly (single format, single tier).
       recordVariant(ref, 'loose', path, { scale: 1, suffix: '', src: emittedPath });
+      // OPT-IN KTX2 (round12): offer the transcoded loose page for a direct-format sibling .ktx2 (no JSON
+      // sidecar — loose lists [x.ktx2, x.webp] in the manifest src). No-op unless the backend path is live.
+      {
+        const sz = sizeByRef.get(ref);
+        if (sz) recordKtx2Candidate({ ref, imagePath: emittedPath, pageBytes: enc.bytes, pageMime: enc.mime, w: sz.w, h: sz.h });
+      }
       replaced.add(path);
       // Phase B bookkeeping: if this transcoded image is a retained dedup OWNER, record its ACTUAL final
       // image path so Phase C points consumers at the real (possibly PNG-fallback, now content-hashed) name,
@@ -2217,6 +2273,89 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     }
   }
 
+  // ── OPT-IN backend native KTX2 post-pass (round12-backend-processing.md, Phase 3 T14/T15/T16) ─────────
+  // SAFETY (load-bearing): backendOn false ⇒ ktx2Candidates is empty ⇒ this loop never runs ⇒ `out` is
+  // unchanged ⇒ the zip is BYTE-IDENTICAL to today. It runs ONLY when the user configured a backend AND
+  // ticked per-run consent AND a KTX2-eligible page exists. Assets leave the device HERE and ONLY here.
+  //
+  // For each eligible RASTER page already in `out` (KEPT — KTX2 is additive, never a replacement):
+  //   1. re-decode the emitted page to a lossless PNG (the sidecar transcodes THIS, so the .ktx2 matches
+  //      the browser-composed page byte-for-byte in pixels).
+  //   2. upload it via encodeRemote → the gateway verifies the token + quota-limits + reverse-proxies to
+  //      the apps/encoder sidecar; on success we get raw .ktx2 bytes.
+  //   3. add `<name>.ktx2` to `out`. For an ATLAS page, ALSO emit a SECOND `.ktx2.json` sidecar (round8:
+  //      a multi-format atlas needs TWO json sidecars, not a multi-format `src` array) with meta.image →
+  //      the .ktx2, and record a manifest variant whose `src` is that .ktx2.json (ktx2-first). For a LOOSE
+  //      page, record a direct-format `.ktx2` manifest variant so the entry's src lists [x.ktx2, x.webp].
+  //   4. charge the HONEST worst-case VRAM CEILING (vramCeilingOfPage, NEVER w·h·4) — reported SEPARATELY
+  //      (ktx2VramBytesWorstCase), never folded into vramBytesAfter (invariant 5).
+  // On ANY failure (unreachable / declined / size cap / encode error) we KEEP the browser raster page and
+  // surface an HONEST skipped[] note — never a silent skip. referencesChanged is set (the game must add a
+  // KTX2 transcoder bundle + loader); the receipt note discloses the extra weight + that requirement.
+  let ktx2Op: NativeOpKind | undefined;
+  let ktx2Uploaded = 0;
+  let ktx2Produced = 0;
+  let ktx2Failed = 0;
+  let ktx2VramBytesWorstCase = 0;
+  if (backendOn && ktx2Candidates.length > 0) {
+    const backend = opts.backend!; // backendOn guarantees presence + consent
+    ktx2Op = 'ktx2';
+    let i = 0;
+    for (const c of ktx2Candidates) {
+      post({ type: 'fix-progress', label: `ktx2 ${basename(c.imagePath)}`, done: i++, total: ktx2Candidates.length });
+      // (1) re-decode the emitted page → lossless PNG source for the sidecar.
+      let pngBytes: Uint8Array | null = null;
+      try {
+        const bmp = await createImageBitmap(new Blob([c.pageBytes as BlobPart], { type: c.pageMime }));
+        const canvas = new OffscreenCanvas(bmp.width, bmp.height);
+        const c2d = canvas.getContext('2d');
+        if (c2d) {
+          c2d.drawImage(bmp, 0, 0);
+          const blob = await canvas.convertToBlob({ type: 'image/png' });
+          pngBytes = new Uint8Array(await blob.arrayBuffer());
+        }
+        bmp.close();
+      } catch {
+        pngBytes = null;
+      }
+      if (!pngBytes) {
+        ktx2Failed++;
+        skipped.push({ assetRef: c.ref, reason: 'ktx2 skipped: could not re-encode page for upload — kept browser image' });
+        continue;
+      }
+      // (2) upload (the ONLY network call; gated by consent above). Never throws (encodeRemote catches).
+      ktx2Uploaded++;
+      const res = await encodeRemote(pngBytes, 'ktx2', c.w, c.h, { apiBase: backend.apiBase, token: backend.token });
+      if (!res.ok) {
+        // HONEST fallback: keep the browser raster page (already in `out`), surface WHY (the gateway code).
+        ktx2Failed++;
+        skipped.push({ assetRef: c.ref, reason: `ktx2 skipped: backend ${res.code} — kept browser image` });
+        continue;
+      }
+      // (3) ADD the .ktx2 sibling (raster page kept). Path = the page image path with a .ktx2 extension.
+      const ktx2Path = c.imagePath.replace(/\.[a-z0-9]+$/i, '.ktx2');
+      out.push({ path: ktx2Path, bytes: res.bytes });
+      ktx2Produced++;
+      referencesChanged = true; // the game must add a KTX2 transcoder bundle + loader (not a drop-in)
+      if (c.atlasSidecar) {
+        // ATLAS: emit a SECOND sidecar `<page>.ktx2.json` (round8 two-sidecar rule) whose meta.image → the
+        // .ktx2, relative to the original sidecar's directory. List it (ktx2-first) in the manifest src.
+        const sidecarDir = dirOf(c.atlasSidecar.path);
+        const ktx2Sidecar: Atlas = { ...c.atlasSidecar.atlas, imageRef: relativeImageRef(sidecarDir, ktx2Path) };
+        const ktx2JsonPath = c.atlasSidecar.path.replace(/\.json$/i, '.ktx2.json');
+        out.push({ path: ktx2JsonPath, bytes: te.encode(emitTexturePackerJson(ktx2Sidecar)) });
+        // Pixi manifest: the .ktx2.json sidecar is the ktx2-first src candidate for this page's entry.
+        recordVariant(c.ref, 'atlas', ktx2Path, { scale: 1, suffix: '', src: ktx2JsonPath });
+      } else {
+        // LOOSE: direct-format candidate — record the .ktx2 itself so the entry's src lists [x.ktx2, x.webp].
+        recordVariant(c.ref, 'loose', ktx2Path, { scale: 1, suffix: '', src: ktx2Path });
+      }
+      // (4) HONEST VRAM ceiling (≤, never w·h·4). Mips baked per the pinned profile ⇒ ×4/3 (the SAME
+      // conditional rule the raster path uses). Reported SEPARATELY (invariant 5), never folded.
+      ktx2VramBytesWorstCase += vramCeilingOfPage('ktx2-uastc', c.w, c.h, KTX2_PROFILE_BAKES_MIPS);
+    }
+  }
+
   post({ type: 'fix-progress', label: 'zipping', done: total - 1, total });
   // `out` path-dedup before zip (design §6 step 9): last-write-wins for a deliberate replace; guards
   // against a duplicate path ever reaching makeZip. Order-preserving on first appearance (determinism).
@@ -2320,6 +2459,13 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     // PixiJS-v8 asset manifest (round8-pixi-manifest.md, additive/optional): present ONLY when the opt-in
     // ran with ≥1 recorded entry. Absent ⇒ no manifest emitted ⇒ receipt byte-identical to today.
     ...(pixiManifest ? { pixiManifest } : {}),
+    // OPT-IN backend native KTX2 (round12-backend-processing.md §7, additive/optional). Present ONLY when
+    // the user consented AND ≥1 page was offered to the backend (uploaded>0). `host` is the gateway origin
+    // (no token, no bytes). ktx2VramBytesWorstCase is the SEPARATE worst-case VRAM CEILING of the produced
+    // .ktx2 pages (≤, never w·h·4, never folded into vramBytesAfter — invariant 5). Absent ⇒ no backend op
+    // ran ⇒ receipt byte-identical to today.
+    ...(ktx2Op && ktx2Uploaded > 0 ? { backendNative: { op: ktx2Op, uploaded: ktx2Uploaded, produced: ktx2Produced, failed: ktx2Failed, host: opts.backend!.apiBase.replace(/\/+$/, '') } } : {}),
+    ...(ktx2VramBytesWorstCase > 0 ? { ktx2VramBytesWorstCase } : {}),
   };
   // Direct postMessage (not the `post` wrapper) so the sheet-diff byte buffers transfer zero-copy. The
   // transferred buffers are FRESH COPIES (captureSheetDiff sliced both), so the live source/emitted buffers

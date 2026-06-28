@@ -68,10 +68,14 @@ export interface BuildPixiManifestOptions {
   bundleName?: string;
 }
 
-/** Format rank for `src` candidate ordering within one entry — AVIF first (most-preferred), PNG last (the
- *  universal safe fallback Pixi tries when avif/webp aren't preferred). Unknown extensions sort after known
- *  ones, ties broken by localeCompare. Mirrors dedup-exec EXT's set. */
+/** Format rank for `src` candidate ordering within one entry. KTX2 ranks FIRST (-1) so a GPU-compressed
+ *  variant is tried before the raster fallback (round12 backend-processing: the worker emits a `.ktx2`
+ *  sibling KEPT alongside the raster page, and the manifest must list it `ktx2-first` so a capable GPU
+ *  loads the compressed tier — Pixi's resolver tries `src` candidates in order, falling back on decode
+ *  failure). Then AVIF (most-preferred raster), …, PNG last (the universal safe fallback). Unknown
+ *  extensions sort after known ones, ties broken by localeCompare. Mirrors dedup-exec EXT's set. */
 const FORMAT_RANK: Readonly<Record<string, number>> = {
+  '.ktx2': -1,
   '.avif': 0,
   '.webp': 1,
   '.png': 2,
@@ -99,12 +103,28 @@ function baseOf(path: string): string {
   return slash < 0 ? path : path.slice(slash + 1);
 }
 
-/** Deterministic `src` ordering within ONE entry: format rank (avif<webp<png<jpg), ties by codepoint sort.
- *  All candidates in one entry share a (scale,suffix) tier, so only the format axis varies. */
+/** Compound KTX2 atlas sidecar (`<page>.ktx2.json`, round8 two-sidecar rule): a `.json` whose meta.image
+ *  points at the GPU-compressed `.ktx2` page. extOf() only sees the final `.json`, so this is detected by the
+ *  inner `.ktx2.` token. Pure string test (dir-aware via baseOf so a directory dot can't false-positive). */
+function isKtx2Sidecar(path: string): boolean {
+  return /\.ktx2\.json$/i.test(baseOf(path));
+}
+
+/** Candidate rank for `src` ordering within ONE entry. KTX2 candidates sort FIRST (ktx2-first) so a capable
+ *  GPU loads the compressed tier before the raster fallback:
+ *    - a LOOSE `.ktx2` image  → FORMAT_RANK['.ktx2'] = -1 (handled by extOf).
+ *    - an ATLAS `.ktx2.json` sidecar → its final ext is `.json` (rank 99 with the raster `.json`), so it is
+ *      special-cased to the SAME -1 rank ahead of the plain raster sidecar.
+ *  Everything else falls back to FORMAT_RANK (avif<webp<png<jpg) then localeCompare. */
+function rankOf(path: string): number {
+  if (isKtx2Sidecar(path)) return -1; // ktx2-first ahead of the raster .json sidecar
+  return FORMAT_RANK[extOf(path)] ?? 99;
+}
+
+/** Deterministic `src` ordering within ONE entry: candidate rank (ktx2<avif<webp<png<jpg), ties by codepoint
+ *  sort. All candidates in one entry share a (scale,suffix) tier, so only the format axis varies. */
 function compareSrc(a: string, b: string): number {
-  const ra = FORMAT_RANK[extOf(a)] ?? 99;
-  const rb = FORMAT_RANK[extOf(b)] ?? 99;
-  return ra - rb || a.localeCompare(b);
+  return rankOf(a) - rankOf(b) || a.localeCompare(b);
 }
 
 /**

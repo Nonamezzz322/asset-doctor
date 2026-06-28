@@ -1,0 +1,83 @@
+# On-PC docker-compose wiring for the OPT-IN native-encode path.
+#
+# Topology (the security boundary):
+#   browser ──(tailnet/host)──▶ apps/api (gateway: license-verify + quota + reverse-proxy)
+#                                   │  (internal network ONLY)
+#                                   ▼
+#                               apps/encoder (toktx sidecar — NO host/tailnet port)
+#
+# The sidecar publishes NO host port and is on an internal-only network, so ONLY apps/api can reach it.
+# It runs non-root on a READ-ONLY filesystem with a scratch tmpfs at /tmp (the single writable path).
+#
+# Copy to docker-compose.yml and fill the apps/api env-file (see local-backend-deploy notes / apps/api).
+# Build context note: both Dockerfiles expect their OWN module dir as context.
+
+name: asset-doctor
+
+networks:
+  # Default bridge: only apps/api is attached + publishes a port. Reaches the tailnet/host.
+  edge:
+    driver: bridge
+  # internal: true → no gateway to the outside; the sidecar lives here, unreachable from host/tailnet.
+  encoder_internal:
+    internal: true
+
+services:
+  api:
+    image: asset-doctor-api:local
+    build:
+      context: ../api
+      dockerfile: Dockerfile
+    container_name: assetdoctor-api
+    restart: unless-stopped
+    # Host 8088 → container 8080 (8080 is taken by qBittorrent on this box — see deploy notes).
+    ports:
+      - "8088:8080"
+    env_file:
+      - ~/assetdoctor/api.env
+    environment:
+      # Where the gateway proxies verified native-encode requests. Service DNS on the internal network.
+      ENCODER_URL: "http://encoder:8090"
+      DB_PATH: /data/asset-doctor.db
+    volumes:
+      # Host-owned bind mount: the distroless image runs as nonroot; a root-owned volume → SQLITE_CANTOPEN.
+      - ~/assetdoctor/data:/data
+    networks:
+      - edge
+      - encoder_internal
+    depends_on:
+      - encoder
+
+  encoder:
+    image: asset-doctor-encoder:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: assetdoctor-encoder
+    restart: unless-stopped
+    # NO `ports:` — the sidecar is never published to the host or tailnet. Only `api` reaches it via the
+    # internal network on its DNS name `encoder:8090`.
+    networks:
+      - encoder_internal
+    # Hardening: non-root (baked into the image), read-only root FS, no new privileges, dropped caps.
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # The ONLY writable path: a RAM-backed scratch tmpfs for ephemeral temp-in/temp-out files. Bounded so a
+    # flood of large encodes can't exhaust host RAM; noexec/nosuid for defense in depth.
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=512m
+    environment:
+      ADDR: ":8090"
+      TOKTX_PATH: /usr/local/bin/toktx
+      TMP_DIR: /tmp
+      MAX_CONCURRENT: "2"
+      EXEC_TIMEOUT: "120s"
+    healthcheck:
+      # The image has no curl at runtime; toktx --version doubles as a cheap liveness check.
+      test: ["CMD", "/usr/local/bin/toktx", "--version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

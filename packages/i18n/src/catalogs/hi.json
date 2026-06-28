@@ -56,9 +56,21 @@
   "severity.info": "जानकारी",
   "triage.verdict": "निदान",
   "triage.allClear": "कोई समस्या नहीं मिली",
-  "triage.filter.crit": { "$count": "n", "one": "{n} गंभीर", "other": "{n} गंभीर" },
-  "triage.filter.warn": { "$count": "n", "one": "{n} चेतावनी", "other": "{n} चेतावनी" },
-  "triage.filter.info": { "$count": "n", "one": "{n} जानकारी", "other": "{n} जानकारी" },
+  "triage.filter.crit": {
+    "$count": "n",
+    "one": "{n} गंभीर",
+    "other": "{n} गंभीर"
+  },
+  "triage.filter.warn": {
+    "$count": "n",
+    "one": "{n} चेतावनी",
+    "other": "{n} चेतावनी"
+  },
+  "triage.filter.info": {
+    "$count": "n",
+    "one": "{n} जानकारी",
+    "other": "{n} जानकारी"
+  },
   "triage.search": "एसेट खोजें",
   "triage.sort.label": "क्रमबद्ध करें",
   "triage.sort.severity": "सबसे खराब पहले",
@@ -67,9 +79,17 @@
   "triage.sort.occupancy": "भराव",
   "triage.group": "फ़ोल्डर के अनुसार समूहित करें",
   "triage.problemsOnly": "केवल समस्याएँ",
-  "triage.showClean": { "$count": "n", "one": "{n} साफ़ एसेट दिखाएँ", "other": "{n} साफ़ एसेट दिखाएँ" },
+  "triage.showClean": {
+    "$count": "n",
+    "one": "{n} साफ़ एसेट दिखाएँ",
+    "other": "{n} साफ़ एसेट दिखाएँ"
+  },
   "triage.showing": "{m} में से {n} दिखाए जा रहे हैं",
-  "triage.relatedRefs": { "$count": "n", "one": "+{n} एसेट", "other": "+{n} एसेट" },
+  "triage.relatedRefs": {
+    "$count": "n",
+    "one": "+{n} एसेट",
+    "other": "+{n} एसेट"
+  },
   "triage.scope.asset": "एसेट",
   "triage.scope.folder": "फ़ोल्डर",
   "triage.cabinetIssues": "कैबिनेट समस्याएँ",
@@ -347,6 +367,21 @@
   "fix.pixiManifestReceipt": "{path} ({n} प्रविष्टियाँ)",
   "fix.hashFilenames": "कंटेंट-हैश फ़ाइल नाम (cache-busting)",
   "fix.hashFilenamesHint": "AD जिन इमेज/शीट को संदर्भित करता है उन सबका नाम name.<hash>.ext कर देता है (hash = अंतिम बाइट्स का sha256), ताकि आप ऑप्टिमाइज़्ड फ़ोल्डर को immutable लंबे-कैश हेडर के साथ सर्व कर सकें। .json/.atlas साइडकार हैश-की गई इमेज पर री-पॉइंट होते हैं, फिर स्वयं भी हैश होते हैं; लोडर-माइग्रेशन स्निपेट और PixiJS manifest हैश-किए नामों को संदर्भित करते हैं। स्केलेटन, manifest.json और बिना AD-स्वामित्व वाले संदर्भ की लूज़ इमेजें स्थिर नाम बनाए रखती हैं। बंद का मतलब आज के फ़ाइल नाम (बाइट-दर-बाइट समान)। PixiJS manifest के साथ सर्वोत्तम।",
+  "fix.backend.title": "KTX2 GPU संपीड़न (बैकएंड, वैकल्पिक)",
+  "fix.backend.hint": "KTX2/UASTC उन टेक्सचर को संपीड़ित करता है जिन्हें GPU VRAM में संपीड़ित रखता है — ब्राउज़र में असंभव। आपकी सहमति से, उपयुक्त पेज आपके कॉन्फ़िगर किए गए सर्वर पर भेजे जाते हैं, .ktx2 में एन्कोड किए जाते हैं और डाउनलोड में जोड़े जाते हैं। बाकी सब कुछ 100% स्थानीय रहता है। डिफ़ॉल्ट रूप से बंद।",
+  "fix.backend.unconfigured": "कोई बैकएंड कॉन्फ़िगर नहीं — KTX2 सक्षम करने के लिए एक API बेस सेट करें और लाइसेंस सक्रिय करें।",
+  "fix.backend.ktx2": "एटलस/अलग पेजों के लिए KTX2 GPU संपीड़न प्रदान करें",
+  "fix.backend.ktx2Hint": "जब सक्षम और सहमति दी गई हो, उपयुक्त पेज आपके सर्वर पर अपलोड किए जाते हैं, .ktx2 में एन्कोड किए जाते हैं (UASTC + Zstd, mipmaps) और सामान्य छवि के साथ zip में जोड़े जाते हैं। ब्राउज़र फिक्स डिफ़ॉल्ट रहता है; यह उस एकमात्र ऑपरेशन के लिए वैकल्पिक फ़ॉलबैक है जो ब्राउज़र नहीं कर सकते।",
+  "fix.backend.reachable": "✓ बैकएंड पहुँच योग्य",
+  "fix.backend.unreachable": "बैकएंड पहुँच से बाहर — KTX2 छोड़ दिया जाएगा और ब्राउज़र छवि रखी जाएगी (रसीद में एक ईमानदार नोट दिखेगा)।",
+  "fix.backend.costZip": "आपका डाउनलोड बड़ा हो जाता है: इसमें .ktx2 और सामान्य छवि दोनों होती हैं (ताकि कोई भी GPU इसे लोड कर सके)।",
+  "fix.backend.costVram": "VRAM लाभ केवल उन GPU पर लागू होता है जो BC7/ASTC/ETC2 का समर्थन करते हैं; अन्य GPU रास्टर छवि पर लौट आते हैं।",
+  "fix.backend.costLoader": "आपके गेम को एक KTX2 ट्रांसकोडर बंडल + Pixi लोडर जोड़ना होगा (import 'pixi.js/ktx2') — एक बार का कोड और बंडल परिवर्तन।",
+  "fix.backend.consent": "मैं समझता/समझती हूँ कि ये छवियाँ KTX2 एन्कोडिंग के लिए सर्वर पर अपलोड की जाएँगी (मेमोरी में संसाधित, संग्रहीत नहीं)।",
+  "fix.backend.receipt": "KTX2: {host} पर {uploaded} में से {produced} पेज संपीड़ित (सामान्य छवियों के साथ जोड़े गए)।",
+  "fix.backend.receiptFailed": "{failed} पेज ब्राउज़र छवि पर लौट आए (बैकएंड ने अस्वीकार किया या पहुँच से बाहर था)।",
+  "fix.backend.receiptVram": "KTX2 GPU VRAM ≤ {bytes:bytes} (सबसे खराब स्थिति; BC1/ETC1 में ट्रांसकोड करने वाले GPU पर कम; अन्यथा रास्टर फ़ॉलबैक) — अलग से रिपोर्ट किया गया, VRAM कुल में नहीं।",
+  "fix.backend.receiptLoader": ".ktx2 फ़ाइलों का उपयोग करने के लिए आपके गेम को एक KTX2 ट्रांसकोडर बंडल + Pixi लोडर जोड़ना होगा (import 'pixi.js/ktx2')। zip बड़ा है क्योंकि इसमें सामान्य छवियाँ भी होती हैं।",
   "license.locked": "Pro फ़िक्स अनलॉक करने के लिए लाइसेंस सक्रिय करें",
   "license.keyPlaceholder": "लाइसेंस कुंजी (AD-…)",
   "license.activate": "सक्रिय करें",

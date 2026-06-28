@@ -57,9 +57,21 @@
   "severity.info": "info",
   "triage.verdict": "Diagnosi",
   "triage.allClear": "nessun problema rilevato",
-  "triage.filter.crit": { "$count": "n", "one": "{n} crit", "other": "{n} crit" },
-  "triage.filter.warn": { "$count": "n", "one": "{n} avv", "other": "{n} avv" },
-  "triage.filter.info": { "$count": "n", "one": "{n} info", "other": "{n} info" },
+  "triage.filter.crit": {
+    "$count": "n",
+    "one": "{n} crit",
+    "other": "{n} crit"
+  },
+  "triage.filter.warn": {
+    "$count": "n",
+    "one": "{n} avv",
+    "other": "{n} avv"
+  },
+  "triage.filter.info": {
+    "$count": "n",
+    "one": "{n} info",
+    "other": "{n} info"
+  },
   "triage.search": "Cerca risorse",
   "triage.sort.label": "Ordina",
   "triage.sort.severity": "Peggiori prima",
@@ -68,9 +80,17 @@
   "triage.sort.occupancy": "Occupazione",
   "triage.group": "Raggruppa per cartella",
   "triage.problemsOnly": "Solo problemi",
-  "triage.showClean": { "$count": "n", "one": "mostra {n} risorsa pulita", "other": "mostra {n} risorse pulite" },
+  "triage.showClean": {
+    "$count": "n",
+    "one": "mostra {n} risorsa pulita",
+    "other": "mostra {n} risorse pulite"
+  },
   "triage.showing": "mostrate {n} di {m}",
-  "triage.relatedRefs": { "$count": "n", "one": "+{n} risorsa", "other": "+{n} risorse" },
+  "triage.relatedRefs": {
+    "$count": "n",
+    "one": "+{n} risorsa",
+    "other": "+{n} risorse"
+  },
   "triage.scope.asset": "risorsa",
   "triage.scope.folder": "cartella",
   "triage.cabinetIssues": "Problemi del gabinetto",
@@ -350,6 +370,21 @@
   "fix.pixiManifestReceipt": "{path} ({n} voci)",
   "fix.hashFilenames": "Nomi file con hash del contenuto (cache-busting)",
   "fix.hashFilenamesHint": "Rinomina ogni immagine/foglio referenziato da AD in name.<hash>.ext (hash = sha256 dei byte finali) così puoi servire la cartella ottimizzata con header di cache lunga immutabili. I sidecar .json/.atlas vengono ripuntati all'immagine con hash e poi hashati a loro volta; lo snippet di migrazione del loader e il manifest PixiJS referenziano i nomi con hash. Lo scheletro, manifest.json e le immagini sciolte senza un riferimento di proprietà di AD mantengono nomi stabili. Spento significa i nomi file di oggi (identico byte per byte). Meglio insieme al manifest PixiJS.",
+  "fix.backend.title": "Compressione GPU KTX2 (backend, opzionale)",
+  "fix.backend.hint": "KTX2/UASTC comprime le texture che la GPU mantiene compresse in VRAM — impossibile nel browser. Con il tuo consenso, le pagine idonee vengono inviate al tuo server configurato, codificate in .ktx2 e aggiunte al download. Tutto il resto rimane 100% locale. Disattivato per impostazione predefinita.",
+  "fix.backend.unconfigured": "Nessun backend configurato — imposta una base API e attiva una licenza per abilitare KTX2.",
+  "fix.backend.ktx2": "Offri compressione GPU KTX2 per pagine atlas/singole",
+  "fix.backend.ktx2Hint": "Quando abilitato e con consenso, le pagine idonee vengono caricate sul tuo server, codificate in .ktx2 (UASTC + Zstd, mipmap) e aggiunte allo zip accanto all'immagine normale. La correzione nel browser resta quella predefinita; questo è un fallback opzionale per l'unica operazione che i browser non possono fare.",
+  "fix.backend.reachable": "✓ Backend raggiungibile",
+  "fix.backend.unreachable": "Backend irraggiungibile — KTX2 verrà saltato e l'immagine del browser mantenuta (una nota onesta appare nella ricevuta).",
+  "fix.backend.costZip": "Il tuo download diventa PIÙ GRANDE: include sia il .ktx2 sia l'immagine normale (così qualsiasi GPU può caricarla).",
+  "fix.backend.costVram": "Il vantaggio VRAM si applica SOLO su GPU che supportano BC7/ASTC/ETC2; le altre GPU ricadono sull'immagine raster.",
+  "fix.backend.costLoader": "Il tuo gioco deve aggiungere un bundle transcoder KTX2 + loader Pixi (import 'pixi.js/ktx2') — una modifica una tantum di codice e bundle.",
+  "fix.backend.consent": "Comprendo che queste immagini verranno caricate sul server per la codifica KTX2 (elaborate in memoria, non memorizzate).",
+  "fix.backend.receipt": "KTX2: {produced} di {uploaded} pagine compresse su {host} (aggiunte accanto alle immagini normali).",
+  "fix.backend.receiptFailed": "{failed} pagina/e sono ricadute sull'immagine del browser (backend rifiutato o irraggiungibile).",
+  "fix.backend.receiptVram": "VRAM GPU di KTX2 ≤ {bytes:bytes} (caso peggiore; meno su GPU che transcodificano a BC1/ETC1; altrimenti fallback raster) — riportato separatamente, non nel totale VRAM.",
+  "fix.backend.receiptLoader": "Per usare i file .ktx2 il tuo gioco deve aggiungere un bundle transcoder KTX2 + loader Pixi (import 'pixi.js/ktx2'). Lo zip è più grande perché include anche le immagini normali.",
   "license.locked": "Attiva una licenza per sbloccare il fix Pro",
   "license.keyPlaceholder": "Chiave di licenza (AD-…)",
   "license.activate": "Attiva",

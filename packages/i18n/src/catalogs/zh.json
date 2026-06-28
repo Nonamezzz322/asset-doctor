@@ -55,9 +55,21 @@
   "severity.info": "提示",
   "triage.verdict": "诊断",
   "triage.allClear": "未发现问题",
-  "triage.filter.crit": { "$count": "n", "one": "{n} 严重", "other": "{n} 严重" },
-  "triage.filter.warn": { "$count": "n", "one": "{n} 警告", "other": "{n} 警告" },
-  "triage.filter.info": { "$count": "n", "one": "{n} 提示", "other": "{n} 提示" },
+  "triage.filter.crit": {
+    "$count": "n",
+    "one": "{n} 严重",
+    "other": "{n} 严重"
+  },
+  "triage.filter.warn": {
+    "$count": "n",
+    "one": "{n} 警告",
+    "other": "{n} 警告"
+  },
+  "triage.filter.info": {
+    "$count": "n",
+    "one": "{n} 提示",
+    "other": "{n} 提示"
+  },
   "triage.search": "搜索资源",
   "triage.sort.label": "排序",
   "triage.sort.severity": "最严重优先",
@@ -66,9 +78,17 @@
   "triage.sort.occupancy": "占用率",
   "triage.group": "按文件夹分组",
   "triage.problemsOnly": "仅问题",
-  "triage.showClean": { "$count": "n", "one": "显示 {n} 个无问题资源", "other": "显示 {n} 个无问题资源" },
+  "triage.showClean": {
+    "$count": "n",
+    "one": "显示 {n} 个无问题资源",
+    "other": "显示 {n} 个无问题资源"
+  },
   "triage.showing": "显示 {m} 个中的 {n} 个",
-  "triage.relatedRefs": { "$count": "n", "one": "+{n} 个资源", "other": "+{n} 个资源" },
+  "triage.relatedRefs": {
+    "$count": "n",
+    "one": "+{n} 个资源",
+    "other": "+{n} 个资源"
+  },
   "triage.scope.asset": "资源",
   "triage.scope.folder": "文件夹",
   "triage.cabinetIssues": "诊室问题",
@@ -336,6 +356,21 @@
   "fix.pixiManifestReceipt": "{path}（{n} 条）",
   "fix.hashFilenames": "内容哈希文件名（缓存清除）",
   "fix.hashFilenamesHint": "将 AD 引用的每个图像/图集重命名为 name.<hash>.ext（hash = 最终字节的 sha256），以便用不可变的长缓存头分发优化后的文件夹。.json/.atlas 边车文件会重新指向哈希后的图像，然后自身也被哈希；加载器迁移片段和 PixiJS manifest 都引用哈希后的名称。骨架、manifest.json 以及没有 AD 拥有引用的散图保持稳定名称。关闭即为当前文件名（逐字节一致）。建议与 PixiJS manifest 搭配使用。",
+  "fix.backend.title": "KTX2 GPU 压缩（后端，可选）",
+  "fix.backend.hint": "KTX2/UASTC 压缩纹理，使其在显存中保持压缩状态——浏览器无法做到。经你同意后，符合条件的页面会发送到你配置的服务器，编码为 .ktx2 并加入下载。其余一切仍 100% 本地。默认关闭。",
+  "fix.backend.unconfigured": "未配置后端——请设置 API 地址并激活许可证以启用 KTX2。",
+  "fix.backend.ktx2": "为图集/独立页面提供 KTX2 GPU 压缩",
+  "fix.backend.ktx2Hint": "启用并同意后，符合条件的页面会上传到你的服务器，编码为 .ktx2（UASTC + Zstd，mipmap），并与普通图像一起加入 zip。浏览器修复仍为默认；这只是浏览器无法完成的那一项操作的可选回退。",
+  "fix.backend.reachable": "✓ 后端可达",
+  "fix.backend.unreachable": "后端不可达——将跳过 KTX2 并保留浏览器图像（回执中会出现诚实说明）。",
+  "fix.backend.costZip": "你的下载会变更大：它同时包含 .ktx2 和普通图像（以便任何 GPU 都能加载）。",
+  "fix.backend.costVram": "显存收益仅在支持 BC7/ASTC/ETC2 的 GPU 上有效；其他 GPU 会回退到光栅图像。",
+  "fix.backend.costLoader": "你的游戏必须添加 KTX2 转码器包 + Pixi 加载器（import 'pixi.js/ktx2'）——一次性的代码与打包更改。",
+  "fix.backend.consent": "我了解这些图像将上传到服务器进行 KTX2 编码（在内存中处理，不会存储）。",
+  "fix.backend.receipt": "KTX2：在 {host} 上压缩了 {uploaded} 个页面中的 {produced} 个（与普通图像一同添加）。",
+  "fix.backend.receiptFailed": "{failed} 个页面回退到浏览器图像（后端拒绝或不可达）。",
+  "fix.backend.receiptVram": "KTX2 GPU 显存 ≤ {bytes:bytes}（最坏情况；在转码为 BC1/ETC1 的 GPU 上更少；否则光栅回退）——单独报告，不计入显存总量。",
+  "fix.backend.receiptLoader": "要使用 .ktx2 文件，你的游戏必须添加 KTX2 转码器包 + Pixi 加载器（import 'pixi.js/ktx2'）。zip 更大是因为它还包含普通图像。",
   "license.locked": "激活许可证以解锁 Pro 修复",
   "license.keyPlaceholder": "许可证密钥（AD-…）",
   "license.activate": "激活",

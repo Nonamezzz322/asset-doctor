@@ -39,6 +39,35 @@ type Config struct {
 	// "Fly-Client-IP" on Fly.io). The rate limiter keys on it. EMPTY (default) = trust nothing, key on
 	// the raw TCP peer. Never set this to a header the client itself can forge through your proxy.
 	TrustedIPHeader string
+
+	// --- Native encode gateway (opt-in, default OFF) -------------------------------------------------
+	// When NativeEnabled is false (the default), the whole /v1/encode path is DEAD: the route is not even
+	// registered, so the client zip + behavior is byte-identical to a build without this feature. This is
+	// the load-bearing safety property of the user-directed amendment to invariants 1 & 2.
+
+	// NativeEnabled turns the encode proxy on. From ENABLE_NATIVE_ENCODE=true.
+	NativeEnabled bool
+
+	// EncoderURL is the base URL of the apps/encoder sidecar on the INTERNAL network (e.g.
+	// "http://encoder:8090"). REQUIRED when NativeEnabled — a missing value is a hard startup error
+	// (fail-closed: we never silently run with the feature half-wired). Never host/tailnet-reachable.
+	EncoderURL string
+
+	// EncodeMaxBodyBytes caps a single /v1/encode request body (base64 PNG + small JSON envelope). Over →
+	// 413, BEFORE any work or proxying. Sized to comfortably hold base64(32 MiB page)+envelope. Default 48 MiB.
+	EncodeMaxBodyBytes int64
+
+	// EncodeTimeout bounds one upstream encode call (UASTC RDO is slow). Default 120s. The proxy route runs
+	// outside the short billing WriteTimeout via ResponseController deadline extension.
+	EncodeTimeout time.Duration
+
+	// EncodeMaxConcurrentPerLicense bounds simultaneous in-flight encodes per license (keyed on the token
+	// claim, in-memory — NOT SQLite). Over → 429. Default 2.
+	EncodeMaxConcurrentPerLicense int
+
+	// EncodeDailyQuotaPerLicense caps encodes per license per UTC day (in-memory, NOT SQLite). Over → 429.
+	// Default 500.
+	EncodeDailyQuotaPerLicense int
 }
 
 func (c *Config) IsProd() bool { return c.Env == "production" }
@@ -58,6 +87,13 @@ func Load() (*Config, error) {
 		EntitlementTTL:  durationDays(env("ENTITLEMENT_TTL_DAYS", "7")),
 		HistoryEnabled:  env("HISTORY_ENABLED", "false") == "true",
 		TrustedIPHeader: os.Getenv("TRUSTED_IP_HEADER"),
+
+		NativeEnabled:                 env("ENABLE_NATIVE_ENCODE", "false") == "true",
+		EncoderURL:                    strings.TrimRight(os.Getenv("ENCODER_URL"), "/"),
+		EncodeMaxBodyBytes:            envInt64("ENCODE_MAX_BODY_BYTES", 48<<20), // 48 MiB
+		EncodeTimeout:                 envDuration("ENCODE_TIMEOUT", 120*time.Second),
+		EncodeMaxConcurrentPerLicense: envInt("ENCODE_MAX_CONCURRENT_PER_LICENSE", 2),
+		EncodeDailyQuotaPerLicense:    envInt("ENCODE_DAILY_QUOTA_PER_LICENSE", 500),
 	}
 
 	seed, err := loadSigningKey(os.Getenv("LICENSE_SIGNING_SEED"), c.IsProd())
@@ -70,6 +106,12 @@ func Load() (*Config, error) {
 		if c.StripeWebhookSecret == "" {
 			return nil, errors.New("config: STRIPE_WEBHOOK_SECRET is required in production (fail-closed)")
 		}
+	}
+
+	// Fail-closed: if the native encode gateway is enabled we MUST know where the sidecar is. We never
+	// register a proxy route that has nowhere to forward to.
+	if c.NativeEnabled && c.EncoderURL == "" {
+		return nil, errors.New("config: ENCODER_URL is required when ENABLE_NATIVE_ENCODE=true (fail-closed)")
 	}
 	return c, nil
 }
@@ -114,6 +156,33 @@ func decodeB64(s string) ([]byte, error) {
 func env(k, def string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
+	}
+	return def
+}
+
+func envInt(k string, def int) int {
+	if v := os.Getenv(k); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
+}
+
+func envInt64(k string, def int64) int64 {
+	if v := os.Getenv(k); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
+}
+
+func envDuration(k string, def time.Duration) time.Duration {
+	if v := os.Getenv(k); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
 	}
 	return def
 }

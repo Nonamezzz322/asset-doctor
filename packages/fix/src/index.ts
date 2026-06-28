@@ -49,6 +49,12 @@ export { dirOf, normalize, resolveImageRef, relativeImageRef } from './dedup-rep
 export { EXT, renamedTo, predictOwnerFinalNames, isOwnerAwareDrop } from './dedup-exec';
 export type { OwnerFinalName, OwnerPlanInput } from './dedup-exec';
 
+// ── GPU-residency CEILING (round12 backend-processing §7) ──────────────────────────────────────
+// PURE worst-case VRAM helper: raster ⇒ w·h·4 (today's model); KTX2/compressed ⇒ ≤ ~1 B/px CEILING
+// (NEVER w·h·4, NEVER faked); mips reuse the shared MIP_OVERHEAD ×4/3, only when baked. Imported by the
+// fix worker + the receipt so the honest VRAM number can't drift from this single tested source.
+export { vramCeilingOfPage } from './vram-ceiling';
+
 // ── Polygon mode (Phase 2 — bitmap-mask packer) ───────────────────────────────────────────────
 export { nestMasks } from './polygon-pack';
 export { traceMesh, scaleMeshToFrame } from './mesh';

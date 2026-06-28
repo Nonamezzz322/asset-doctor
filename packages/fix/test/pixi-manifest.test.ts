@@ -36,8 +36,9 @@ function entriesOf(json: string) {
   return m.bundles[0]!.assets;
 }
 
-/** Known loadable target extensions — every `src` candidate must point at a real image/sheet kind. */
-const LOADABLE = /\.(avif|webp|png|jpe?g|json|atlas)$/i;
+/** Known loadable target extensions — every `src` candidate must point at a real image/sheet kind.
+ *  `.ktx2` is the OPT-IN GPU-compressed loose tier (round12); `.ktx2.json` matches the generic `.json` arm. */
+const LOADABLE = /\.(avif|webp|png|jpe?g|json|atlas|ktx2)$/i;
 
 /** Structural shape gate reused by T1–T7: a valid PixiAssetsManifest whose every src candidate is loadable
  *  and where NO asset carries a `data` key (B1) — and the top-level is { bundles } ONLY. */
@@ -297,6 +298,56 @@ describe('buildPixiManifest — pure PixiJS-v8 manifest builder', () => {
     ];
     const e = entriesOf(buildPixiManifest(assets));
     expect(e[0]!.src).toEqual(['ui/btn.avif', 'ui/btn.webp']);
+  });
+
+  it('T15 (round12): LOOSE ktx2+raster pair → src is [x.ktx2, x.webp] (ktx2-FIRST), regardless of input order', () => {
+    // The worker records a raster `.webp` (drop-in) and an additive `.ktx2` sibling for the SAME ref. The
+    // load-bearing claim (fix.worker.ts:2350) is "ktx2-first" so a capable GPU loads the compressed tier.
+    const assets: ManifestAsset[] = [
+      {
+        ref: 'bg/sky.png',
+        kind: 'loose',
+        source: 'bg/sky.png',
+        // Feed raster-first to prove the builder re-sorts ktx2 ahead.
+        variants: [v('bg/sky.webp'), v('bg/sky.ktx2')],
+      },
+    ];
+    const json = buildPixiManifest(assets);
+    assertLoadableShape(json);
+    const e = entriesOf(json);
+    expect(e).toHaveLength(1);
+    expect(e[0]!.alias).toEqual(['bg/sky', 'sky']);
+    expect(e[0]!.src).toEqual(['bg/sky.ktx2', 'bg/sky.webp']); // ktx2 FIRST, raster fallback last
+    // Reversed input ⇒ identical (deterministic total re-sort).
+    const rev = buildPixiManifest([{ ...assets[0]!, variants: [...assets[0]!.variants].reverse() }]);
+    expect(rev).toBe(json);
+  });
+
+  it('T16 (round12): ATLAS ktx2 two-sidecar pair → src is [hud.ktx2.json, hud.json] (ktx2-FIRST), regardless of input order', () => {
+    // round8 two-sidecar rule: a multi-format atlas needs TWO .json sidecars (NOT a multi-format src array).
+    // The worker records the drop-in raster sidecar `ui/hud.json` AND the additive `ui/hud.ktx2.json` (whose
+    // meta.image → the .ktx2 page) for the same ref. compareSrc must put the .ktx2.json sidecar first even
+    // though BOTH end in `.json` (the plain FORMAT_RANK tie would otherwise lexically sort hud.json first).
+    const assets: ManifestAsset[] = [
+      {
+        ref: 'ui/hud.json',
+        kind: 'atlas',
+        source: 'ui/hud.json',
+        // Feed raster-first to prove the builder re-sorts the ktx2 sidecar ahead.
+        variants: [v('ui/hud.json'), v('ui/hud.ktx2.json')],
+      },
+    ];
+    const json = buildPixiManifest(assets);
+    assertLoadableShape(json);
+    const e = entriesOf(json);
+    expect(e).toHaveLength(1);
+    expect(e[0]!.alias).toEqual(['ui/hud', 'hud']);
+    expect(e[0]!.src).toEqual(['ui/hud.ktx2.json', 'ui/hud.json']); // ktx2 sidecar FIRST, raster sidecar last
+    // The image files are NEVER in src (Pixi reads each sidecar's meta.image).
+    expect(e[0]!.src.some((s) => s.endsWith('.webp') || s.endsWith('.ktx2'))).toBe(false);
+    // Reversed input ⇒ identical (deterministic total re-sort).
+    const rev = buildPixiManifest([{ ...assets[0]!, variants: [...assets[0]!.variants].reverse() }]);
+    expect(rev).toBe(json);
   });
 
   it('extra: bundleName option overrides "default"; countPixiManifestEntries matches the emitted entry count', () => {

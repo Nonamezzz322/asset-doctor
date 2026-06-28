@@ -117,6 +117,18 @@ export interface FixOptions {
    *  sheets list the `.json`/`.atlas` sidecar; Spine still needs `pixi-spine`. Implies no saving (invariant 5
    *  — the manifest sums nothing). */
   emitPixiManifest?: boolean;
+  // ── OPT-IN backend native ops (docs/improvements/round12-backend-processing.md, Phase 3) ──────────
+  /** OPT-IN, DEFAULT OFF carve-out of invariants 1 & 2 (user-directed amendment): native-only encodes
+   *  (today only KTX2/UASTC, which is impossible in-browser) move to a backend the user explicitly enables
+   *  AND consents to PER RUN. SAFETY (load-bearing): when this field is ABSENT the ENTIRE backend path is
+   *  dead — no probe, no upload, no extra zip entry — so the worker output is BYTE-IDENTICAL to today. The
+   *  browser fix stays the default; the backend is an opt-in fallback for native-only ops. Assets leave the
+   *  device ONLY when `backend` is present (the user configured a host) AND `backend.consent === true` (the
+   *  user ticked "these images are sent to the server" THIS run) AND a KTX2-eligible page exists. On any
+   *  failure (unreachable / declined / non-2xx) the worker FALLS BACK to the browser raster page with an
+   *  HONEST skipped[] note — never a silent skip. */
+  backend?: BackendOptions;
+
   /** Content-hash cache-busting (docs/improvements/round9-cache-busting.md). When ON, every emitted
    *  image/sheet AD references is renamed `name.<8hex>.ext` where the hash = sha256 of the FINAL emitted
    *  bytes, and EVERY referrer is repointed at the hashed name (atlas meta.image / Spine .atlas texture
@@ -126,6 +138,30 @@ export interface FixOptions {
    *  repointed), and pass-through LOOSE images unless emitPixiManifest is also on (the manifest is then the
    *  guaranteed referrer). ADDITIVE: absent/false ⇒ no hashing branch runs ⇒ zip BYTE-IDENTICAL to today. */
   hashFilenames?: boolean;
+}
+
+/** Native op kinds the OPT-IN backend can perform (round12-backend-processing.md §2). v1 = KTX2 only
+ *  (UASTC → Zstd, baked mips). A closed verb set so the worker can never request an op the gateway/sidecar
+ *  doesn't allow-list. Additive: a future value here NEVER changes the default (no-backend) path. */
+export type NativeOpKind = 'ktx2';
+
+/** OPT-IN backend configuration (round12-backend-processing.md §5). PRESENT ⇒ the user configured a host
+ *  AND we hold a valid entitlement token; the worker may offer native ops. ABSENT on FixOptions ⇒ the whole
+ *  path is dead (byte-identical). HONESTY: `consent` is the per-run explicit "these images are uploaded to
+ *  the server" acknowledgement — the worker uploads NOTHING unless `consent === true`. */
+export interface BackendOptions {
+  /** API gateway origin (apps/api), no trailing slash, e.g. https://asset-doctor-api.fly.dev. The worker
+   *  POSTs page bytes to `${apiBase}/v1/encode`; the gateway verifies the token, quota-limits, and reverse-
+   *  proxies to the apps/encoder sidecar (the distroless billing image does NO native work). */
+  apiBase: string;
+  /** ed25519 entitlement token (offline-verified in the browser; sent as `Authorization: Bearer <token>`).
+   *  The gateway re-verifies it server-side before any work — closes the free-CPU hole. */
+  token: string;
+  /** Native ops the user opted into. v1 only `['ktx2']`. Empty/absent ⇒ no op eligible ⇒ no upload. */
+  ops: NativeOpKind[];
+  /** PER-RUN explicit consent. FALSE/absent ⇒ the worker NEVER uploads (it falls back to the browser path
+   *  with an honest skip note). Only TRUE after the user ticked the consent box THIS run. */
+  consent: boolean;
 }
 
 export interface FixOverride {
@@ -284,6 +320,19 @@ export interface FixReceipt {
    *  zip-entry name (`manifest.json`, or a collision-avoiding fallback). Absent ⇒ no manifest emitted ⇒
    *  receipt byte-identical to today. Names/structure only — sums no saving (invariant 5). */
   pixiManifest?: { assets: number; path: string };
+  /** OPT-IN backend native ops summary (round12-backend-processing.md §7, Phase 3). Present ONLY when the
+   *  user consented AND ≥1 page was actually offered to the backend. `op` = the native op kind (v1 'ktx2');
+   *  `uploaded` = pages sent; `produced` = `.ktx2` files received + added to the zip; `failed` = pages that
+   *  fell back to the browser raster page (unreachable / declined / encode error — each surfaced in
+   *  skipped[]); `host` = the gateway origin (no token, no bytes). Absent ⇒ no backend op ran ⇒ receipt
+   *  byte-identical to today. */
+  backendNative?: { op: NativeOpKind; uploaded: number; produced: number; failed: number; host: string };
+  /** HONEST worst-case GPU VRAM CEILING (bytes) of the produced `.ktx2` pages — Σ vramCeilingOfPage('ktx2-
+   *  uastc', w, h, mipsBaked). This is an UPPER BOUND ("GPU VRAM ≤ …"), NEVER w·h·4 and NEVER folded into the
+   *  hard vramBytesAfter (invariant 5): the runtime may transcode to BC1/ETC1 (≤0.5 B/px) or fall back to
+   *  raster on GPUs with no block-compression support. Reported SEPARATELY with the "≤ / fallback" caveat in
+   *  the receipt copy. Absent ⇒ no KTX2 produced. */
+  ktx2VramBytesWorstCase?: number;
 }
 
 /* ── Dry-run plan preview (docs/improvements/dry-run-plan-preview.md) ─────────────────────────
