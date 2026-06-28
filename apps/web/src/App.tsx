@@ -517,6 +517,8 @@ function SettingsPanel({
   setWebpNearLossless,
   pngRecompress,
   setPngRecompress,
+  opaqueAlpha,
+  setOpaqueAlpha,
   overrides,
   setOverrides,
 }: {
@@ -528,6 +530,8 @@ function SettingsPanel({
   setWebpNearLossless: (b: boolean) => void;
   pngRecompress: boolean;
   setPngRecompress: (b: boolean) => void;
+  opaqueAlpha: boolean;
+  setOpaqueAlpha: (b: boolean) => void;
   overrides: { match: string; quality: number }[];
   setOverrides: (o: { match: string; quality: number }[]) => void;
 }) {
@@ -554,6 +558,12 @@ function SettingsPanel({
       <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.settings.pngRecompressHint')}>
         <input type="checkbox" checked={pngRecompress} onChange={(e) => setPngRecompress(e.target.checked)} className="accent-teal" />
         {t('fix.settings.pngRecompress')}
+      </label>
+      {/* Opaque-alpha (round15): drop the DEAD alpha channel of a fully-opaque image. HONESTY (invariant 5):
+          the title states DISK-only — the GPU still allocates RGBA8888, so this is NEVER a VRAM claim. */}
+      <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.settings.opaqueAlphaHint')}>
+        <input type="checkbox" checked={opaqueAlpha} onChange={(e) => setOpaqueAlpha(e.target.checked)} className="accent-teal" />
+        {t('fix.settings.opaqueAlpha')}
       </label>
 
       <div className="mt-3 border-t border-line pt-2">
@@ -1219,6 +1229,10 @@ function FixCard({ files }: { files: PickedFile[] }) {
   const [scaleAwareQ, setScaleAwareQ] = useState(false);
   const [webpNearLossless, setWebpNearLossless] = useState(false);
   const [pngRecompress, setPngRecompress] = useState(false);
+  // Opaque-alpha (round15) — own Pro toggle, DEFAULT OFF. The fix for `wasted-alpha` findings: re-encode a
+  // fully-opaque image WITHOUT its dead alpha channel for a DISK saving (invariant 5 — NEVER a VRAM claim;
+  // the GPU still allocates RGBA8888). Off ⇒ no transcode op carries `opaque` ⇒ byte-identical to today.
+  const [opaqueAlpha, setOpaqueAlpha] = useState(false);
   const [overrides, setOverrides] = useState<{ match: string; quality: number }[]>([]);
 
   // Feature 4 — own Pro opt-in, DEFAULT OFF (NOT under aggressive). Defaults reproduce today: off ⇒ no
@@ -1426,6 +1440,9 @@ function FixCard({ files }: { files: PickedFile[] }) {
       // own per-format near-lossless, so omit the legacy global knob when a profile is sent (no double-source).
       webpNearLossless: !exportProfile && webpNearLossless ? 60 : undefined,
       pngRecompressLevel: pngRecompress ? 2 : undefined,
+      // Opaque-alpha (round15) — forwarded only when enabled; off ⇒ undefined ⇒ no transcode op carries
+      // `opaque` ⇒ byte-identical to today. DISK-only saving (invariant 5 — never a VRAM claim).
+      opaqueAlpha: opaqueAlpha || undefined,
       marking: aggressive && Object.keys(marking).length > 0 ? marking : undefined,
       skinGuard: aggressive && Object.keys(skinGuard).length > 0 ? skinGuard : undefined,
       overrides: overrides.length > 0 ? overrides.filter((o) => o.match.trim() !== '') : undefined,
@@ -1551,7 +1568,7 @@ function FixCard({ files }: { files: PickedFile[] }) {
   const sawPlan = useRef(false);
   useEffect(() => {
     if (sawPlan.current) setPhase({ t: 'idle' });
-  }, [aggressive, polygon, marking, effort, scaleAwareQ, webpNearLossless, pngRecompress, overrides, packLoose, packMode, packGranularity, packTrim, extrude, tierEnable, tierSuffixes, profileEnable, profileFormats, customTiers, profileOverrides, ktx2Enable, pngquantEnable]);
+  }, [aggressive, polygon, marking, effort, scaleAwareQ, webpNearLossless, pngRecompress, opaqueAlpha, overrides, packLoose, packMode, packGranularity, packTrim, extrude, tierEnable, tierSuffixes, profileEnable, profileFormats, customTiers, profileOverrides, ktx2Enable, pngquantEnable]);
   // Consent is NEVER sticky: drop the per-run "uploaded to server" acknowledgement the moment BOTH backend
   // ops are disabled OR the backend becomes unreachable, so a fresh run can't inherit a prior tick. The user
   // must re-consent each time the upload path could engage.
@@ -1607,6 +1624,8 @@ function FixCard({ files }: { files: PickedFile[] }) {
             setWebpNearLossless={setWebpNearLossless}
             pngRecompress={pngRecompress}
             setPngRecompress={setPngRecompress}
+            opaqueAlpha={opaqueAlpha}
+            setOpaqueAlpha={setOpaqueAlpha}
             overrides={overrides}
             setOverrides={setOverrides}
           />

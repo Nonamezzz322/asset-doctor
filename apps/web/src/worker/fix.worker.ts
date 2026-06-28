@@ -384,6 +384,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       maxSize: opts.maxSize,
       maxEdge: opts.maxEdge,
       aggressive: opts.aggressive,
+      // Opaque-alpha (round15): forward the Pro toggle so the plan stamps `opaque:true` on the transcode op
+      // for every wasted-alpha-flagged loose ref (DISK-only saving, invariant 5). Off ⇒ no op carries opaque.
+      opaqueAlpha: opts.opaqueAlpha,
       isAtlasRef: (ref) => atlasByRef.has(ref),
       // Edge-extrude (bleed, design OPTION A): forward the UI knob. planFix floors it to a non-negative
       // int and STAMPS it onto every repack/pack op (the only ops whose worker compose blits a rectangle
@@ -1109,6 +1112,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     canvas: OffscreenCanvas,
     c2d: OffscreenCanvasRenderingContext2D,
     kind: 'resize' | 'transcode',
+    // Opaque-alpha (round15): the caller has already composed `canvas` opaque ({alpha:false}); pass the flag
+    // through to each per-format feToEncodeOpts so the @jsquash AVIF path encodes the dead alpha plane at
+    // minimum cost. DISK-only (invariant 5). Default false ⇒ alpha preserved (byte-identical to today).
+    opaque = false,
   ): Promise<{ ownerImage: string; ownerImageUnhashed: string; referencesChanged: boolean }> => {
     profileOwned.add(ref);
     profileAssets++;
@@ -1128,7 +1135,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     let refsChanged = false;
     for (const f of rp.formats) {
       const fe = formatEncode(f, scale, rp.global);
-      const enc = await encodeCanvas(canvas, c2d, fe.targetMime, feToEncodeOpts(fe));
+      // Opaque-alpha (round15): spread `opaque` so the @jsquash AVIF path drops the dead channel. The canvas
+      // is already {alpha:false} from the caller. Default false ⇒ feToEncodeOpts unchanged (byte-identical).
+      const enc = await encodeCanvas(canvas, c2d, fe.targetMime, { ...feToEncodeOpts(fe), opaque });
       if (!enc) {
         skipped.push({ assetRef: ref, reason: `variant ${f.format} skipped: encode to ${fe.targetMime} unavailable` });
         continue;
@@ -1565,7 +1574,11 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         // (ownerActualName.image), and a complete encode failure leaves the owner on its ORIGINAL.
         const bmp = await createImageBitmap(new Blob([bytes]));
         const canvas = new OffscreenCanvas(bmp.width, bmp.height);
-        const c2d = canvas.getContext('2d');
+        // Opaque-alpha (round15): in profile mode the fan-out decodes ITS OWN canvas — compose onto a
+        // genuinely opaque `{alpha:false}` surface when the op is opaque so EVERY fanned-out variant drops
+        // the dead alpha channel (DISK-only, invariant 5). feToEncodeOpts below also carries `op.opaque` so
+        // the @jsquash AVIF path encodes the constant alpha plane at minimum cost. Absent ⇒ alpha-true canvas.
+        const c2d = canvas.getContext('2d', op.opaque ? { alpha: false } : undefined);
         if (!c2d) {
           bmp.close();
           skipped.push({ assetRef: ref, reason: 'no 2D context' });
@@ -1574,7 +1587,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         }
         c2d.drawImage(bmp, 0, 0);
         bmp.close();
-        const r = await emitLooseProfileFanout(ref, path, 1, canvas, c2d, 'transcode');
+        const r = await emitLooseProfileFanout(ref, path, 1, canvas, c2d, 'transcode', op.opaque);
         if (ownerActualName.has(ref)) {
           // Cache-bust (round9 K8): dedup owner image = the fan-out's first (hashed) variant; un-hashed for
           // Phase C's divergence comparison (a content hash is not a divergence). hashOff ⇒ the two are equal.
@@ -1589,7 +1602,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       }
       // Effective per-asset options (folder/type overrides; no downscale ⇒ scale 1 ⇒ quality unchanged).
       const eff = effectiveFor(ref, 1);
-      const enc = await transcode(bytes, eff.targetMime, encOptsFor(eff, false));
+      // Opaque-alpha (round15): thread the op's channel-drop intent into transcode() — it composes onto an
+      // `{alpha:false}` surface and (AVIF) encodes the dead alpha plane at minimum cost. DISK-only saving
+      // (invariant 5); the receipt's measured before/after captures the real delta. Absent ⇒ alpha preserved.
+      const enc = await transcode(bytes, eff.targetMime, { ...encOptsFor(eff, false), opaque: op.opaque });
       if (!enc) {
         skipped.push({ assetRef: ref, reason: `transcode to ${eff.targetMime} unavailable` });
         // Owner transcode skipped ⇒ the owner keeps its ORIGINAL image; correct the actual name so Phase
@@ -1622,7 +1638,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         referencesChanged = true; // a loose-image rename is NOT drop-in
         changeRows.push(looseRenameChange(path, emittedPath, 'transcode')); // loader-migration: logo.png → logo.webp
       }
-      operations.push(`transcode ${basename(path)} → ${enc.mime.replace('image/', '')}`);
+      // Opaque-alpha (round15): annotate the audit trail when the dead channel was dropped (DISK-only).
+      operations.push(`transcode ${basename(path)} → ${enc.mime.replace('image/', '')}${op.opaque ? ' (opaque)' : ''}`);
     } else if (op.kind === 'drop' && op.ownerRef == null) {
       // Legacy bare-drop (no owner-aware repoint): today's behavior — delete every copy after the first.
       // Owner-aware drops (op.ownerRef set) are DEFERRED to Phase C below.
@@ -2656,6 +2673,14 @@ interface EncodeOpts {
   pngRecompressLevel?: number;
   /** When the target codec is unavailable: true → fall back to PNG, false → return null (honest skip). */
   allowPngFallback?: boolean;
+  /** Opaque-alpha (round15): drop the (DEAD) alpha channel — the Pro fix for a `wasted-alpha` finding. The
+   *  CALLER must have composed the source onto a genuinely opaque `{alpha:false}` surface (transcode() and
+   *  the fan-out do this when set), so every pixel's alpha is 255. This flag then nudges the @jsquash codecs
+   *  to actually OMIT the channel rather than store a constant plane: AVIF gets qualityAlpha:0 (the all-255
+   *  plane is encoded at minimum cost), WebP lossy/lossless rely on the opaque canvas (native + @jsquash both
+   *  see no transparency). HONESTY (invariant 5): DISK-only — the GPU still decodes to RGBA8888. The byte win
+   *  is whatever is MEASURED downstream, never asserted. Absent/false ⇒ alpha preserved (today's behavior). */
+  opaque?: boolean;
 }
 
 const clamp06 = (n: number): number => Math.max(0, Math.min(6, Math.round(n)));
@@ -2688,7 +2713,10 @@ async function encodeCanvas(canvas: OffscreenCanvas, c2d: OffscreenCanvasRenderi
       const m = (await import('@jsquash/avif')) as { encode: (d: ImageData, o?: Record<string, number | boolean>) => Promise<ArrayBuffer> };
       const buf = await m.encode(data, {
         quality: Math.round(q * 100),
-        qualityAlpha: opts.avifQualityAlpha ?? -1,
+        // Opaque-alpha (round15): a genuinely opaque source (alpha all-255) — encode the dead alpha plane at
+        // minimum cost (qualityAlpha:0) instead of tracking quality, so the channel is near-free. DISK-only
+        // (invariant 5). Otherwise honor the explicit knob or the @jsquash default (-1, tracks quality).
+        qualityAlpha: opts.opaque ? 0 : (opts.avifQualityAlpha ?? -1),
         speed: 10 - Math.round((effort / 6) * 4),
         enableSharpYUV: true,
         ...(opts.avifSubsample != null ? { subsample: opts.avifSubsample } : {}),
@@ -2757,7 +2785,10 @@ async function recompressPng(c2d: OffscreenCanvasRenderingContext2D, canvas: Off
 async function transcode(bytes: ArrayBuffer, target: ImageMime, enc: EncodeOpts): Promise<{ bytes: Uint8Array; mime: ImageMime } | null> {
   const bmp = await createImageBitmap(new Blob([bytes]));
   const canvas = new OffscreenCanvas(bmp.width, bmp.height);
-  const c2d = canvas.getContext('2d');
+  // Opaque-alpha (round15): compose onto a genuinely opaque `{alpha:false}` surface so the encoder drops the
+  // dead alpha channel (DISK-only, invariant 5 — the GPU still allocates RGBA8888). The strongest signal to
+  // BOTH the native convertToBlob path and the @jsquash getImageData path. Absent ⇒ today's alpha-true canvas.
+  const c2d = canvas.getContext('2d', enc.opaque ? { alpha: false } : undefined);
   if (!c2d) return null;
   c2d.drawImage(bmp, 0, 0);
   bmp.close();

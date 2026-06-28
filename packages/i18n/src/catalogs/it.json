@@ -108,6 +108,9 @@
   "find.solid-fill.title": "Tinta unita {w}×{h} — un colore impegna {vram:bytes}",
   "find.solid-fill.detail": "Ogni pixel campionato è dello stesso colore (o completamente trasparente) — niente bordi, gradiente o dettaglio. Eppure impegna {vram:bytes} di VRAM ({w}×{h}×4) per trasportare un solo valore.",
   "find.solid-fill.fix": "Sostituiscila con una texture 1×1 tinta/stirata a runtime, o con uno sprite a tinta unita.",
+  "find.wasted-alpha.title": "{srcLabel} porta un canale alfa inutilizzato — {saved:bytes} di peso morto",
+  "find.wasted-alpha.detail": "Ogni pixel è completamente opaco (alfa 255), eppure questo {srcLabel} memorizza ancora un canale alfa. Rimuoverlo (ricodifica opaca, stesso formato) taglia ~{saved:bytes} ({frac:pct}) di DOWNLOAD. È un risparmio solo su disco — la GPU decodifica comunque in RGBA8888, quindi la VRAM resta invariata.",
+  "find.wasted-alpha.fix": "Ricodifica opaco (RGB) per la consegna, o usa un formato senza canale alfa.",
   "find.wasted-regions.title": {
     "$count": "n",
     "one": "{n} regione vuota mappata",
@@ -280,6 +283,8 @@
   "fix.settings.nearLosslessHint": "WebP quasi senza perdite — più nitido del lossy, più piccolo del totalmente senza perdite.",
   "fix.settings.pngRecompress": "Ricompressione PNG senza perdite",
   "fix.settings.pngRecompressHint": "Riconfeziona i byte PNG senza perdite (oxipng). Carica un codec al primo utilizzo.",
+  "fix.settings.opaqueAlpha": "Rimuovi canale alfa inutilizzato",
+  "fix.settings.opaqueAlphaHint": "Ricodifica le immagini completamente opache senza il loro canale alfa morto — solo un risparmio di download/disco. La VRAM resta invariata (la GPU decodifica comunque in RGBA8888).",
   "fix.settings.overrides": "Override per cartella / tipo",
   "fix.settings.overridesHint": "Sovrascrivi formato o qualità per un prefisso di cartella o un tipo di asset.",
   "fix.skipped.whyNoKernel": "Il kernel di riduzione non è configurabile nel browser — viene usato il ricampionatore ad alta qualità del browser.",

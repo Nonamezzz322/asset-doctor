@@ -37,6 +37,14 @@ export interface FixOptions {
   avifSubsample?: number;
   /** Lossless PNG recompress via @jsquash/oxipng level 0-6. Omit ⇒ off (no new WASM loaded). */
   pngRecompressLevel?: number;
+  /** Opaque-encode the Pro fix for `wasted-alpha` findings (round15): re-encode a fully-opaque image WITHOUT
+   *  its dead alpha channel for a DISK/download saving. HONESTY (invariant 5): DISK-only — the GPU still
+   *  decodes to RGBA8888, so this is NEVER a VRAM claim. The plan stamps `opaque:true` on the transcode op
+   *  for every wasted-alpha-flagged loose ref (folded into a format transcode where one already fires, else
+   *  a standalone opaque transcode); the worker composes onto an `{alpha:false}` surface and the receipt
+   *  measures the real byte delta (honest skip if no win). Absent/false ⇒ no op carries `opaque` ⇒ byte-
+   *  identical to today (the wasted-alpha finding stays a diagnosis-only verdict). */
+  opaqueAlpha?: boolean;
   /** Scale-aware quality (lower q on downscaled output). Pure deterministic formula. Default false. */
   scaleAwareQuality?: boolean;
   /** UI-supplied lazy/bundle marking (Feature 3). Absent ⇒ all bundles treated as 'isolated'. */

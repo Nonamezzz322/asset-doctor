@@ -5,9 +5,9 @@
 
 import type { Asset, ImageFeatures, ImageMime } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
-import { analyze, mergeSharedAtlases, type EncodeSizer } from '@asset-doctor/analysis';
+import { analyze, mergeSharedAtlases, type EncodeSizer, type OpaqueEncodeSizer } from '@asset-doctor/analysis';
 import { groupFiles, keyOf, type RawFile } from '../lib/group';
-import { classifyContent, dHashFromGray, isFlat, isSolidColor, luma } from '../lib/perceptual';
+import { alphaFullyOpaque, classifyContent, dHashFromGray, isFlat, isSolidColor, luma } from '../lib/perceptual';
 import type { ContentClass } from '@asset-doctor/core';
 import type { WorkerRequest, WorkerResponse } from './protocol';
 
@@ -22,6 +22,9 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
     const grouped = groupFiles(files);
     const assets: Asset[] = [];
     const imageBytes = new Map<string, ArrayBuffer>();
+    // mime of each LOOSE image, keyed by assetRef — gates the full-frame opaque scan to alpha-bearing
+    // formats (PNG/WebP) only; atlases are never keyed here (the wasted-alpha rule is loose-only).
+    const looseMime = new Map<string, ImageMime>();
     const total = grouped.atlases.length + grouped.images.length;
     let done = 0;
     // Honest unparsed surface: ingest's "looks like a manifest but unusable" skip-points + the worker's
@@ -60,6 +63,7 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       if (res.ok && res.asset.kind === 'image') {
         assets.push(res.asset);
         imageBytes.set(res.asset.image.name, im.bytes);
+        looseMime.set(res.asset.image.name, res.asset.image.mime);
       } else if (!res.ok) {
         unparsed.push({ ref, reason: res.error });
       }
@@ -71,16 +75,22 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
     const features: ImageFeatures[] = [];
     for (const [assetRef, bytes] of imageBytes) {
       const contentHash = await sha256Hex(bytes);
-      const { dHash, contentClass, solid } = await decodeFeatures(bytes);
+      // Only a LOOSE alpha-bearing image (PNG/WebP) needs the full-frame opaque scan — gate it so atlases
+      // and JPEG/AVIF loose images never pay the full-resolution decode (instant-wow: most files skip it).
+      const m = looseMime.get(assetRef);
+      const scanAlpha = m === 'image/png' || m === 'image/webp';
+      const { dHash, contentClass, solid, opaque } = await decodeFeatures(bytes, scanAlpha);
       const feat: ImageFeatures = { assetRef, contentHash };
       if (dHash) feat.dHash = dHash;
       if (contentClass !== 'unknown') feat.contentClass = contentClass;
       if (solid) feat.solid = true; // additive: only ever set when true
+      if (opaque) feat.opaque = true; // additive: only ever set when true (full-frame alpha === 255)
       features.push(feat);
     }
 
     const report = await analyze(mergeSharedAtlases(assets), undefined, {
       encodeImage: makeEncoder(imageBytes),
+      encodeOpaque: makeOpaqueEncoder(imageBytes),
       features,
       missingImages: grouped.missing,
       ...(unparsed.length ? { unparsed } : {}),
@@ -96,30 +106,56 @@ async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** Per-image cap (px) on the full-frame opaque scan. The 9×8 path is always cheap; the opaque scan needs
+ *  a FULL-RESOLUTION getImageData (one extra full decode), so we cap it to keep the free diagnosis ≤10s.
+ *  ~24 MP covers 4096×4096 (a generous loose-art ceiling); above it we skip honestly (no `opaque`
+ *  feature ⇒ no finding) rather than risk a slow read on an outlier. Short-circuit means most images bail
+ *  on the first transparent pixel well before the scan cost matters; this cap bounds the worst case. */
+const ALPHA_SCAN_MAX_PX = 4096 * 4096 * 1.5; // ≈ 25.2 MP
+
 /** ONE 9×8 decode → BOTH the dHash (near-dup detection) AND the content class (format verdict). The
  *  9×8 RGBA sample is read once with getImageData; `dHash` is null for featureless fills (they collapse
  *  to one hash → false near-dup matches), `contentClass` is the lossy-vs-lossless hint (Inv 4: NO
  *  encode here — the class is pure math over the already-decoded sample). The same sample also yields
- *  `solid` (single-color / fully transparent — drives the loose-only solid-fill finding). 'unknown' /
- *  solid:false on any decode failure or when OffscreenCanvas is unavailable. */
+ *  `solid` (single-color / fully transparent — drives the loose-only solid-fill finding). When
+ *  `scanAlpha` (a loose PNG/WebP), the SAME decoded bitmap is also drawn at FULL resolution for a
+ *  full-frame opaque scan (`opaque` — alpha === 255 on every pixel; short-circuits on the first
+ *  non-opaque pixel, so most images bail instantly). 'unknown' / solid:false / opaque:false on any
+ *  decode failure, when OffscreenCanvas is unavailable, or when the image exceeds ALPHA_SCAN_MAX_PX. */
 async function decodeFeatures(
   bytes: ArrayBuffer,
-): Promise<{ dHash: string | null; contentClass: ContentClass; solid: boolean }> {
-  if (typeof OffscreenCanvas === 'undefined') return { dHash: null, contentClass: 'unknown', solid: false };
+  scanAlpha: boolean,
+): Promise<{ dHash: string | null; contentClass: ContentClass; solid: boolean; opaque: boolean }> {
+  if (typeof OffscreenCanvas === 'undefined')
+    return { dHash: null, contentClass: 'unknown', solid: false, opaque: false };
   try {
     const bmp = await createImageBitmap(new Blob([bytes]));
     const canvas = new OffscreenCanvas(9, 8);
     const c2d = canvas.getContext('2d');
-    if (!c2d) return { dHash: null, contentClass: 'unknown', solid: false };
+    if (!c2d) {
+      bmp.close();
+      return { dHash: null, contentClass: 'unknown', solid: false, opaque: false };
+    }
     c2d.drawImage(bmp, 0, 0, 9, 8);
-    bmp.close();
     const data = c2d.getImageData(0, 0, 9, 8).data;
+    // Full-frame opaque scan: reuse the SAME bitmap (already decoded) at full resolution. Gated to loose
+    // alpha-bearing formats and a size cap; alphaFullyOpaque short-circuits on the first non-opaque pixel.
+    let opaque = false;
+    if (scanAlpha && bmp.width > 0 && bmp.height > 0 && bmp.width * bmp.height <= ALPHA_SCAN_MAX_PX) {
+      const full = new OffscreenCanvas(bmp.width, bmp.height);
+      const fctx = full.getContext('2d', { willReadFrequently: true });
+      if (fctx) {
+        fctx.drawImage(bmp, 0, 0);
+        opaque = alphaFullyOpaque(fctx.getImageData(0, 0, bmp.width, bmp.height).data);
+      }
+    }
+    bmp.close();
     const gray: number[] = [];
     for (let p = 0; p < 9 * 8; p++) gray.push(luma(data, p * 4));
     const dHash = isFlat(gray) ? null : dHashFromGray(gray); // featureless → skip perceptual matching
-    return { dHash, contentClass: classifyContent(gray, data), solid: isSolidColor(gray, data) };
+    return { dHash, contentClass: classifyContent(gray, data), solid: isSolidColor(gray, data), opaque };
   } catch {
-    return { dHash: null, contentClass: 'unknown', solid: false };
+    return { dHash: null, contentClass: 'unknown', solid: false, opaque: false };
   }
 }
 
@@ -138,6 +174,35 @@ function makeEncoder(imageBytes: Map<string, ArrayBuffer>): EncodeSizer {
       const blob = await canvas.convertToBlob({ type: targetMime, quality: 0.9 });
       // convertToBlob falls back to PNG where the target codec is unavailable — don't count that.
       return blob.type === targetMime ? blob.size : null;
+    } catch {
+      return null;
+    }
+  };
+}
+
+/** MEASURE the disk size of an asset re-encoded OPAQUE (alpha channel dropped) to its SAME format. Used
+ *  only to size the wasted-alpha finding's honest disk saving (byteSize − this) — it sizes, it never emits
+ *  a file (invariant 3). Composes onto an `{alpha:false}` OffscreenCanvas (a genuinely opaque surface —
+ *  the strongest signal that the encoder may omit the channel), then convertToBlob to the source mime.
+ *  Returns null when OffscreenCanvas is unavailable, the bytes are missing, or convertToBlob falls back to
+ *  a different codec (so the size is never miscounted). */
+function makeOpaqueEncoder(imageBytes: Map<string, ArrayBuffer>): OpaqueEncodeSizer {
+  return async (assetRef: string, mime: ImageMime) => {
+    if (typeof OffscreenCanvas === 'undefined') return null;
+    const bytes = imageBytes.get(assetRef);
+    if (!bytes) return null;
+    try {
+      const bmp = await createImageBitmap(new Blob([bytes]));
+      const canvas = new OffscreenCanvas(bmp.width, bmp.height);
+      const c2d = canvas.getContext('2d', { alpha: false }); // genuinely opaque surface → drop the channel
+      if (!c2d) {
+        bmp.close();
+        return null;
+      }
+      c2d.drawImage(bmp, 0, 0);
+      bmp.close();
+      const blob = await canvas.convertToBlob({ type: mime, quality: 0.9 });
+      return blob.type === mime ? blob.size : null;
     } catch {
       return null;
     }

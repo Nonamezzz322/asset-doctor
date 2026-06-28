@@ -257,6 +257,7 @@ export type Rule =
   | 'dimensions-npot'
   | 'dimensions-oversize'
   | 'solid-fill'
+  | 'wasted-alpha'
   // whole-folder (scope: 'folder')
   | 'duplicate-exact'
   | 'duplicate-similar'
@@ -357,6 +358,13 @@ export interface ImageFeatures {
    *  per-sample stdDev is below SOLID_STD. Drives the loose-only `solid-fill` finding (a big solid PNG
    *  pins w×h×4 VRAM for one color). Additive: only ever SET when true; absent ⇒ today's behavior. */
   solid?: boolean;
+  /** True iff a FULL-FRAME alpha scan found EVERY pixel fully opaque (alpha === 255) — i.e. the image
+   *  carries an alpha channel it never uses. Drives the loose-only `wasted-alpha` finding (the dead
+   *  channel costs DISK bytes, never VRAM — the GPU still allocates RGBA8888). Measured on the
+   *  full-resolution decode (NOT the 9×8 sample: one transparent pixel must not average away), with a
+   *  short-circuit on the first non-opaque pixel so most images bail instantly. Additive: only ever SET
+   *  when true; absent (not opaque, decode skipped/failed, or no host scan) ⇒ today's behavior. */
+  opaque?: boolean;
 }
 
 /* ── Bundle / lazy marking (Feature 3 — UI-sourced) ────────────────────────────────────────
@@ -513,6 +521,14 @@ export interface ThresholdConfig {
    *  this edge the finding is `warn` (a 1024² solid pins 4 MB VRAM), else `info`. Optional/additive:
    *  absent ⇒ the solid-fill finding is suppressed (CLI/budget configs that don't opt in). */
   solidFill?: { minEdgePx: number; warnEdgePx: number };
+  /** Wasted-alpha (a fully-opaque image still carrying an alpha channel) gate. `minEdgePx` — both edges
+   *  must be ≥ this before flagging (a tiny icon's dead channel is negligible). `minDiskSaving` — the
+   *  measured fraction of disk bytes that dropping the channel (re-encode opaque to the same format)
+   *  must save before the finding fires (a near-zero saving isn't worth a verdict). DISK-only — invariant
+   *  5: the GPU still allocates RGBA8888 regardless, so this is NEVER a VRAM win. Optional/additive:
+   *  absent ⇒ the wasted-alpha finding is suppressed (CLI/budget configs that don't opt in — it is also
+   *  browser-only, NOT enumerated by resolveThresholds, so the CLI never opts in). */
+  wastedAlpha?: { minEdgePx: number; minDiskSaving: number };
 }
 
 export interface AnalysisReport {
@@ -570,7 +586,15 @@ export type FixOp =
        *  Rectangle blits only — meshed/rotated blits are skipped + surfaced honestly. Absent/0 ⇒ no
        *  extrude (today's behavior, byte-identical). */
       extrude?: number }
-  | { kind: 'transcode'; assetRef: string; targetMime: ImageMime; quality: number; lossless: boolean }
+  | { kind: 'transcode'; assetRef: string; targetMime: ImageMime; quality: number; lossless: boolean;
+      /** Drop the (here-DEAD) alpha channel before encoding to `targetMime` — the Pro fix for a
+       *  `wasted-alpha` finding (a fully-opaque RGBA image whose alpha plane is constant 255). The worker
+       *  composes onto a genuinely opaque `{alpha:false}` surface (the strongest signal that the encoder may
+       *  omit the channel), so the emitted file is RGB/opaque. HONESTY (invariant 5): this is a DISK/download
+       *  saving ONLY — the GPU still decodes to RGBA8888 and allocates the same VRAM (unless a different GPU
+       *  format is chosen, which this op never does). The saving carried in the receipt is the MEASURED byte
+       *  delta, never a VRAM claim. Absent/false ⇒ today's alpha-preserving transcode (byte-identical). */
+      opaque?: boolean }
   | { kind: 'resize'; assetRef: string; to: Size; targetMime: ImageMime; quality: number }
   | { kind: 'drop'; assetRef: string; reason: 'duplicate-exact' | 'duplicate-similar';
       /** Owner-aware drop (Feature 1): retained ref this drop's references repoint to. Absent ⇒ legacy

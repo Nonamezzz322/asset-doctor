@@ -1561,4 +1561,73 @@ same precedent as \`fix.skipped\`), and the files that must NOT be surfaced.
   );
 }
 
+/* ── Case 18: wasted-alpha — fully-opaque-with-alpha-channel detector goldens (docs/improvements/round15-wasted-alpha-detector-full-frame-opaque-.md) ──
+ * Two LOOSE PNGs cross-checking `alphaFullyOpaque` (apps/web/src/lib/perceptual.ts). UNLIKE the solid-fill /
+ * content-class fixtures (which run on the 9×8 box-average sample), the wasted-alpha detector runs on the
+ * FULL-RESOLUTION decode — one transparent pixel must NOT average away. So the golden `opaque` flag is
+ * authored over the full-res RGBA here, and the test reads the full-res PNG directly (no downsample):
+ *   • opaque.png      — a solid OPAQUE fill: every pixel alpha 255 → the alpha channel is dead → opaque:true.
+ *   • transparent.png — an opaque inner bbox with a fully-TRANSPARENT 32px margin (one corner clear) → at
+ *                       least one alpha-0 pixel → the channel is in use → opaque:false. The single-pixel
+ *                       short-circuit guarantees the margin is enough; the thick margin just keeps it
+ *                       human-verifiable.
+ * The DISK cost of the dead channel is MEASURED at analysis time by an opaque re-encode (worker
+ * makeOpaqueEncoder); the finding reports diskBytesSaved ONLY — never VRAM (invariant 5: the GPU still
+ * decodes to RGBA8888). README documents that the saving is disk-only and the VERDICT is the diagnosis;
+ * the opaque re-encode itself is the Pro fix's job (generation — invariant 3). */
+{
+  const W = 256;
+  const H = 256;
+  const COLOR = [40, 110, 170];
+
+  const opaque = solidPng(W, H, COLOR); // every pixel alpha 255 → dead alpha channel
+  // opaque 192×192 content with a fully-transparent 32px margin (corner cells alpha 0) → channel in use
+  const transparent = marginPng(W, H, 32, 32, W - 64, H - 64, COLOR);
+
+  writeCase(
+    'wasted-alpha',
+    {
+      'opaque.png': opaque,
+      'transparent.png': transparent,
+      'expected.json': {
+        kind: 'wasted-alpha',
+        feature: 'wasted-alpha-loose-detector',
+        // Golden `opaque` per image — authored by hand over the FULL-RESOLUTION RGBA, the independent
+        // cross-check of alphaFullyOpaque (which runs full-frame, NOT on the 9×8 sample).
+        images: [
+          { name: 'opaque.png', w: W, h: H, opaque: true, why: 'solid opaque fill → every pixel alpha 255 → the alpha channel is dead weight on disk' },
+          { name: 'transparent.png', w: W, h: H, opaque: false, why: 'opaque 192×192 content with a fully-transparent 32px margin → at least one alpha-0 pixel → the channel is in use' },
+        ],
+        note:
+          'Two loose PNGs for the wasted-alpha (fully-opaque-with-alpha-channel) detector. Read at FULL '
+          + 'resolution (NOT the 9×8 sample — one transparent pixel must not average away). opaque ⇒ opaque:true '
+          + '(rule wasted-alpha; diskBytesSaved = byteSize − opaque-re-encode bytes, MEASURED; NO vramBytesSaved, '
+          + 'invariant 5); transparent ⇒ opaque:false. The disk saving is DOWNLOAD-only — the GPU still decodes '
+          + 'to RGBA8888 and allocates the same VRAM. The opaque re-encode is the Pro fix\'s job (invariant 3).',
+      },
+    },
+    `# wasted-alpha
+
+Two **loose** PNGs for the **wasted-alpha** detector — a fully-opaque image still carrying an alpha channel
+(\`docs/improvements/round15-wasted-alpha-detector-full-frame-opaque-.md\`). Each carries a hand-authored
+golden \`opaque\` flag in \`expected.json\` — the independent cross-check of \`alphaFullyOpaque\`.
+
+**Unlike** the solid-fill / content-class fixtures, this detector runs on the **full-resolution** decode
+(a single transparent pixel must NOT box-average away), so the golden is authored over the full-res RGBA and
+the test reads the PNG directly (no 9×8 downsample):
+
+- **\`opaque.png\`** — a solid opaque 256×256 fill → every pixel alpha 255 → the alpha channel is **dead
+  weight on disk** → \`opaque:true\`. The MEASURED disk cost (re-encode opaque, same format) is the finding's
+  \`diskBytesSaved\`.
+- **\`transparent.png\`** — opaque 192×192 content with a fully-transparent **32px margin** → at least one
+  alpha-0 pixel → the channel is **in use** → \`opaque:false\`.
+
+**Honesty (invariant 5):** dropping the dead channel is a **download/disk** saving only — the GPU still
+decodes to RGBA8888 and allocates the same VRAM. The finding reports \`diskBytesSaved\` and **never** a VRAM
+win. The diagnosis MEASURES (opaque or not) and reports the byte cost; the opaque re-encode itself is the
+**Pro fix's** job (generation — invariant 3).
+`,
+  );
+}
+
 console.log('Done.');

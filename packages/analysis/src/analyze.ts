@@ -26,8 +26,10 @@ import {
   solidFillFinding,
   vramBytes,
   vramBytesMipmapped,
+  wastedAlphaFinding,
   wastedRegions,
   type EncodeSizer,
+  type OpaqueEncodeSizer,
 } from './rules';
 import {
   atlasMergeFinding,
@@ -44,6 +46,11 @@ export interface AnalyzeDeps {
   /** Encode an asset's image to a target format → byte size (or null). Browser/worker supplies
    *  this via canvas.convertToBlob; headless tests mock it. */
   encodeImage?: EncodeSizer;
+  /** Re-encode an asset's image OPAQUE (drop the dead alpha channel) to its SAME format → byte size (or
+   *  null). MEASURES the honest disk cost of a fully-opaque image's unused alpha channel (the wasted-alpha
+   *  finding). Browser/worker supplies it via an `{alpha:false}` OffscreenCanvas; headless/CLI omits it ⇒
+   *  the finding never fires (byte-identical to today). */
+  encodeOpaque?: OpaqueEncodeSizer;
   /** Per-image features (content hash + dHash) for folder-level duplicate detection. */
   features?: ImageFeatures[];
   /** Manifests whose referenced image is missing from the folder. */
@@ -84,6 +91,12 @@ export async function analyze(
   // solid-fill finding ⇒ byte-identical to today (CLI / headless tests unaffected).
   const solidByRef = new Set<string>();
   for (const f of deps.features ?? []) if (f.solid) solidByRef.add(f.assetRef);
+
+  // Fully-opaque marking from the host's FULL-FRAME alpha scan (a fully-opaque image still carrying an
+  // alpha channel wastes DISK bytes). Loose images only (atlases never trip it). Absent ⇒ empty ⇒ no
+  // wasted-alpha finding ⇒ byte-identical to today (CLI / headless tests unaffected).
+  const opaqueByRef = new Set<string>();
+  for (const f of deps.features ?? []) if (f.opaque) opaqueByRef.add(f.assetRef);
 
   const addFormat = async (ref: string, image: ImageAsset, contentClass: ContentClass = 'unknown') => {
     const fmt = await formatFinding(ref, image, cfg, deps.encodeImage, contentClass);
@@ -137,6 +150,16 @@ export async function analyze(
         if (solid) findings.push(solid);
       }
       await addFormat(image.name, image, classByRef.get(image.name) ?? 'unknown');
+      // Wasted alpha: a fully-opaque loose image still carrying an alpha channel. Loose-only, gated on the
+      // host's full-frame opaque scan; the MEASURED disk saving (opaque re-encode, same format) is real and
+      // DISK-only (invariant 5). Absent feature / no encodeOpaque dep ⇒ never fires ⇒ byte-identical.
+      if (opaqueByRef.has(image.name)) {
+        const wa = await wastedAlphaFinding(image.name, image, cfg, deps.encodeOpaque);
+        if (wa) {
+          findings.push(wa);
+          potentialDiskSaved += wa.estimate?.diskBytesSaved ?? 0;
+        }
+      }
     }
   }
 

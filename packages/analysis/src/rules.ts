@@ -153,6 +153,60 @@ export function solidFillFinding(ref: string, size: Size, cfg: ThresholdConfig):
   };
 }
 
+/** Re-encode an asset's image OPAQUELY (compose onto an opaque canvas, dropping the dead alpha channel)
+ *  to the SAME source format and return the resulting byte size — or null if unavailable. The MEASURED
+ *  honest disk cost of the alpha channel = source byteSize − this. Same kind of injected sizer as
+ *  EncodeSizer (measurement, not generation: it sizes, it never emits a file — the actual opaque file is
+ *  the Pro fix's job, invariant 3). Browser/worker supplies it via an `{alpha:false}` OffscreenCanvas;
+ *  headless/CLI omits it ⇒ the finding never fires. */
+export type OpaqueEncodeSizer = (assetRef: string, mime: ImageMime) => Promise<number | null>;
+
+/** Fully-opaque LOOSE image that still carries an alpha channel (PNG / WebP-with-alpha). Its alpha is
+ *  255 on EVERY pixel (host full-frame scan), so the channel is dead weight on DISK — a PNG/WebP encoder
+ *  spends bytes storing a constant plane. We MEASURE that DISK cost by re-encoding the image OPAQUE to the
+ *  SAME format (the injected sizer); the saving is `byteSize − opaqueBytes`. HONESTY (invariant 5): this is
+ *  a DOWNLOAD/disk saving ONLY — the GPU still decodes to RGBA8888 and allocates the same VRAM, so the
+ *  finding carries `diskBytesSaved` and NEVER `vramBytesSaved`. We never emit the opaque image (that is the
+ *  fix engine's job — invariant 3). Loose-only; the worker sets `opaque` from a full-resolution scan (NOT
+ *  the 9×8 sample — one transparent pixel must not average away). Returns null below the gates, on a JPEG /
+ *  AVIF source (JPEG has no alpha; AVIF is already the recommended target), or with no sizer / no saving. */
+export async function wastedAlphaFinding(
+  ref: string,
+  image: ImageAsset,
+  cfg: ThresholdConfig,
+  encodeOpaque?: OpaqueEncodeSizer,
+): Promise<Finding | null> {
+  if (!cfg.wastedAlpha || !encodeOpaque || image.byteSize <= 0) return null;
+  // Only formats that actually store a (here-dead) alpha channel. JPEG has none; AVIF is already the
+  // best delivery target (the format audit owns it) and rarely the loose-art case we mean.
+  if (image.mime !== 'image/png' && image.mime !== 'image/webp') return null;
+  const shorter = Math.min(image.size.w, image.size.h);
+  if (shorter < cfg.wastedAlpha.minEdgePx) return null;
+  const opaqueBytes = await encodeOpaque(ref, image.mime);
+  if (opaqueBytes == null || opaqueBytes <= 0) return null;
+  const saved = image.byteSize - opaqueBytes;
+  const frac = saved / image.byteSize;
+  if (frac < cfg.wastedAlpha.minDiskSaving) return null; // a near-zero channel isn't worth a verdict
+  const label = FORMAT_LABEL[image.mime];
+  return {
+    id: `${ref}:wasted-alpha`,
+    rule: 'wasted-alpha',
+    severity: 'warn',
+    assetRef: ref,
+    title: `${label} carries an unused alpha channel — ${fmtBytes(saved)} of dead weight`,
+    detail:
+      `Every pixel is fully opaque (alpha 255), yet this ${label} still stores an alpha channel. ` +
+      `Dropping it (re-encode opaque, same format) cuts ~${fmtBytes(saved)} (${pct1(frac)}%) of DOWNLOAD. ` +
+      `This is a DISK saving only — the GPU still decodes to RGBA8888, so VRAM is unchanged.`,
+    fix: `Re-encode opaque (RGB) for delivery, or switch to a format without an alpha channel.`,
+    // DISK only: the dead channel costs download bytes; it costs NOTHING on the GPU (RGBA8888 regardless,
+    // invariant 5). NO vramBytesSaved — that would be a faked win.
+    estimate: { diskBytesSaved: saved },
+    messageKey: 'wasted-alpha',
+    params: { srcLabel: label, srcBytes: image.byteSize, opaqueBytes, saved, frac },
+  };
+}
+
 export function wastedRegions(
   atlas: Atlas,
   cfg: ThresholdConfig,

@@ -1,0 +1,21 @@
+{
+  "kind": "wasted-alpha",
+  "feature": "wasted-alpha-loose-detector",
+  "images": [
+    {
+      "name": "opaque.png",
+      "w": 256,
+      "h": 256,
+      "opaque": true,
+      "why": "solid opaque fill → every pixel alpha 255 → the alpha channel is dead weight on disk"
+    },
+    {
+      "name": "transparent.png",
+      "w": 256,
+      "h": 256,
+      "opaque": false,
+      "why": "opaque 192×192 content with a fully-transparent 32px margin → at least one alpha-0 pixel → the channel is in use"
+    }
+  ],
+  "note": "Two loose PNGs for the wasted-alpha (fully-opaque-with-alpha-channel) detector. Read at FULL resolution (NOT the 9×8 sample — one transparent pixel must not average away). opaque ⇒ opaque:true (rule wasted-alpha; diskBytesSaved = byteSize − opaque-re-encode bytes, MEASURED; NO vramBytesSaved, invariant 5); transparent ⇒ opaque:false. The disk saving is DOWNLOAD-only — the GPU still decodes to RGBA8888 and allocates the same VRAM. The opaque re-encode is the Pro fix's job (invariant 3)."
+}

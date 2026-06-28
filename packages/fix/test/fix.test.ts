@@ -183,6 +183,81 @@ describe('planFix', () => {
   });
 });
 
+// ── Opaque-alpha (round15) — the Pro fix for `wasted-alpha` findings ──────────────────────────────
+// planFix's `opts.opaqueAlpha` stamps `opaque:true` on the transcode op for every wasted-alpha-flagged
+// loose ref (DISK-only, invariant 5). Pure data assertions: exactly one transcode op per ref, carrying
+// opaque:true and targeting opts.targetMime (NEVER a source mime — the plan holds none). OFF ⇒ no op
+// carries `opaque` ⇒ byte-identical. format + wasted-alpha ⇒ one op (folded), not two. Order-independent.
+describe('planFix — opaque-alpha (wasted-alpha fix)', () => {
+  const base = { targetMime: 'image/avif' as const, quality: 0.85, lossless: false, padding: 2, maxSize: 4096, maxEdge: 2048 };
+  const transcodes = (plan: { ops: FixOp[] }) => plan.ops.filter((o): o is Extract<FixOp, { kind: 'transcode' }> => o.kind === 'transcode');
+  const wastedAlpha = (ref: string): AnalysisReport['findings'][number] =>
+    ({ id: `${ref}:wasted-alpha`, rule: 'wasted-alpha', severity: 'warn', assetRef: ref, title: '', detail: '', messageKey: 'wasted-alpha', params: { srcLabel: 'PNG', srcBytes: 1000, opaqueBytes: 700, saved: 300, frac: 0.3 } });
+  const reportOf = (findings: AnalysisReport['findings']): AnalysisReport => ({
+    assets: findings.map((f) => ({ assetRef: f.assetRef, diskBytes: 1000, vramBytes: 0 })),
+    findings,
+    totals: { diskBytes: 1000, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+    thresholds: DEFAULT_THRESHOLDS,
+  });
+
+  it('OFF ⇒ no transcode op carries opaque (byte-identical to today)', () => {
+    const report = reportOf([wastedAlpha('logo.png')]);
+    const plan = planFix(report, { ...base, aggressive: false }); // opaqueAlpha omitted
+    expect(plan.ops.some((o) => o.kind === 'transcode' && o.opaque)).toBe(false);
+    // A wasted-alpha-only finding with the toggle off emits NO transcode op at all (diagnosis-only).
+    expect(transcodes(plan)).toHaveLength(0);
+  });
+
+  it('ON, wasted-alpha-only ref ⇒ a standalone opaque transcode to opts.targetMime', () => {
+    const report = reportOf([wastedAlpha('logo.png')]);
+    const plan = planFix(report, { ...base, aggressive: false, opaqueAlpha: true });
+    const ts = transcodes(plan);
+    expect(ts).toHaveLength(1);
+    expect(ts[0]!.assetRef).toBe('logo.png');
+    expect(ts[0]!.opaque).toBe(true);
+    expect(ts[0]!.targetMime).toBe('image/avif'); // opts.targetMime, NEVER the source mime
+  });
+
+  it('ON, format + wasted-alpha for the same ref ⇒ EXACTLY ONE transcode op carrying opaque:true', () => {
+    const report = reportOf([
+      { id: 'logo.png:format', rule: 'format', severity: 'warn', assetRef: 'logo.png', title: '', detail: '' },
+      wastedAlpha('logo.png'),
+    ]);
+    const plan = planFix(report, { ...base, aggressive: false, opaqueAlpha: true });
+    const ts = transcodes(plan);
+    expect(ts).toHaveLength(1); // folded into the format transcode — never two ops
+    expect(ts[0]!.opaque).toBe(true);
+    expect(ts[0]!.targetMime).toBe('image/avif');
+  });
+
+  it('ON, order-independent: wasted-alpha BEFORE the format finding still folds into one opaque op', () => {
+    const report = reportOf([
+      wastedAlpha('logo.png'), // appears first
+      { id: 'logo.png:format', rule: 'format', severity: 'warn', assetRef: 'logo.png', title: '', detail: '' },
+    ]);
+    const plan = planFix(report, { ...base, aggressive: false, opaqueAlpha: true });
+    const ts = transcodes(plan);
+    expect(ts).toHaveLength(1);
+    expect(ts[0]!.opaque).toBe(true);
+  });
+
+  it('ON, a wasted-alpha ref also RESIZED ⇒ no opaque transcode (resize owns the re-encode)', () => {
+    const report = reportOf([
+      { id: 'big.png:oversize', rule: 'dimensions-oversize', severity: 'crit', assetRef: 'big.png', title: '', detail: '', messageKey: 'oversize', params: { w: 4096, h: 4096, edge: 4096, budget: 2730, sev: 'crit', vram: 0 } },
+      wastedAlpha('big.png'),
+    ]);
+    const plan = planFix(report, { ...base, aggressive: false, opaqueAlpha: true });
+    expect(plan.ops.some((o) => o.kind === 'resize' && o.assetRef === 'big.png')).toBe(true);
+    expect(transcodes(plan)).toHaveLength(0); // resize wins; no standalone opaque transcode
+  });
+
+  it('ON, a folder-scope wasted-alpha finding is ignored (no single op target)', () => {
+    const report = reportOf([{ ...wastedAlpha('logo.png'), scope: 'folder' as const }]);
+    const plan = planFix(report, { ...base, aggressive: false, opaqueAlpha: true });
+    expect(transcodes(plan)).toHaveLength(0);
+  });
+});
+
 // ── Owner-aware dedup drop path (design §3d / §10) ───────────────────────────────────────────────
 // planFix's THIRD argument (DedupGroup[]) turns exact-dup drops into OWNER-AWARE drops: one drop per
 // consumer carrying `ownerRef`, with `repointManifest:true` only for atlas consumers (isAtlasRef). Owners

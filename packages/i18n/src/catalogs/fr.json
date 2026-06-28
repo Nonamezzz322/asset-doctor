@@ -108,6 +108,9 @@
   "find.solid-fill.title": "Uni {w}×{h} — une couleur immobilise {vram:bytes}",
   "find.solid-fill.detail": "Chaque pixel échantillonné est de la même couleur (ou entièrement transparent) — ni contour, ni dégradé, ni détail. Il immobilise pourtant {vram:bytes} de VRAM ({w}×{h}×4) pour porter une seule valeur.",
   "find.solid-fill.fix": "Remplacez par une texture 1×1 teintée/étirée à l'exécution, ou par un sprite de couleur unie.",
+  "find.wasted-alpha.title": "{srcLabel} porte un canal alpha inutilisé — {saved:bytes} de poids mort",
+  "find.wasted-alpha.detail": "Chaque pixel est entièrement opaque (alpha 255), pourtant ce {srcLabel} stocke encore un canal alpha. Le supprimer (réencodage opaque, même format) retire ~{saved:bytes} ({frac:pct}) de TÉLÉCHARGEMENT. C'est une économie disque uniquement — le GPU décode toujours en RGBA8888, donc la VRAM est inchangée.",
+  "find.wasted-alpha.fix": "Réencodez en opaque (RGB) pour la livraison, ou choisissez un format sans canal alpha.",
   "find.wasted-regions.title": {
     "$count": "n",
     "one": "{n} région vide cartographiée",
@@ -280,6 +283,8 @@
   "fix.settings.nearLosslessHint": "WebP quasi sans perte — plus net qu'avec perte, plus petit que totalement sans perte.",
   "fix.settings.pngRecompress": "Recompression PNG sans perte",
   "fix.settings.pngRecompressHint": "Réempaquette les octets PNG sans perte (oxipng). Charge un codec à la première utilisation.",
+  "fix.settings.opaqueAlpha": "Supprimer le canal alpha inutilisé",
+  "fix.settings.opaqueAlphaHint": "Réencode les images entièrement opaques sans leur canal alpha mort — une économie de téléchargement/disque uniquement. La VRAM est inchangée (le GPU décode toujours en RGBA8888).",
   "fix.settings.overrides": "Surcharges par dossier / type",
   "fix.settings.overridesHint": "Surcharge le format ou la qualité pour un préfixe de dossier ou un type d'asset.",
   "fix.skipped.whyNoKernel": "Le noyau de réduction n'est pas configurable dans le navigateur — le rééchantillonneur haute qualité du navigateur est utilisé.",

@@ -87,6 +87,9 @@
   "find.solid-fill.title": "Solid {w}×{h} — one color pinning {vram:bytes}",
   "find.solid-fill.detail": "Every sampled pixel is the same color (or fully transparent) — no edges, gradient or detail. It still pins {vram:bytes} of VRAM ({w}×{h}×4) to carry a single value.",
   "find.solid-fill.fix": "Replace with a 1×1 texture tinted/stretched at runtime, or a solid-color sprite.",
+  "find.wasted-alpha.title": "{srcLabel} carries an unused alpha channel — {saved:bytes} of dead weight",
+  "find.wasted-alpha.detail": "Every pixel is fully opaque (alpha 255), yet this {srcLabel} still stores an alpha channel. Dropping it (re-encode opaque, same format) cuts ~{saved:bytes} ({frac:pct}) of DOWNLOAD. This is a DISK saving only — the GPU still decodes to RGBA8888, so VRAM is unchanged.",
+  "find.wasted-alpha.fix": "Re-encode opaque (RGB) for delivery, or switch to a format without an alpha channel.",
   "find.wasted-regions.title": {
     "$count": "n",
     "one": "{n} empty region mapped",
@@ -257,6 +260,8 @@
   "fix.settings.nearLosslessHint": "Near-lossless WebP — sharper than lossy, smaller than fully lossless.",
   "fix.settings.pngRecompress": "PNG lossless recompress",
   "fix.settings.pngRecompressHint": "Re-pack PNG bytes losslessly (oxipng). Loads a codec on first use.",
+  "fix.settings.opaqueAlpha": "Drop unused alpha channel",
+  "fix.settings.opaqueAlphaHint": "Re-encode fully-opaque images without their dead alpha channel — a download/disk saving only. VRAM is unchanged (the GPU still decodes to RGBA8888).",
   "fix.settings.overrides": "Per-folder / per-type overrides",
   "fix.settings.overridesHint": "Override format or quality for a folder prefix or an asset type.",
   "fix.skipped.whyNoKernel": "Downscale kernel isn't configurable in-browser — the browser's high-quality resampler is used.",

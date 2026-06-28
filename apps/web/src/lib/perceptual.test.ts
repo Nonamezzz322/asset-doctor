@@ -5,6 +5,7 @@ import { PNG, type PNGImage } from 'pngjs';
 import { describe, expect, it } from 'vitest';
 import type { ContentClass } from '@asset-doctor/core';
 import {
+  alphaFullyOpaque,
   classifyContent,
   dHashFromGray,
   grayStdDev,
@@ -130,6 +131,26 @@ describe('isSolidColor (single-color / fully transparent detector)', () => {
   });
 });
 
+describe('alphaFullyOpaque (full-frame opaque scan — wasted-alpha detector)', () => {
+  it('every pixel alpha 255 ⇒ true (a dead alpha channel)', () => {
+    expect(alphaFullyOpaque(rgba(() => [10, 20, 30, 255]))).toBe(true);
+  });
+
+  it('one single non-opaque pixel ⇒ false (short-circuits; transparency is real)', () => {
+    expect(alphaFullyOpaque(rgba((i) => (i === N - 1 ? [0, 0, 0, 0] : [10, 20, 30, 255])))).toBe(false);
+    // 254 is NOT opaque — a real, used alpha channel, never "dead"
+    expect(alphaFullyOpaque(rgba((i) => (i === 0 ? [10, 20, 30, 254] : [10, 20, 30, 255])))).toBe(false);
+  });
+
+  it('a fully-transparent buffer ⇒ false (alpha 0 everywhere — channel is in use)', () => {
+    expect(alphaFullyOpaque(rgba(() => [0, 0, 0, 0]))).toBe(false);
+  });
+
+  it('an empty buffer ⇒ false (nothing to measure — never claim a saving on no data)', () => {
+    expect(alphaFullyOpaque(new Uint8ClampedArray(0))).toBe(false);
+  });
+});
+
 describe('classifyContent (order: alpha-art → flat → photographic; empty → unknown)', () => {
   it('a hard-alpha icon ⇒ alpha-art (even after a resample smears the edge)', () => {
     // Opaque body that is ALSO low-variance in color — alpha must win over the flat-variance branch.
@@ -237,6 +258,39 @@ describe('classifyContent over the format-classes fixtures (golden cross-check)'
       const golden = expected.images.find((e) => e.name === img.name);
       expect(golden?.contentClass).toBe(img.contentClass);
       expect(classifyFixture(img.name)).toBe(img.contentClass);
+    });
+  }
+});
+
+describe('alphaFullyOpaque over the wasted-alpha fixtures (golden cross-check)', () => {
+  // UNLIKE the solid-fill / content-class cross-checks (which box-average to the 9×8 dHash sample), the
+  // wasted-alpha detector runs on the FULL-RESOLUTION decode — one transparent pixel must not average
+  // away. So we read the full-res fixture PNG directly (the PNG.data IS the interleaved RGBA the worker's
+  // full-frame getImageData yields) and feed it straight to alphaFullyOpaque. The golden `opaque` in
+  // expected.json is authored by hand in the generator, an independent cross-check.
+  const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../../fixtures/sample-projects/wasted-alpha');
+
+  function opaqueFixture(file: string): boolean {
+    const png = PNG.sync.read(readFileSync(join(FIXTURES, file)));
+    return alphaFullyOpaque(new Uint8ClampedArray(png.data)); // full-res RGBA, no downsample
+  }
+
+  interface ExpectedOpaque {
+    name: string;
+    opaque: boolean;
+  }
+  const expected = JSON.parse(readFileSync(join(FIXTURES, 'expected.json'), 'utf8')) as {
+    images: ExpectedOpaque[];
+  };
+
+  for (const img of [
+    { name: 'opaque.png', opaque: true },
+    { name: 'transparent.png', opaque: false },
+  ]) {
+    it(`${img.name} ⇒ opaque:${img.opaque} (matches the authored golden)`, () => {
+      const golden = expected.images.find((e) => e.name === img.name);
+      expect(golden?.opaque).toBe(img.opaque); // golden agrees with the hard-coded expectation (no drift)
+      expect(opaqueFixture(img.name)).toBe(img.opaque); // detector agrees with the golden
     });
   }
 });

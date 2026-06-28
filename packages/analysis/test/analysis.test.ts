@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { Asset, Atlas, Rect } from '@asset-doctor/core';
 import { parseAtlas, parseImage } from '@asset-doctor/parsers';
-import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, wastedAlphaFinding, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -298,6 +298,87 @@ describe('solid-fill (single-color loose image)', () => {
       features: [{ assetRef: 'plate.png', contentHash: 'h', solid: true }],
     });
     expect(withSolid.totals.potentialDiskSaved).toBe(report.totals.potentialDiskSaved);
+  });
+});
+
+describe('wasted-alpha (fully-opaque image carrying a dead alpha channel)', () => {
+  const looseImg = (name: string, w: number, h: number, mime: 'image/png' | 'image/webp' | 'image/jpeg' | 'image/avif' = 'image/png', byteSize = 10000): Asset => ({
+    kind: 'image',
+    image: { name, imageRef: name, size: { w, h }, mime, byteSize },
+  });
+  const px = looseImg('flat.png', 512, 512).image; // a 512² PNG over both gates
+
+  it('opaque PNG with a real disk saving ⇒ warn, diskBytesSaved only, NO vramBytesSaved (Inv 5)', async () => {
+    const f = (await wastedAlphaFinding('flat.png', px, DEFAULT_THRESHOLDS, async () => 7000))!;
+    expect(f).not.toBeNull();
+    expect(f.rule).toBe('wasted-alpha');
+    expect(f.messageKey).toBe('wasted-alpha');
+    expect(f.severity).toBe('warn');
+    expect(f.estimate?.diskBytesSaved).toBe(10000 - 7000);
+    expect(f.estimate?.vramBytesSaved).toBeUndefined(); // disk-only; the GPU still allocates RGBA8888
+    expect(f.params).toEqual({ srcLabel: 'PNG', srcBytes: 10000, opaqueBytes: 7000, saved: 3000, frac: 0.3 });
+  });
+
+  it('saving below minDiskSaving ⇒ null (a near-zero channel isn\'t worth a verdict)', async () => {
+    // 10000 → 9900 = 1% < 5% gate
+    expect(await wastedAlphaFinding('flat.png', px, DEFAULT_THRESHOLDS, async () => 9900)).toBeNull();
+  });
+
+  it('below minEdgePx ⇒ null (a tiny icon\'s dead channel is negligible)', async () => {
+    const tiny = looseImg('i.png', 32, 32).image; // shorter edge 32 < minEdgePx 64
+    expect(await wastedAlphaFinding('i.png', tiny, DEFAULT_THRESHOLDS, async () => 100)).toBeNull();
+  });
+
+  it('JPEG / AVIF source ⇒ null (JPEG has no alpha; AVIF is the recommended target)', async () => {
+    expect(await wastedAlphaFinding('p.jpg', looseImg('p.jpg', 512, 512, 'image/jpeg').image, DEFAULT_THRESHOLDS, async () => 1)).toBeNull();
+    expect(await wastedAlphaFinding('p.avif', looseImg('p.avif', 512, 512, 'image/avif').image, DEFAULT_THRESHOLDS, async () => 1)).toBeNull();
+  });
+
+  it('no encodeOpaque sizer ⇒ null (CLI / headless never fires)', async () => {
+    expect(await wastedAlphaFinding('flat.png', px, DEFAULT_THRESHOLDS, undefined)).toBeNull();
+  });
+
+  it('no wastedAlpha config ⇒ null (budget configs that don\'t opt in)', async () => {
+    const cfg = { ...DEFAULT_THRESHOLDS };
+    delete cfg.wastedAlpha;
+    expect(await wastedAlphaFinding('flat.png', px, cfg, async () => 7000)).toBeNull();
+  });
+
+  it('sizer returns null ⇒ null (codec fallback — never miscount)', async () => {
+    expect(await wastedAlphaFinding('flat.png', px, DEFAULT_THRESHOLDS, async () => null)).toBeNull();
+  });
+
+  it('analyze threads opaque:true to a LOOSE image via features ⇒ finding + bumps potentialDiskSaved', async () => {
+    const report = await analyze([looseImg('flat.png', 512, 512)], undefined, {
+      encodeOpaque: async () => 7000,
+      features: [{ assetRef: 'flat.png', contentHash: 'h', opaque: true }],
+    });
+    const wa = report.findings.find((f) => f.rule === 'wasted-alpha');
+    expect(wa?.assetRef).toBe('flat.png');
+    expect(report.totals.potentialDiskSaved).toBe(3000);
+  });
+
+  it('analyze NEVER fires wasted-alpha for an ATLAS, even if a feature marks it opaque (loose-only)', async () => {
+    const atlasAsset: Asset = {
+      kind: 'atlas',
+      atlas: { name: 'sheet.png', imageRef: 'sheet.png', size: { w: 1024, h: 1024 }, sprites: [{ name: 's0', frame: { x: 0, y: 0, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 32, h: 32 } }], source: { kind: 'pixi' } },
+      image: { name: 'sheet.png', imageRef: 'sheet.png', size: { w: 1024, h: 1024 }, mime: 'image/png', byteSize: 10000 },
+    };
+    const report = await analyze([atlasAsset], undefined, {
+      encodeOpaque: async () => 1,
+      features: [{ assetRef: 'sheet.png', contentHash: 'h', opaque: true }],
+    });
+    expect(report.findings.find((f) => f.rule === 'wasted-alpha')).toBeUndefined();
+  });
+
+  it('absent feature / absent dep ⇒ no finding (CLI / headless byte-identical)', async () => {
+    const noFeat = await analyze([looseImg('flat.png', 512, 512)], undefined, { encodeOpaque: async () => 7000 });
+    expect(noFeat.findings.find((f) => f.rule === 'wasted-alpha')).toBeUndefined();
+    expect(noFeat.totals.potentialDiskSaved).toBe(0);
+    const noDep = await analyze([looseImg('flat.png', 512, 512)], undefined, {
+      features: [{ assetRef: 'flat.png', contentHash: 'h', opaque: true }],
+    });
+    expect(noDep.findings.find((f) => f.rule === 'wasted-alpha')).toBeUndefined();
   });
 });
 

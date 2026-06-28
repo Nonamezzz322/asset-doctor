@@ -14,11 +14,12 @@ export {
   occupancyFinding,
   dimensionFindings,
   solidFillFinding,
+  wastedAlphaFinding,
   wastedRegions,
   formatFinding,
   fmtBytes,
 } from './rules';
-export type { EncodeSizer } from './rules';
+export type { EncodeSizer, OpaqueEncodeSizer } from './rules';
 export {
   duplicateExactFindings,
   duplicateSimilarFindings,

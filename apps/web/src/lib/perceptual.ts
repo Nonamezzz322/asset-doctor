@@ -114,6 +114,21 @@ export function hasHardAlpha(
   return opaqueCount / n >= pole && clearCount / n >= pole;
 }
 
+/** Alpha is FULLY opaque iff EVERY pixel's alpha byte === 255 — i.e. the image carries an alpha
+ *  channel it never uses. Runs over the FULL-RESOLUTION interleaved RGBA bytes (the alpha channel is
+ *  every 4th byte), NOT the 9×8 sample: a single transparent pixel must not box-average away. SHORT-
+ *  CIRCUITS on the first non-opaque pixel — most images bail almost instantly (instant-wow safe), and a
+ *  fully-opaque image is the worst case (one full sweep, strictly cheaper than the existing format-audit
+ *  decode+encode). An empty buffer ⇒ false (nothing to measure — never claim a saving on no data).
+ *  Pure integer-byte read, deterministic. Mirrors the alpha-pole loop in hasHardAlpha but with a hard
+ *  255 threshold (a 254 alpha is a real, used channel — not dead). */
+export function alphaFullyOpaque(rgba: Uint8ClampedArray | number[]): boolean {
+  const n = Math.floor(rgba.length / 4);
+  if (n === 0) return false;
+  for (let p = 0; p < n; p++) if ((rgba[p * 4 + 3] ?? 0) !== 255) return false;
+  return true;
+}
+
 /** Classify a 9×8 RGBA sample into a coarse content class for the format-suitability verdict.
  *  Order (design §4): hard alpha first (a flat icon WITH a hard cutout is 'alpha-art', so checking
  *  alpha before variance keeps it out of the 'flat' bucket) → low-variance fill ('flat') → else

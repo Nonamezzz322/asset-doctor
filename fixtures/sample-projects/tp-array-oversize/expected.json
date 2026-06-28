@@ -21,5 +21,5 @@
       "severity": "info"
     }
   ],
-  "note": "Occupancy ~86% (ok). Atlas 4100×1024: edge 4100 > 4096 (oversize crit) and NPOT (warn)."
+  "note": "Occupancy ~86% (ok). Atlas 4100×1024: edge 4100 > 4096 (oversize crit) and NPOT (warn). 16.8MB texture → mipmaps would add ~5.6MB (mipmap-cost info)."
 }

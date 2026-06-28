@@ -18,6 +18,13 @@ export interface PlanOptions {
   maxEdge: number;
   /** Aggressive, NON-drop-in: merge under-filled atlas groups + drop exact & near duplicates. */
   aggressive: boolean;
+  /** Opaque-encode the Pro fix for a `wasted-alpha` finding (a fully-opaque image still carrying a dead
+   *  alpha channel): re-encode it WITHOUT the alpha channel for a DISK/download saving (invariant 5 — never
+   *  a VRAM claim; the GPU still allocates RGBA8888). When ON, every `wasted-alpha`-flagged loose ref gets a
+   *  transcode op with `opaque:true` — either by setting the flag on its existing `format` transcode, or by
+   *  emitting a standalone opaque transcode when format didn't fire. DEFAULT OFF ⇒ no op carries `opaque` ⇒
+   *  byte-identical to today (the wasted-alpha finding stays a diagnosis-only verdict). */
+  opaqueAlpha?: boolean;
   /** True iff a ref is an atlas (image+manifest pair). Supplied by the worker (which has atlasByRef).
    *  Pure predicate — used to decide owner-aware drops that repoint a consumer manifest's meta.image.
    *  Absent ⇒ no ref is treated as an atlas (every owner-aware drop is a whole-file drop). */
@@ -86,6 +93,18 @@ export interface PlanOptions {
  * does NOT size the gutter (that's a worker-side per-op decision: `gutter = max(op.padding, op.extrude)`,
  * respecting the padding budget, then `effectiveExtrude = min(extrude, gutter)`). extrude unset/0 ⇒ NO
  * op carries `extrude` ⇒ every op object is byte-identical to today (default OFF).
+ *
+ * OPAQUE-ALPHA (`opts.opaqueAlpha`, round15): the Pro fix for `wasted-alpha` findings (fully-opaque images
+ * that still carry a dead alpha channel). When ON, every `wasted-alpha`-flagged loose ref is guaranteed
+ * EXACTLY ONE transcode op carrying `opaque:true` (encode to `opts.targetMime` WITHOUT the alpha channel,
+ * a DISK-only saving — invariant 5, never VRAM). Determinism: an `opaqueRefs` Set is built FIRST (order-
+ * free), so the `format` transcode branch sets `opaque:true` whenever its ref is opaque-flagged, regardless
+ * of finding order; a local `transcoded` Set then lets a standalone wasted-alpha branch emit an opaque
+ * transcode ONLY for opaque refs that no format/resize/drop/pack/tier op already claimed — so a ref with
+ * BOTH `format` AND `wasted-alpha` yields one op (the format transcode, now opaque), never two. The op
+ * targets `opts.targetMime` exactly like the format op (the plan holds no source mime; the finding's
+ * `params.srcLabel` is copy-only, not op routing). OFF/no wasted-alpha finding ⇒ no op carries `opaque`
+ * ⇒ byte-identical to today (the finding stays a diagnosis-only verdict; CLI/headless unaffected).
  */
 export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: DedupGroup[], packGroups?: PackGroup[]): FixPlan {
   const ops: FixOp[] = [];
@@ -102,6 +121,22 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
   // Refs folded into a packed sheet/atlas (Feature 4). Guards pass-2 transcode below (a packed loose
   // image is encoded once, into its sheet — never also transcoded). Empty unless packGroups supplied.
   const packed = new Set<string>();
+
+  // Opaque-alpha (round15): the loose refs a `wasted-alpha` finding flagged (fully opaque, dead alpha
+  // channel). Built FIRST so it is order-free — the pass-2 `format` branch consults it to set `opaque:true`
+  // on an existing format transcode regardless of finding order, and a standalone branch emits an opaque
+  // transcode for opaque refs that no other op claimed. Only when the UI opted in (opts.opaqueAlpha); a
+  // folder-scope finding has no single op target so it is excluded. Empty ⇒ no op carries `opaque`.
+  const opaqueRefs = new Set<string>();
+  if (opts.opaqueAlpha) {
+    for (const f of report.findings) {
+      if (f.rule === 'wasted-alpha' && f.scope !== 'folder') opaqueRefs.add(f.assetRef);
+    }
+  }
+  // Local guard so a ref flagged by BOTH `format` and `wasted-alpha` yields EXACTLY ONE transcode op
+  // (carrying opaque:true). The format branch adds to it when it emits; the standalone opaque branch only
+  // fires for an opaque ref NOT already transcoded here. Order-independent by construction (Set membership).
+  const transcoded = new Set<string>();
 
   // Scale-tier export (design §7): ON iff a non-empty (already-validated) ladder is supplied. Tiering
   // RENAMES owners, so when it coincides with aggressive owner-aware dedup we drop the manifest repoint
@@ -265,8 +300,32 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
       // lossy q0.9 frays hard edges + flat fills. This is where the honest lossless byte delta the
       // analysis path deferred (Inv 4) is actually produced. Photographic/unknown follow opts.lossless.
       const wantsLossless = f.params?.contentClass === 'flat' || f.params?.contentClass === 'alpha-art';
-      ops.push({ kind: 'transcode', assetRef: f.assetRef, targetMime: opts.targetMime, quality: opts.quality, lossless: opts.lossless || wantsLossless });
+      transcoded.add(f.assetRef);
+      ops.push({
+        kind: 'transcode',
+        assetRef: f.assetRef,
+        targetMime: opts.targetMime,
+        quality: opts.quality,
+        lossless: opts.lossless || wantsLossless,
+        // Opaque-alpha (round15): this format-improvable image is ALSO fully-opaque-with-dead-alpha — fold
+        // the channel-drop into the same encode (one op, no orphan). DISK-only (invariant 5). Order-free:
+        // opaqueRefs is pre-built, so this fires whether the wasted-alpha finding sorted before or after.
+        ...(opaqueRefs.has(f.assetRef) ? { opaque: true } : {}),
+      });
     }
+  }
+
+  // pass 2b (opaque-alpha, round15): a `wasted-alpha`-flagged loose ref that NO other op claimed (no
+  // format/resize/drop/pack/tier op above) still deserves the channel-drop fix — emit its OWN opaque
+  // transcode to opts.targetMime. The `transcoded` guard (built in pass 2) ensures a ref with BOTH
+  // format and wasted-alpha is handled exactly once (by the format branch, now carrying opaque:true), so
+  // this never double-emits. DISK-only saving (invariant 5 — the GPU still allocates RGBA8888); the worker
+  // measures the real byte delta and skips honestly if there is no win. Empty opaqueRefs ⇒ this loop is a
+  // no-op ⇒ byte-identical to today.
+  for (const ref of opaqueRefs) {
+    if (transcoded.has(ref) || resized.has(ref) || dropped.has(ref) || packed.has(ref) || tiered.has(ref)) continue;
+    transcoded.add(ref);
+    ops.push({ kind: 'transcode', assetRef: ref, targetMime: opts.targetMime, quality: opts.quality, lossless: opts.lossless, opaque: true });
   }
   return { ops, thresholds: report.thresholds };
 }

@@ -107,6 +107,9 @@
   "find.solid-fill.title": "Einfarbig {w}×{h} — eine Farbe bindet {vram:bytes}",
   "find.solid-fill.detail": "Jeder abgetastete Pixel hat dieselbe Farbe (oder ist völlig transparent) — keine Kanten, kein Verlauf, keine Details. Trotzdem bindet er {vram:bytes} VRAM ({w}×{h}×4), um einen einzigen Wert zu tragen.",
   "find.solid-fill.fix": "Durch eine 1×1-Textur ersetzen, zur Laufzeit eingefärbt/gestreckt, oder durch ein einfarbiges Sprite.",
+  "find.wasted-alpha.title": "{srcLabel} führt einen ungenutzten Alphakanal — {saved:bytes} totes Gewicht",
+  "find.wasted-alpha.detail": "Jeder Pixel ist vollständig deckend (Alpha 255), trotzdem speichert dieses {srcLabel} einen Alphakanal. Ihn zu entfernen (deckend neu kodieren, gleiches Format) spart ~{saved:bytes} ({frac:pct}) DOWNLOAD. Das ist nur eine Ersparnis auf der Festplatte — die GPU dekodiert weiterhin zu RGBA8888, der VRAM bleibt also unverändert.",
+  "find.wasted-alpha.fix": "Deckend (RGB) für die Auslieferung neu kodieren oder ein Format ohne Alphakanal wählen.",
   "find.wasted-regions.title": {
     "$count": "n",
     "one": "{n} leere Region gemappt",
@@ -277,6 +280,8 @@
   "fix.settings.nearLosslessHint": "Nahezu verlustfreies WebP — schärfer als verlustbehaftet, kleiner als vollständig verlustfrei.",
   "fix.settings.pngRecompress": "PNG verlustfrei neu komprimieren",
   "fix.settings.pngRecompressHint": "Packt PNG-Bytes verlustfrei neu (oxipng). Lädt einen Codec bei erster Nutzung.",
+  "fix.settings.opaqueAlpha": "Ungenutzten Alphakanal entfernen",
+  "fix.settings.opaqueAlphaHint": "Kodiert vollständig opake Bilder ohne ihren toten Alphakanal neu — nur eine Download-/Speicherersparnis. VRAM bleibt unverändert (die GPU dekodiert weiterhin zu RGBA8888).",
   "fix.settings.overrides": "Überschreibungen pro Ordner / Typ",
   "fix.settings.overridesHint": "Format oder Qualität für einen Ordner-Präfix oder einen Asset-Typ überschreiben.",
   "fix.skipped.whyNoKernel": "Der Verkleinerungs-Kernel ist im Browser nicht konfigurierbar — der hochwertige Resampler des Browsers wird verwendet.",
