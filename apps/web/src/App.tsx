@@ -519,6 +519,8 @@ function SettingsPanel({
   setPngRecompress,
   opaqueAlpha,
   setOpaqueAlpha,
+  bestFormatPerImage,
+  setBestFormatPerImage,
   overrides,
   setOverrides,
 }: {
@@ -532,6 +534,8 @@ function SettingsPanel({
   setPngRecompress: (b: boolean) => void;
   opaqueAlpha: boolean;
   setOpaqueAlpha: (b: boolean) => void;
+  bestFormatPerImage: boolean;
+  setBestFormatPerImage: (b: boolean) => void;
   overrides: { match: string; quality: number }[];
   setOverrides: (o: { match: string; quality: number }[]) => void;
 }) {
@@ -564,6 +568,13 @@ function SettingsPanel({
       <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.settings.opaqueAlphaHint')}>
         <input type="checkbox" checked={opaqueAlpha} onChange={(e) => setOpaqueAlpha(e.target.checked)} className="accent-teal" />
         {t('fix.settings.opaqueAlpha')}
+      </label>
+      {/* Per-image best format (round17): transcode each loose image to the format the audit MEASURED smallest
+          (WebP vs AVIF) instead of one fixed target. HONESTY: bestMime is the measured winner (invariant 3);
+          a format transcode is DISK-only (invariant 5 — never a VRAM claim). */}
+      <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.settings.bestFormatHint')}>
+        <input type="checkbox" checked={bestFormatPerImage} onChange={(e) => setBestFormatPerImage(e.target.checked)} className="accent-teal" />
+        {t('fix.settings.bestFormat')}
       </label>
 
       <div className="mt-3 border-t border-line pt-2">
@@ -1233,6 +1244,12 @@ function FixCard({ files }: { files: PickedFile[] }) {
   // fully-opaque image WITHOUT its dead alpha channel for a DISK saving (invariant 5 — NEVER a VRAM claim;
   // the GPU still allocates RGBA8888). Off ⇒ no transcode op carries `opaque` ⇒ byte-identical to today.
   const [opaqueAlpha, setOpaqueAlpha] = useState(false);
+  // Per-image MEASURED best-format pick (round17) — own Pro toggle, DEFAULT OFF. The diagnosis ALREADY
+  // measured the smallest real encode per loose image (WebP vs AVIF); when ON the fix transcodes each image
+  // to its measured winner instead of one fixed format for all. HONESTY: bestMime is the MEASURED winner
+  // (invariant 3); a format transcode is DISK-only (invariant 5). Off ⇒ every op carries the global target
+  // ⇒ byte-identical to today. An active export profile / a per-folder override still take precedence.
+  const [bestFormatPerImage, setBestFormatPerImage] = useState(false);
   const [overrides, setOverrides] = useState<{ match: string; quality: number }[]>([]);
 
   // Feature 4 — own Pro opt-in, DEFAULT OFF (NOT under aggressive). Defaults reproduce today: off ⇒ no
@@ -1443,6 +1460,12 @@ function FixCard({ files }: { files: PickedFile[] }) {
       // Opaque-alpha (round15) — forwarded only when enabled; off ⇒ undefined ⇒ no transcode op carries
       // `opaque` ⇒ byte-identical to today. DISK-only saving (invariant 5 — never a VRAM claim).
       opaqueAlpha: opaqueAlpha || undefined,
+      // Per-image MEASURED best-format pick (round17) — forwarded only when enabled; off ⇒ undefined ⇒ every
+      // loose transcode op carries the global targetMime ⇒ byte-identical to today (the fixed-target path).
+      // When ON, the plan routes each loose `format` transcode to the diagnosis-measured winner (params.
+      // bestMime). An active exportProfile / a per-folder override still take precedence (worker-side). DISK-
+      // only (invariant 5 — both formats decode to RGBA8888); honest (invariant 3 — bestMime is measured).
+      bestFormatPerImage: bestFormatPerImage || undefined,
       marking: aggressive && Object.keys(marking).length > 0 ? marking : undefined,
       skinGuard: aggressive && Object.keys(skinGuard).length > 0 ? skinGuard : undefined,
       overrides: overrides.length > 0 ? overrides.filter((o) => o.match.trim() !== '') : undefined,
@@ -1568,7 +1591,7 @@ function FixCard({ files }: { files: PickedFile[] }) {
   const sawPlan = useRef(false);
   useEffect(() => {
     if (sawPlan.current) setPhase({ t: 'idle' });
-  }, [aggressive, polygon, marking, effort, scaleAwareQ, webpNearLossless, pngRecompress, opaqueAlpha, overrides, packLoose, packMode, packGranularity, packTrim, extrude, tierEnable, tierSuffixes, profileEnable, profileFormats, customTiers, profileOverrides, ktx2Enable, pngquantEnable]);
+  }, [aggressive, polygon, marking, effort, scaleAwareQ, webpNearLossless, pngRecompress, opaqueAlpha, bestFormatPerImage, overrides, packLoose, packMode, packGranularity, packTrim, extrude, tierEnable, tierSuffixes, profileEnable, profileFormats, customTiers, profileOverrides, ktx2Enable, pngquantEnable]);
   // Consent is NEVER sticky: drop the per-run "uploaded to server" acknowledgement the moment BOTH backend
   // ops are disabled OR the backend becomes unreachable, so a fresh run can't inherit a prior tick. The user
   // must re-consent each time the upload path could engage.
@@ -1626,6 +1649,8 @@ function FixCard({ files }: { files: PickedFile[] }) {
             setPngRecompress={setPngRecompress}
             opaqueAlpha={opaqueAlpha}
             setOpaqueAlpha={setOpaqueAlpha}
+            bestFormatPerImage={bestFormatPerImage}
+            setBestFormatPerImage={setBestFormatPerImage}
             overrides={overrides}
             setOverrides={setOverrides}
           />

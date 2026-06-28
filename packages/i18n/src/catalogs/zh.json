@@ -274,6 +274,8 @@
   "fix.settings.pngRecompressHint": "无损重新打包 PNG 字节（oxipng）。首次使用时加载编解码器。",
   "fix.settings.opaqueAlpha": "移除未使用的 Alpha 通道",
   "fix.settings.opaqueAlphaHint": "重新编码完全不透明的图像，去掉无用的 Alpha 通道——仅节省下载/磁盘空间。VRAM 不变（GPU 仍解码为 RGBA8888）。",
+  "fix.settings.bestFormat": "逐图最佳格式（实测）",
+  "fix.settings.bestFormatHint": "将每张图像转码为我们的审计实测最小的格式（WebP 与 AVIF），而不是对所有图像使用同一种格式。仅节省下载/磁盘空间——VRAM 不变（两者都解码为 RGBA8888）。",
   "fix.settings.overrides": "按文件夹 / 类型覆盖",
   "fix.settings.overridesHint": "为某个文件夹前缀或资源类型覆盖格式或质量。",
   "fix.skipped.whyNoKernel": "缩小核在浏览器中无法配置 — 使用浏览器的高质量重采样器。",

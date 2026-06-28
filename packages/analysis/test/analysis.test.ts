@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import type { Asset, Atlas, Rect } from '@asset-doctor/core';
+import type { Asset, Atlas, ImageAsset, ImageMime, Rect } from '@asset-doctor/core';
 import { parseAtlas, parseImage } from '@asset-doctor/parsers';
 import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, wastedAlphaFinding, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
@@ -224,6 +224,47 @@ describe('format audit — content-class lossless verdict', () => {
     const report = await analyze([looseImg('x.png')], undefined, { encodeImage: async () => 4000 });
     const fmt = report.findings.find((f) => f.rule === 'format');
     expect(fmt?.messageKey).toBe('format');
+  });
+});
+
+// ── Per-image MEASURED best-format pick (round17): formatFinding ALREADY measures both candidates
+// (FORMAT_TARGETS) and now RECORDS the winning mime in params.bestMime — the machine-readable counterpart
+// of the display `target` label. The diagnosis stays measurement-only (invariant 3); the Pro fix opts into
+// carrying this forward. A DIFFERENTIATING encoder mock is required (the constant `async () => 4000` only
+// ever proves AVIF wins) to exercise the WebP-wins branch + the deterministic tie-break.
+describe('format audit — measured bestMime param (round17)', () => {
+  const looseImg = (name: string, mime: ImageMime = 'image/png'): ImageAsset =>
+    ({ name, imageRef: name, size: { w: 256, h: 256 }, mime, byteSize: 10000 });
+
+  it('records bestMime = AVIF when AVIF encodes smallest (lossy verdict)', async () => {
+    const f = (await formatFinding('a.png', looseImg('a.png'), DEFAULT_THRESHOLDS, async (_r, _s, t) => (t === 'image/avif' ? 6000 : 7000)))!;
+    expect(f.messageKey).toBe('format');
+    expect(f.params?.bestMime).toBe('image/avif');
+    expect(f.params?.target).toBe('AVIF'); // the display label stays beside the machine-readable mime
+  });
+
+  it('records bestMime = WebP when WebP encodes smallest (the branch the constant mock can never hit)', async () => {
+    const f = (await formatFinding('b.png', looseImg('b.png'), DEFAULT_THRESHOLDS, async (_r, _s, t) => (t === 'image/avif' ? 7000 : 6000)))!;
+    expect(f.params?.bestMime).toBe('image/webp');
+    expect(f.params?.target).toBe('WebP');
+  });
+
+  it('deterministic tie-break: equal encodes keep AVIF (first FORMAT_TARGETS candidate)', async () => {
+    const f = (await formatFinding('c.png', looseImg('c.png'), DEFAULT_THRESHOLDS, async () => 6000))!;
+    expect(f.params?.bestMime).toBe('image/avif'); // strict-smaller pick ⇒ tie keeps the first iterated
+  });
+
+  it('records bestMime on the flat/alpha-art lossless verdict too', async () => {
+    for (const cls of ['flat', 'alpha-art'] as const) {
+      const f = (await formatFinding('d.png', looseImg('d.png'), DEFAULT_THRESHOLDS, async (_r, _s, t) => (t === 'image/avif' ? 7000 : 6000), cls))!;
+      expect(f.messageKey).toBe('format-lossless');
+      expect(f.params?.bestMime).toBe('image/webp');
+    }
+  });
+
+  it('bestMime is NEVER the source mime: a WebP source yields AVIF (candidate loop skips target===source)', async () => {
+    const f = (await formatFinding('e.webp', looseImg('e.webp', 'image/webp'), DEFAULT_THRESHOLDS, async () => 6000))!;
+    expect(f.params?.bestMime).toBe('image/avif'); // only AVIF is a candidate for a WebP source
   });
 });
 

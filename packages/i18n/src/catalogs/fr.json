@@ -285,6 +285,8 @@
   "fix.settings.pngRecompressHint": "Réempaquette les octets PNG sans perte (oxipng). Charge un codec à la première utilisation.",
   "fix.settings.opaqueAlpha": "Supprimer le canal alpha inutilisé",
   "fix.settings.opaqueAlphaHint": "Réencode les images entièrement opaques sans leur canal alpha mort — une économie de téléchargement/disque uniquement. La VRAM est inchangée (le GPU décode toujours en RGBA8888).",
+  "fix.settings.bestFormat": "Meilleur format par image (mesuré)",
+  "fix.settings.bestFormatHint": "Transcode chaque image vers le format que notre audit a mesuré comme le plus petit (WebP ou AVIF), au lieu d'un format unique pour toutes. Une économie de téléchargement/disque uniquement — la VRAM est inchangée (les deux décodent en RGBA8888).",
   "fix.settings.overrides": "Surcharges par dossier / type",
   "fix.settings.overridesHint": "Surcharge le format ou la qualité pour un préfixe de dossier ou un type d'asset.",
   "fix.skipped.whyNoKernel": "Le noyau de réduction n'est pas configurable dans le navigateur — le rééchantillonneur haute qualité du navigateur est utilisé.",

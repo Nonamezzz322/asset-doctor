@@ -292,7 +292,14 @@ export async function formatFinding(
       fix: `Transcode to lossless ${FORMAT_LABEL[best.mime]} for delivery.`,
       estimate: { diskBytesSaved: saved },
       messageKey: 'format-lossless',
-      params: { target: FORMAT_LABEL[best.mime], frac, srcLabel: FORMAT_LABEL[image.mime], srcBytes: image.byteSize, bestBytes: best.bytes, saved, contentClass },
+      // `bestMime` carries the MEASURED smallest-encode winner (machine-readable, beside the display label)
+      // so the Pro fix can transcode each image to the format the diagnosis already proved smallest (round17
+      // per-image best-format pick) instead of re-guessing a fixed target. We only RECORD the measurement
+      // (invariant 3 — diagnosis measures, never generates); the fix opts into honoring it. Deterministic:
+      // `best.mime` inherits the strict-smaller FORMAT_TARGETS scan (ties keep AVIF, the first candidate),
+      // and it can NEVER equal the source mime (the candidate loop skips target===image.mime + AVIF sources
+      // early-return), so a no-op pick is impossible.
+      params: { target: FORMAT_LABEL[best.mime], frac, srcLabel: FORMAT_LABEL[image.mime], srcBytes: image.byteSize, bestBytes: best.bytes, saved, contentClass, bestMime: best.mime },
     };
   }
   return {
@@ -307,6 +314,9 @@ export async function formatFinding(
     fix: 'Transcode to AVIF (or WebP) for delivery.',
     estimate: { diskBytesSaved: saved },
     messageKey: 'format',
-    params: { target: FORMAT_LABEL[best.mime], frac, srcLabel: FORMAT_LABEL[image.mime], srcBytes: image.byteSize, bestBytes: best.bytes, saved },
+    // `bestMime` (machine-readable) = the MEASURED smallest-encode winner, beside the display label, so the
+    // Pro fix can honor the measured per-image winner (round17) rather than re-guess a fixed target. RECORD
+    // only (invariant 3); see the format-lossless branch above for the determinism/no-op-impossible note.
+    params: { target: FORMAT_LABEL[best.mime], frac, srcLabel: FORMAT_LABEL[image.mime], srcBytes: image.byteSize, bestBytes: best.bytes, saved, bestMime: best.mime },
   };
 }

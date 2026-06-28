@@ -258,6 +258,84 @@ describe('planFix — opaque-alpha (wasted-alpha fix)', () => {
   });
 });
 
+// ── Per-image MEASURED best-format pick (round17) ─────────────────────────────────────────────────
+// planFix's `opts.bestFormatPerImage` routes each LOOSE `format` transcode op to the winner the diagnosis
+// ALREADY measured (params.bestMime) instead of the single global opts.targetMime. Pure data assertions:
+// ON ⇒ each op carries its finding's bestMime; absent/malformed bestMime ⇒ opts.targetMime (fail-safe);
+// OFF (default) ⇒ EVERY op carries opts.targetMime and the op array deep-equals the pre-change baseline;
+// atlas/resize findings under ON ⇒ still opts.targetMime; the standalone opaque transcode keeps the global
+// target. NO encoding — the plan only routes (invariant 3).
+describe('planFix — per-image measured best-format pick (round17)', () => {
+  const base = { targetMime: 'image/webp' as const, quality: 0.85, lossless: false, padding: 2, maxSize: 4096, maxEdge: 2048, aggressive: false };
+  const transcodes = (plan: { ops: FixOp[] }) => plan.ops.filter((o): o is Extract<FixOp, { kind: 'transcode' }> => o.kind === 'transcode');
+  // A loose `format` finding carrying a measured bestMime (mirrors formatFinding's params shape).
+  const fmt = (ref: string, bestMime?: string): AnalysisReport['findings'][number] =>
+    ({ id: `${ref}:format`, rule: 'format', severity: 'warn', assetRef: ref, title: '', detail: '', messageKey: 'format', params: bestMime === undefined ? {} : { bestMime } });
+  const reportOf = (findings: AnalysisReport['findings']): AnalysisReport => ({
+    assets: findings.map((f) => ({ assetRef: f.assetRef, diskBytes: 1000, vramBytes: 0 })),
+    findings,
+    totals: { diskBytes: 1000, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+    thresholds: DEFAULT_THRESHOLDS,
+  });
+
+  it('ON ⇒ each loose transcode targets its finding\'s MEASURED bestMime (per-image, not the global target)', () => {
+    const report = reportOf([fmt('logo.png', 'image/webp'), fmt('bg.png', 'image/avif')]);
+    const ts = transcodes(planFix(report, { ...base, bestFormatPerImage: true }));
+    expect(ts.find((o) => o.assetRef === 'logo.png')!.targetMime).toBe('image/webp');
+    expect(ts.find((o) => o.assetRef === 'bg.png')!.targetMime).toBe('image/avif'); // differs from global webp
+  });
+
+  it('ON, a finding with NO bestMime ⇒ falls back to opts.targetMime (atlas / no-encoder report)', () => {
+    const ts = transcodes(planFix(reportOf([fmt('x.png')]), { ...base, bestFormatPerImage: true }));
+    expect(ts).toHaveLength(1);
+    expect(ts[0]!.targetMime).toBe('image/webp'); // opts.targetMime
+  });
+
+  it('ON, a MALFORMED bestMime ⇒ guard rejects ⇒ opts.targetMime (fail-safe)', () => {
+    const ts = transcodes(planFix(reportOf([fmt('x.png', 'image/tiff')]), { ...base, bestFormatPerImage: true }));
+    expect(ts[0]!.targetMime).toBe('image/webp');
+  });
+
+  it('OFF (default) ⇒ every op carries opts.targetMime AND the op array deep-equals the pre-change baseline', () => {
+    const report = reportOf([fmt('logo.png', 'image/avif'), fmt('bg.png', 'image/webp')]);
+    const off = planFix(report, base); // bestFormatPerImage omitted
+    expect(transcodes(off).every((o) => o.targetMime === 'image/webp')).toBe(true);
+    // Byte-identity (additivity): explicit-false === absent === the bestMime-blind run.
+    expect(planFix(report, { ...base, bestFormatPerImage: false })).toEqual(off);
+    expect(planFix(reportOf([fmt('logo.png'), fmt('bg.png')]), base)).toEqual(off); // bestMime is inert when OFF
+  });
+
+  it('ON, a resized ref keeps opts.targetMime (round17 routes ONLY the pass-2 format transcode)', () => {
+    const report = reportOf([
+      { id: 'big.png:oversize', rule: 'dimensions-oversize', severity: 'crit', assetRef: 'big.png', title: '', detail: '', messageKey: 'oversize', params: { w: 4096, h: 4096, edge: 4096, budget: 2730, sev: 'crit', vram: 0 } },
+      fmt('big.png', 'image/avif'),
+    ]);
+    const plan = planFix(report, { ...base, bestFormatPerImage: true });
+    const resize = plan.ops.find((o): o is Extract<FixOp, { kind: 'resize' }> => o.kind === 'resize')!;
+    expect(resize.targetMime).toBe('image/webp'); // resize keeps the global target (measured on full size)
+    expect(transcodes(plan)).toHaveLength(0); // resize wins over transcode
+  });
+
+  it('ON, the standalone opaque transcode keeps opts.targetMime (no format finding ⇒ no measured bestMime)', () => {
+    const report = reportOf([{ id: 'logo.png:wasted-alpha', rule: 'wasted-alpha', severity: 'warn', assetRef: 'logo.png', title: '', detail: '', messageKey: 'wasted-alpha', params: { srcLabel: 'PNG', srcBytes: 1000, opaqueBytes: 700, saved: 300, frac: 0.3 } }]);
+    const ts = transcodes(planFix(report, { ...base, bestFormatPerImage: true, opaqueAlpha: true }));
+    expect(ts).toHaveLength(1);
+    expect(ts[0]!.opaque).toBe(true);
+    expect(ts[0]!.targetMime).toBe('image/webp'); // pass-2b uses opts.targetMime
+  });
+
+  it('ON, format + wasted-alpha for one ref ⇒ ONE op carrying bestMime AND opaque:true (folded, no double-emit)', () => {
+    const report = reportOf([
+      fmt('logo.png', 'image/avif'),
+      { id: 'logo.png:wasted-alpha', rule: 'wasted-alpha', severity: 'warn', assetRef: 'logo.png', title: '', detail: '', messageKey: 'wasted-alpha', params: { srcLabel: 'PNG', srcBytes: 1000, opaqueBytes: 700, saved: 300, frac: 0.3 } },
+    ]);
+    const ts = transcodes(planFix(report, { ...base, bestFormatPerImage: true, opaqueAlpha: true }));
+    expect(ts).toHaveLength(1);
+    expect(ts[0]!.targetMime).toBe('image/avif'); // measured winner
+    expect(ts[0]!.opaque).toBe(true); // opaque folded in
+  });
+});
+
 // ── Owner-aware dedup drop path (design §3d / §10) ───────────────────────────────────────────────
 // planFix's THIRD argument (DedupGroup[]) turns exact-dup drops into OWNER-AWARE drops: one drop per
 // consumer carrying `ownerRef`, with `repointManifest:true` only for atlas consumers (isAtlasRef). Owners

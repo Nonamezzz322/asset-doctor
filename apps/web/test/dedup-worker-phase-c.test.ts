@@ -17,7 +17,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative } from 'node:path';
-import type { Asset, Atlas, ImageFeatures } from '@asset-doctor/core';
+import type { Asset, Atlas, ImageFeatures, ImageMime } from '@asset-doctor/core';
 import { groupFiles, keyOf, type RawFile } from '@asset-doctor/ingest';
 import { parseAtlas, parseAtlasManifest, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
 import { buildDedupGroups } from '@asset-doctor/analysis';
@@ -33,6 +33,7 @@ import {
   // while shipping in fix.worker.ts).
   predictOwnerFinalNames,
   isOwnerAwareDrop,
+  renamedTo,
 } from '@asset-doctor/fix';
 
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects/raw-multifolder-dupes');
@@ -156,7 +157,20 @@ interface PhaseCResult {
   dedupDiskBytesSaved: number;
   dedupVramBytesSavedUpperBound: number;
 }
-function runPhaseC(b: Built, transcodedOwners: Set<string> = new Set(), tiering = false): PhaseCResult {
+// round17 (per-image MEASURED best-format pick) regression: a SUCCESSFULLY-transcoded owner whose measured
+// winner (params.bestMime, e.g. AVIF) differs from the global opts.targetMime (e.g. WebP). The worker's
+// Phase-A prediction lambda (fix.worker.ts) must route the owner through the SAME resolution execute uses
+// (effectiveForTranscode(ref, op.targetMime).targetMime = the per-image winner), NOT the global
+// effectiveFor(ref,1).targetMime — else the prediction (owner.webp) diverges from the actual emit
+// (owner.avif) and Phase C falsely KEEPS the consumer, silently halting aggressive dedup. `winnerMimeByOwner`
+// models a transcoded owner's MEASURED per-image winner (what execute emits); when set for an owner, both the
+// prediction (round17 fix) and the actual emit use it, so a correct prediction MATCHES and the dedup runs.
+function runPhaseC(
+  b: Built,
+  transcodedOwners: Set<string> = new Set(),
+  tiering = false,
+  winnerMimeByOwner: Map<string, ImageMime> = new Map(),
+): PhaseCResult {
   const isAtlasRef = (ref: string): boolean => b.atlasByRef.has(ref);
   const groups = buildDedupGroups(b.features, b.spineRefs, expected.marking, expected.skinGuard);
   // When tiering is on, plan.ts sets keepConsumer on owner-aware drops (the owner gets renamed) — the
@@ -178,13 +192,20 @@ function runPhaseC(b: Built, transcodedOwners: Set<string> = new Set(), tiering 
     imagePath: b.pathByRef.get(ref),
     manifestPath: b.manifestPathOf(ref),
     transcoded: transcodedOwners.has(ref),
-    targetMime: 'image/webp',
+    // round17: a transcoded owner's prediction follows its MEASURED per-image winner (effectiveForTranscode in
+    // the worker), defaulting to the global target when no per-image winner is supplied (legacy/fixed-target).
+    targetMime: winnerMimeByOwner.get(ref) ?? 'image/webp',
   }));
   // Phase B — actual owner final image. A `transcodedOwners` member simulates the worker's §10.8 keep-the-
   // consumer case: the transcode FAILED, so the owner keeps its ORIGINAL image while the prediction still
   // says .webp ⇒ Phase C must detect the divergence and KEEP the consumer rather than dangle the reference.
+  // round17: a SUCCESSFUL transcode emits the owner at its per-image winner (renamedTo(path, winnerMime)) — the
+  // same mime the round17 prediction uses — so prediction MATCHES actual and the dedup runs (consumer dropped).
   const ownerActualImage = new Map<string, string>();
-  for (const [ref, fn] of predictedFinal) ownerActualImage.set(ref, transcodedOwners.has(ref) ? b.pathByRef.get(ref)! : fn.image);
+  for (const [ref, fn] of predictedFinal) {
+    const winner = winnerMimeByOwner.get(ref);
+    ownerActualImage.set(ref, transcodedOwners.has(ref) ? (winner ? renamedTo(b.pathByRef.get(ref)!, winner) : b.pathByRef.get(ref)!) : fn.image);
+  }
 
   const res: PhaseCResult = { emitted: [], dropped: new Set(), skipped: [], referencesRewritten: 0, looseRepathSkipped: 0, dedupDiskBytesSaved: 0, dedupVramBytesSavedUpperBound: 0 };
   for (const op of dedupDrops) {
@@ -311,6 +332,46 @@ describe('worker Phase-C owner-aware dedup execution (golden worker block)', () 
     expect(res.skipped.some((s) => s.assetRef === 'extra/sheet.png')).toBe(true);
     expect(res.dropped.has('extra/sheet.png')).toBe(false); // KEPT — not dropped against a diverged owner
     expect(res.referencesRewritten).toBe(0); // the only repoint was suppressed by the divergence guard
+  });
+
+  it('round17: aggressive dedup STILL runs when the owner is transcoded to its MEASURED winner ≠ global target', async () => {
+    const b = await buildWorkerState(loadRawFiles());
+    // The owner main_game/sheet.png is successfully transcoded to its per-image MEASURED winner AVIF (the
+    // diagnosis's params.bestMime), while the global opts.targetMime is WebP. The round17 fix routes the
+    // Phase-A prediction through effectiveForTranscode(ref, op.targetMime) so it predicts main_game/sheet.AVIF
+    // — the SAME name execute emits — and the divergence guard passes ⇒ the duplicate IS dropped (dedup runs).
+    const winner = new Map<string, ImageMime>([['main_game/sheet.png', 'image/avif']]);
+    const res = runPhaseC(b, new Set(['main_game/sheet.png']), false, winner);
+
+    // The duplicate consumer image IS dropped (NOT kept) — the round17 bug would have kept it (prediction
+    // owner.webp ≠ actual owner.avif ⇒ false divergence ⇒ silent dedup halt).
+    expect(res.dropped.has('extra/sheet.png')).toBe(true);
+    expect(res.skipped.some((s) => s.assetRef === 'extra/sheet.png')).toBe(false);
+    expect(res.referencesRewritten).toBe(1);
+    // The repointed manifest points at the owner's ACTUAL transcoded name (…/sheet.avif), proving prediction
+    // == actual (no divergence). Resolve THROUGH the parser the way a loader would.
+    const emitted = res.emitted.find((e) => e.path === 'extra/sheet.json');
+    expect(emitted, 'expected the consumer manifest to be repointed at the transcoded owner').toBeDefined();
+    const parsed = parseAtlasManifest(emitted!.manifest, {});
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(resolveImageRef('extra/sheet.json', parsed.atlas.imageRef)).toBe(normalize('main_game/sheet.avif'));
+    }
+
+    // Bug guard — model the PRE-fix worker lambda directly: it predicted the owner's final name from the
+    // GLOBAL opts.targetMime (effectiveFor(ref,1) = WebP) while execute emitted the per-image winner (AVIF).
+    // Show that exact prediction≠actual pair makes the divergence guard KEEP the consumer (the regression),
+    // proving the AVIF run above only drops because the fix routes the prediction through the per-op winner.
+    const groups = buildDedupGroups(b.features, b.spineRefs, expected.marking, expected.skinGuard);
+    const buggyPredicted = predictOwnerFinalNames(groups, (ref) => ({
+      imagePath: b.pathByRef.get(ref),
+      manifestPath: b.manifestPathOf(ref),
+      transcoded: ref === 'main_game/sheet.png',
+      targetMime: 'image/webp', // BUG: global target, ignoring the measured AVIF winner
+    }));
+    const buggyPredictedOwner = buggyPredicted.get('main_game/sheet.png')!.image; // …/sheet.webp
+    const actualOwner = renamedTo(b.pathByRef.get('main_game/sheet.png')!, 'image/avif'); // …/sheet.avif (execute)
+    expect(buggyPredictedOwner).not.toBe(actualOwner); // the false divergence that silently halted dedup
   });
 
   it('dedup × tiering (correction 8 / Finding 1): no surviving manifest references a DROPPED owner image', async () => {

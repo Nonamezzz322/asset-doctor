@@ -285,6 +285,8 @@
   "fix.settings.pngRecompressHint": "Riconfeziona i byte PNG senza perdite (oxipng). Carica un codec al primo utilizzo.",
   "fix.settings.opaqueAlpha": "Rimuovi canale alfa inutilizzato",
   "fix.settings.opaqueAlphaHint": "Ricodifica le immagini completamente opache senza il loro canale alfa morto — solo un risparmio di download/disco. La VRAM resta invariata (la GPU decodifica comunque in RGBA8888).",
+  "fix.settings.bestFormat": "Formato migliore per immagine (misurato)",
+  "fix.settings.bestFormatHint": "Transcodifica ogni immagine nel formato che il nostro audit ha misurato come il più piccolo (WebP o AVIF), invece di un unico formato per tutte. Solo un risparmio di download/disco — la VRAM resta invariata (entrambi decodificano in RGBA8888).",
   "fix.settings.overrides": "Override per cartella / tipo",
   "fix.settings.overridesHint": "Sovrascrivi formato o qualità per un prefisso di cartella o un tipo di asset.",
   "fix.skipped.whyNoKernel": "Il kernel di riduzione non è configurabile nel browser — viene usato il ricampionatore ad alta qualità del browser.",

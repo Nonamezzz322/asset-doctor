@@ -393,6 +393,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       // Opaque-alpha (round15): forward the Pro toggle so the plan stamps `opaque:true` on the transcode op
       // for every wasted-alpha-flagged loose ref (DISK-only saving, invariant 5). Off ⇒ no op carries opaque.
       opaqueAlpha: opts.opaqueAlpha,
+      // Per-image MEASURED best-format pick (round17): forward the Pro toggle so the plan routes each LOOSE
+      // `format` transcode op to the winner the diagnosis already measured (params.bestMime) instead of the
+      // single global targetMime. Off ⇒ every op carries opts.targetMime ⇒ byte-identical to today.
+      bestFormatPerImage: opts.bestFormatPerImage,
       isAtlasRef: (ref) => atlasByRef.has(ref),
       // Edge-extrude (bleed, design OPTION A): forward the UI knob. planFix floors it to a non-negative
       // int and STAMPS it onto every repack/pack op (the only ops whose worker compose blits a rectangle
@@ -454,6 +458,15 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     const e = resolveOptions(ref, kindOf(ref), baseEffective, opts.overrides);
     return { ...e, quality: scaleAwareQuality(e.quality, scale, opts.scaleAwareQuality ?? false) };
   };
+  /** Effective options for a TRANSCODE op, honoring its per-op `targetMime` as the resolve BASE (round17,
+   *  per-image MEASURED best-format pick). When bestFormatPerImage is ON the plan stamped the op with the
+   *  format the diagnosis already measured smallest (params.bestMime); we feed that as the base so it
+   *  REPLACES the global default — while a user's per-folder/type override (resolveOptions, later-wins) still
+   *  WINS over it (honest precedence: explicit user override > auto-measured per-image default). When the opt
+   *  is OFF, `op.targetMime === opts.targetMime` for every op, so this === effectiveFor(ref, 1) (scale 1 ⇒
+   *  scaleAwareQuality is a no-op) ⇒ byte-identical to today. No downscale here (transcode never resizes). */
+  const effectiveForTranscode = (ref: string, opMime: ImageMime): EffectiveOptions =>
+    resolveOptions(ref, kindOf(ref), { ...baseEffective, targetMime: opMime }, opts.overrides);
   /** Build the encodeCanvas opts for a resolved per-asset EffectiveOptions (quality 0..100 → 0..1). */
   const encOptsFor = (e: EffectiveOptions, allowPngFallback: boolean): EncodeOpts => ({
     quality: e.quality / 100,
@@ -895,12 +908,21 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     // resolved format>). Predict THAT first-format mime (honoring overrides) so Phase C doesn't see a false
     // divergence and silently degrade the dedup. This ALSO fixes a pre-existing latent mismatch: profile-on
     // owners were predicted with the legacy opts.targetMime, not the profile's first format. Profile OFF ⇒
-    // the legacy effectiveFor(ref,1).targetMime, byte-identical to before.
-    const targetMime = transcoded
-      ? profileOn
-        ? resolveProfile(ref).formats[0]!.format
-        : effectiveFor(ref, 1).targetMime
-      : opts.targetMime;
+    // route the owner through the SAME resolution the transcode execute uses — effectiveForTranscode(ref,
+    // op.targetMime) — so the per-image MEASURED best-format pick (round17) is reflected here too. When
+    // bestFormatPerImage is ON the plan stamped this op with the diagnosis-measured winner (params.bestMime,
+    // e.g. AVIF), and execute renames the owner via renamedTo(path, enc.mime) where enc.mime derives from
+    // effectiveForTranscode(ref, op.targetMime).targetMime; predicting from the GLOBAL opts.targetMime (the
+    // old effectiveFor(ref,1) base) would diverge from that actual emit ⇒ Phase C would falsely KEEP the
+    // consumer and silently stop dropping the duplicate (round17 MAJOR). Feeding op.targetMime as the resolve
+    // BASE mirrors execute exactly (an override redirect still wins). bestFormatPerImage OFF ⇒ op.targetMime
+    // === opts.targetMime ⇒ effectiveForTranscode(ref, op.targetMime) === effectiveFor(ref,1) ⇒ byte-identical.
+    const targetMime =
+      transcoded && op?.kind === 'transcode'
+        ? profileOn
+          ? resolveProfile(ref).formats[0]!.format
+          : effectiveForTranscode(ref, op.targetMime).targetMime
+        : opts.targetMime;
     return {
       imagePath: pathByRef.get(ref),
       manifestPath: manifestPathOf(ref),
@@ -1613,7 +1635,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         continue;
       }
       // Effective per-asset options (folder/type overrides; no downscale ⇒ scale 1 ⇒ quality unchanged).
-      const eff = effectiveFor(ref, 1);
+      // Per-image MEASURED best-format pick (round17): honor the op's per-op targetMime as the resolve BASE
+      // (the plan set it to the diagnosis-measured winner when bestFormatPerImage is on, else opts.targetMime
+      // ⇒ identical to effectiveFor(ref, 1)). A user per-folder/type override still wins over it.
+      const eff = effectiveForTranscode(ref, op.targetMime);
       // Opaque-alpha (round15): thread the op's channel-drop intent into transcode() — it composes onto an
       // `{alpha:false}` surface and (AVIF) encodes the dead alpha plane at minimum cost. DISK-only saving
       // (invariant 5); the receipt's measured before/after captures the real delta. Absent ⇒ alpha preserved.

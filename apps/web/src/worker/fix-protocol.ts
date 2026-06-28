@@ -45,6 +45,17 @@ export interface FixOptions {
    *  measures the real byte delta (honest skip if no win). Absent/false ⇒ no op carries `opaque` ⇒ byte-
    *  identical to today (the wasted-alpha finding stays a diagnosis-only verdict). */
   opaqueAlpha?: boolean;
+  /** Per-image MEASURED best-format pick (round17-per-image-measured-best-format-pick). The diagnosis
+   *  ALREADY measured the smallest real encode per loose image (formatFinding compares real encoded sizes
+   *  and records the winner in `params.bestMime`). When ON, the LOOSE `format` transcode op targets that
+   *  measured per-image winner (WebP vs AVIF) instead of the single global `targetMime` — the fix carries the
+   *  measurement forward instead of re-guessing one format for all. HONESTY: bestMime is the MEASURED winner
+   *  (invariant 3 — diagnosis measures, the fix generates); a format transcode is DISK-only (invariant 5 —
+   *  both decode to RGBA8888, so it is never a VRAM claim). PRECEDENCE: this is the NON-profile default-path
+   *  enhancement — an active `exportProfile` governs formats on its own (worker-gated) fan-out, and a
+   *  per-folder/type `override.targetMime` still WINS (it layers on the per-image pick as the resolve base).
+   *  Absent/false ⇒ every op carries `targetMime` ⇒ byte-identical to today (the fixed-target behavior). */
+  bestFormatPerImage?: boolean;
   /** Scale-aware quality (lower q on downscaled output). Pure deterministic formula. Default false. */
   scaleAwareQuality?: boolean;
   /** UI-supplied lazy/bundle marking (Feature 3). Absent ⇒ all bundles treated as 'isolated'. */

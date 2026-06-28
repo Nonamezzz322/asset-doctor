@@ -262,6 +262,8 @@
   "fix.settings.pngRecompressHint": "Re-pack PNG bytes losslessly (oxipng). Loads a codec on first use.",
   "fix.settings.opaqueAlpha": "Drop unused alpha channel",
   "fix.settings.opaqueAlphaHint": "Re-encode fully-opaque images without their dead alpha channel — a download/disk saving only. VRAM is unchanged (the GPU still decodes to RGBA8888).",
+  "fix.settings.bestFormat": "Per-image best format (measured)",
+  "fix.settings.bestFormatHint": "Transcode each image to the format our audit measured smallest (WebP vs AVIF), instead of one format for all. A download/disk saving only — VRAM is unchanged (both decode to RGBA8888).",
   "fix.settings.overrides": "Per-folder / per-type overrides",
   "fix.settings.overridesHint": "Override format or quality for a folder prefix or an asset type.",
   "fix.skipped.whyNoKernel": "Downscale kernel isn't configurable in-browser — the browser's high-quality resampler is used.",

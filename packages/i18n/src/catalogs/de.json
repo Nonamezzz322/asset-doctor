@@ -282,6 +282,8 @@
   "fix.settings.pngRecompressHint": "Packt PNG-Bytes verlustfrei neu (oxipng). Lädt einen Codec bei erster Nutzung.",
   "fix.settings.opaqueAlpha": "Ungenutzten Alphakanal entfernen",
   "fix.settings.opaqueAlphaHint": "Kodiert vollständig opake Bilder ohne ihren toten Alphakanal neu — nur eine Download-/Speicherersparnis. VRAM bleibt unverändert (die GPU dekodiert weiterhin zu RGBA8888).",
+  "fix.settings.bestFormat": "Bestes Format pro Bild (gemessen)",
+  "fix.settings.bestFormatHint": "Jedes Bild in das von unserer Analyse als am kleinsten gemessene Format umkodieren (WebP vs. AVIF), statt ein Format für alle. Nur eine Download-/Speicherersparnis — VRAM bleibt unverändert (beide dekodieren zu RGBA8888).",
   "fix.settings.overrides": "Überschreibungen pro Ordner / Typ",
   "fix.settings.overridesHint": "Format oder Qualität für einen Ordner-Präfix oder einen Asset-Typ überschreiben.",
   "fix.skipped.whyNoKernel": "Der Verkleinerungs-Kernel ist im Browser nicht konfigurierbar — der hochwertige Resampler des Browsers wird verwendet.",

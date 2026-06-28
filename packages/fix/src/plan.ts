@@ -7,6 +7,12 @@
 
 import type { AnalysisReport, DedupGroup, FixOp, FixPlan, ImageMime, PackGroup, ScaleTier } from '@asset-doctor/core';
 
+/** The four real image mimes (core's ImageMime). Used to validate a finding's measured `params.bestMime`
+ *  before routing a transcode op to it — a malformed/absent value fails the guard and falls back to the
+ *  global target (fail-safe ⇒ byte-identical to today). */
+const VALID_MIMES: ReadonlySet<string> = new Set(['image/png', 'image/webp', 'image/jpeg', 'image/avif']);
+const isImageMime = (v: unknown): v is ImageMime => typeof v === 'string' && VALID_MIMES.has(v);
+
 export interface PlanOptions {
   /** Target format for transcode + the repacked sheet image. */
   targetMime: ImageMime;
@@ -25,6 +31,16 @@ export interface PlanOptions {
    *  emitting a standalone opaque transcode when format didn't fire. DEFAULT OFF ⇒ no op carries `opaque` ⇒
    *  byte-identical to today (the wasted-alpha finding stays a diagnosis-only verdict). */
   opaqueAlpha?: boolean;
+  /** Per-image MEASURED best-format pick (round17). formatFinding ALREADY measured every candidate
+   *  (FORMAT_TARGETS) and recorded the winner in `params.bestMime`. When ON, the pass-2 LOOSE `format`
+   *  transcode op targets that measured winner instead of the single global `opts.targetMime`; absent/
+   *  invalid bestMime (atlas / no-encoder report / OFF) ⇒ `opts.targetMime`. The plan does NO encoding — it
+   *  only routes the op to the format the diagnosis already proved smallest (invariant 3 — measure, then the
+   *  fix generates). PRECEDENCE: this governs ONLY the NON-profile default path; an active export profile
+   *  fans out its own formats (worker-gated), and a user per-folder/type override still WINS (it layers on
+   *  the per-image pick as the resolve base, worker-side). DEFAULT OFF ⇒ every op carries `opts.targetMime`
+   *  ⇒ byte-identical to today. Deterministic: bestMime inherits formatFinding's strict-smaller tie-break. */
+  bestFormatPerImage?: boolean;
   /** True iff a ref is an atlas (image+manifest pair). Supplied by the worker (which has atlasByRef).
    *  Pure predicate — used to decide owner-aware drops that repoint a consumer manifest's meta.image.
    *  Absent ⇒ no ref is treated as an atlas (every owner-aware drop is a whole-file drop). */
@@ -301,10 +317,20 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
       // analysis path deferred (Inv 4) is actually produced. Photographic/unknown follow opts.lossless.
       const wantsLossless = f.params?.contentClass === 'flat' || f.params?.contentClass === 'alpha-art';
       transcoded.add(f.assetRef);
+      // Per-image MEASURED best-format pick (round17). formatFinding ALREADY measured every candidate and
+      // recorded the winner in `params.bestMime` (never the source mime: the candidate loop skips
+      // target===image.mime + AVIF sources early-return). Honor it instead of the single global
+      // `opts.targetMime` when the opt is ON AND the param is a valid ImageMime. Absent (atlas / no-encoder
+      // report) or malformed or OFF ⇒ `opts.targetMime` ⇒ byte-identical. NO encoding here — the plan only
+      // routes the op to the format the diagnosis already proved smaller. A per-folder/type override (worker-
+      // side resolveOptions) still wins, layered on this measured base; an export profile fans out its own
+      // formats on a different (worker-gated) path. The standalone opaque transcode (pass 2b) keeps
+      // opts.targetMime — that ref has no `format` finding, so no bestMime was measured for it.
+      const perImageMime = opts.bestFormatPerImage && isImageMime(f.params?.bestMime) ? f.params.bestMime : opts.targetMime;
       ops.push({
         kind: 'transcode',
         assetRef: f.assetRef,
-        targetMime: opts.targetMime,
+        targetMime: perImageMime,
         quality: opts.quality,
         lossless: opts.lossless || wantsLossless,
         // Opaque-alpha (round15): this format-improvable image is ALSO fully-opaque-with-dead-alpha — fold
