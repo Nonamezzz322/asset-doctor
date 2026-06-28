@@ -319,6 +319,7 @@
   "fix.sheetDiff.proofNote": "Radiografía antes/después de cada hoja reempaquetada. La imagen del después brilla en rojo donde aún queda espacio vacío. OCC/VRAM/dimensiones son dos estados medidos, no un ahorro.",
   "fix.sheetDiff.before": "antes",
   "fix.sheetDiff.after": "después",
+  "fix.sheetDiff.measuredBadge": "medido en tu GPU en esta ejecución",
   "fix.tier.title": "Generar niveles de resolución",
   "fix.tier.hint": "Emite copias reducidas de cada recurso para que el juego cargue la resolución que se ajusta al dispositivo.",
   "fix.tier.enable": "Generar niveles de resolución",

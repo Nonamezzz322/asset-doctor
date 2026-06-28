@@ -1,6 +1,7 @@
 import type { PickedFile } from './import';
 import type { FixOptions, FixPlanSummary, FixReceipt, FixResponse } from '../worker/fix-protocol';
 import { attachKtx2Probe } from './ktx2-probe-run';
+import { attachSheetProbes } from './sheet-probe-run';
 
 export interface FixProgress {
   label: string;
@@ -35,7 +36,14 @@ export function runFix(files: PickedFile[], options: FixOptions, onProgress: (p:
         // returns the SAME receipt ⇒ byte-identical to today. The probe never throws (honest fallback flag);
         // a catch still resolves with the un-augmented receipt so a probe hiccup can't break the download.
         const done = m;
-        const probe = done.ktx2Probe?.length ? attachKtx2Probe(done.receipt, done.ktx2Probe) : Promise.resolve(done.receipt);
+        // Round17 seam: chain BOTH device-local GPU probes after the ktx2 one — replay each produced sheet's
+        // before/after frames through real offscreen WebGL (attachSheetProbes) and attach the SEPARATE
+        // measured fields (draw calls + decoded VRAM). Each probe returns the SAME receipt ref when its
+        // inputs/WebGL are absent ⇒ byte-identical to today. Sequential: each probe destroys its Pixi app
+        // (frees the GL ctx). The shared .catch keeps a probe hiccup from ever breaking the download.
+        const probe = (done.ktx2Probe?.length ? attachKtx2Probe(done.receipt, done.ktx2Probe) : Promise.resolve(done.receipt)).then((r) =>
+          attachSheetProbes(r),
+        );
         probe
           .catch(() => done.receipt)
           .then((receipt) => {

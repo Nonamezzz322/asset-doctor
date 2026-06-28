@@ -319,6 +319,7 @@
   "fix.sheetDiff.proofNote": "Radiografia prima/dopo di ogni foglio riconfezionato. L'immagine del dopo si illumina di rosso dove lo spazio è ancora vuoto. OCC/VRAM/dimensioni sono due stati misurati, non un risparmio.",
   "fix.sheetDiff.before": "prima",
   "fix.sheetDiff.after": "dopo",
+  "fix.sheetDiff.measuredBadge": "misurato sulla tua GPU in questa esecuzione",
   "fix.tier.title": "Genera livelli di risoluzione",
   "fix.tier.hint": "Emette copie ridotte di ogni risorsa così il gioco carica la risoluzione adatta al dispositivo.",
   "fix.tier.enable": "Genera livelli di risoluzione",

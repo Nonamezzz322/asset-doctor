@@ -306,6 +306,7 @@
   "fix.sheetDiff.proofNote": "每张重新打包图集的前后 X 光对比。重打包后的画面在仍为空白处发红光。OCC/VRAM/尺寸是两个测得的状态，而非节省量。",
   "fix.sheetDiff.before": "之前",
   "fix.sheetDiff.after": "之后",
+  "fix.sheetDiff.measuredBadge": "本次运行在你的 GPU 上实测",
   "fix.tier.title": "生成分辨率层级",
   "fix.tier.hint": "为每个资源输出缩小的副本，让游戏加载适合设备的分辨率。",
   "fix.tier.enable": "生成分辨率层级",

@@ -659,6 +659,12 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       vramBefore: beforeDims.w * beforeDims.h * 4,
       vramAfter: afterAtlas.size.w * afterAtlas.size.h * 4,
       afterZones: proof.zones,
+      // NEW (additive): packed frame rects the MAIN-thread render-probe (sheet-probe-run.ts) replays
+      // through real offscreen WebGL. beforeFrames absent for a pack page (no source atlas ⇒ no honest
+      // "before", mirrors occBefore=0); afterFrames always present. Plain integer Rect objects ⇒
+      // structured-cloned, NOT added to the transfer list below (they are not ArrayBuffers).
+      ...(beforeAtlas ? { beforeFrames: beforeAtlas.sprites.map((s) => s.frame) } : {}),
+      afterFrames: afterAtlas.sprites.map((s) => s.frame),
     });
   };
   // Input file paths — the collision pre-check (Feature 4, design §6 step 1) asserts a synthesized

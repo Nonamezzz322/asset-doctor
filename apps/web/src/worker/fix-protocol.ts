@@ -1,4 +1,4 @@
-import type { ExportProfile, ImageMime, LazyMarking, OverlayZone, ScaleTier, SkinGuard } from '@asset-doctor/core';
+import type { ExportProfile, ImageMime, LazyMarking, OverlayZone, Rect, ScaleTier, SkinGuard } from '@asset-doctor/core';
 import type { PackMode, StaticGranularity } from '@asset-doctor/ingest';
 // Type-only import (erased under verbatimModuleSyntax ⇒ no runtime cycle with op-manifest, which already
 // type-imports FixPlanSummary/PlanOpCounts from here). op-manifest.ts is the documented OWNER of the OpKind
@@ -248,6 +248,30 @@ export interface SheetDiff {
   vramAfter: number;
   /** [] or one { kind:'empty', rects } — the after-film's still-empty space (no cast; feeds Finding.overlay). */
   afterZones: OverlayZone[];
+
+  /** Packed frame rects of the SOURCE sheet (beforeAtlas.sprites[].frame), copied at capture so the
+   *  MAIN thread can replay them through real offscreen WebGL (sheet-probe-run.ts). ABSENT for a `pack`
+   *  page (loose has no source atlas ⇒ no honest "before", mirrors occBefore=0). Plain integer rects
+   *  (structured-clone, NOT transferable — they are not ArrayBuffers). Absent ⇒ no before-probe ⇒
+   *  SheetDiff byte-identical to today. */
+  beforeFrames?: Rect[];
+  /** Packed frame rects of the EMITTED sheet (afterAtlas.sprites[].frame), copied at capture. Drives the
+   *  measured AFTER reading. Present once frames are wired (afterAtlas always exists at capture). */
+  afterFrames?: Rect[];
+
+  // ── Filled AFTER the worker finishes by attachSheetProbes (MAIN thread; the worker has no WebGL). ──
+  /** MEASURED issued GL draw calls for the SOURCE sheet's frames on THE USER'S GPU this run. Absent ⇒ no
+   *  probe ran (no WebGL / no beforeFrames / per-sheet failure). DEVICE-LOCAL; never cross-device; never
+   *  folded into any saving (invariant 5). */
+  drawCallsBefore?: number;
+  /** MEASURED issued GL draw calls for the EMITTED sheet — the honest "after" beside drawCallsBefore. */
+  drawCallsAfter?: number;
+  /** MEASURED decoded texture VRAM (ProbeReading.vramBytes = Σ w·h·4 over uploaded textures) of the SOURCE
+   *  sheet — the REAL GPU footprint, a DIFFERENT quantity from the static `vramBefore` (declared w·h·4).
+   *  NEVER merged with vramBefore/After/vramBytesAfter (invariant 5). */
+  decodedVramBefore?: number;
+  /** MEASURED decoded texture VRAM of the EMITTED sheet — beside decodedVramBefore, never folded. */
+  decodedVramAfter?: number;
 }
 
 /** Lightweight receipt (no bytes — the optimized files live in the zip Blob). */

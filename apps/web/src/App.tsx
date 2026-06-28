@@ -2006,6 +2006,37 @@ function SheetDiffView({ diff }: { diff: SheetDiff }) {
         {' · '}
         <span className="text-ink-soft">VRAM</span> {fmtBytes(diff.vramBefore)} → {fmtBytes(diff.vramAfter)}
       </p>
+      {/* MEASURED on the user's GPU this run (render-probe of the produced sheet, sheet-probe-run.ts).
+          DEVICE-LOCAL, kept SEPARATE from the static VRAM strip above — a DIFFERENT quantity (real decoded
+          footprint + real draw calls), NEVER a saving, NEVER folded into vramBytes* (invariant 5). Rendered
+          only when the probe filled fields; gated PER-METRIC. Pack page (no beforeFrames) shows after-only
+          — honest, mirroring the static "OCC 0% →". */}
+      {diff.drawCallsAfter != null || diff.decodedVramAfter != null ? (
+        <p className="break-all px-1 font-mono text-[10px] leading-relaxed text-teal/90">
+          <span className="uppercase tracking-[0.08em]">{t('fix.sheetDiff.measuredBadge')}</span>
+          {' · '}
+          {diff.drawCallsBefore != null && diff.drawCallsAfter != null ? (
+            <>
+              <span className="text-ink-soft">DRAWS</span> {diff.drawCallsBefore} → {diff.drawCallsAfter}
+              {' · '}
+            </>
+          ) : diff.drawCallsAfter != null ? (
+            <>
+              <span className="text-ink-soft">DRAWS</span> {diff.drawCallsAfter}
+              {' · '}
+            </>
+          ) : null}
+          {diff.decodedVramBefore != null && diff.decodedVramAfter != null ? (
+            <>
+              <span className="text-ink-soft">DECODED VRAM</span> {fmtBytes(diff.decodedVramBefore)} → {fmtBytes(diff.decodedVramAfter)}
+            </>
+          ) : diff.decodedVramAfter != null ? (
+            <>
+              <span className="text-ink-soft">DECODED VRAM</span> {fmtBytes(diff.decodedVramAfter)}
+            </>
+          ) : null}
+        </p>
+      ) : null}
     </div>
   );
 }

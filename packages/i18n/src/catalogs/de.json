@@ -316,6 +316,7 @@
   "fix.sheetDiff.proofNote": "Vorher/Nachher-Röntgenbild jedes neu gepackten Sheets. Das Nachher-Bild leuchtet rot, wo noch Platz leer ist. OCC/VRAM/Maße sind zwei gemessene Zustände, keine Ersparnis.",
   "fix.sheetDiff.before": "vorher",
   "fix.sheetDiff.after": "nachher",
+  "fix.sheetDiff.measuredBadge": "auf deiner GPU in diesem Lauf gemessen",
   "fix.tier.title": "Auflösungsstufen erzeugen",
   "fix.tier.hint": "Erzeugt herunterskalierte Kopien jedes Assets, damit das Spiel die zum Gerät passende Auflösung lädt.",
   "fix.tier.enable": "Auflösungsstufen erzeugen",
