@@ -1,5 +1,6 @@
 import type { PickedFile } from './import';
 import type { FixOptions, FixPlanSummary, FixReceipt, FixResponse } from '../worker/fix-protocol';
+import { attachKtx2Probe } from './ktx2-probe-run';
 
 export interface FixProgress {
   label: string;
@@ -28,8 +29,19 @@ export function runFix(files: PickedFile[], options: FixOptions, onProgress: (p:
       if (m.type === 'fix-progress') {
         onProgress({ label: m.label, done: m.done, total: m.total });
       } else if (m.type === 'fix-done') {
-        resolve({ receipt: m.receipt, zip: m.zip });
-        worker.terminate();
+        // Round15 seam (CORRECTION-2): after fix-done, before resolve, probe the produced .ktx2 pages on the
+        // MAIN thread (the worker has no WebGL) and REPLACE the receipt with the augmented one (measured,
+        // device-local GPU VRAM beside the worst-case ceiling). No ktx2 produced / no WebGL ⇒ attachKtx2Probe
+        // returns the SAME receipt ⇒ byte-identical to today. The probe never throws (honest fallback flag);
+        // a catch still resolves with the un-augmented receipt so a probe hiccup can't break the download.
+        const done = m;
+        const probe = done.ktx2Probe?.length ? attachKtx2Probe(done.receipt, done.ktx2Probe) : Promise.resolve(done.receipt);
+        probe
+          .catch(() => done.receipt)
+          .then((receipt) => {
+            resolve({ receipt, zip: done.zip });
+            worker.terminate();
+          });
       } else if (m.type === 'fix-error') {
         reject(new Error(m.error));
         worker.terminate();

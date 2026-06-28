@@ -23,6 +23,12 @@ export interface GlStats {
   liveTextures: number;
   /** Σ w×h×4 over live base textures (+33% where mipmaps were generated). */
   vramBytes: number;
+  /** Σ compressedTexImage2D/compressedTexSubImage2D data byteLengths over live textures — the REAL resident
+   *  compressed (block-compression) footprint incl. all baked mip levels (each its own call, so the sum IS
+   *  the exact residency). 0 unless a compressed upload was observed. DEVICE-MEASURED (the GPU's chosen
+   *  transcode target), NEVER w·h·4 and NEVER charged a synthetic MIP_OVERHEAD (the mips are real, already
+   *  summed). A compressed texture contributes THIS (not w·h·4) to `vramBytes`. */
+  compressedBytes: number;
 }
 
 export interface InstrumentHandle {
@@ -41,6 +47,26 @@ interface TexRecord {
   w: number;
   h: number;
   mip: boolean;
+  /** Σ compressed-upload data byteLengths charged to this texture (all mip levels). 0 for raster. When
+   *  >0 the texture contributes THIS to VRAM (measured residency), NOT w·h·4 — see `vram()`. */
+  compressed: number;
+}
+
+/** Real resident byte length of a compressed upload's data argument. PURE — a deterministic arg reader,
+ *  headless-verifiable independent of GL (mirrors `recordTexImage`). The data arg is an ArrayBufferView
+ *  whose `.byteLength` IS the resident size of that mip level; the PBO form passes the size as a number.
+ *    compressedTexImage2D(target, level, internalformat, w, h, border, data)           ⇒ view at index 6
+ *    compressedTexImage2D(target, level, internalformat, w, h, border, imageSize, off) ⇒ number at index 6 (PBO)
+ *    compressedTexSubImage2D(target, level, x, y, w, h, format, data)                  ⇒ view at index 7
+ *    compressedTexSubImage2D(target, level, x, y, w, h, format, imageSize, off)        ⇒ number at index 7 (PBO)
+ *  Returns the view's byteLength (or the explicit imageSize for the PBO form), else 0. */
+export function compressedDataByteLength(name: string, a: unknown[]): number {
+  const idx = name === 'compressedTexSubImage2D' ? 7 : 6;
+  const data = a[idx];
+  if (typeof data === 'number') return data >= 0 ? data : 0; // PBO form: explicit imageSize
+  const view = data as { byteLength?: unknown } | null | undefined;
+  if (view && typeof view.byteLength === 'number') return view.byteLength;
+  return 0;
 }
 
 export function instrument(gl: GlLike): InstrumentHandle {
@@ -89,7 +115,7 @@ export function instrument(gl: GlLike): InstrumentHandle {
 
   patch('createTexture', (orig) => (...a) => {
     const tex = orig(...a);
-    textures.set(tex, { w: 0, h: 0, mip: false });
+    textures.set(tex, { w: 0, h: 0, mip: false, compressed: 0 });
     return tex;
   });
   patch('deleteTexture', (orig) => (...a) => {
@@ -108,6 +134,16 @@ export function instrument(gl: GlLike): InstrumentHandle {
   patch('texImage2D', (orig) => (...a) => {
     counters.textureUploads++;
     recordTexImage(a);
+    return orig(...a);
+  });
+  patch('compressedTexImage2D', (orig) => (...a) => {
+    counters.textureUploads++;
+    recordCompressed('compressedTexImage2D', a); // level-0 records w/h (like recordTexImage) + adds byteLength
+    return orig(...a);
+  });
+  patch('compressedTexSubImage2D', (orig) => (...a) => {
+    counters.textureUploads++;
+    recordCompressed('compressedTexSubImage2D', a); // adds byteLength; does NOT reset w/h (a sub-upload)
     return orig(...a);
   });
   patch('generateMipmap', (orig) => (...a) => {
@@ -137,14 +173,45 @@ export function instrument(gl: GlLike): InstrumentHandle {
     }
   }
 
+  function recordCompressed(name: string, a: unknown[]): void {
+    const t = textures.get(bound);
+    if (!t) return;
+    // MEASURED residency: the data arg's real byteLength (each mip level is its own call ⇒ summed).
+    t.compressed += compressedDataByteLength(name, a);
+    // compressedTexImage2D level 0 defines the footprint (w/h). The sub variant never resets dims.
+    if (
+      name === 'compressedTexImage2D' &&
+      (typeof a[1] === 'number' ? a[1] : 0) === 0 &&
+      typeof a[3] === 'number' &&
+      typeof a[4] === 'number' &&
+      a[3] > 0 &&
+      a[4] > 0
+    ) {
+      t.w = a[3];
+      t.h = a[4]; // compressedTexImage2D(target, level, internalformat, w, h, border, ...)
+    }
+  }
+
   function vram(): number {
     let total = 0;
     for (const t of textures.values()) {
-      // CONDITIONAL: the +33% chain is charged only for textures we actually saw mipmapped — the same
+      // A texture that received a compressed upload contributes its MEASURED compressed total (real
+      // resident bytes, all mips already summed) — NOT w·h·4 and NO synthetic MIP_OVERHEAD on it.
+      if (t.compressed > 0) {
+        total += t.compressed;
+        continue;
+      }
+      // Raster: CONDITIONAL +33% chain charged only for textures we actually saw mipmapped — the same
       // factor (MIP_OVERHEAD, shared with static analysis) applied per measured generateMipmap call.
       if (t.w > 0 && t.h > 0) total += t.w * t.h * 4 * (t.mip ? MIP_OVERHEAD : 1);
     }
     return Math.round(total);
+  }
+
+  function compressedTotal(): number {
+    let total = 0;
+    for (const t of textures.values()) total += t.compressed;
+    return total;
   }
 
   return {
@@ -161,6 +228,7 @@ export function instrument(gl: GlLike): InstrumentHandle {
       redundantProgBinds: counters.redundantProgBinds,
       liveTextures: textures.size,
       vramBytes: vram(),
+      compressedBytes: compressedTotal(),
     }),
     reset: () => {
       counters.drawElementsCalls = 0;

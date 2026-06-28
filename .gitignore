@@ -9,6 +9,11 @@ build/
 # vite
 .vite/
 
+# self-hosted Pixi KTX2 transcoder — REGENERATED from the installed pixi.js by
+# apps/web/scripts/copy-ktx-transcoder.mjs (predev/prebuild), so it never drifts from the pinned
+# version and we don't commit ~930 KB of vendored binary (round15 no-CDN KTX2 probe).
+apps/web/public/transcoders/ktx/
+
 # test
 coverage/
 

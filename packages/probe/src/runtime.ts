@@ -19,6 +19,7 @@ function aggregate(probes: InstrumentHandle[]): GlStats {
   let redundantProgBinds = 0;
   let liveTextures = 0;
   let vramBytes = 0;
+  let compressedBytes = 0;
   for (const p of probes) {
     const s = p.stats();
     drawElementsCalls += s.drawElementsCalls;
@@ -32,6 +33,7 @@ function aggregate(probes: InstrumentHandle[]): GlStats {
     redundantProgBinds += s.redundantProgBinds;
     liveTextures += s.liveTextures;
     vramBytes += s.vramBytes;
+    compressedBytes += s.compressedBytes;
   }
   return {
     drawCalls: drawElementsCalls + drawArraysCalls,
@@ -46,6 +48,7 @@ function aggregate(probes: InstrumentHandle[]): GlStats {
     redundantProgBinds,
     liveTextures,
     vramBytes,
+    compressedBytes,
   };
 }
 

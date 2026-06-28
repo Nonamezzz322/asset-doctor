@@ -116,7 +116,7 @@ import { dedupKeepConsumerSkip, deselectedSkips, fixOpKind, summarizePlan, type 
 // SAME constructors the unit test drives directly (the worker can't run in Node — createImageBitmap).
 import { dropChange, finalizeChanges, looseRenameChange, mergeChanges, packChanges, repackChanges, tierChanges } from '../lib/loader-migration';
 import { canKeepSheetDiff, sheetGeometryProof } from './sheet-diff';
-import type { FixChange, FixInputFile, FixMode, FixOptions, FixReceipt, FixRequest, FixResponse, NativeOpKind, SheetDiff } from './fix-protocol';
+import type { FixChange, FixInputFile, FixMode, FixOptions, FixReceipt, FixRequest, FixResponse, Ktx2ProbeInput, NativeOpKind, SheetDiff } from './fix-protocol';
 // OPT-IN backend native KTX2 (round12-backend-processing.md, Phase 3). encodeRemote is the ONLY network
 // call in the fix path and it fires ONLY behind opts.backend + per-run consent (backendOn). KTX2_PROFILE_
 // BAKES_MIPS keeps the wire profile + the VRAM-ceiling accounting (vramCeilingOfPage mips arg) in sync.
@@ -2353,6 +2353,12 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   let ktx2Produced = 0;
   let ktx2Failed = 0;
   let ktx2VramBytesWorstCase = 0;
+  // GPU-VRAM probe side-channel (round15): collect the produced `.ktx2` + its raster page (FRESH slices, so
+  // the zip/`out` buffers stay intact — same discipline as captureSheetDiff) for the MAIN-thread probe (the
+  // worker has no WebGL). Capped (mirror SHEET_DIFF_MAX) to bound the zero-copy transfer; the rest still
+  // contribute ktx2VramBytesWorstCase only ("measured N of M"). Empty ⇒ no probe ⇒ byte-identical to today.
+  const KTX2_PROBE_MAX = 6;
+  const ktx2Probe: Ktx2ProbeInput[] = [];
   if (backendOn && ktx2Candidates.length > 0) {
     const backend = opts.backend!; // backendOn guarantees presence + consent
     ktx2Op = 'ktx2';
@@ -2392,6 +2398,16 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       const ktx2Path = c.imagePath.replace(/\.[a-z0-9]+$/i, '.ktx2');
       out.push({ path: ktx2Path, bytes: res.bytes });
       ktx2Produced++;
+      // GPU-VRAM probe (round15): retain the produced `.ktx2` + its raster page as FRESH slices (the `out`/zip
+      // copies stay intact) so the host can measure real compressed residency on its GPU. Capped (the rest
+      // keep only the worst-case ceiling). Detached ArrayBuffers transfer zero-copy on fix-done.
+      if (ktx2Probe.length < KTX2_PROBE_MAX) {
+        ktx2Probe.push({
+          ktx2Bytes: res.bytes.slice().buffer,
+          rasterBytes: c.pageBytes.slice().buffer,
+          rasterMime: c.pageMime,
+        });
+      }
       referencesChanged = true; // the game must add a KTX2 transcoder bundle + loader (not a drop-in)
       if (c.atlasSidecar) {
         // ATLAS: emit a SECOND sidecar `<page>.ktx2.json` (round8 two-sidecar rule) whose meta.image → the
@@ -2588,11 +2604,15 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     ...(backendNative.length > 0 ? { backendNative } : {}),
     ...(ktx2VramBytesWorstCase > 0 ? { ktx2VramBytesWorstCase } : {}),
   };
-  // Direct postMessage (not the `post` wrapper) so the sheet-diff byte buffers transfer zero-copy. The
-  // transferred buffers are FRESH COPIES (captureSheetDiff sliced both), so the live source/emitted buffers
-  // already in `out`→zip stay intact. Empty sheetDiffs ⇒ empty transfer list ⇒ identical to today.
-  const transfer = sheetDiffs.flatMap((d) => [d.beforeBytes, d.afterBytes]);
-  ctx.postMessage({ type: 'fix-done', receipt, zip } satisfies FixResponse, transfer);
+  // Direct postMessage (not the `post` wrapper) so the sheet-diff + ktx2-probe byte buffers transfer
+  // zero-copy. The transferred buffers are FRESH COPIES (captureSheetDiff + the ktx2 collection both
+  // sliced), so the live source/emitted buffers already in `out`→zip stay intact. Empty ⇒ empty transfer
+  // list + omitted ktx2Probe ⇒ identical to today.
+  const transfer = [...sheetDiffs.flatMap((d) => [d.beforeBytes, d.afterBytes]), ...ktx2Probe.flatMap((p) => [p.ktx2Bytes, p.rasterBytes])];
+  ctx.postMessage(
+    { type: 'fix-done', receipt, zip, ...(ktx2Probe.length > 0 ? { ktx2Probe } : {}) } satisfies FixResponse,
+    transfer,
+  );
 }
 
 /** Format-audit encoder: measure a candidate format's byte size via native canvas (matches the

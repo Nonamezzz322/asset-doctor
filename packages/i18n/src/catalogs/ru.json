@@ -406,6 +406,8 @@
   "fix.backend.receiptPngquant": "pngquant: {produced} из {uploaded} PNG-страниц пережато на {host} — загрузка {before:bytes} → {after:bytes} (на месте; VRAM не изменился).",
   "fix.backend.receiptFailed": "{failed} страниц(ы) откатились к браузерному изображению (бэкенд отклонил или недоступен).",
   "fix.backend.receiptVram": "KTX2 GPU VRAM ≤ {bytes:bytes} (худший случай; меньше на GPU с транскодом в BC1/ETC1; иначе растровый фолбэк) — указано отдельно, не в сумме VRAM.",
+  "fix.backend.receiptVramMeasured": "Замерено {measured:bytes} на вашем GPU (блочное сжатие) — против {baseline:bytes} в растре; потолок ≤ {ceiling:bytes}. Только для этого устройства.",
+  "fix.backend.receiptVramFallback": "Ваш GPU не поддерживает блочное сжатие (или транскодер не загрузился) — KTX2 здесь откатился в растр, выигрыша по VRAM на этом устройстве нет.",
   "fix.backend.receiptLoader": "Чтобы использовать файлы .ktx2, ваша игра должна добавить бандл KTX2-транскодера + загрузчик Pixi (import 'pixi.js/ktx2'). Zip больше, потому что он также содержит обычные изображения.",
   "license.locked": "Активируйте лицензию, чтобы открыть Pro-фикс",
   "license.keyPlaceholder": "Лицензионный ключ (AD-…)",

@@ -1782,6 +1782,23 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
           {bn.op === 'ktx2' && (receipt.ktx2VramBytesWorstCase ?? 0) > 0 ? (
             <p className="font-mono text-[10px] text-ink-soft">{t('fix.backend.receiptVram', { bytes: receipt.ktx2VramBytesWorstCase ?? 0 })}</p>
           ) : null}
+          {/* Round15: the MEASURED, DEVICE-LOCAL GPU residency shown BESIDE the worst-case ceiling — the
+              one estimated headline turned into a fact ("measured X on your GPU, ceiling ≤ Y — this device
+              only"). NEVER folded into vramBytesAfter (invariant 5) nor claimed across devices (invariant 3).
+              When the probe fell back to raster (no block-compression support / transcoder didn't load), the
+              honest fallback note is shown instead. Absent fields ⇒ no probe ran ⇒ renders exactly as today. */}
+          {bn.op === 'ktx2' && receipt.probedKtx2VramBytes != null && !receipt.probedKtx2Fallback ? (
+            <p className="font-mono text-[10px] text-ok">
+              {t('fix.backend.receiptVramMeasured', {
+                measured: receipt.probedKtx2VramBytes,
+                baseline: receipt.probedKtx2RasterBaselineBytes ?? 0,
+                ceiling: receipt.ktx2VramBytesWorstCase ?? 0,
+              })}
+            </p>
+          ) : null}
+          {bn.op === 'ktx2' && receipt.probedKtx2Fallback ? (
+            <p className="font-mono text-[10px] text-warn">{t('fix.backend.receiptVramFallback')}</p>
+          ) : null}
           {bn.op === 'ktx2' ? (
             <p className="font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.backend.receiptLoader')}</p>
           ) : null}

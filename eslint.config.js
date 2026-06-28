@@ -11,6 +11,9 @@ export default tseslint.config(
       '**/coverage/**',
       '**/*.config.js',
       '**/*.config.ts',
+      // Vite static-passthrough assets — NOT lintable source. Includes the self-hosted Pixi KTX2
+      // transcoder (public/transcoders/ktx/libktx.js — emscripten glue) copied for round15's no-CDN probe.
+      '**/public/**',
     ],
   },
   js.configs.recommended,

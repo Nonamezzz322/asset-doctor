@@ -379,6 +379,8 @@
   "fix.backend.receiptPngquant": "pngquant：{host} 上 {uploaded} 个 PNG 页面中有 {produced} 个被重压缩 — 下载 {before:bytes} → {after:bytes}（就地；VRAM 不变）。",
   "fix.backend.receiptFailed": "{failed} 个页面回退到浏览器图像（后端拒绝或不可达）。",
   "fix.backend.receiptVram": "KTX2 GPU 显存 ≤ {bytes:bytes}（最坏情况；在转码为 BC1/ETC1 的 GPU 上更少；否则光栅回退）——单独报告，不计入显存总量。",
+  "fix.backend.receiptVramMeasured": "在你的 GPU 上实测 {measured:bytes}（块压缩）——相比光栅 {baseline:bytes}；上限 ≤ {ceiling:bytes}。仅限本设备。",
+  "fix.backend.receiptVramFallback": "你的 GPU 不支持块压缩（或转码器未加载）——KTX2 在此回退为光栅，本设备没有显存收益。",
   "fix.backend.receiptLoader": "要使用 .ktx2 文件，你的游戏必须添加 KTX2 转码器包 + Pixi 加载器（import 'pixi.js/ktx2'）。zip 更大是因为它还包含普通图像。",
   "license.locked": "激活许可证以解锁 Pro 修复",
   "license.keyPlaceholder": "许可证密钥（AD-…）",

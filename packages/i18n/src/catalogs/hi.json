@@ -390,6 +390,8 @@
   "fix.backend.receiptPngquant": "pngquant: {host} पर {uploaded} में से {produced} PNG पेज पुनः-संपीड़ित — डाउनलोड {before:bytes} → {after:bytes} (उसी जगह; VRAM अपरिवर्तित)।",
   "fix.backend.receiptFailed": "{failed} पेज ब्राउज़र छवि पर लौट आए (बैकएंड ने अस्वीकार किया या पहुँच से बाहर था)।",
   "fix.backend.receiptVram": "KTX2 GPU VRAM ≤ {bytes:bytes} (सबसे खराब स्थिति; BC1/ETC1 में ट्रांसकोड करने वाले GPU पर कम; अन्यथा रास्टर फ़ॉलबैक) — अलग से रिपोर्ट किया गया, VRAM कुल में नहीं।",
+  "fix.backend.receiptVramMeasured": "आपके GPU पर मापा गया {measured:bytes} (ब्लॉक-संपीड़ित) — रास्टर {baseline:bytes} से कम; सीमा ≤ {ceiling:bytes}. केवल इस डिवाइस पर।",
+  "fix.backend.receiptVramFallback": "आपके GPU में ब्लॉक-संपीड़न समर्थन नहीं है (या ट्रांसकोडर लोड नहीं हुआ) — KTX2 यहाँ रास्टर पर लौट गया, इस डिवाइस पर कोई VRAM लाभ नहीं।",
   "fix.backend.receiptLoader": ".ktx2 फ़ाइलों का उपयोग करने के लिए आपके गेम को एक KTX2 ट्रांसकोडर बंडल + Pixi लोडर जोड़ना होगा (import 'pixi.js/ktx2')। zip बड़ा है क्योंकि इसमें सामान्य छवियाँ भी होती हैं।",
   "license.locked": "Pro फ़िक्स अनलॉक करने के लिए लाइसेंस सक्रिय करें",
   "license.keyPlaceholder": "लाइसेंस कुंजी (AD-…)",

@@ -393,6 +393,8 @@
   "fix.backend.receiptPngquant": "pngquant: {produced} de {uploaded} páginas PNG recomprimidas em {host} — download {before:bytes} → {after:bytes} (no lugar; VRAM inalterada).",
   "fix.backend.receiptFailed": "{failed} página(s) recorreram à imagem do navegador (backend recusou ou inacessível).",
   "fix.backend.receiptVram": "VRAM de GPU do KTX2 ≤ {bytes:bytes} (pior caso; menos em GPUs que transcodificam para BC1/ETC1; caso contrário, fallback rasterizado) — relatado separadamente, não no total de VRAM.",
+  "fix.backend.receiptVramMeasured": "Medido {measured:bytes} na sua GPU (comprimido por blocos) — de {baseline:bytes} em raster; teto ≤ {ceiling:bytes}. Somente este dispositivo.",
+  "fix.backend.receiptVramFallback": "Sua GPU não suporta compressão por blocos (ou o transcodificador não carregou) — o KTX2 recorreu ao raster aqui, sem ganho de VRAM neste dispositivo.",
   "fix.backend.receiptLoader": "Para usar os arquivos .ktx2 seu jogo deve adicionar um pacote transcodificador KTX2 + carregador Pixi (import 'pixi.js/ktx2'). O zip é maior porque também inclui as imagens normais.",
   "license.locked": "Ative uma licença para desbloquear o ajuste Pro",
   "license.keyPlaceholder": "Chave de licença (AD-…)",

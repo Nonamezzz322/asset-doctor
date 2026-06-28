@@ -358,6 +358,22 @@ export interface FixReceipt {
    *  raster on GPUs with no block-compression support. Reported SEPARATELY with the "≤ / fallback" caveat in
    *  the receipt copy. Absent ⇒ no KTX2 produced. */
   ktx2VramBytesWorstCase?: number;
+  /** MEASURED resident GPU VRAM (bytes) of the produced .ktx2 pages on THE USER'S GPU this run — Σ
+   *  ProbeKtx2Reading.compressedBytes over the probed pages (each mip level its own compressedTexImage2D
+   *  call, summed ⇒ exact residency). Turns the one ESTIMATED headline into a MEASURED fact, shown BESIDE
+   *  `ktx2VramBytesWorstCase` ("measured X on your GPU (BC7/ASTC), ceiling ≤ Y — this device only"). It is
+   *  DEVICE-LOCAL ONLY (the GPU's chosen transcode target AND whether the transcoder loaded both move it)
+   *  and is NEVER folded into the hard `vramBytesAfter` (Invariant 5) nor asserted across devices (Invariant
+   *  3). Filled AFTER the worker finishes by a main-thread WebGL probe (the worker has no WebGL); ABSENT ⇒
+   *  no probe ran (no WebGL / no .ktx2 produced / transcoder unavailable) ⇒ receipt byte-identical to today. */
+  probedKtx2VramBytes?: number;
+  /** Raster (RGBA8888 = w·h·4) baseline measured in the SAME probe pass — the honest "before" beside the
+   *  measured compressed "after". Absent together with `probedKtx2VramBytes` (no probe ran). */
+  probedKtx2RasterBaselineBytes?: number;
+  /** True ⇒ ≥1 probed page fell back to raster on this device (no block-compression support / transcoder
+   *  failed / asset 404'd) ⇒ the measured number is NOT a win here — disclosed so it is never mis-sold.
+   *  Absent ⇒ no probe ran (or every probed page got real compression). */
+  probedKtx2Fallback?: boolean;
 }
 
 /* ── Dry-run plan preview (docs/improvements/dry-run-plan-preview.md) ─────────────────────────
@@ -391,9 +407,27 @@ export interface FixPlanSummary {
   hasDeferredChecks: boolean;
 }
 
+/** One produced `.ktx2` page + its raster source, TRANSFERRED from the worker on `fix-done` so the MAIN
+ *  thread can probe real GPU residency (the worker has no WebGL). The worker holds these bytes; we ship a
+ *  store-only zip *writer* (no reader), so re-reading the zip on the host is not an option — the side-channel
+ *  carries fresh slices instead. Populated ONLY when ≥1 `.ktx2` was produced (capped); absent otherwise ⇒
+ *  no probe ⇒ receipt + behaviour byte-identical to today. */
+export interface Ktx2ProbeInput {
+  /** the produced `.ktx2` page bytes (a fresh slice — the zip's copy stays intact). */
+  ktx2Bytes: ArrayBuffer;
+  /** the SAME page's raster bytes (a fresh slice) — decoded on the host for the w·h·4 baseline. */
+  rasterBytes: ArrayBuffer;
+  /** the raster bytes' MIME (so the host decodes them correctly). */
+  rasterMime: string;
+}
+
 export type FixResponse =
   | { type: 'fix-progress'; label: string; done: number; total: number }
-  | { type: 'fix-done'; receipt: FixReceipt; zip: Blob }
+  /** `ktx2Probe` is the OPT-IN GPU-VRAM probe side-channel (round15): present (non-empty) ONLY when the
+   *  backend produced ≥1 `.ktx2` page. The host (fix-client.runFix) probes these on the main thread and
+   *  REPLACES `receipt` with the augmented one (the measured fields) before resolving. Absent ⇒ no probe ⇒
+   *  receipt + zip byte-identical to today. The buffers are transferred zero-copy (fresh worker slices). */
+  | { type: 'fix-done'; receipt: FixReceipt; zip: Blob; ktx2Probe?: Ktx2ProbeInput[] }
   /** Dry-run preview (mode:'plan'). Additive: the execute path never emits this; fix-progress/fix-done
    *  are unchanged. */
   | { type: 'fix-plan'; summary: FixPlanSummary }

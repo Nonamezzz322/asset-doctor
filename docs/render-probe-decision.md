@@ -60,6 +60,33 @@ and VRAM from a real render — works and reads cleanly. Build on it: the struct
 profiler (extension / SDK) and the correlation layer that stitches static findings to live
 GPU-workload numbers.
 
+## KTX2 GPU-VRAM probe (round15) — same status tier
+
+[`probeKtx2`](../packages/probe/src/probe.ts) extends the moat to the produced `.ktx2` pages: it
+transcodes a page through Pixi's KTX2 loader in the same offscreen-WebGL renderer and reads the
+**measured** resident compressed bytes via `compressedTexImage2D` byteLengths (incl. baked mips —
+each level is its own call, so the sum IS the exact residency; `GlStats.compressedBytes`). It turns
+the one ESTIMATED GPU-VRAM headline (`ktx2VramBytesWorstCase`) into a measured fact, surfaced BESIDE
+the worst-case ceiling and labelled **"this device only"** (the number is doubly device-dependent —
+the GPU's chosen transcode target AND whether the transcoder loaded both move it), never folded into
+`vramBytesAfter` (invariant 5) nor asserted cross-device (invariant 3).
+
+- **Self-hosted transcoder (required, no network).** Pixi v8's KTX2 loader DEFAULTS to a jsdelivr
+  CDN fetch for `libktx.js`/`libktx.wasm`. We copy those (shipped inside the `pixi.js` package) into
+  [`apps/web/public/transcoders/ktx/`](../apps/web/public/transcoders/ktx/) via
+  [`scripts/copy-ktx-transcoder.mjs`](../apps/web/scripts/copy-ktx-transcoder.mjs) (predev/prebuild)
+  and call `setKTXTranscoderPath({jsUrl,wasmUrl})` to those same-origin URLs **before** the first
+  probe ([`apps/web/src/lib/ktx2-probe-run.ts`](../apps/web/src/lib/ktx2-probe-run.ts)) — so the
+  probe NEVER hits a third-party CDN and works offline.
+- **Status: same tier as render-probe above.** The instrument extension (`compressedBytes` +
+  `compressedDataByteLength`) is verified **headless** in
+  [`packages/probe/test/instrument.test.ts`](../packages/probe/test/instrument.test.ts); the live
+  transcode read is a **documented browser/GPU run** (gated by `webglAvailable`, like `probeAtlas`).
+- **Honest fallback, never throws.** No block-compression support / transcoder unavailable / asset
+  404 ⇒ the loader gives a raster texture ⇒ `fallback:true` with `compressedBytes ===
+  rasterBaselineBytes` (no win on this device, disclosed). No `.ktx2` / no WebGL ⇒ no fields attached
+  ⇒ receipt byte-identical to today.
+
 ## Reproduce
 
 ```bash

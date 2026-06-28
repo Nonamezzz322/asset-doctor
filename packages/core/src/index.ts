@@ -437,6 +437,28 @@ export interface ProbeReading {
   shaderCompiles: number;
 }
 
+/** MEASURED resident GPU bytes of a transcoded .ktx2 page on THE PROBING DEVICE ONLY — read from a real
+ *  offscreen-WebGL render via compressedTexImage2D byteLengths (incl. baked mips, each level its own call,
+ *  so the sum IS the exact residency). NOT a cross-device claim, NOT a ceiling: the GPU-chosen transcode
+ *  target (BC7/ASTC/BC1/ETC1) AND whether the transcoder loaded at all both move this number, so it is
+ *  labelled "on your GPU / this device only" and shown BESIDE COMPRESSED_BYTES_PER_PX_CEILING — NEVER
+ *  folded into a hard vramBytesAfter (Invariant 5) or any cross-device assertion (Invariant 3).
+ *  `rasterBaselineBytes` = the SAME page measured RGBA8888 (w·h·4) — the honest "before". `fallback:true`
+ *  ⇒ this GPU has NO block-compression support (or the transcoder failed to load / asset 404'd) and the
+ *  loader produced a raster texture ⇒ `compressedBytes === rasterBaselineBytes` and it is NOT a win on this
+ *  device (reported honestly, never mis-sold). Zero-dep + ADDITIVE: a caller that never runs the probe
+ *  simply omits it; mirrors `ProbeReading` (re-exported by @asset-doctor/probe for back-compat). */
+export interface ProbeKtx2Reading {
+  /** Σ compressedTexImage2D/compressedTexSubImage2D data byteLengths over the transcoded texture (all mip
+   *  levels). The MEASURED resident compressed footprint on this GPU — NOT w·h·4, NOT a ceiling. */
+  compressedBytes: number;
+  /** The SAME page as RGBA8888 (w·h·4) measured in the same probe pass — the honest "before" state. */
+  rasterBaselineBytes: number;
+  /** True ⇒ no block-compression support on this GPU OR the transcoder failed/asset 404'd ⇒ the loader gave
+   *  a raster texture ⇒ `compressedBytes === rasterBaselineBytes` ⇒ NO win on this device (disclosed). */
+  fallback: boolean;
+}
+
 export interface AssetMetrics {
   assetRef: string;
   diskBytes: number;
