@@ -39,6 +39,11 @@
   },
   "report.noAssets": "没有可显示的单张图片或图集资源。",
   "report.noImage": "该资源没有可显示的图片。",
+  "report.unparsed.title": {
+    "$count": "n",
+    "one": "{n} 个文件无法分析",
+    "other": "{n} 个文件无法分析"
+  },
   "findings.title": "诊断结果",
   "findings.none": "✓ 该资源无任何问题",
   "pro.note": "Pro 修复（重新打包 + 转码）— 阶段 2",
@@ -57,6 +62,9 @@
   "find.npot.title": "非二次幂 {w}×{h}",
   "find.npot.detail": "若你的工具链将其填充至 POT，填充到 {potW}×{potH} 会浪费 {waste:pct}（{vram:bytes}）。WebGL2/PixiJS 原生上传 NPOT（clamp+linear），因此这通常无害。",
   "find.npot.fix": "仅当你的流程强制 POT 时才需处理：trim/调整尺寸使填充最小化。",
+  "find.solid-fill.title": "纯色 {w}×{h} —— 一种颜色占用 {vram:bytes}",
+  "find.solid-fill.detail": "每个采样像素都是同一种颜色（或完全透明）—— 没有边缘、渐变或细节。它仍占用 {vram:bytes} 的 VRAM（{w}×{h}×4）来承载单个值。",
+  "find.solid-fill.fix": "改用 1×1 纹理在运行时着色/拉伸，或用纯色 sprite。",
   "find.wasted-regions.title": {
     "$count": "n",
     "other": "已映射 {n} 个空白区域"
@@ -243,6 +251,15 @@
   },
   "fix.dedup.diskSaved": "去重在磁盘上节省 −{bytes:bytes}",
   "fix.dedup.vramUpperBound": "最多节省 −{bytes:bytes} VRAM（上限 — 仅当运行时在各副本间共享一次上传时）",
+  "fix.sheetDiff.title": {
+    "$count": "n",
+    "one": "{n} 张图集 — 可视化证明",
+    "other": "{n} 张图集 — 可视化证明"
+  },
+  "fix.sheetDiff.showing": "显示 {total} 张中的 {shown} 张",
+  "fix.sheetDiff.proofNote": "每张重新打包图集的前后 X 光对比。重打包后的画面在仍为空白处发红光。OCC/VRAM/尺寸是两个测得的状态，而非节省量。",
+  "fix.sheetDiff.before": "之前",
+  "fix.sheetDiff.after": "之后",
   "fix.tier.title": "生成分辨率层级",
   "fix.tier.hint": "为每个资源输出缩小的副本，让游戏加载适合设备的分辨率。",
   "fix.tier.enable": "生成分辨率层级",

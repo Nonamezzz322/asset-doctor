@@ -172,3 +172,109 @@ regionB
     expect(pages[1]!.sprites).toHaveLength(1);
   });
 });
+
+describe('parser hardening — corrupt input is rejected, not coerced (F3)', () => {
+  // A 1024×1024 fixture image to anchor the atlas/page size for OOB tests.
+  const img1024 = () => ({ ref: 'packed.png', bytes: bytes('pixi-packed-ok/packed.png') });
+
+  it('readRect: a 0×0 / negative frame is rejected (invalid frame error)', () => {
+    const manifest = {
+      frames: { 'bad.png': { frame: { x: 0, y: 0, w: 0, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 0, h: 32 } } },
+      meta: { image: 'packed.png', size: { w: 1024, h: 1024 } },
+    };
+    const res = parseAtlas(manifest, img1024());
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/invalid frame "bad.png"/);
+  });
+
+  it('atlas OOB: a frame past the page edge is rejected; flush at the edge is allowed', () => {
+    const oob = {
+      frames: { 'over.png': { frame: { x: 1000, y: 0, w: 100, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 100, h: 32 } } },
+      meta: { image: 'packed.png', size: { w: 1024, h: 1024 } },
+    };
+    const r1 = parseAtlas(oob, img1024());
+    expect(r1.ok).toBe(false);
+    if (!r1.ok) expect(r1.error).toMatch(/extends past atlas 1024×1024/);
+
+    // x+w === size.w is allowed (`>`, not `>=`).
+    const edge = {
+      frames: { 'edge.png': { frame: { x: 1024 - 64, y: 0, w: 64, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 64, h: 32 } } },
+      meta: { image: 'packed.png', size: { w: 1024, h: 1024 } },
+    };
+    const r2 = parseAtlas(edge, img1024());
+    expect(r2.ok).toBe(true);
+  });
+
+  it('readImageInfo: a 0×0 / absurd PNG header reads as null (validDims)', () => {
+    // PNG sig + IHDR with width 0 → invalid.
+    const png = new Uint8Array(24);
+    png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+    // width@16 = 0, height@20 = 100
+    png[20] = 0x00; png[21] = 0x00; png[22] = 0x00; png[23] = 0x64;
+    expect(readImageInfo(png)).toBeNull();
+
+    // width > MAX_DIM (32768) → invalid.
+    const huge = new Uint8Array(24);
+    huge.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+    huge[16] = 0x00; huge[17] = 0x01; huge[18] = 0x00; huge[19] = 0x00; // width 65536
+    huge[20] = 0x00; huge[21] = 0x00; huge[22] = 0x00; huge[23] = 0x64; // height 100
+    expect(readImageInfo(huge)).toBeNull();
+  });
+
+  it('spine fixed-arity NaN parse: a blank coord token flags the region malformed (no coord shift)', () => {
+    // Old `.filter(Number.isFinite)` turned `xy: , 100` into [100] → {x:100,y:0} (silent misplacement).
+    const atlas = `sheet.png
+size: 256,256
+good
+  rotate: 0
+  xy: 0, 0
+  size: 50, 50
+  orig: 50, 50
+bad
+  rotate: 0
+  xy: , 100
+  size: 50, 50
+  orig: 50, 50
+`;
+    const pages = parseSpineAtlasText(atlas);
+    const p = pages[0]!;
+    expect(p.sprites.map((s) => s.name)).toEqual(['good']); // bad region NOT silently placed at x:100
+    expect(p.malformedRegions).toEqual([{ name: 'bad', reason: 'region "bad": non-finite xy ", 100"' }]);
+  });
+
+  it('spine per-region OOB recovery: an out-of-page region is dropped + surfaced; the page keeps good ones', () => {
+    const atlas = `sheet.png
+size: 128,128
+inside
+  rotate: 0
+  xy: 0, 0
+  size: 64, 64
+  orig: 64, 64
+outside
+  rotate: 0
+  xy: 100, 0
+  size: 64, 64
+  orig: 64, 64
+`;
+    const p = parseSpineAtlasText(atlas)[0]!;
+    expect(p.sprites.map((s) => s.name)).toEqual(['inside']);
+    expect(p.malformedRegions).toEqual([
+      { name: 'outside', reason: 'region "outside" extends past page 128×128' },
+    ]);
+  });
+
+  it('spine offset stays tolerant: a malformed optional offset defaults to 0 (region survives)', () => {
+    const atlas = `sheet.png
+size: 256,256
+rgn
+  rotate: 0
+  xy: 0, 0
+  size: 40, 30
+  orig: 50, 50
+  offset: , 5
+`;
+    const p = parseSpineAtlasText(atlas)[0]!;
+    expect(p.sprites).toHaveLength(1);
+    expect(p.malformedRegions).toBeUndefined(); // offset is tolerant, not a required field
+  });
+});

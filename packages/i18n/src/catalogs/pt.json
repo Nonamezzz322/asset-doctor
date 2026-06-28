@@ -41,6 +41,11 @@
   },
   "report.noAssets": "Nenhum asset individual de imagem ou atlas para exibir.",
   "report.noImage": "Nenhuma imagem para exibir para este asset.",
+  "report.unparsed.title": {
+    "$count": "n",
+    "one": "{n} arquivo não pôde ser analisado",
+    "other": "{n} arquivos não puderam ser analisados"
+  },
   "findings.title": "Achados",
   "findings.none": "✓ nenhum problema para este asset",
   "pro.note": "Fix Pro (repack + transcodificação) — Fase 2",
@@ -59,6 +64,9 @@
   "find.npot.title": "Não-potência-de-dois {w}×{h}",
   "find.npot.detail": "Preencher até {potW}×{potH} desperdiçaria {waste:pct} ({vram:bytes}) SE seu toolchain ajustar para POT. WebGL2/PixiJS fazem upload de NPOT nativamente (clamp+linear), então isso geralmente é inofensivo.",
   "find.npot.fix": "Só aja se seu pipeline forçar POT: faça trim/redimensione para que o preenchimento seja mínimo.",
+  "find.solid-fill.title": "Sólida {w}×{h} — uma cor fixa {vram:bytes}",
+  "find.solid-fill.detail": "Cada pixel amostrado é a mesma cor (ou totalmente transparente) — sem bordas, gradiente ou detalhe. Ainda assim fixa {vram:bytes} de VRAM ({w}×{h}×4) para carregar um único valor.",
+  "find.solid-fill.fix": "Substitua por uma textura 1×1 tingida/esticada em tempo de execução, ou por um sprite de cor sólida.",
   "find.wasted-regions.title": {
     "$count": "n",
     "one": "{n} região vazia mapeada",
@@ -256,6 +264,15 @@
   },
   "fix.dedup.diskSaved": "−{bytes:bytes} on disk from de-duplication",
   "fix.dedup.vramUpperBound": "up to −{bytes:bytes} VRAM (upper bound — only if the runtime shares one upload across the copies)",
+  "fix.sheetDiff.title": {
+    "$count": "n",
+    "one": "{n} folha — prova visual",
+    "other": "{n} folhas — prova visual"
+  },
+  "fix.sheetDiff.showing": "mostrando {shown} de {total}",
+  "fix.sheetDiff.proofNote": "Radiografia antes/depois de cada folha reempacotada. A imagem do depois brilha em vermelho onde o espaço ainda está vazio. OCC/VRAM/dimensões são dois estados medidos, não uma economia.",
+  "fix.sheetDiff.before": "antes",
+  "fix.sheetDiff.after": "depois",
   "fix.tier.title": "Gerar níveis de resolução",
   "fix.tier.hint": "Emite cópias reduzidas de cada recurso para que o jogo carregue a resolução adequada ao dispositivo.",
   "fix.tier.enable": "Gerar níveis de resolução",

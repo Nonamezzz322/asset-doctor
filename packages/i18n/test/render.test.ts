@@ -6,6 +6,7 @@ import {
   DEFAULT_THRESHOLDS as cfg,
   occupancyFinding,
   dimensionFindings,
+  solidFillFinding,
   wastedRegions,
   formatFinding,
   duplicateExactFindings,
@@ -39,6 +40,7 @@ async function realFindings(): Promise<Finding[]> {
   out.push(wastedRegions(a, cfg)!);
   out.push(...dimensionFindings('big.png', { w: 4096, h: 4096 }, cfg)); // oversize (POT → no npot)
   out.push(...dimensionFindings('icon.png', { w: 100, h: 100 }, cfg)); // npot (not oversize)
+  out.push(solidFillFinding('plate.png', { w: 1024, h: 1024 }, cfg)!); // solid-fill (warn)
   out.push((await formatFinding('hero.png', img('hero.png', 256, 256, 10000).image, cfg, async () => 4000))!);
   // flat/alpha-art content class ⇒ messageKey 'format-lossless' (rule still 'format') — drift-check the
   // new key family + its baked EN strings exactly like every other finding.
@@ -60,7 +62,7 @@ describe('renderFinding — English catalog reproduces the baked strings (drift 
     const findings = await realFindings();
     const keys = new Set(findings.map((f) => f.messageKey));
     // sanity: we exercised every messageKey family the rules emit
-    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'integrity', 'format-aggregate', 'variants']));
+    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'integrity', 'format-aggregate', 'variants']));
     for (const f of findings) {
       expect(f.messageKey, `${f.id} must carry a messageKey`).toBeTruthy();
       const r = renderFinding(f, 'en');

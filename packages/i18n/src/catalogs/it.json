@@ -41,6 +41,11 @@
   },
   "report.noAssets": "Nessun asset immagine o atlas da mostrare.",
   "report.noImage": "Nessuna immagine da mostrare per questo asset.",
+  "report.unparsed.title": {
+    "$count": "n",
+    "one": "{n} file non è stato possibile analizzare",
+    "other": "{n} file non è stato possibile analizzare"
+  },
   "findings.title": "Risultati",
   "findings.none": "✓ nessun problema per questo asset",
   "pro.note": "Fix Pro (repack + transcodifica) — Fase 2",
@@ -59,6 +64,9 @@
   "find.npot.title": "Non-potenza-di-due {w}×{h}",
   "find.npot.detail": "Il padding a {potW}×{potH} sprecherebbe {waste:pct} ({vram:bytes}) SE la tua toolchain fa padding a POT. WebGL2/PixiJS caricano NPOT nativamente (clamp+linear), quindi di solito è innocuo.",
   "find.npot.fix": "Intervieni solo se la tua pipeline impone POT: ritaglia/ridimensiona per minimizzare il padding.",
+  "find.solid-fill.title": "Tinta unita {w}×{h} — un colore impegna {vram:bytes}",
+  "find.solid-fill.detail": "Ogni pixel campionato è dello stesso colore (o completamente trasparente) — niente bordi, gradiente o dettaglio. Eppure impegna {vram:bytes} di VRAM ({w}×{h}×4) per trasportare un solo valore.",
+  "find.solid-fill.fix": "Sostituiscila con una texture 1×1 tinta/stirata a runtime, o con uno sprite a tinta unita.",
   "find.wasted-regions.title": {
     "$count": "n",
     "one": "{n} regione vuota mappata",
@@ -256,6 +264,15 @@
   },
   "fix.dedup.diskSaved": "−{bytes:bytes} su disco grazie alla deduplicazione",
   "fix.dedup.vramUpperBound": "fino a −{bytes:bytes} di VRAM (limite superiore — solo se il runtime condivide un upload tra le copie)",
+  "fix.sheetDiff.title": {
+    "$count": "n",
+    "one": "{n} foglio — prova visiva",
+    "other": "{n} fogli — prova visiva"
+  },
+  "fix.sheetDiff.showing": "mostrati {shown} di {total}",
+  "fix.sheetDiff.proofNote": "Radiografia prima/dopo di ogni foglio riconfezionato. L'immagine del dopo si illumina di rosso dove lo spazio è ancora vuoto. OCC/VRAM/dimensioni sono due stati misurati, non un risparmio.",
+  "fix.sheetDiff.before": "prima",
+  "fix.sheetDiff.after": "dopo",
   "fix.tier.title": "Genera livelli di risoluzione",
   "fix.tier.hint": "Emette copie ridotte di ogni risorsa così il gioco carica la risoluzione adatta al dispositivo.",
   "fix.tier.enable": "Genera livelli di risoluzione",

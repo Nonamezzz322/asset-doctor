@@ -123,6 +123,36 @@ export function dimensionFindings(ref: string, size: Size, cfg: ThresholdConfig)
   return out;
 }
 
+/** Single-color (or fully transparent) LOOSE image. A 1024² solid PNG is POT and under the oversize
+ *  budget, yet pins w×h×4 VRAM to carry ONE color — the format audit won't catch it (no ≥25% transcode
+ *  delta on an already-tiny solid). We MEASURE the wasted VRAM; we never emit the 1×1 replacement (that
+ *  is the fix engine's job — Invariant 3), so the estimate is `vramBytesSaved` only, NO `diskBytesSaved`.
+ *  Loose-only; the worker sets `solid` from the SAME 9×8 sample it already decodes (zero extra read). */
+export function solidFillFinding(ref: string, size: Size, cfg: ThresholdConfig): Finding | null {
+  if (!cfg.solidFill) return null;
+  const shorter = Math.min(size.w, size.h);
+  if (shorter < cfg.solidFill.minEdgePx) return null;
+  const longest = Math.max(size.w, size.h);
+  const severity: Severity = longest >= cfg.solidFill.warnEdgePx ? 'warn' : 'info';
+  const vram = vramBytes(size);
+  return {
+    id: `${ref}:solid-fill`,
+    rule: 'solid-fill',
+    severity,
+    assetRef: ref,
+    title: `Solid ${size.w}×${size.h} — one color pinning ${fmtBytes(vram)}`,
+    detail:
+      `Every sampled pixel is the same color (or fully transparent) — no edges, gradient or detail. ` +
+      `It still pins ${fmtBytes(vram)} of VRAM (${size.w}×${size.h}×4) to carry a single value.`,
+    fix: 'Replace with a 1×1 texture tinted/stretched at runtime, or a solid-color sprite.',
+    // VRAM only: a 1×1 carries the color in ~4 bytes; the disk saving belongs to the fix engine that
+    // actually emits the replacement (we measure, we don't generate — Invariant 3).
+    estimate: { vramBytesSaved: vram - BYTES_PER_PX },
+    messageKey: 'solid-fill',
+    params: { w: size.w, h: size.h, vram },
+  };
+}
+
 export function wastedRegions(
   atlas: Atlas,
   cfg: ThresholdConfig,

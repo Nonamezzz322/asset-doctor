@@ -40,6 +40,11 @@
   },
   "report.noAssets": "No individual image or atlas assets to display.",
   "report.noImage": "No image to display for this asset.",
+  "report.unparsed.title": {
+    "$count": "n",
+    "one": "{n} file could not be analyzed",
+    "other": "{n} files could not be analyzed"
+  },
   "findings.title": "Findings",
   "findings.none": "✓ no issues for this asset",
   "pro.note": "Pro fix (repack + transcode) — Phase 2",
@@ -58,6 +63,9 @@
   "find.npot.title": "Non-power-of-two {w}×{h}",
   "find.npot.detail": "Padding to {potW}×{potH} would waste {waste:pct} ({vram:bytes}) IF your toolchain pads to POT. WebGL2/PixiJS upload NPOT natively (clamp+linear), so this is usually harmless.",
   "find.npot.fix": "Only act if your pipeline forces POT: trim/resize so the padding is minimal.",
+  "find.solid-fill.title": "Solid {w}×{h} — one color pinning {vram:bytes}",
+  "find.solid-fill.detail": "Every sampled pixel is the same color (or fully transparent) — no edges, gradient or detail. It still pins {vram:bytes} of VRAM ({w}×{h}×4) to carry a single value.",
+  "find.solid-fill.fix": "Replace with a 1×1 texture tinted/stretched at runtime, or a solid-color sprite.",
   "find.wasted-regions.title": {
     "$count": "n",
     "one": "{n} empty region mapped",
@@ -253,6 +261,15 @@
   },
   "fix.dedup.diskSaved": "−{bytes:bytes} on disk from de-duplication",
   "fix.dedup.vramUpperBound": "up to −{bytes:bytes} VRAM (upper bound — only if the runtime shares one upload across the copies)",
+  "fix.sheetDiff.title": {
+    "$count": "n",
+    "one": "{n} sheet — visual proof",
+    "other": "{n} sheets — visual proof"
+  },
+  "fix.sheetDiff.showing": "showing {shown} of {total}",
+  "fix.sheetDiff.proofNote": "Before/after X-ray of each repacked sheet. The after-film glows red where space is still empty. OCC/VRAM/dims are two measured states, not a saving.",
+  "fix.sheetDiff.before": "before",
+  "fix.sheetDiff.after": "after",
   "fix.tier.title": "Generate resolution tiers",
   "fix.tier.hint": "Emit downscaled copies of each asset so the game loads the resolution that fits the device.",
   "fix.tier.enable": "Generate resolution tiers",

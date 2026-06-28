@@ -7,7 +7,7 @@ import type { Asset, ImageFeatures, ImageMime } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
 import { analyze, mergeSharedAtlases, type EncodeSizer } from '@asset-doctor/analysis';
 import { groupFiles, keyOf, type RawFile } from '../lib/group';
-import { classifyContent, dHashFromGray, isFlat, luma } from '../lib/perceptual';
+import { classifyContent, dHashFromGray, isFlat, isSolidColor, luma } from '../lib/perceptual';
 import type { ContentClass } from '@asset-doctor/core';
 import type { WorkerRequest, WorkerResponse } from './protocol';
 
@@ -24,6 +24,10 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
     const imageBytes = new Map<string, ArrayBuffer>();
     const total = grouped.atlases.length + grouped.images.length;
     let done = 0;
+    // Honest unparsed surface: ingest's "looks like a manifest but unusable" skip-points + the worker's
+    // own parse failures (atlas/spine threw or image header unrecognized) + per-region Spine recovery.
+    // Sorted by ref before handing to analyze (which passes it through verbatim).
+    const unparsed = [...grouped.unparsed];
 
     for (const a of grouped.atlases) {
       const image = { ref: a.name, bytes: new Uint8Array(a.image.bytes) };
@@ -37,6 +41,14 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       if (res.ok && res.asset.kind === 'atlas') {
         assets.push(res.asset);
         imageBytes.set(res.asset.atlas.name, a.image.bytes);
+      } else if (!res.ok) {
+        unparsed.push({ ref: a.name, reason: res.error });
+      }
+      // Per-region Spine recovery: the page kept its good sprites; surface the bad regions individually.
+      if (a.kind === 'spine') {
+        for (const mr of (a.manifest as SpinePage).malformedRegions ?? []) {
+          unparsed.push({ ref: `${a.name}#${mr.name}`, reason: mr.reason });
+        }
       }
     }
     for (const im of grouped.images) {
@@ -48,18 +60,22 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       if (res.ok && res.asset.kind === 'image') {
         assets.push(res.asset);
         imageBytes.set(res.asset.image.name, im.bytes);
+      } else if (!res.ok) {
+        unparsed.push({ ref, reason: res.error });
       }
     }
+    unparsed.sort((a, b) => a.ref.localeCompare(b.ref));
 
     // Per-image features for folder-level duplicate detection + the content-class format verdict.
     // ONE decode per image yields both the dHash AND the content class (zero extra getImageData).
     const features: ImageFeatures[] = [];
     for (const [assetRef, bytes] of imageBytes) {
       const contentHash = await sha256Hex(bytes);
-      const { dHash, contentClass } = await decodeFeatures(bytes);
+      const { dHash, contentClass, solid } = await decodeFeatures(bytes);
       const feat: ImageFeatures = { assetRef, contentHash };
       if (dHash) feat.dHash = dHash;
       if (contentClass !== 'unknown') feat.contentClass = contentClass;
+      if (solid) feat.solid = true; // additive: only ever set when true
       features.push(feat);
     }
 
@@ -67,6 +83,7 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       encodeImage: makeEncoder(imageBytes),
       features,
       missingImages: grouped.missing,
+      ...(unparsed.length ? { unparsed } : {}),
     });
     post({ type: 'done', report });
   } catch (err) {
@@ -82,24 +99,27 @@ async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
 /** ONE 9×8 decode → BOTH the dHash (near-dup detection) AND the content class (format verdict). The
  *  9×8 RGBA sample is read once with getImageData; `dHash` is null for featureless fills (they collapse
  *  to one hash → false near-dup matches), `contentClass` is the lossy-vs-lossless hint (Inv 4: NO
- *  encode here — the class is pure math over the already-decoded sample). 'unknown' on any decode
- *  failure or when OffscreenCanvas is unavailable. */
-async function decodeFeatures(bytes: ArrayBuffer): Promise<{ dHash: string | null; contentClass: ContentClass }> {
-  if (typeof OffscreenCanvas === 'undefined') return { dHash: null, contentClass: 'unknown' };
+ *  encode here — the class is pure math over the already-decoded sample). The same sample also yields
+ *  `solid` (single-color / fully transparent — drives the loose-only solid-fill finding). 'unknown' /
+ *  solid:false on any decode failure or when OffscreenCanvas is unavailable. */
+async function decodeFeatures(
+  bytes: ArrayBuffer,
+): Promise<{ dHash: string | null; contentClass: ContentClass; solid: boolean }> {
+  if (typeof OffscreenCanvas === 'undefined') return { dHash: null, contentClass: 'unknown', solid: false };
   try {
     const bmp = await createImageBitmap(new Blob([bytes]));
     const canvas = new OffscreenCanvas(9, 8);
     const c2d = canvas.getContext('2d');
-    if (!c2d) return { dHash: null, contentClass: 'unknown' };
+    if (!c2d) return { dHash: null, contentClass: 'unknown', solid: false };
     c2d.drawImage(bmp, 0, 0, 9, 8);
     bmp.close();
     const data = c2d.getImageData(0, 0, 9, 8).data;
     const gray: number[] = [];
     for (let p = 0; p < 9 * 8; p++) gray.push(luma(data, p * 4));
     const dHash = isFlat(gray) ? null : dHashFromGray(gray); // featureless → skip perceptual matching
-    return { dHash, contentClass: classifyContent(gray, data) };
+    return { dHash, contentClass: classifyContent(gray, data), solid: isSolidColor(gray, data) };
   } catch {
-    return { dHash: null, contentClass: 'unknown' };
+    return { dHash: null, contentClass: 'unknown', solid: false };
   }
 }
 

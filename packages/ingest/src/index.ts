@@ -27,6 +27,11 @@ export interface Grouped {
   images: RawFile[];
   /** Manifests whose referenced image is missing from the folder. */
   missing: { manifest: string; image: string }[];
+  /** Files that LOOK like an asset manifest but could not be used — surfaced honestly (symmetric with
+   *  the fix engine's skipped[]), NEVER benign non-asset files. Only the 3 "looks like a manifest but
+   *  unusable" cases: a `.atlas` that threw, a `.json` that failed JSON.parse, or a manifest with frames
+   *  but no meta.image. `ref` = basename. Sorted by ref; additive (absent/empty ⇒ byte-identical). */
+  unparsed: { ref: string; reason: string }[];
 }
 
 const IMAGE_RE = /\.(png|webp|jpe?g|avif)$/i;
@@ -79,6 +84,9 @@ export function groupFiles(files: RawFile[]): Grouped {
   const referenced = new Set<string>();
   const atlases: GroupedAtlas[] = [];
   const missing: { manifest: string; image: string }[] = [];
+  // Honest "looks like a manifest but unusable" surface (NOT benign non-asset files — see :111/:118).
+  const unparsed: { ref: string; reason: string }[] = [];
+  const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
   const resolve = (manifestPath: string | undefined, imageName: string): RawFile | undefined => {
     const dirHit = manifestPath ? byPath.get(normalizePath(`${dirOf(manifestPath)}/${imageName}`)) : undefined;
@@ -92,7 +100,8 @@ export function groupFiles(files: RawFile[]): Grouped {
       let pages: SpinePage[];
       try {
         pages = parseSpineAtlasText(new TextDecoder().decode(f.bytes));
-      } catch {
+      } catch (e) {
+        unparsed.push({ ref: baseName(f.name), reason: `Spine .atlas parse failed: ${msg(e)}` });
         continue;
       }
       for (const page of pages) {
@@ -112,12 +121,16 @@ export function groupFiles(files: RawFile[]): Grouped {
     let json: unknown;
     try {
       json = JSON.parse(new TextDecoder().decode(f.bytes));
-    } catch {
+    } catch (e) {
+      unparsed.push({ ref: baseName(f.name), reason: `manifest JSON parse failed: ${msg(e)}` });
       continue;
     }
-    if (!looksLikeManifest(json)) continue;
+    if (!looksLikeManifest(json)) continue; // a .json config / non-manifest is legitimately not an asset — stay silent
     const imageName = manifestImage(json);
-    if (!imageName) continue;
+    if (!imageName) {
+      unparsed.push({ ref: baseName(f.name), reason: 'manifest has frames but no meta.image' });
+      continue;
+    }
     const image = resolve(f.path, imageName);
     if (!image) {
       missing.push({ manifest: baseName(f.name), image: baseName(imageName) });
@@ -128,7 +141,8 @@ export function groupFiles(files: RawFile[]): Grouped {
   }
 
   const images = files.filter((f) => IMAGE_RE.test(f.name) && !referenced.has(keyOf(f)));
-  return { atlases, images, missing };
+  unparsed.sort((a, b) => a.ref.localeCompare(b.ref));
+  return { atlases, images, missing, unparsed };
 }
 
 /* ── Feature 4: group loose images into pack groups (design §4) ─────────────────────────────────

@@ -1,4 +1,4 @@
-import type { ImageMime, LazyMarking, ScaleTier, SkinGuard } from '@asset-doctor/core';
+import type { ImageMime, LazyMarking, OverlayZone, ScaleTier, SkinGuard } from '@asset-doctor/core';
 import type { PackMode, StaticGranularity } from '@asset-doctor/ingest';
 // Type-only import (erased under verbatimModuleSyntax ⇒ no runtime cycle with op-manifest, which already
 // type-imports FixPlanSummary/PlanOpCounts from here). op-manifest.ts is the documented OWNER of the OpKind
@@ -143,6 +143,28 @@ export interface FixChange {
   kind: OpKind;
 }
 
+/** Before/after X-ray of ONE repacked/merged/packed/Spine-repacked sheet (round6-f1-sheet-diff.md).
+ *  Carries the encoded source + emitted page bytes (transferred to the main thread) so the receipt can
+ *  show two FilmViewers per sheet — the trust proof for a paid repack. HONESTY (invariant 5): occ/VRAM/
+ *  dims are TWO MEASURED STATES (`before → after`), NEVER a "% saved" — the receipt's vramBytesAfter is
+ *  the SOLE saving claim. `afterZones` glows the after-film's still-empty space (a wasted-regions
+ *  overlay). `occBefore = 0` for a `pack` page (loose has no source atlas — honest "0% packed"). */
+export interface SheetDiff {
+  name: string;
+  beforeBytes: ArrayBuffer;
+  afterBytes: ArrayBuffer;
+  beforeWxH: { w: number; h: number };
+  afterWxH: { w: number; h: number };
+  /** Packed-area fraction 0..1 (occBefore = 0 for a pack page — loose has no source atlas). */
+  occBefore: number;
+  occAfter: number;
+  /** Base GPU footprint w·h·4 (bytes) — two measured states, never a delta claim. */
+  vramBefore: number;
+  vramAfter: number;
+  /** [] or one { kind:'empty', rects } — the after-film's still-empty space (no cast; feeds Finding.overlay). */
+  afterZones: OverlayZone[];
+}
+
 /** Lightweight receipt (no bytes — the optimized files live in the zip Blob). */
 export interface FixReceipt {
   diskBytesBefore: number;
@@ -206,6 +228,12 @@ export interface FixReceipt {
    *  (invariant 5: a symmetric gutter can grow a bin — never claimed free). Reported SEPARATELY; the
    *  growth is ALSO already reflected in vramBytes*. Absent/0 ⇒ no bin grew. */
   extrudeVramDelta?: number;
+  /** Before/after X-ray of the repacked/merged/packed/Spine-repacked sheets, capped at the first N=6
+   *  composed (≤8 MB/side). `sheetDiffsTotal` = how many were composed in all, so the UI can say
+   *  "showing N of M". The bytes are transferred to the main thread. Additive: empty ⇒ both omitted ⇒
+   *  receipt byte-identical to today. */
+  sheetDiffs?: SheetDiff[];
+  sheetDiffsTotal?: number;
 }
 
 /* ── Dry-run plan preview (docs/improvements/dry-run-plan-preview.md) ─────────────────────────

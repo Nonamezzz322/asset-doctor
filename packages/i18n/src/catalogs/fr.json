@@ -41,6 +41,11 @@
   },
   "report.noAssets": "Aucun asset image ou atlas individuel à afficher.",
   "report.noImage": "Aucune image à afficher pour cet asset.",
+  "report.unparsed.title": {
+    "$count": "n",
+    "one": "{n} fichier n'a pas pu être analysé",
+    "other": "{n} fichiers n'ont pas pu être analysés"
+  },
   "findings.title": "Constats",
   "findings.none": "✓ aucun problème pour cet asset",
   "pro.note": "Correction Pro (repack + transcodage) — Phase 2",
@@ -59,6 +64,9 @@
   "find.npot.title": "Non-puissance-de-deux {w}×{h}",
   "find.npot.detail": "Le remplissage jusqu'à {potW}×{potH} gaspillerait {waste:pct} ({vram:bytes}) SI votre toolchain remplit en POT. WebGL2/PixiJS uploadent le NPOT nativement (clamp+linear), c'est donc généralement sans conséquence.",
   "find.npot.fix": "N'intervenez que si votre pipeline force le POT : trimez/redimensionnez pour minimiser le remplissage.",
+  "find.solid-fill.title": "Uni {w}×{h} — une couleur immobilise {vram:bytes}",
+  "find.solid-fill.detail": "Chaque pixel échantillonné est de la même couleur (ou entièrement transparent) — ni contour, ni dégradé, ni détail. Il immobilise pourtant {vram:bytes} de VRAM ({w}×{h}×4) pour porter une seule valeur.",
+  "find.solid-fill.fix": "Remplacez par une texture 1×1 teintée/étirée à l'exécution, ou par un sprite de couleur unie.",
   "find.wasted-regions.title": {
     "$count": "n",
     "one": "{n} région vide cartographiée",
@@ -256,6 +264,15 @@
   },
   "fix.dedup.diskSaved": "−{bytes:bytes} sur le disque grâce à la déduplication",
   "fix.dedup.vramUpperBound": "jusqu'à −{bytes:bytes} de VRAM (borne supérieure — uniquement si le runtime partage un upload entre les copies)",
+  "fix.sheetDiff.title": {
+    "$count": "n",
+    "one": "{n} feuille — preuve visuelle",
+    "other": "{n} feuilles — preuve visuelle"
+  },
+  "fix.sheetDiff.showing": "{shown} sur {total} affichées",
+  "fix.sheetDiff.proofNote": "Radiographie avant/après de chaque feuille réempaquetée. L'image « après » s'illumine en rouge là où l'espace est encore vide. OCC/VRAM/dimensions sont deux états mesurés, pas un gain.",
+  "fix.sheetDiff.before": "avant",
+  "fix.sheetDiff.after": "après",
   "fix.tier.title": "Générer des niveaux de résolution",
   "fix.tier.hint": "Émet des copies réduites de chaque ressource pour que le jeu charge la résolution adaptée à l'appareil.",
   "fix.tier.enable": "Générer des niveaux de résolution",

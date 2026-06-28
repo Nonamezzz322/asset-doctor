@@ -80,6 +80,7 @@ describe('attachProbeReadings', () => {
     stubBrowser(true);
     probeAtlas.mockResolvedValue(READING);
     const rep = report(true);
+    rep.unparsed = [{ ref: 'broken.json', reason: 'manifest JSON parse failed: x' }]; // F3 surface
     const out = await attachProbeReadings(rep, bytesOf);
     expect(out).not.toBe(rep); // new report
     expect(out.assets[0]?.probe).toEqual(READING);
@@ -88,6 +89,7 @@ describe('attachProbeReadings', () => {
     // static estimate untouched (declared vs measured — never merged)
     expect(out.totals.vramBytes).toBe(300);
     expect(rep.assets[0]?.probe).toBeUndefined(); // input not mutated
+    expect(out.unparsed).toEqual(rep.unparsed); // F3: unparsed rides through the write-back spread
   });
 
   it('swallows a per-atlas probe error — that atlas has no reading, the rest attach', async () => {

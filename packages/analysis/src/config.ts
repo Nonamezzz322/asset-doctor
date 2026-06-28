@@ -17,4 +17,7 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   // wording with the measured frag at any value); it does NOT switch on this threshold today — the
   // value is the calibration hook for a future standalone fragmentation finding. PROVISIONAL — a
   // display/copy gate ONLY, NOT a savings gate (a MaxRects repack reclaims waste at any dispersion).
+  solidFill: { minEdgePx: 256, warnEdgePx: 1024 }, // CALIBRATE — single-color loose image gate.
+  // Both edges ≥ minEdgePx before flagging (a tiny swatch is harmless); ≥ warnEdgePx ⇒ warn (a 1024²
+  // solid pins 4 MB VRAM for one color), else info. Loose-only; atlases never trip it.
 };

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { Asset, Atlas, Rect } from '@asset-doctor/core';
 import { parseAtlas, parseImage } from '@asset-doctor/parsers';
-import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -224,6 +224,104 @@ describe('format audit — content-class lossless verdict', () => {
     const report = await analyze([looseImg('x.png')], undefined, { encodeImage: async () => 4000 });
     const fmt = report.findings.find((f) => f.rule === 'format');
     expect(fmt?.messageKey).toBe('format');
+  });
+});
+
+describe('solid-fill (single-color loose image)', () => {
+  const looseImg = (name: string, w: number, h: number): Asset => ({
+    kind: 'image',
+    image: { name, imageRef: name, size: { w, h }, mime: 'image/png', byteSize: 10000 },
+  });
+
+  it('a 1024² solid ⇒ warn, vramBytesSaved = w·h·4 − 4, NO diskBytesSaved (Inv 3)', () => {
+    const f = solidFillFinding('plate.png', { w: 1024, h: 1024 }, DEFAULT_THRESHOLDS)!;
+    expect(f).not.toBeNull();
+    expect(f.rule).toBe('solid-fill');
+    expect(f.messageKey).toBe('solid-fill');
+    expect(f.severity).toBe('warn'); // 1024 ≥ warnEdgePx (1024)
+    expect(f.estimate?.vramBytesSaved).toBe(1024 * 1024 * 4 - 4);
+    expect(f.estimate?.diskBytesSaved).toBeUndefined(); // measure VRAM only; the 1×1 is the fix engine's
+    expect(f.params).toEqual({ w: 1024, h: 1024, vram: 1024 * 1024 * 4 });
+  });
+
+  it('below warnEdgePx but at/above minEdgePx ⇒ info', () => {
+    const f = solidFillFinding('s.png', { w: 512, h: 512 }, DEFAULT_THRESHOLDS)!;
+    expect(f.severity).toBe('info');
+  });
+
+  it('below minEdgePx ⇒ null (a tiny solid swatch is harmless)', () => {
+    expect(solidFillFinding('tiny.png', { w: 128, h: 128 }, DEFAULT_THRESHOLDS)).toBeNull();
+    // shorter edge gates: a tall-thin sliver under minEdgePx on either axis ⇒ null
+    expect(solidFillFinding('sliver.png', { w: 2048, h: 64 }, DEFAULT_THRESHOLDS)).toBeNull();
+  });
+
+  it('no solidFill config ⇒ null (CLI / budget configs that don\'t opt in)', () => {
+    const cfg = { ...DEFAULT_THRESHOLDS };
+    delete cfg.solidFill;
+    expect(solidFillFinding('p.png', { w: 1024, h: 1024 }, cfg)).toBeNull();
+  });
+
+  it('analyze threads solid:true to a LOOSE image via features ⇒ finding', async () => {
+    const report = await analyze([looseImg('plate.png', 1024, 1024)], undefined, {
+      encodeImage: async () => 9999,
+      features: [{ assetRef: 'plate.png', contentHash: 'h', solid: true }],
+    });
+    const solid = report.findings.find((f) => f.rule === 'solid-fill');
+    expect(solid?.assetRef).toBe('plate.png');
+    expect(solid?.severity).toBe('warn');
+  });
+
+  it('analyze NEVER fires solid-fill for an ATLAS, even if a feature marks it solid (loose-only)', async () => {
+    const atlasAsset: Asset = {
+      kind: 'atlas',
+      atlas: {
+        name: 'sheet.png',
+        imageRef: 'sheet.png',
+        size: { w: 1024, h: 1024 },
+        sprites: [{ name: 's0', frame: { x: 0, y: 0, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 32, h: 32 } }],
+        source: { kind: 'pixi' },
+      },
+      image: { name: 'sheet.png', imageRef: 'sheet.png', size: { w: 1024, h: 1024 }, mime: 'image/png', byteSize: 10000 },
+    };
+    const report = await analyze([atlasAsset], undefined, {
+      features: [{ assetRef: 'sheet.png', contentHash: 'h', solid: true }],
+    });
+    expect(report.findings.find((f) => f.rule === 'solid-fill')).toBeUndefined();
+  });
+
+  it('absent features ⇒ no solid-fill finding (CLI / headless byte-identical)', async () => {
+    const report = await analyze([looseImg('plate.png', 1024, 1024)], undefined, { encodeImage: async () => 9999 });
+    expect(report.findings.find((f) => f.rule === 'solid-fill')).toBeUndefined();
+    // potentialDiskSaved is unaffected (solid-fill carries no diskBytesSaved)
+    const withSolid = await analyze([looseImg('plate.png', 1024, 1024)], undefined, {
+      encodeImage: async () => 9999,
+      features: [{ assetRef: 'plate.png', contentHash: 'h', solid: true }],
+    });
+    expect(withSolid.totals.potentialDiskSaved).toBe(report.totals.potentialDiskSaved);
+  });
+});
+
+describe('unparsed pass-through (F3)', () => {
+  const looseImg = (name: string): Asset => ({
+    kind: 'image',
+    image: { name, imageRef: name, size: { w: 256, h: 256 }, mime: 'image/png', byteSize: 10000 },
+  });
+
+  it('threads deps.unparsed verbatim onto the report (no re-sort, no filter)', async () => {
+    const unparsed = [
+      { ref: 'broken.json', reason: 'manifest JSON parse failed: x' },
+      { ref: 'noimage.json', reason: 'manifest has frames but no meta.image' },
+    ];
+    const report = await analyze([looseImg('good.png')], undefined, { unparsed });
+    expect(report.unparsed).toEqual(unparsed); // pure pass-through (host already sorted)
+    expect(report.assets.map((a) => a.assetRef)).toEqual(['good.png']); // good asset survives
+  });
+
+  it('absent / empty unparsed ⇒ field omitted (byte-identical to today)', async () => {
+    const a = await analyze([looseImg('good.png')], undefined, {});
+    expect('unparsed' in a).toBe(false);
+    const b = await analyze([looseImg('good.png')], undefined, { unparsed: [] });
+    expect('unparsed' in b).toBe(false);
   });
 });
 

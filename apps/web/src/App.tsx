@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AnalysisReport, BundleAvailability, LazyMarking, ScaleTier, SkinGuard } from '@asset-doctor/core';
+import type { AnalysisReport, AssetMetrics, BundleAvailability, Finding, LazyMarking, ScaleTier, SkinGuard } from '@asset-doctor/core';
 import type { PackMode, StaticGranularity } from '@asset-doctor/ingest';
 import { bundleOf, cmp } from '@asset-doctor/analysis';
 import { DEFAULT_SCALE_TIERS } from '@asset-doctor/fix';
@@ -14,7 +14,7 @@ import { keyOf } from './lib/group';
 import { attachProbeReadings } from './lib/probe-run';
 import { runAnalysis, type Progress } from './lib/worker-client';
 import { planFix, runFix, type FixOutcome, type FixProgress } from './lib/fix-client';
-import type { FixChange, FixOptions, FixPlanSummary, FixReceipt } from './worker/fix-protocol';
+import type { FixChange, FixOptions, FixPlanSummary, FixReceipt, SheetDiff } from './worker/fix-protocol';
 import { fmtBytes, SEVERITY_TEXT } from './lib/format';
 import { groupOps, OP_KIND_ORDER, REFERENCE_CHANGING, type OpKind } from './lib/op-manifest';
 import { migrationSnippet, type Engine } from './lib/loader-migration';
@@ -171,6 +171,7 @@ export function App() {
                 }
               }}
             />
+            {report.unparsed?.length ? <UnparsedNotice items={report.unparsed} /> : null}
             {report.assets.length === 0 ? (
               <p className="font-mono text-sm text-ink-soft">{t('report.noAssets')}</p>
             ) : (
@@ -241,6 +242,26 @@ function HeaderMetric({ label, value, accent, title }: { label: string; value: s
       <div className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-soft">{label}</div>
       <div className={`font-mono text-xs font-semibold ${accent ? 'text-cta' : 'text-ink'}`}>{value}</div>
     </div>
+  );
+}
+
+// Honest "could not analyze" surface — symmetric with the fix receipt's skipped[] list. Reuses the
+// fix.skipped <details> styling. Reasons stay English (parser strings, same precedent as fix.skipped).
+function UnparsedNotice({ items }: { items: NonNullable<AnalysisReport['unparsed']> }) {
+  const { t } = useI18n();
+  return (
+    <details className="rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
+      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">
+        {t('report.unparsed.title', { n: items.length })}
+      </summary>
+      <ul className="mt-1.5 space-y-1">
+        {items.map((u, i) => (
+          <li key={i} className="font-mono text-[10px] leading-relaxed text-ink-soft">
+            <span className="break-all">{u.ref}</span> — {u.reason}
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
@@ -1038,6 +1059,13 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
         <ReceiptRow label={t('metric.disk')} before={receipt.diskBytesBefore} after={receipt.diskBytesAfter} pct={pct(receipt.diskBytesBefore, receipt.diskBytesAfter)} />
         <ReceiptRow label="VRAM" before={receipt.vramBytesBefore} after={receipt.vramBytesAfter} pct={pct(receipt.vramBytesBefore, receipt.vramBytesAfter)} />
       </div>
+      {/* Before/after FilmViewer X-ray of each repacked/merged/packed/Spine-repacked sheet (round6-f1-
+          sheet-diff.md): the visual TRUST PROOF behind the headline VRAM row above. Two films per sheet
+          (the after-film glows red where space is STILL empty) + a per-sheet OCC/dims/VRAM strip of two
+          MEASURED states (`→`, NEVER a pct — the VRAM ReceiptRow above is the SOLE saving claim, invariant
+          5). Capped at the first N composed (≤8 MB/side); "showing N of M" when more were composed. Gated
+          on a non-empty sheetDiffs[] so absent/empty runs render byte-identical to today (spread-omitted). */}
+      {(receipt.sheetDiffs?.length ?? 0) > 0 ? <SheetDiffs sheetDiffs={receipt.sheetDiffs ?? []} total={receipt.sheetDiffsTotal ?? 0} /> : null}
       {/* Per-file change manifest — the existing receipt.operations[] trail, grouped by verb, collapsed
           by default (instant-wow headline stays first). Reference-changing verbs (merge/dedup/pack/tier)
           coloured warn, reinforcing the aggregate ⚠ banners at the per-row level. Pure presentation of
@@ -1157,6 +1185,82 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
       <button type="button" onClick={onRedownload} className="w-full rounded-lg border border-line px-3 py-1.5 font-mono text-[11px] text-teal transition hover:border-teal">
         ↓ {t('fix.download')}
       </button>
+    </div>
+  );
+}
+
+// Before/after FilmViewer X-ray of the repacked/merged/packed/Spine-repacked sheets (round6-f1-sheet-
+// diff.md) — the VISUAL TRUST PROOF for a paid repack, collapsed under the receipt's VRAM row (the headline
+// claim it backs). Reuses the fix.skipped <details> chrome. HONESTY (invariant 5): the per-sheet OCC/dims/
+// VRAM strip shows two MEASURED states with `→` only — NO pct/"saved %" here; the receipt's VRAM ReceiptRow
+// is the SOLE saving claim. "showing N of M" surfaces when more sheets were composed than the capped N kept.
+function SheetDiffs({ sheetDiffs, total }: { sheetDiffs: SheetDiff[]; total: number }) {
+  const { t } = useI18n();
+  return (
+    <details className="rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
+      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">
+        {t('fix.sheetDiff.title', { n: sheetDiffs.length })}
+      </summary>
+      <p className="mt-1.5 font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.sheetDiff.proofNote')}</p>
+      {/* The cap kept the first N composed; surface the honest "showing N of M" when more were composed. */}
+      {total > sheetDiffs.length ? (
+        <p className="mt-1 font-mono text-[10px] text-ink-soft">{t('fix.sheetDiff.showing', { shown: sheetDiffs.length, total })}</p>
+      ) : null}
+      <div className="mt-2 space-y-4">
+        {sheetDiffs.map((d, i) => (
+          <SheetDiffView key={`${d.name}-${i}`} diff={d} />
+        ))}
+      </div>
+    </details>
+  );
+}
+
+// ONE sheet's before/after: two side-by-side FilmViewers (BEFORE = source bytes, no findings; AFTER =
+// emitted bytes + one synthetic wasted-regions Finding whose overlay = the after-film's still-empty zones,
+// so the empty space glows red — no cast: SheetDiff.afterZones is already OverlayZone[]). Each viewer gets a
+// partial { occupancy, vramBytes } AssetMetrics (FilmViewer's metric reads are all optional-guarded, so a
+// partial renders cleanly). Below the pair: a compact OCC/dims/VRAM strip of two MEASURED states joined by
+// `→` — NEVER a pct (invariant 5; the receipt VRAM row is the sole saving claim).
+function SheetDiffView({ diff }: { diff: SheetDiff }) {
+  const { t } = useI18n();
+  // Synthetic finding so the after-film glows where space is STILL empty. `overlay` is fed verbatim from the
+  // worker's wasted-regions proof (OverlayZone[]); constant id/rule/severity drive only the overlay styling.
+  const afterFinding: Finding = {
+    id: 'sheet-diff-empty',
+    rule: 'wasted-regions',
+    severity: 'crit',
+    assetRef: diff.name,
+    title: '',
+    detail: '',
+    overlay: diff.afterZones,
+  };
+  const beforeMetrics = { occupancy: diff.occBefore, vramBytes: diff.vramBefore } as AssetMetrics;
+  const afterMetrics = { occupancy: diff.occAfter, vramBytes: diff.vramAfter } as AssetMetrics;
+  // Formats ONE occupancy value as a percentage of itself (e.g. 0.28 → "28%") — a MEASURED state readout,
+  // NOT a savings/delta. The strip joins two such states with `→` and never computes a "% saved" (invariant
+  // 5): the receipt's VRAM ReceiptRow above is the SOLE saving claim.
+  const occPct = (occ: number): string => `${Math.round(occ * 100)}%`;
+  const wxh = (s: { w: number; h: number }): string => (s.w === s.h ? `${s.w}²` : `${s.w}×${s.h}`);
+  return (
+    <div className="space-y-1.5">
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <p className="px-1 font-mono text-[9px] uppercase tracking-[0.08em] text-ink-soft">{t('fix.sheetDiff.before')}</p>
+          <FilmViewer bytes={diff.beforeBytes} findings={[]} name={diff.name} metrics={beforeMetrics} />
+        </div>
+        <div className="space-y-1">
+          <p className="px-1 font-mono text-[9px] uppercase tracking-[0.08em] text-ink-soft">{t('fix.sheetDiff.after')}</p>
+          <FilmViewer bytes={diff.afterBytes} findings={[afterFinding]} name={diff.name} metrics={afterMetrics} />
+        </div>
+      </div>
+      {/* Two MEASURED states, `→` only — NO pct (invariant 5). Numbers/dims/bytes in mono (instrument readout). */}
+      <p className="break-all px-1 font-mono text-[10px] leading-relaxed text-ink-soft">
+        <span className="text-ink-soft">OCC</span> {occPct(diff.occBefore)} → {occPct(diff.occAfter)}
+        {' · '}
+        {wxh(diff.beforeWxH)} → {wxh(diff.afterWxH)}
+        {' · '}
+        <span className="text-ink-soft">VRAM</span> {fmtBytes(diff.vramBefore)} → {fmtBytes(diff.vramAfter)}
+      </p>
     </div>
   );
 }

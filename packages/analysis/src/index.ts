@@ -13,6 +13,7 @@ export {
   occupancyValue,
   occupancyFinding,
   dimensionFindings,
+  solidFillFinding,
   wastedRegions,
   formatFinding,
   fmtBytes,

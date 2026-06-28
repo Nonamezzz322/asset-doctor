@@ -1,0 +1,22 @@
+{
+  "kind": "unparsed-surface",
+  "feature": "unparsed-honest-surface",
+  "assets": [
+    "good.png"
+  ],
+  "unparsed": [
+    {
+      "ref": "broken.json",
+      "reasonStartsWith": "manifest JSON parse failed:"
+    },
+    {
+      "ref": "noimage.json",
+      "reason": "manifest has frames but no meta.image"
+    }
+  ],
+  "silent": [
+    "config.json",
+    "notes.txt"
+  ],
+  "note": "One good loose image plus the two deterministic ingest skip-points. The diagnosis surfaces the unusable would-be manifests (broken JSON; frames but no meta.image) and stays SILENT on benign non-asset files (a non-manifest config.json; a notes.txt) — symmetric with the fix engine's skipped[], never flagging a file that is legitimately not an asset (Invariant 3)."
+}

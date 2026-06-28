@@ -10,6 +10,13 @@ export interface ImageInfo {
 
 const PNG_SIG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
+/** Largest dimension any GL implementation supports (and well past any sane sprite). A header that
+ *  decodes to 0, negative, or an absurd size is corrupt/garbage — reject it rather than fabricate a
+ *  texture that would pin terabytes of "VRAM". */
+const MAX_DIM = 32768;
+const validDims = (s: Size | null): Size | null =>
+  s && s.w > 0 && s.h > 0 && s.w <= MAX_DIM && s.h <= MAX_DIM ? s : null;
+
 function startsWith(b: Uint8Array, sig: number[], offset = 0): boolean {
   if (offset + sig.length > b.length) return false;
   for (let i = 0; i < sig.length; i++) if (b[offset + i] !== sig[i]) return false;
@@ -25,7 +32,7 @@ const u24le = (b: Uint8Array, o: number): number => b[o]! | (b[o + 1]! << 8) | (
 function readPng(b: Uint8Array): Size | null {
   if (!startsWith(b, PNG_SIG) || b.length < 24) return null;
   // 8 sig, 4 IHDR length, 4 'IHDR', then width@16, height@20 (big-endian u32).
-  return { w: u32be(b, 16), h: u32be(b, 20) };
+  return validDims({ w: u32be(b, 16), h: u32be(b, 20) });
 }
 
 function readWebp(b: Uint8Array): Size | null {
@@ -36,16 +43,16 @@ function readWebp(b: Uint8Array): Size | null {
   const fourcc = String.fromCharCode(b[12]!, b[13]!, b[14]!, b[15]!);
   if (fourcc === 'VP8 ') {
     // lossy: 3-byte frame tag, start code 9d 01 2a, then 14-bit w / 14-bit h @26.
-    return { w: u16le(b, 26) & 0x3fff, h: u16le(b, 28) & 0x3fff };
+    return validDims({ w: u16le(b, 26) & 0x3fff, h: u16le(b, 28) & 0x3fff });
   }
   if (fourcc === 'VP8L') {
     // lossless: signature 0x2f @20, then (w-1):14, (h-1):14 packed little-endian.
     const bits = (b[21]! | (b[22]! << 8) | (b[23]! << 16) | (b[24]! << 24)) >>> 0;
-    return { w: (bits & 0x3fff) + 1, h: ((bits >> 14) & 0x3fff) + 1 };
+    return validDims({ w: (bits & 0x3fff) + 1, h: ((bits >> 14) & 0x3fff) + 1 });
   }
   if (fourcc === 'VP8X') {
     // extended: 24-bit (w-1) @24, 24-bit (h-1) @27, little-endian.
-    return { w: u24le(b, 24) + 1, h: u24le(b, 27) + 1 };
+    return validDims({ w: u24le(b, 24) + 1, h: u24le(b, 27) + 1 });
   }
   return null;
 }
@@ -73,7 +80,7 @@ function readJpeg(b: Uint8Array): Size | null {
     const isSof =
       marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
     if (isSof) {
-      return { h: u16be(b, o + 5), w: u16be(b, o + 7) };
+      return validDims({ h: u16be(b, o + 5), w: u16be(b, o + 7) });
     }
     o += 2 + len;
   }
@@ -108,7 +115,7 @@ function readAvif(b: Uint8Array): Size | null {
   // Image size lives in the 'ispe' (ImageSpatialExtents) box: ['ispe'][version+flags:4][w:4][h:4].
   const idx = indexOfFourcc(b, 'ispe');
   if (idx < 0 || idx + 16 > b.length) return null;
-  return { w: u32be(b, idx + 8), h: u32be(b, idx + 12) };
+  return validDims({ w: u32be(b, idx + 8), h: u32be(b, idx + 12) });
 }
 
 /** Detect format from magic bytes and return its mime + pixel size, or null. */

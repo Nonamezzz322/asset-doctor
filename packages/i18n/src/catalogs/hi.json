@@ -40,6 +40,11 @@
   },
   "report.noAssets": "दिखाने के लिए कोई अलग इमेज या atlas एसेट नहीं।",
   "report.noImage": "इस एसेट के लिए दिखाने हेतु कोई इमेज नहीं।",
+  "report.unparsed.title": {
+    "$count": "n",
+    "one": "{n} फ़ाइल का विश्लेषण नहीं किया जा सका",
+    "other": "{n} फ़ाइलों का विश्लेषण नहीं किया जा सका"
+  },
   "findings.title": "निष्कर्ष",
   "findings.none": "✓ इस एसेट के लिए कोई समस्या नहीं",
   "pro.note": "Pro फ़िक्स (repack + ट्रांसकोड) — फेज़ 2",
@@ -58,6 +63,9 @@
   "find.npot.title": "नॉन-पावर-ऑफ़-टू {w}×{h}",
   "find.npot.detail": "{potW}×{potH} तक padding करने पर {waste:pct} ({vram:bytes}) बर्बाद होगा, यदि आपकी toolchain POT तक pad करती हो। WebGL2/PixiJS NPOT को नेटिव अपलोड करते हैं (clamp+linear), इसलिए यह आम तौर पर हानिरहित है।",
   "find.npot.fix": "केवल तभी कार्रवाई करें जब आपकी पाइपलाइन POT बाध्य करे: trim/resize करें ताकि padding न्यूनतम हो।",
+  "find.solid-fill.title": "ठोस {w}×{h} — एक रंग {vram:bytes} पिन करता है",
+  "find.solid-fill.detail": "हर नमूना पिक्सेल एक ही रंग का है (या पूरी तरह पारदर्शी) — कोई किनारा, ग्रेडिएंट या डिटेल नहीं। फिर भी यह एक अकेला मान ले जाने के लिए {vram:bytes} VRAM ({w}×{h}×4) पिन करता है।",
+  "find.solid-fill.fix": "इसे रनटाइम पर टिंट/स्ट्रेच की गई 1×1 टेक्सचर, या ठोस-रंग के sprite से बदलें।",
   "find.wasted-regions.title": {
     "$count": "n",
     "one": "{n} खाली region मैप किया",
@@ -253,6 +261,15 @@
   },
   "fix.dedup.diskSaved": "डीडुप्लिकेशन से डिस्क पर −{bytes:bytes}",
   "fix.dedup.vramUpperBound": "अधिकतम −{bytes:bytes} VRAM (ऊपरी सीमा — केवल यदि रनटाइम प्रतियों के बीच एक अपलोड साझा करे)",
+  "fix.sheetDiff.title": {
+    "$count": "n",
+    "one": "{n} शीट — दृश्य प्रमाण",
+    "other": "{n} शीट — दृश्य प्रमाण"
+  },
+  "fix.sheetDiff.showing": "{total} में से {shown} दिखाई जा रही",
+  "fix.sheetDiff.proofNote": "हर री-पैक की गई शीट का पहले/बाद का X-ray। बाद वाली फ़िल्म वहाँ लाल चमकती है जहाँ जगह अब भी खाली है। OCC/VRAM/आयाम दो मापी गई स्थितियाँ हैं, बचत नहीं।",
+  "fix.sheetDiff.before": "पहले",
+  "fix.sheetDiff.after": "बाद",
   "fix.tier.title": "रिज़ॉल्यूशन टियर बनाएँ",
   "fix.tier.hint": "हर एसेट की छोटी की गई प्रतियाँ बनाता है ताकि गेम डिवाइस के अनुकूल रिज़ॉल्यूशन लोड करे।",
   "fix.tier.enable": "रिज़ॉल्यूशन टियर बनाएँ",

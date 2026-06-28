@@ -8,7 +8,7 @@
 import type { Asset, Atlas, Blit, FixOp, ImageMime, ImageFeatures, PackGroup, Rect, Size, TrimRect } from '@asset-doctor/core';
 import { groupFiles, groupLooseForPacking, keyOf, type LooseImage, type RawFile } from '@asset-doctor/ingest';
 import { parseAtlas, parseImage, parseSpineAtlasText, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
-import { analyze, buildDedupGroups, hasResolutionToken, mergeSharedAtlases, type EncodeSizer } from '@asset-doctor/analysis';
+import { analyze, buildDedupGroups, hasResolutionToken, mergeSharedAtlases, occupancyValue, type EncodeSizer } from '@asset-doctor/analysis';
 import {
   emitSpineAtlasText,
   emitTexturePackerJson,
@@ -81,11 +81,18 @@ import { dedupKeepConsumerSkip, deselectedSkips, fixOpKind, summarizePlan, type 
 // consumer manifest in place) as one-line builder calls; finalizeChanges sorts+dedups deterministically.
 // SAME constructors the unit test drives directly (the worker can't run in Node — createImageBitmap).
 import { dropChange, finalizeChanges, looseRenameChange, mergeChanges, packChanges, tierChanges } from '../lib/loader-migration';
-import type { FixChange, FixInputFile, FixMode, FixOptions, FixReceipt, FixRequest, FixResponse } from './fix-protocol';
+import { canKeepSheetDiff, sheetGeometryProof } from './sheet-diff';
+import type { FixChange, FixInputFile, FixMode, FixOptions, FixReceipt, FixRequest, FixResponse, SheetDiff } from './fix-protocol';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 const post = (m: FixResponse): void => ctx.postMessage(m);
 const basename = (p: string): string => p.split('/').pop() ?? p;
+
+// Sheet-diff caps + the emitted-sheet geometry proof + the cap decision (docs/improvements/round6-f1-
+// sheet-diff.md) live in the PURE, Node-testable ./sheet-diff module — the worker imports them verbatim so
+// a Vitest test can assert the cap arithmetic + the empty-zone map against the analysis primitives headless
+// (the worker itself can't run in Node — `self` / OffscreenCanvas). sheetDiffsTotal still counts ALL
+// composed so the UI can say "showing N of M"; canKeepSheetDiff gates only what is RETAINED in the receipt.
 // dirOf / resolveImageRef / relativeImageRef are imported from @asset-doctor/fix (PURE, tested).
 const td = new TextDecoder();
 const te = new TextEncoder();
@@ -462,6 +469,48 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
 
   // ── execute ──
   const out: { path: string; bytes: Uint8Array }[] = [];
+  // Sheet-diff X-ray (docs/improvements/round6-f1-sheet-diff.md): a before/after FilmViewer pair per
+  // repack/merge/pack-page/Spine-repack op that successfully composes. CAPPED at the first SHEET_DIFF_MAX;
+  // sheetDiffsTotal counts ALL composed so the UI can say "showing N of M". The bytes are transferred to
+  // the main thread. Empty ⇒ both fields spread-omitted ⇒ receipt byte-identical to today.
+  const sheetDiffs: SheetDiff[] = [];
+  let sheetDiffsTotal = 0;
+  /** Capture one composed sheet's before/after proof. `beforeRef` = the source atlas/loose ref (its bytes
+   *  live in bytesByRef); `beforeDims` = the source pixel size; `afterAtlas` = the emitted Atlas (occupancy
+   *  + dims + zones); `afterBytes` = the emitted page bytes; `beforeAtlas` (optional) = the source atlas for
+   *  occBefore (absent ⇒ occBefore=0, the honest "0% packed" for a pack page with no source atlas). ALWAYS
+   *  bumps sheetDiffsTotal; only pushes within the cap + per-side byte budget. Copies BOTH buffers so the
+   *  live source/emitted buffers (still headed to the zip) survive the transfer. */
+  const captureSheetDiff = (
+    beforeRef: string,
+    beforeDims: Size,
+    afterAtlas: Atlas,
+    afterBytes: Uint8Array,
+    afterName: string,
+    beforeAtlas?: Atlas,
+  ): void => {
+    sheetDiffsTotal++;
+    const before = bytesByRef.get(beforeRef);
+    if (!before) return;
+    // PURE cap decision (count cap + per-side byte budget) — shared with the headless test so the worker
+    // and its proof can't drift. The total above is always bumped; this gates only what is RETAINED.
+    if (!canKeepSheetDiff(sheetDiffs.length, before.byteLength, afterBytes.byteLength)) return;
+    const proof = sheetGeometryProof(afterAtlas);
+    sheetDiffs.push({
+      name: afterName,
+      // Copy BOTH: before is a live source buffer (still readable for the zip / other ops); after is the
+      // emitted Uint8Array also pushed to `out` → zip. slice() yields a fresh exact-length buffer to transfer.
+      beforeBytes: before.slice(0),
+      afterBytes: afterBytes.slice().buffer,
+      beforeWxH: { w: beforeDims.w, h: beforeDims.h },
+      afterWxH: { w: afterAtlas.size.w, h: afterAtlas.size.h },
+      occBefore: beforeAtlas ? occupancyValue(beforeAtlas) : 0,
+      occAfter: proof.occ,
+      vramBefore: beforeDims.w * beforeDims.h * 4,
+      vramAfter: afterAtlas.size.w * afterAtlas.size.h * 4,
+      afterZones: proof.zones,
+    });
+  };
   // Input file paths — the collision pre-check (Feature 4, design §6 step 1) asserts a synthesized
   // sheet/page/JSON/.atlas path never overwrites an existing input or an already-emitted output.
   const inputPaths = new Set(files.map((f) => f.path));
@@ -658,6 +707,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
    *  to skipped[] exactly once. Returns null only when the source sheet is unavailable. */
   const extractSprite = async (id: string, atlasRef: string, frame: Rect, rotated: boolean): Promise<MaskItem | null> => {
     if (maskCache.has(id)) return maskCache.get(id)!;
+    // Defense-in-depth: a 0×0 or negative frame can't be a sprite (OffscreenCanvas(0,0) throws). The
+    // parsers now reject these upstream (F3), but never construct a degenerate canvas here regardless.
+    if (frame.w <= 0 || frame.h <= 0) return null;
     const bmp = await bitmapOf(atlasRef);
     if (!bmp) return null;
     const c = new OffscreenCanvas(frame.w, frame.h);
@@ -747,6 +799,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         const imagePath = pathByRef.get(ref)!;
         out.push({ path: imagePath, bytes: enc.bytes });
         out.push({ path: info.path, bytes: te.encode(emitSpineAtlasText(na)) });
+        captureSheetDiff(ref, atlas.size, na, enc.bytes, basename(imagePath), atlas);
         replaced.add(imagePath);
         replaced.add(info.path);
         vramSaved += r.vramBytesBefore - r.vramBytesAfter;
@@ -854,12 +907,15 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           out.push({ path: `${baseDir}${stem}.json`, bytes: te.encode(emitTexturePackerJson(na)) });
           mergedManifestPaths.push(`${baseDir}${stem}.json`); // loader-migration: a NEW manifest to load
           mergedPageImages.push(`${baseDir}${stem}${ext}`); // ...and its REAL page image (na.imageRef on disk)
+          // Sheet-diff: group[0] is the representative source page ("1 of N" — merge folds many into few).
+          captureSheetDiff(refs[0]!, group[0]!.size, na, sheet!.bytes, `${stem}${ext} (1 of ${refs.length})`, group[0]);
         } else {
           const ref = refs[0]!;
           const origPath = pathByRef.get(ref)!;
           const imagePath = sheet!.mime === 'image/webp' ? origPath.replace(/\.[a-z0-9]+$/i, '.webp') : origPath;
           if (sheet!.mime === 'image/webp') na.imageRef = na.imageRef.replace(/\.[a-z0-9]+$/i, '.webp');
           out.push({ path: imagePath, bytes: sheet!.bytes });
+          captureSheetDiff(ref, group[0]!.size, na, sheet!.bytes, basename(na.imageRef), group[0]);
           replaced.add(origPath);
           replaced.add(imagePath);
           const mPath = manifestPathOf(ref);
@@ -1157,6 +1213,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           emitted.push({ path: join(group.outDir, `${pageBase}.json`), bytes: te.encode(emitTexturePackerJson(na)) });
           packManifestPaths.push(join(group.outDir, `${pageBase}.json`)); // loader-migration: a NEW sheet manifest
           packPageImages.push(join(group.outDir, `${pageBase}${ext}`)); // ...and its REAL page image (na.imageRef on disk)
+          // Sheet-diff (STATIC pages only): loose has no source atlas ⇒ occBefore=0 (honest "0% packed").
+          // The representative "before" is the first packed loose region's source image (its full dims).
+          const beforeRef = regions[0]!.ref;
+          captureSheetDiff(beforeRef, sizeByRef.get(beforeRef) ?? na.size, na, enc.bytes, basename(na.imageRef));
         }
       }
       if (!composeOk) {
@@ -1579,8 +1639,16 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     ...(extrudedBlits > 0 ? { extrudePx: extrudePxApplied, extrudedBlits } : {}),
     ...(extrudeSkippedCount > 0 ? { extrudeSkipped: extrudeSkippedCount } : {}),
     ...(extrudeVramDelta !== 0 ? { extrudeVramDelta } : {}),
+    // Sheet-diff X-ray (round6-f1-sheet-diff.md, additive/optional): before/after FilmViewer pairs for the
+    // first SHEET_DIFF_MAX composed sheets; sheetDiffsTotal counts ALL composed ("showing N of M"). Empty
+    // ⇒ both omitted ⇒ receipt byte-identical to today.
+    ...(sheetDiffs.length > 0 ? { sheetDiffs, sheetDiffsTotal } : {}),
   };
-  post({ type: 'fix-done', receipt, zip });
+  // Direct postMessage (not the `post` wrapper) so the sheet-diff byte buffers transfer zero-copy. The
+  // transferred buffers are FRESH COPIES (captureSheetDiff sliced both), so the live source/emitted buffers
+  // already in `out`→zip stay intact. Empty sheetDiffs ⇒ empty transfer list ⇒ identical to today.
+  const transfer = sheetDiffs.flatMap((d) => [d.beforeBytes, d.afterBytes]);
+  ctx.postMessage({ type: 'fix-done', receipt, zip } satisfies FixResponse, transfer);
 }
 
 /** Format-audit encoder: measure a candidate format's byte size via native canvas (matches the

@@ -12,6 +12,10 @@ export interface SpinePage {
   size?: Size;
   format?: string;
   sprites: Sprite[];
+  /** Regions on THIS page that named an asset but were unusable (a required field — xy/size/orig/bounds —
+   *  had a non-finite value, or the region fell outside the page). Per-region recovery: the page keeps its
+   *  good sprites; only the bad ones are surfaced. Additive: absent/empty ⇒ byte-identical to today. */
+  malformedRegions?: { name: string; reason: string }[];
 }
 
 interface RegionAcc {
@@ -24,13 +28,16 @@ interface RegionAcc {
   offsets?: { w: number; h: number };
   /** legacy `offset: x, y` — the trimmed region's offset within the original. */
   offset?: { x: number; y: number };
+  /** Set when a REQUIRED field had a non-finite value — the region is dropped + surfaced (not silently
+   *  coerced to 0, which would fabricate a placement). First failure wins (??=). */
+  malformed?: string;
 }
 
-const ints = (v: string): number[] =>
-  v
-    .split(',')
-    .map((s) => parseInt(s.trim(), 10))
-    .filter((n) => Number.isFinite(n));
+// FIXED-ARITY, NaN-PRESERVING parse: keep one entry per comma-separated token by POSITION (NOT the old
+// `.filter(Number.isFinite)`, which SHIFTED coords — `'xy: , 100'` collapsed to `[100]` → `{x:100,y:0}`,
+// silently misplacing the region). A blank/garbage token now yields NaN at its true index, so a required
+// field reads as non-finite and the region is flagged malformed instead of misplaced.
+const numsRaw = (v: string): number[] => v.split(',').map((s) => parseInt(s.trim(), 10));
 
 const PAGE_KEYS = new Set(['size', 'format', 'filter', 'repeat', 'pma', 'scale']);
 const REGION_KEYS = new Set(['rotate', 'xy', 'size', 'orig', 'offset', 'offsets', 'index', 'bounds', 'split', 'pad']);
@@ -45,22 +52,39 @@ function rotatedFrom(v: string): boolean {
 
 function applyPageKey(page: SpinePage, key: string, val: string): void {
   if (key === 'size') {
-    const [w, h] = ints(val);
-    if (w && h) page.size = { w, h };
+    const [w, h] = numsRaw(val);
+    if (Number.isFinite(w) && Number.isFinite(h) && w! > 0 && h! > 0) page.size = { w: w!, h: h! };
   } else if (key === 'format') {
     page.format = val.trim();
   }
 }
 
+/** Required region fields whose non-finite value invalidates the placement (vs offset/offsets, which
+ *  default to 0 tolerantly). The arity each must satisfy. */
+const fin = (n: number | undefined): boolean => n !== undefined && Number.isFinite(n);
+
 function applyRegionKey(r: RegionAcc, key: string, val: string): void {
-  const n = ints(val);
+  const n = numsRaw(val);
   if (key === 'rotate') r.rotated = rotatedFrom(val);
-  else if (key === 'xy') r.xy = { x: n[0] ?? 0, y: n[1] ?? 0 };
-  else if (key === 'size') r.size = { w: n[0] ?? 0, h: n[1] ?? 0 };
-  else if (key === 'orig') r.orig = { w: n[0] ?? 0, h: n[1] ?? 0 };
-  else if (key === 'bounds') r.bounds = { x: n[0] ?? 0, y: n[1] ?? 0, w: n[2] ?? 0, h: n[3] ?? 0 };
-  else if (key === 'offsets') r.offsets = { w: n[2] ?? 0, h: n[3] ?? 0 };
-  else if (key === 'offset') r.offset = { x: n[0] ?? 0, y: n[1] ?? 0 };
+  else if (key === 'xy') {
+    if (!fin(n[0]) || !fin(n[1])) r.malformed ??= `region "${r.name}": non-finite xy "${val.trim()}"`;
+    else r.xy = { x: n[0]!, y: n[1]! };
+  } else if (key === 'size') {
+    if (!fin(n[0]) || !fin(n[1])) r.malformed ??= `region "${r.name}": non-finite size "${val.trim()}"`;
+    else r.size = { w: n[0]!, h: n[1]! };
+  } else if (key === 'orig') {
+    if (!fin(n[0]) || !fin(n[1])) r.malformed ??= `region "${r.name}": non-finite orig "${val.trim()}"`;
+    else r.orig = { w: n[0]!, h: n[1]! };
+  } else if (key === 'bounds') {
+    if (!fin(n[0]) || !fin(n[1]) || !fin(n[2]) || !fin(n[3]))
+      r.malformed ??= `region "${r.name}": non-finite bounds "${val.trim()}"`;
+    else r.bounds = { x: n[0]!, y: n[1]!, w: n[2]!, h: n[3]! };
+  } else if (key === 'offsets') {
+    // tolerant: a malformed optional offset defaults to 0 (today's behavior).
+    r.offsets = { w: Number.isFinite(n[2]) ? n[2]! : 0, h: Number.isFinite(n[3]) ? n[3]! : 0 };
+  } else if (key === 'offset') {
+    r.offset = { x: Number.isFinite(n[0]) ? n[0]! : 0, y: Number.isFinite(n[1]) ? n[1]! : 0 };
+  }
 }
 
 function toSprite(r: RegionAcc): Sprite {
@@ -85,7 +109,27 @@ export function parseSpineAtlasText(text: string): SpinePage[] {
   let region: RegionAcc | null = null;
 
   const flushRegion = () => {
-    if (page && region) page.sprites.push(toSprite(region));
+    if (page && region) {
+      if (region.malformed) {
+        (page.malformedRegions ??= []).push({ name: region.name, reason: region.malformed });
+      } else {
+        const sprite = toSprite(region);
+        // Per-region OOB check when the page size is known: a region placed past the page edge is a
+        // corrupt atlas, not a usable sprite. `frame` is AS PLACED (already swapped in toSprite when
+        // rotated), so the `x+w > size.w` test is correct without double-swap. `===` at the edge is fine.
+        if (
+          page.size &&
+          (sprite.frame.x + sprite.frame.w > page.size.w || sprite.frame.y + sprite.frame.h > page.size.h)
+        ) {
+          (page.malformedRegions ??= []).push({
+            name: region.name,
+            reason: `region "${region.name}" extends past page ${page.size.w}×${page.size.h}`,
+          });
+        } else {
+          page.sprites.push(sprite);
+        }
+      }
+    }
     region = null;
   };
 

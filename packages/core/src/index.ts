@@ -156,6 +156,7 @@ export type Rule =
   | 'format'
   | 'dimensions-npot'
   | 'dimensions-oversize'
+  | 'solid-fill'
   // whole-folder (scope: 'folder')
   | 'duplicate-exact'
   | 'duplicate-similar'
@@ -226,6 +227,10 @@ export interface ImageFeatures {
    *  lossy-vs-lossless format verdict for LOOSE images (atlases pass 'unknown'). Additive: absent/'unknown'
    *  ⇒ today's lossy path, byte-identical. */
   contentClass?: ContentClass;
+  /** True iff the SAME 9×8 RGBA sample is a single color (or fully transparent) — every channel's
+   *  per-sample stdDev is below SOLID_STD. Drives the loose-only `solid-fill` finding (a big solid PNG
+   *  pins w×h×4 VRAM for one color). Additive: only ever SET when true; absent ⇒ today's behavior. */
+  solid?: boolean;
 }
 
 /* ── Bundle / lazy marking (Feature 3 — UI-sourced) ────────────────────────────────────────
@@ -355,6 +360,11 @@ export interface ThresholdConfig {
    *  standalone fragmentation finding. PROVISIONAL — a display/copy gate only, NOT a savings gate
    *  (a repack reclaims waste at any dispersion). Optional/additive: absent ⇒ no effect. */
   fragmentation?: { warn: number };
+  /** Solid-fill (single-color loose image) gate. `minEdgePx` — both edges must be ≥ this before a
+   *  solid loose image is worth flagging (a tiny solid swatch is harmless). `warnEdgePx` — at/above
+   *  this edge the finding is `warn` (a 1024² solid pins 4 MB VRAM), else `info`. Optional/additive:
+   *  absent ⇒ the solid-fill finding is suppressed (CLI/budget configs that don't opt in). */
+  solidFill?: { minEdgePx: number; warnEdgePx: number };
 }
 
 export interface AnalysisReport {
@@ -392,6 +402,10 @@ export interface AnalysisReport {
    *  host render-probe (which sprites to draw) without re-parsing manifests. Additive: absent/per-key
    *  undefined ⇒ no atlas frames to probe (loose-only folder); byte-identical to today when omitted. */
   atlasFrames?: Record<string, Rect[]>;
+  /** Would-be assets the diagnosis could NOT parse — surfaced honestly instead of silently dropped
+   *  (symmetric with the fix engine's skipped[]). NEVER benign non-asset files. `ref` = dir-aware key /
+   *  basename / "<page>#<region>". Additive & order-stable (sorted by ref): absent/empty ⇒ byte-identical. */
+  unparsed?: { ref: string; reason: string }[];
 }
 
 /* ── Fix model (Phase 2 — output of @asset-doctor/fix + the fix worker) ─────────────────────

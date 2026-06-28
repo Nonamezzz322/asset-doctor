@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import type { Size } from '@asset-doctor/core';
-import { groupLooseForPacking, type LooseImage, type RawFile } from '../src/index';
+import { groupFiles, groupLooseForPacking, type LooseImage, type RawFile } from '../src/index';
 
 const DEFAULTS = {
   occupancy: { warn: 0.8, crit: 0.6 },
@@ -260,5 +260,37 @@ describe('mode + determinism', () => {
     );
     expect(b.groups).toEqual(a.groups);
     expect(b.collisions).toEqual(a.collisions);
+  });
+});
+
+describe('groupFiles — honest unparsed surface (F3)', () => {
+  const png = (name: string): RawFile => ({ name, bytes: new ArrayBuffer(8) }); // name-only; groupFiles keys images by name
+  const json = (name: string, body: string): RawFile => ({ name, bytes: buf(body) });
+
+  it('surfaces broken JSON + frames-without-meta.image (sorted by ref), keeps the good image', () => {
+    const g = groupFiles([
+      png('good.png'),
+      json('broken.json', '{ "frames": { "a.png": { "frame": '), // truncated → JSON.parse throws
+      json('noimage.json', JSON.stringify({ frames: { 'a.png': { frame: { x: 0, y: 0, w: 8, h: 8 } } } })), // frames, no meta.image
+    ]);
+    expect(g.images.map((i) => i.name)).toEqual(['good.png']);
+    expect(g.unparsed.map((u) => u.ref)).toEqual(['broken.json', 'noimage.json']); // sorted by ref
+    expect(g.unparsed.find((u) => u.ref === 'broken.json')!.reason).toMatch(/^manifest JSON parse failed:/);
+    expect(g.unparsed.find((u) => u.ref === 'noimage.json')!.reason).toBe('manifest has frames but no meta.image');
+  });
+
+  it('stays SILENT on benign non-asset files (a non-manifest config.json; a notes.txt)', () => {
+    const g = groupFiles([
+      png('good.png'),
+      json('config.json', JSON.stringify({ name: 'level-1', tiles: [1, 2, 3] })), // no frames → not an asset
+      { name: 'notes.txt', bytes: buf('hello') },
+    ]);
+    expect(g.unparsed).toEqual([]); // flagging a benign non-asset file would be its own dishonesty (Inv 3)
+    expect(g.images.map((i) => i.name)).toEqual(['good.png']);
+  });
+
+  it('a clean folder leaves unparsed empty (additive: byte-identical to today)', () => {
+    const g = groupFiles([png('a.png'), png('b.png')]);
+    expect(g.unparsed).toEqual([]);
   });
 });

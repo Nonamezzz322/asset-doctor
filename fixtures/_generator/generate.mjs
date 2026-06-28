@@ -1414,4 +1414,151 @@ verdict (gradients are deliberately out of the confident set, M2).
   );
 }
 
+/* ── Case 16: solid-fill — single-color loose-image detector goldens (docs/improvements/round6-f2-solid-fill.md) ──
+ * Two LOOSE images cross-checking `isSolidColor` (apps/web/src/lib/perceptual.ts) the same way Case 15
+ * cross-checks `classifyContent`: the solid verdict is authored HERE, independently of the detector.
+ *
+ * `isSolidColor` runs on the 9×8 downsample of the decoded RGBA (the dHash sample the worker reuses;
+ * Inv 4 — no encode). The cross-check reproduces that sample via the SAME box-average sample9x8 the
+ * Case-15 test uses. So both fixtures are drawn on a 9×8-aligned grid (576×512, 64px cells):
+ *   • plate.png  — one solid opaque color across the whole image → every per-channel stdDev ≈ 0 → solid.
+ *   • framed.png — solid center color B with a THICK 64px perimeter color A (one full ring of edge cells).
+ *                  Box-averaging keeps the perimeter cells = A and interior cells = B (the 64px ring fully
+ *                  fills the outer 9×8 cells — NOT a thin 1px border that would average out), so the A↔B
+ *                  delta is present at sample resolution → NOT solid, deterministically.
+ * README documents the limitation: features below one 9×8 cell (e.g. a 1px border) are sub-sample and
+ * average away — only ≥1-cell-thick structure is detectable. */
+{
+  const GW = 9; // sample-grid columns (matches the dHash 9×8)
+  const GH = 8; // sample-grid rows
+  const CELL = 64; // px per grid cell → 576×512, an exact multiple of 9×8; the frame is exactly one cell thick
+  const W = GW * CELL; // 576
+  const H = GH * CELL; // 512
+
+  const PLATE_COLOR = [40, 110, 170]; // the single solid color
+  const FRAME_COLOR = [220, 60, 60]; // perimeter color A (full A↔B delta vs the center)
+  const CENTER_COLOR = [40, 110, 170]; // interior color B
+
+  // plate: one solid opaque color, edge to edge → solid.
+  const plate = solidPng(W, H, PLATE_COLOR);
+
+  // framed: 64px (one full cell) perimeter of A around a solid B center → NOT solid (edge cells differ
+  // from interior cells by the full A↔B delta after the box-average downsample).
+  const framed = (() => {
+    const png = new PNG({ width: W, height: H });
+    fillRect(png, 0, 0, W, H, FRAME_COLOR); // whole image = frame color
+    fillRect(png, CELL, CELL, W - 2 * CELL, H - 2 * CELL, CENTER_COLOR); // inset center = center color
+    return PNG.sync.write(png);
+  })();
+
+  writeCase(
+    'solid-fill',
+    {
+      'plate.png': plate,
+      'framed.png': framed,
+      'expected.json': {
+        kind: 'solid-fill',
+        feature: 'solid-fill-loose-detector',
+        grid: { w: GW, h: GH, cell: CELL },
+        // Golden `solid` per image — authored by hand, the independent cross-check of isSolidColor.
+        images: [
+          { name: 'plate.png', w: W, h: H, solid: true, why: 'one solid opaque color edge to edge → every per-channel stdDev ≈ 0 < SOLID_STD (2)' },
+          { name: 'framed.png', w: W, h: H, solid: false, why: 'solid center with a 64px (one full 9×8 cell) perimeter of a different color → edge cells differ from interior by the full delta after box-average → above SOLID_STD' },
+        ],
+        note:
+          'Two loose images for the single-color (solid-fill) detector. Drawn on a 9×8-aligned grid so a '
+          + 'box-average downsample to the dHash sample is deterministic and the verdict survives the resample. '
+          + 'plate ⇒ solid (rule solid-fill, vramBytesSaved = w·h·4 − 4); framed ⇒ not solid. Features below one '
+          + '9×8 cell (e.g. a 1px border) are sub-sample and average away — only ≥1-cell-thick structure is detectable.',
+      },
+    },
+    `# solid-fill
+
+Two **loose** images for the single-color (**solid-fill**) detector
+(\`docs/improvements/round6-f2-solid-fill.md\`). Each carries a hand-authored golden \`solid\` flag in
+\`expected.json\` — the independent cross-check of \`isSolidColor\` (the detector runs on the **9×8 dHash
+sample** the worker already decodes; Invariant 4 — no encode).
+
+Both are drawn on a grid that is an exact multiple of **9×8** (576×512, 64px cells), so a box-average
+downsample to 9×8 is deterministic and the verdict survives the resample:
+
+- **\`plate.png\`** — one solid opaque color edge to edge → every per-channel stdDev ≈ 0 (below
+  \`SOLID_STD\` = 2) → **solid**. A 576×512 solid PNG pins ≈1.2 MB of VRAM to carry one color.
+- **\`framed.png\`** — a solid center with a **thick 64px** perimeter (exactly one 9×8 cell) of a
+  different color → the outer ring of sample cells reads color A, the interior reads color B, so the
+  full A↔B delta survives the box-average → **not solid**.
+
+**Limitation (by design):** a feature thinner than one 9×8 cell (e.g. a 1px border) is below the sample
+resolution — it box-averages into the surrounding cell and the image reads as solid. Only structure at
+least one cell thick is detectable. (That is why the negative control uses a 64px frame, not a 1px one.)
+`,
+  );
+}
+
+/* ── Case 17: unparsed-corrupt — honestly-surfaced unparseable manifests (docs/improvements/round6-f3-unparsed-surface.md) ──
+ * The diagnosis used to silently DROP would-be assets it couldn't parse. This folder mixes ONE good loose
+ * image with the two deterministic ingest skip-points so the regression test can assert both:
+ *   • good.png      — a valid loose image → a real asset survives (the notice never replaces the report).
+ *   • broken.json   — invalid JSON text → JSON.parse throws → unparsed "manifest JSON parse failed: …".
+ *   • noimage.json  — valid JSON, has `frames` (so it LOOKS like a manifest) but no `meta.image` →
+ *                     unparsed "manifest has frames but no meta.image".
+ * A bare `notes.txt` / a non-manifest `config.json` (no frames) stay SILENT by design — flagging a benign
+ * non-asset file would be its own dishonesty (Invariant 3). expected.unparsed is authored here by hand. */
+{
+  const good = solidPng(64, 64, [38, 139, 210]); // a valid loose image — survives parsing
+  // A frames-bearing manifest with NO meta.image (looks like a manifest, unusable).
+  const noImageManifest = {
+    frames: { 'a.png': tpFrameBody(fr('a.png', 0, 0, 32, 32)) },
+    meta: { size: { w: 64, h: 64 } }, // deliberately no `image`
+  };
+  // A legitimate non-manifest JSON (no frames) — MUST stay silent (not surfaced).
+  const config = { name: 'level-1', tiles: [1, 2, 3] };
+
+  writeCase(
+    'unparsed-corrupt',
+    {
+      'good.png': good,
+      'broken.json': '{ "frames": { "a.png": { "frame": { "x": 0, "y": 0, ', // truncated → JSON.parse fails
+      'noimage.json': noImageManifest,
+      'config.json': config,
+      'notes.txt': 'just a readme, not an asset\n',
+      'expected.json': {
+        kind: 'unparsed-surface',
+        feature: 'unparsed-honest-surface',
+        // The good asset the diagnosis still produces.
+        assets: ['good.png'],
+        // Surfaced honestly (sorted by ref). Reasons stay English (parser strings).
+        unparsed: [
+          { ref: 'broken.json', reasonStartsWith: 'manifest JSON parse failed:' },
+          { ref: 'noimage.json', reason: 'manifest has frames but no meta.image' },
+        ],
+        // Deliberately NOT surfaced (benign non-asset files).
+        silent: ['config.json', 'notes.txt'],
+        note:
+          'One good loose image plus the two deterministic ingest skip-points. The diagnosis surfaces the '
+          + 'unusable would-be manifests (broken JSON; frames but no meta.image) and stays SILENT on benign '
+          + 'non-asset files (a non-manifest config.json; a notes.txt) — symmetric with the fix engine\'s '
+          + 'skipped[], never flagging a file that is legitimately not an asset (Invariant 3).',
+      },
+    },
+    `# unparsed-corrupt
+
+A folder that mixes one **good** loose image with the two deterministic **ingest skip-points**, to prove the
+diagnosis surfaces unparseable would-be assets HONESTLY instead of silently dropping them
+(\`docs/improvements/round6-f3-unparsed-surface.md\`) — symmetric with the fix engine's \`skipped[]\`.
+
+- **\`good.png\`** — a valid 64×64 loose image → a real asset survives (the notice never replaces the report).
+- **\`broken.json\`** — truncated/invalid JSON → \`JSON.parse\` throws → surfaced
+  \`manifest JSON parse failed: …\`.
+- **\`noimage.json\`** — valid JSON with \`frames\` (so it *looks* like a manifest) but no \`meta.image\` →
+  surfaced \`manifest has frames but no meta.image\`.
+- **\`config.json\`** (no \`frames\`) and **\`notes.txt\`** — legitimately **not** assets → stay **silent**
+  (flagging a benign non-asset file would be its own dishonesty, Invariant 3).
+
+\`expected.json\` pins the good asset, the sorted \`unparsed\` surface (reasons stay English — parser strings,
+same precedent as \`fix.skipped\`), and the files that must NOT be surfaced.
+`,
+  );
+}
+
 console.log('Done.');

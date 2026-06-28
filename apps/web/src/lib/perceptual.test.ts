@@ -10,8 +10,10 @@ import {
   grayStdDev,
   hasHardAlpha,
   isFlat,
+  isSolidColor,
   luma,
   FLAT_STD,
+  SOLID_STD,
 } from './perceptual';
 
 const N = 9 * 8; // 72 samples — the 9×8 dHash grid
@@ -75,6 +77,56 @@ describe('hasHardAlpha (histogram pole occupancy — resample-robust)', () => {
 
   it('empty buffer ⇒ false', () => {
     expect(hasHardAlpha(new Uint8ClampedArray(0))).toBe(false);
+  });
+});
+
+describe('isSolidColor (single-color / fully transparent detector)', () => {
+  it('a uniform opaque sample ⇒ solid (every per-channel stdDev 0 < SOLID_STD)', () => {
+    expect(SOLID_STD).toBe(2);
+    const buf = rgba(() => [40, 110, 170, 255]);
+    expect(isSolidColor(grayOf(buf), buf)).toBe(true);
+  });
+
+  it('a fully-transparent sample ⇒ solid (no variance on any channel)', () => {
+    const buf = rgba(() => [0, 0, 0, 0]);
+    expect(isSolidColor(grayOf(buf), buf)).toBe(true);
+  });
+
+  it('a single differing corner pixel ⇒ NOT solid (one channel exceeds SOLID_STD)', () => {
+    // 71 of 72 pixels one color, the corner a strongly different color → per-channel stdDev > 2.
+    const buf = rgba((i) => (i === 0 ? [255, 0, 0, 255] : [40, 110, 170, 255]));
+    expect(isSolidColor(grayOf(buf), buf)).toBe(false);
+  });
+
+  it('two chromatic colors at EQUAL luma ⇒ NOT solid (R/G/B catch what gray misses)', () => {
+    // Pick two colors with (near) identical luma but different R/G/B so grayStdDev alone would pass.
+    // luma = .299R + .587G + .114B. [128,128,128] vs a chroma swing about it at matched luma.
+    const a: [number, number, number, number] = [180, 110, 80, 255];
+    const b: [number, number, number, number] = [40, 160, 190, 255];
+    const la = 0.299 * a[0] + 0.587 * a[1] + 0.114 * a[2];
+    const lb = 0.299 * b[0] + 0.587 * b[1] + 0.114 * b[2];
+    expect(Math.abs(la - lb)).toBeLessThan(2); // luma nearly equal — gray would (almost) pass
+    const buf = rgba((i) => (i % 2 === 0 ? a : b));
+    expect(grayStdDev(grayOf(buf))).toBeLessThan(SOLID_STD); // gray alone wouldn't flag it
+    expect(isSolidColor(grayOf(buf), buf)).toBe(false); // but the R/G/B channels do
+  });
+
+  it('a same-color alpha ramp ⇒ NOT solid (alpha channel variance)', () => {
+    const buf = rgba((i) => [100, 100, 100, Math.round((i / (N - 1)) * 255)]);
+    expect(isSolidColor(grayOf(buf), buf)).toBe(false);
+  });
+
+  it('a smooth luminance gradient ⇒ NOT solid', () => {
+    const buf = rgba((i) => {
+      const v = Math.round((i / (N - 1)) * 255);
+      return [v, v, v, 255];
+    });
+    expect(isSolidColor(grayOf(buf), buf)).toBe(false);
+  });
+
+  it('an empty / short sample ⇒ NOT solid (below sample resolution)', () => {
+    expect(isSolidColor([], new Uint8ClampedArray(0))).toBe(false);
+    expect(isSolidColor([1, 2, 3], new Uint8ClampedArray([1, 2]))).toBe(false);
   });
 });
 
@@ -185,6 +237,65 @@ describe('classifyContent over the format-classes fixtures (golden cross-check)'
       const golden = expected.images.find((e) => e.name === img.name);
       expect(golden?.contentClass).toBe(img.contentClass);
       expect(classifyFixture(img.name)).toBe(img.contentClass);
+    });
+  }
+});
+
+describe('isSolidColor over the solid-fill fixtures (golden cross-check)', () => {
+  // Same harness as the content-class cross-check above: reproduce the worker's 9×8 RGBA sample from the
+  // on-disk fixture PNGs with a deterministic BOX-AVERAGE downsample (no canvas in Node) and feed it to
+  // isSolidColor. The fixtures are drawn on a 9×8-aligned grid (64px cells) so the box-average is exact and
+  // the verdict survives the resample; the golden `solid` in expected.json is authored by hand in the
+  // generator, an independent cross-check.
+  const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../../fixtures/sample-projects/solid-fill');
+
+  function sample9x8(png: PNGImage): Uint8ClampedArray {
+    const { width: W, height: H, data } = png;
+    const out = new Uint8ClampedArray(DW * DH * 4);
+    for (let gy = 0; gy < DH; gy++) {
+      for (let gx = 0; gx < DW; gx++) {
+        const x0 = Math.floor((gx * W) / DW);
+        const x1 = Math.floor(((gx + 1) * W) / DW);
+        const y0 = Math.floor((gy * H) / DH);
+        const y1 = Math.floor(((gy + 1) * H) / DH);
+        let r = 0, g = 0, b = 0, a = 0, n = 0;
+        for (let y = y0; y < y1; y++) {
+          for (let x = x0; x < x1; x++) {
+            const i = (W * y + x) << 2;
+            r += data[i]!; g += data[i + 1]!; b += data[i + 2]!; a += data[i + 3]!; n++;
+          }
+        }
+        const o = (gy * DW + gx) * 4;
+        out[o] = r / n; out[o + 1] = g / n; out[o + 2] = b / n; out[o + 3] = a / n;
+      }
+    }
+    return out;
+  }
+
+  function solidFixture(file: string): boolean {
+    const png = PNG.sync.read(readFileSync(join(FIXTURES, file)));
+    const rgba = sample9x8(png);
+    const gray: number[] = [];
+    for (let p = 0; p < DW * DH; p++) gray.push(luma(rgba, p * 4));
+    return isSolidColor(gray, rgba);
+  }
+
+  interface ExpectedSolid {
+    name: string;
+    solid: boolean;
+  }
+  const expected = JSON.parse(readFileSync(join(FIXTURES, 'expected.json'), 'utf8')) as {
+    images: ExpectedSolid[];
+  };
+
+  for (const img of [
+    { name: 'plate.png', solid: true },
+    { name: 'framed.png', solid: false },
+  ]) {
+    it(`${img.name} ⇒ solid:${img.solid} (matches the authored golden)`, () => {
+      const golden = expected.images.find((e) => e.name === img.name);
+      expect(golden?.solid).toBe(img.solid); // golden agrees with the hard-coded expectation (no drift)
+      expect(solidFixture(img.name)).toBe(img.solid); // detector agrees with the golden
     });
   }
 });

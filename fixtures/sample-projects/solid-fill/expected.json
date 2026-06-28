@@ -1,0 +1,26 @@
+{
+  "kind": "solid-fill",
+  "feature": "solid-fill-loose-detector",
+  "grid": {
+    "w": 9,
+    "h": 8,
+    "cell": 64
+  },
+  "images": [
+    {
+      "name": "plate.png",
+      "w": 576,
+      "h": 512,
+      "solid": true,
+      "why": "one solid opaque color edge to edge → every per-channel stdDev ≈ 0 < SOLID_STD (2)"
+    },
+    {
+      "name": "framed.png",
+      "w": 576,
+      "h": 512,
+      "solid": false,
+      "why": "solid center with a 64px (one full 9×8 cell) perimeter of a different color → edge cells differ from interior by the full delta after box-average → above SOLID_STD"
+    }
+  ],
+  "note": "Two loose images for the single-color (solid-fill) detector. Drawn on a 9×8-aligned grid so a box-average downsample to the dHash sample is deterministic and the verdict survives the resample. plate ⇒ solid (rule solid-fill, vramBytesSaved = w·h·4 − 4); framed ⇒ not solid. Features below one 9×8 cell (e.g. a 1px border) are sub-sample and average away — only ≥1-cell-thick structure is detectable."
+}

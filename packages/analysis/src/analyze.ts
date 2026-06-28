@@ -23,6 +23,7 @@ import {
   formatFinding,
   occupancyFinding,
   occupancyValue,
+  solidFillFinding,
   vramBytes,
   vramBytesMipmapped,
   wastedRegions,
@@ -47,6 +48,10 @@ export interface AnalyzeDeps {
   features?: ImageFeatures[];
   /** Manifests whose referenced image is missing from the folder. */
   missingImages?: { manifest: string; image: string }[];
+  /** Would-be assets the host could NOT parse (ingest skip-points + worker parse failures) — surfaced
+   *  honestly instead of silently dropped. Pure pass-through: the host has already sorted by ref; this
+   *  layer never re-sorts or filters. Absent/empty ⇒ byte-identical to today. */
+  unparsed?: { ref: string; reason: string }[];
 }
 
 const RANK: Record<Severity, number> = { crit: 0, warn: 1, info: 2, ok: 3 };
@@ -73,6 +78,12 @@ export async function analyze(
   // byte-identical to today (CLI / headless tests unaffected).
   const classByRef = new Map<string, ContentClass>();
   for (const f of deps.features ?? []) if (f.contentClass) classByRef.set(f.assetRef, f.contentClass);
+
+  // Single-color (solid) marking from the SAME 9×8 sample the worker already decodes for dHash. Loose
+  // images only (atlases never trip it — a collage average is meaningless). Absent ⇒ empty ⇒ no
+  // solid-fill finding ⇒ byte-identical to today (CLI / headless tests unaffected).
+  const solidByRef = new Set<string>();
+  for (const f of deps.features ?? []) if (f.solid) solidByRef.add(f.assetRef);
 
   const addFormat = async (ref: string, image: ImageAsset, contentClass: ContentClass = 'unknown') => {
     const fmt = await formatFinding(ref, image, cfg, deps.encodeImage, contentClass);
@@ -121,6 +132,10 @@ export async function analyze(
         vramBytesMipmapped: vramBytesMipmapped(image.size),
       });
       findings.push(...dimensionFindings(image.name, image.size, cfg));
+      if (solidByRef.has(image.name)) {
+        const solid = solidFillFinding(image.name, image.size, cfg);
+        if (solid) findings.push(solid);
+      }
       await addFormat(image.name, image, classByRef.get(image.name) ?? 'unknown');
     }
   }
@@ -166,5 +181,7 @@ export async function analyze(
     // Additive: omit entirely when no atlas had frames (loose-only folder) so the report is
     // byte-identical to today. The host probe reads this; absent ⇒ nothing to probe.
     ...(Object.keys(atlasFrames).length > 0 ? { atlasFrames } : {}),
+    // Pure pass-through of the host's already-sorted unparsed surface. Omit when empty ⇒ byte-identical.
+    ...(deps.unparsed?.length ? { unparsed: deps.unparsed } : {}),
   };
 }

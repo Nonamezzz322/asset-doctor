@@ -40,6 +40,11 @@
   },
   "report.noAssets": "Keine einzelnen Bild- oder Atlas-Assets zum Anzeigen.",
   "report.noImage": "Kein Bild für dieses Asset anzuzeigen.",
+  "report.unparsed.title": {
+    "$count": "n",
+    "one": "{n} Datei konnte nicht analysiert werden",
+    "other": "{n} Dateien konnten nicht analysiert werden"
+  },
   "findings.title": "Befunde",
   "findings.none": "✓ keine Probleme für dieses Asset",
   "pro.note": "Pro-Fix (neu packen + transkodieren) — Phase 2",
@@ -58,6 +63,9 @@
   "find.npot.title": "Nicht-Zweierpotenz {w}×{h}",
   "find.npot.detail": "Auffüllen auf {potW}×{potH} würde {waste:pct} ({vram:bytes}) verschwenden, FALLS deine Toolchain auf POT auffüllt. WebGL2/PixiJS laden NPOT nativ (clamp+linear), daher meist unproblematisch.",
   "find.npot.fix": "Nur handeln, wenn deine Pipeline POT erzwingt: trimmen/skalieren, sodass die Auffüllung minimal ist.",
+  "find.solid-fill.title": "Einfarbig {w}×{h} — eine Farbe bindet {vram:bytes}",
+  "find.solid-fill.detail": "Jeder abgetastete Pixel hat dieselbe Farbe (oder ist völlig transparent) — keine Kanten, kein Verlauf, keine Details. Trotzdem bindet er {vram:bytes} VRAM ({w}×{h}×4), um einen einzigen Wert zu tragen.",
+  "find.solid-fill.fix": "Durch eine 1×1-Textur ersetzen, zur Laufzeit eingefärbt/gestreckt, oder durch ein einfarbiges Sprite.",
   "find.wasted-regions.title": {
     "$count": "n",
     "one": "{n} leere Region gemappt",
@@ -253,6 +261,15 @@
   },
   "fix.dedup.diskSaved": "−{bytes:bytes} auf der Festplatte durch Deduplizierung",
   "fix.dedup.vramUpperBound": "bis zu −{bytes:bytes} VRAM (Obergrenze — nur wenn die Laufzeit einen Upload über die Kopien teilt)",
+  "fix.sheetDiff.title": {
+    "$count": "n",
+    "one": "{n} Sheet — visueller Beweis",
+    "other": "{n} Sheets — visueller Beweis"
+  },
+  "fix.sheetDiff.showing": "{shown} von {total} angezeigt",
+  "fix.sheetDiff.proofNote": "Vorher/Nachher-Röntgenbild jedes neu gepackten Sheets. Das Nachher-Bild leuchtet rot, wo noch Platz leer ist. OCC/VRAM/Maße sind zwei gemessene Zustände, keine Ersparnis.",
+  "fix.sheetDiff.before": "vorher",
+  "fix.sheetDiff.after": "nachher",
   "fix.tier.title": "Auflösungsstufen erzeugen",
   "fix.tier.hint": "Erzeugt herunterskalierte Kopien jedes Assets, damit das Spiel die zum Gerät passende Auflösung lädt.",
   "fix.tier.enable": "Auflösungsstufen erzeugen",

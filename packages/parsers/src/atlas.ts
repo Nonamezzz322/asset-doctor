@@ -20,6 +20,9 @@ function readRect(v: unknown): Rect | null {
   const w = num(r.w);
   const h = num(r.h);
   if (x === undefined || y === undefined || w === undefined || h === undefined) return null;
+  // Reject degenerate / negative rects: a 0×0 or negative frame is not a usable sprite, and a negative
+  // origin would place it outside the page. Safe for spriteSourceSize too (trim offsets are ≥0, w/h>0).
+  if (w <= 0 || h <= 0 || x < 0 || y < 0) return null;
   return { x, y, w, h };
 }
 
@@ -153,6 +156,15 @@ export function parseAtlasManifest(
 
   const size = readSize(meta.size) ?? opts.imageSize;
   if (!size) return { ok: false, error: 'atlas size unknown (no meta.size and no image)' };
+
+  // Out-of-bounds pass (after size is known): a frame placed past the page edge is a corrupt manifest,
+  // not a usable atlas. `frame` is the rect AS PLACED (already w/h-swapped when rotated), so the same
+  // `x+w > size.w` test is correct without any further swap. `===` at the edge is fine (`>`, not `>=`).
+  for (const s of sprites) {
+    if (s.frame.x + s.frame.w > size.w || s.frame.y + s.frame.h > size.h) {
+      return { ok: false, error: `frame "${s.name}" extends past atlas ${size.w}×${size.h}` };
+    }
+  }
 
   const imageRef = (typeof meta.image === 'string' ? meta.image : undefined) ?? opts.imageRef;
   if (!imageRef) return { ok: false, error: 'atlas imageRef unknown (no meta.image and no image)' };

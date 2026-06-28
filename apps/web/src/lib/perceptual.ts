@@ -17,6 +17,10 @@ export const CLEAR = 8;
 /** Minimum fraction of samples each pole must hold for a hard-alpha verdict. */
 export const minPole = 0.12;
 
+/** Below this per-channel sample stdDev, a channel reads as constant. Tighter than FLAT_STD=12 (a flat
+ *  icon still has edges/text) and below dedup's minStdDev=6 — a SOLID image has no variance at all. */
+export const SOLID_STD = 2;
+
 /** Grayscale luma from RGBA pixel data at byte index i. */
 export function luma(data: Uint8ClampedArray | number[], i: number): number {
   return 0.299 * (data[i] ?? 0) + 0.587 * (data[i + 1] ?? 0) + 0.114 * (data[i + 2] ?? 0);
@@ -54,6 +58,37 @@ export function grayStdDev(gray: number[]): number {
  *  "near-duplicate" matches — exclude them from perceptual matching. */
 export function isFlat(gray: number[], minStdDev = 6): boolean {
   return grayStdDev(gray) < minStdDev;
+}
+
+/** Standard deviation of channel `c` (0=R,1=G,2=B,3=A) across the interleaved RGBA samples. */
+function channelStdDev(rgba: Uint8ClampedArray | number[], c: number): number {
+  const n = Math.floor(rgba.length / 4);
+  if (n === 0) return 0;
+  let sum = 0;
+  for (let p = 0; p < n; p++) sum += rgba[p * 4 + c] ?? 0;
+  const mean = sum / n;
+  let varSum = 0;
+  for (let p = 0; p < n; p++) {
+    const v = (rgba[p * 4 + c] ?? 0) - mean;
+    varSum += v * v;
+  }
+  return Math.sqrt(varSum / n);
+}
+
+/** True iff the 9×8 sample is a single color (or fully transparent): EVERY channel — R, G, B, alpha,
+ *  and the derived gray (catches a chromatic shift at equal luma) — has a per-sample stdDev below
+ *  SOLID_STD. A fully-transparent image has zero variance on every channel ⇒ also "solid". A short /
+ *  empty sample (below the 9×8 sample resolution) ⇒ false. Pure integer-sample math (deterministic). */
+export function isSolidColor(
+  gray: number[],
+  rgba: Uint8ClampedArray | number[],
+  std = SOLID_STD,
+): boolean {
+  const n = Math.floor(rgba.length / 4);
+  if (n === 0 || gray.length === 0) return false;
+  if (grayStdDev(gray) >= std) return false;
+  for (let c = 0; c < 4; c++) if (channelStdDev(rgba, c) >= std) return false;
+  return true;
 }
 
 /** Hard alpha present iff BOTH alpha poles are populated in the sample: a meaningful fraction of
