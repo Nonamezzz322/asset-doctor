@@ -1,4 +1,4 @@
-import type { ImageMime, LazyMarking, OverlayZone, ScaleTier, SkinGuard } from '@asset-doctor/core';
+import type { ExportProfile, ImageMime, LazyMarking, OverlayZone, ScaleTier, SkinGuard } from '@asset-doctor/core';
 import type { PackMode, StaticGranularity } from '@asset-doctor/ingest';
 // Type-only import (erased under verbatimModuleSyntax ⇒ no runtime cycle with op-manifest, which already
 // type-imports FixPlanSummary/PlanOpCounts from here). op-manifest.ts is the documented OWNER of the OpKind
@@ -55,6 +55,16 @@ export interface FixOptions {
   /** Bypass the already-tiered skip (per-asset AND whole-folder, design §8) for the rare legit case
    *  where `*_hd`/`*_2x` art should still be re-tiered. Mirrors packForced. Default false. */
   tierForce?: boolean;
+
+  /** Config-driven export profile (round7-export-profile.md §2/§3). ADDITIVE: absent ⇒ byte-identical to
+   *  today. When present it is the SOLE source of formats + resolutions + per-format compression for the
+   *  loose-transcode / loose-resize / tier paths; SUPERSEDES the legacy targetMime + scaleTiers +
+   *  webpNearLossless for THOSE paths only. Repack/merge sheets (lossless WebP) + Spine pages (PNG) are
+   *  UNCHANGED. Validated fail-closed (validateProfile): ≥1 format, ≥1 tier with a scale===1 top, no
+   *  lossless-AVIF, valid suffix tokens, no duplicate targets; invalid ⇒ NO emit + an honest skipped[]
+   *  entry. MUTUALLY EXCLUSIVE with scaleTiers (buildOptions omits scaleTiers when a profile is sent —
+   *  never both). NOT wired in the worker yet (scaffolding only — T6+ wires execution). */
+  exportProfile?: ExportProfile;
 
   // ── Feature 4 (pack loose assets into spritesheets) — own Pro toggle, DEFAULT OFF (NOT folded under
   //    aggressive). Absent/false ⇒ no pack groups built, no pack ops, byte-identical to today. ──
@@ -217,6 +227,14 @@ export interface FixReceipt {
    *  picks this tier" ladder. The runtime loads ONE tier, so this is NEVER summed into vramBytesAfter
    *  (invariant 5); tiering contributes 0 to vramSaved (the top tier == the source footprint). */
   tierVram?: { suffix: string; scale: number; vramBytes: number }[];
+  /** Config-driven export-profile summary (round7-export-profile.md §3). `formats`/`tiers` = the
+   *  VALIDATED counts; `assets` = assets fanned out; `filesEmitted` = total variant files (Σ assets ×
+   *  emitted formats × tiers). Present whenever a VALID profile ran — INCLUDING assets=0 (an explicit
+   *  profile request always reports what it produced; finding [0]). Absent only when no valid profile ran
+   *  (byte-identical to today). The per-tier VRAM ladder is STILL `tierVram` (never summed; invariant 5);
+   *  format fan-out adds DISK only — the runtime loads ONE format × ONE tier — so it contributes 0 to
+   *  vramBytesAfter. */
+  exportProfile?: { formats: number; tiers: number; assets: number; filesEmitted: number };
   /** Edge-extrude (bleed) summary. `extrudePx` = the requested extrude width; `extrudedBlits` = rectangle
    *  blits that got an extrude; `extrudeSkipped` = blits where extrude was REQUESTED but skipped (meshed
    *  clip / rotated — no polygon-edge extrude in v1). Descriptive only. Absent ⇒ no extrude ran. */

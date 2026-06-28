@@ -18,12 +18,16 @@ import { fileURLToPath } from 'node:url';
 import type { Atlas, ImageMime } from '@asset-doctor/core';
 import { parseAtlas, parseAtlasManifest } from '@asset-doctor/parsers';
 import {
+  DEFAULT_FORMAT_QUALITY,
   emitTexturePackerJson,
+  formatEncode,
   resolveOptions,
   scaleAwareQuality,
   SCALE_QUALITY_FLOOR,
   type EffectiveOptions,
 } from '../src/index';
+
+const globalKnobs = { effort: 0, scaleAwareQuality: false } as const;
 
 // ── §10.11 scaleAwareQuality ────────────────────────────────────────────────────────────────────
 describe('scaleAwareQuality (§10.11)', () => {
@@ -55,12 +59,21 @@ describe('scaleAwareQuality (§10.11)', () => {
 
 // ── §10.12 resolveOptions folder/type matching ──────────────────────────────────────────────────
 describe('resolveOptions folder/type matching (§10.12)', () => {
-  const base: EffectiveOptions = { quality: 80, effort: 0, targetMime: 'image/webp', webpNearLossless: 100 };
+  const base: EffectiveOptions = { quality: 80, effort: 0, targetMime: 'image/webp', webpNearLossless: 100, lossless: false };
 
   it('returns a copy of the base when no override matches', () => {
     const out = resolveOptions('ui/btn.png', 'pixi', base, [{ match: 'fx', quality: 40 }]);
     expect(out).toEqual(base);
     expect(out).not.toBe(base); // fresh object
+  });
+
+  it('threads lossless through from the base (B1) — FixOverride cannot set it in v1', () => {
+    // A matching override leaves lossless untouched: it falls through from the base unchanged.
+    const lossy = resolveOptions('ui/btn.png', 'pixi', base, [{ match: 'ui', quality: 50 }]);
+    expect(lossy.lossless).toBe(false);
+    // A base that IS lossless stays lossless across a matching override (no FixOverride.lossless field).
+    const losslessBase: EffectiveOptions = { ...base, lossless: true };
+    expect(resolveOptions('ui/btn.png', 'pixi', losslessBase, [{ match: 'ui', effort: 6 }]).lossless).toBe(true);
   });
 
   it('folder prefix matches the folder itself and anything nested under it', () => {
@@ -96,6 +109,83 @@ describe('resolveOptions folder/type matching (§10.12)', () => {
     const a = resolveOptions('ui/x.png', 'pixi', base, overrides);
     const b = resolveOptions('ui/x.png', 'pixi', base, overrides);
     expect(a).toEqual(b);
+  });
+});
+
+// ── formatEncode (export profile §4b) ─────────────────────────────────────────────────────────────
+describe('formatEncode (export profile §4b)', () => {
+  it('webp lossy: defaults quality to DEFAULT_FORMAT_QUALITY, near off (100), not lossless', () => {
+    const fe = formatEncode({ format: 'image/webp' }, 1, globalKnobs);
+    expect(fe).toEqual({
+      targetMime: 'image/webp',
+      quality: DEFAULT_FORMAT_QUALITY,
+      lossless: false,
+      effort: 0,
+      webpNearLossless: 100,
+    });
+  });
+
+  it('webp lossless: lossless true, near forced off even if a near was given', () => {
+    const fe = formatEncode({ format: 'image/webp', lossless: true, near: 40 }, 1, globalKnobs);
+    expect(fe.lossless).toBe(true);
+    expect(fe.webpNearLossless).toBe(100); // lossless wins over near
+  });
+
+  it('webp near-lossless: forwards near as webpNearLossless when not lossless', () => {
+    const fe = formatEncode({ format: 'image/webp', near: 60 }, 1, globalKnobs);
+    expect(fe.lossless).toBe(false);
+    expect(fe.webpNearLossless).toBe(60);
+  });
+
+  it('png: lossless implied, quality irrelevant, webpNearLossless off, no avif knobs; forwards pngRecompressLevel', () => {
+    const fe = formatEncode({ format: 'image/png', quality: 10 }, 1, { ...globalKnobs, pngRecompressLevel: 4 });
+    expect(fe.targetMime).toBe('image/png');
+    expect(fe.lossless).toBe(true);
+    expect(fe.webpNearLossless).toBe(100);
+    expect(fe.pngRecompressLevel).toBe(4);
+    expect(fe.avifSubsample).toBeUndefined();
+    expect(fe.avifQualityAlpha).toBeUndefined();
+  });
+
+  it('avif: lossy only, forwards avif knobs, webpNearLossless off, no png knob', () => {
+    const fe = formatEncode({ format: 'image/avif', quality: 70 }, 1, {
+      ...globalKnobs,
+      avifQualityAlpha: 80,
+      avifSubsample: 3,
+    });
+    expect(fe.targetMime).toBe('image/avif');
+    expect(fe.lossless).toBe(false);
+    expect(fe.quality).toBe(70);
+    expect(fe.avifQualityAlpha).toBe(80);
+    expect(fe.avifSubsample).toBe(3);
+    expect(fe.webpNearLossless).toBe(100);
+    expect(fe.pngRecompressLevel).toBeUndefined();
+  });
+
+  it('folds scaleAwareQuality onto the format quality (floor 50) when downscaling', () => {
+    // 90 - round((1 - 0.5) * 50) = 65, exactly as scaleAwareQuality.
+    const fe = formatEncode({ format: 'image/webp', quality: 90 }, 0.5, { effort: 0, scaleAwareQuality: true });
+    expect(fe.quality).toBe(scaleAwareQuality(90, 0.5, true));
+    expect(fe.quality).toBe(65);
+    // heavy downscale floors at SCALE_QUALITY_FLOOR.
+    const floored = formatEncode({ format: 'image/avif', quality: 60 }, 0.1, { effort: 0, scaleAwareQuality: true });
+    expect(floored.quality).toBe(SCALE_QUALITY_FLOOR);
+  });
+
+  it('scaleAwareQuality disabled ⇒ quality unchanged (today\'s behavior)', () => {
+    const fe = formatEncode({ format: 'image/avif', quality: 85 }, 0.5, { effort: 0, scaleAwareQuality: false });
+    expect(fe.quality).toBe(85);
+  });
+
+  it('threads global effort to every format', () => {
+    expect(formatEncode({ format: 'image/webp' }, 1, { effort: 6, scaleAwareQuality: false }).effort).toBe(6);
+    expect(formatEncode({ format: 'image/avif' }, 1, { effort: 6, scaleAwareQuality: false }).effort).toBe(6);
+    expect(formatEncode({ format: 'image/png' }, 1, { effort: 6, scaleAwareQuality: false }).effort).toBe(6);
+  });
+
+  it('is deterministic: same inputs ⇒ deep-equal output', () => {
+    const args = [{ format: 'image/webp' as const, quality: 75, near: 30 }, 0.75, { effort: 3, scaleAwareQuality: true }] as const;
+    expect(formatEncode(...args)).toEqual(formatEncode(...args));
   });
 });
 

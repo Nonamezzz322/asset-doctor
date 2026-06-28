@@ -5,7 +5,7 @@
 // (native WebP, or AVIF via @jsquash with honest fallback), drop exact duplicates, and zip a drop-in
 // optimized folder. Assets never leave the device. Every fix the browser can't do lands in skipped[].
 
-import type { Asset, Atlas, Blit, FixOp, ImageMime, ImageFeatures, PackGroup, Rect, Size, TrimRect } from '@asset-doctor/core';
+import type { Asset, Atlas, Blit, FixOp, FormatTarget, ImageMime, ImageFeatures, PackGroup, Rect, ScaleTier, Size, TrimRect } from '@asset-doctor/core';
 import { groupFiles, groupLooseForPacking, keyOf, type LooseImage, type RawFile } from '@asset-doctor/ingest';
 import { parseAtlas, parseImage, parseSpineAtlasText, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
 import { analyze, buildDedupGroups, hasResolutionToken, mergeSharedAtlases, occupancyValue, type EncodeSizer } from '@asset-doctor/analysis';
@@ -39,6 +39,15 @@ import {
   scaleLoose,
   tieredName,
   validateTiers,
+  // PURE config-driven export-profile helpers (round7-export-profile.md §4a/§4b) — fail-closed profile
+  // validation (validateProfile, delegates the resolution axis to validateTiers), the per-format encode
+  // mapping (formatEncode → encodeCanvas params, incl. the threaded lossless B1), and the format-token
+  // naming math (variantManifestName: single-format ⇒ byte-identical legacy `.json`, multi ⇒ a `.webp`/
+  // `.avif` token before the manifest ext). The worker reuses these VERBATIM so the fan-out can't drift.
+  validateProfile,
+  formatEncode,
+  variantManifestName,
+  type FormatEncode,
   // PURE owner-aware dedup repoint path math (design §3d) — SINGLE source of truth, Vitest-covered in
   // packages/fix, so the meta.image repoint resolves back through @asset-doctor/parsers and can't drift.
   dirOf,
@@ -228,14 +237,52 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     for (const c of grouped2.collisions) packCollisionSkips.push({ assetRef: c.refs.join(' | '), reason: `pack skipped: two files map to one region name '${c.name}' — kept the first` });
   }
 
+  // ── Config-driven export profile (round7-export-profile.md §5a, T6) — own Pro toggle, DEFAULT OFF ─────
+  // Validate the profile ONCE, fail-closed. Absent ⇒ profileOn stays false ⇒ every path below reproduces
+  // today byte-identically. Invalid ⇒ NO emit + an HONEST `(profile)` skipped[] entry per reason (never a
+  // silent drop). The profile is MUTUALLY EXCLUSIVE with scaleTiers (buildOptions omits scaleTiers when a
+  // profile is sent), so opts.scaleTiers is empty when profileOn — the two never both feed the tier axis.
+  let profileOn = false;
+  let profileFormats: FormatTarget[] = [];
+  let profileTiers: ScaleTier[] = [];
+  let profileMulti = false; // >1 format ⇒ the format token disambiguates manifest names (single ⇒ legacy).
+  const profileSkips: { assetRef: string; reason: string }[] = [];
+  if (opts.exportProfile) {
+    const v = validateProfile(opts.exportProfile);
+    if (!v.ok) {
+      for (const e of v.errors) profileSkips.push({ assetRef: '(profile)', reason: `export profile rejected: ${e}` });
+    } else {
+      profileFormats = v.formats;
+      profileTiers = v.tiers;
+      profileMulti = v.formats.length > 1;
+      profileOn = true;
+    }
+  }
+  // The profile's global encode knobs (effort/scaleAwareQuality/avif*/pngRecompress) — folded into every
+  // formatEncode below. Read from the profile (NOT the legacy top-level opts) when profileOn so the panel's
+  // knobs govern the fan-out; falls through harmlessly when profile absent (profileFormats is empty).
+  const profileGlobal = {
+    effort: opts.exportProfile?.effort ?? 0,
+    scaleAwareQuality: opts.exportProfile?.scaleAwareQuality ?? false,
+    avifQualityAlpha: opts.exportProfile?.avifQualityAlpha,
+    avifSubsample: opts.exportProfile?.avifSubsample,
+    pngRecompressLevel: opts.exportProfile?.pngRecompressLevel,
+  };
+
   // ── Scale-tier export (design docs/scale-tiers-design.md §5/§7) — own Pro toggle, DEFAULT OFF ─────────
   // Validate the requested ladder ONCE (fail-closed). An invalid/empty ladder arrives at planFix as
   // absent so today's single-scale path reproduces byte-identically. A whole-folder skip flag + the
   // per-asset eligibility predicate (mesh / multi-page Spine / already-tiered gates) are computed here so
   // both planFix (the resize/transcode/dedup guards) and the worker tier loop below share ONE decision.
+  // ROUND7 T6: a profile's RESOLUTION axis (profileTiers) feeds the SAME tier multiplier — but ONLY when it
+  // carries a real LOWER tier (some scale<1). A format-only profile (single scale-1 top tier) keeps
+  // tieringOn=false (B3): the tier loop is NOT entered and fan-out happens in the loose handlers (T8), so a
+  // pure-format run is never mislabeled a `tier` op and never trips the dedup-repoint-disable / owner-rename
+  // machinery. The profile's tiers are already validated (validateProfile) so we use them directly here.
   const tierReq = opts.scaleTiers ?? [];
   const tierValidation = tierReq.length > 0 ? validateTiers(tierReq) : null;
-  const tiers = tierValidation?.ok ? tierValidation.tiers : [];
+  const profileHasLowerTier = profileOn && profileTiers.some((tt) => tt.scale < 1);
+  const tiers = profileHasLowerTier ? profileTiers : tierValidation?.ok ? tierValidation.tiers : [];
   const tieringOn = tiers.length > 0;
   // Whole-folder already-tiered: if any cluster already differs by a resolution token, the folder ships
   // tiers — skip tiering globally (design §8). A png+webp same-size folder does NOT trip this (format
@@ -315,6 +362,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     effort: opts.effort ?? 0,
     targetMime: opts.targetMime,
     webpNearLossless: opts.webpNearLossless ?? 100,
+    // round7-export-profile.md B1: default false ⇒ today's loose/tier encode path is byte-identical
+    // (it never set lossless). A profile's per-format lossless is threaded in via formatEncode (T4).
+    lossless: false,
   };
   const kindOf = (ref: string): FixAssetKind => (spineRefs.has(ref) ? 'spine' : atlasByRef.has(ref) ? 'pixi' : 'loose');
   /** Effective encode options for a loose-image op at `ref`, optionally downscaled by `scale` (1 = none). */
@@ -331,6 +381,21 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     avifSubsample: opts.avifSubsample,
     pngRecompressLevel: opts.pngRecompressLevel,
     allowPngFallback,
+  });
+  /** Build the encodeCanvas opts for a profile FormatEncode (round7-export-profile.md §5c/§5d, T7/T8): map
+   *  the pure FormatEncode (quality 0..100, threaded lossless B1, per-format knobs) onto EncodeOpts (quality
+   *  0..1). allowPngFallback is ALWAYS true here — a fan-out target that can't encode degrades to PNG (the
+   *  B4 collision guard then de-dups same-mime fallbacks). The per-format avif/png knobs are forwarded ONLY
+   *  for their owning codec (formatEncode already nulled the others), so a stray knob never reaches a codec. */
+  const feToEncodeOpts = (fe: FormatEncode): EncodeOpts => ({
+    quality: fe.quality / 100,
+    lossless: fe.lossless,
+    effort: fe.effort,
+    webpNearLossless: fe.webpNearLossless,
+    avifQualityAlpha: fe.avifQualityAlpha,
+    avifSubsample: fe.avifSubsample,
+    pngRecompressLevel: fe.pngRecompressLevel,
+    allowPngFallback: true,
   });
 
   // ── DRY-RUN PLAN SHORT-CIRCUIT (docs/improvements/dry-run-plan-preview.md) ──────────────────────────
@@ -386,6 +451,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     // the subset knowable WITHOUT composing pixels). Pixel-dependent skips (polygon-no-win, near-dup dHash,
     // codec-unavailable, post-compose name-collision, …) are NOT predicted — they surface only at execute.
     const planSkips: { assetRef: string; reason: string }[] = [];
+    // ROUND7 T6: an invalid export profile is rejected up front (no emit) — surface its honest `(profile)`
+    // reasons FIRST so the preview mirrors the execute receipt's leading entries.
+    for (const s of profileSkips) planSkips.push(s);
     for (const s of packCollisionSkips) planSkips.push(s); // execute pushes these first (file→region collisions)
     // Multi-page Spine single-atlas repack refusal — determinable pre-compose via spineInfoOf (the execute
     // repack branch refuses a >1-page Spine before any pixel work).
@@ -517,6 +585,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   const replaced = new Set<string>();
   const dropped = new Set<string>();
   const skipped: { assetRef: string; reason: string }[] = [];
+  // ROUND7 T6: an invalid export profile rejected above ⇒ no emit + honest `(profile)` reasons. Seed
+  // `skipped` with them so the receipt is honest (never a silent drop). Valid/absent profile ⇒ empty.
+  for (const s of profileSkips) skipped.push(s);
   const operations: string[] = [];
   let referencesChanged = false;
   // Loader-migration guide (docs/improvements/loader-migration.md): accumulate ONLY genuine loader-CALL
@@ -566,6 +637,15 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   let tieredAssets = 0;
   let tierFilesEmitted = 0;
   const tierVramBytes = tiers.map(() => 0);
+  // ── Config-driven export-profile receipt counters + format-only ownership (round7-export-profile.md
+  //    §5d/§9, T8/T9) ──. profileAssets = assets fanned out across formats×tiers; profileFilesEmitted =
+  // total variant files emitted (image + manifest/skeleton). DISK-only — the runtime loads ONE format ×
+  // ONE tier, so this never folds into vramBytesAfter (invariant 5). `profileOwned` records refs the
+  // format-only fan-out (T8) emitted from the loose transcode/resize handlers, so the standalone op is NOT
+  // ALSO run (double-emit guard) WITHOUT disabling dedup repoint (B3 — first-class, not a `_1x` tier hack).
+  let profileAssets = 0;
+  let profileFilesEmitted = 0;
+  const profileOwned = new Set<string>();
   // Refs claimed by a repack / atlas-merge / Feature-4 pack pass. In v1 the tier loop runs over the
   // PRE-transform asset list (`merged`), so a repacked/merged/packed asset's EMITTED sheet is not re-fed
   // into tiering (design §7 scopes this out for v1). Tracking the refs here lets the tier loop surface an
@@ -757,6 +837,64 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     if (e <= 0) return { gutter: 0, eff: 0 };
     const gutter = Math.max(op.padding, e);
     return { gutter, eff: effectiveExtrude(e, gutter) };
+  };
+
+  // ── ROUND7 T8: format-only export-profile fan-out for a LOOSE image (round7-export-profile.md §5d) ────
+  // The first-class fan-out the design mandates instead of the B3 `_1x`-tier hack: compose ONCE (the caller
+  // hands us the composed canvas at the output scale), then emit ONE file per profile FORMAT off that single
+  // canvas. The FIRST emitted variant is the canonical rename target (renamedTo + replaced.add — same as
+  // today's single-transcode path), so dedup-repoint stays intact (B3); later variants are additional files.
+  // B4 collision guard: two formats can fall back to the SAME actual mime — emit the first, skip the later
+  // with an honest note (keyed on the actual emitted path). Returns the OWNER's final image path (for the
+  // dedup ownerActualName bookkeeping) + whether references changed. `kind` distinguishes the loader row.
+  // Called ONLY when profileOn; records profileOwned so the standalone op never double-runs (the caller skips
+  // its own emit). profileAssets/profileFilesEmitted accrue here. Deterministic (profileFormats given order).
+  const emitLooseProfileFanout = async (
+    ref: string,
+    srcPath: string,
+    scale: number,
+    canvas: OffscreenCanvas,
+    c2d: OffscreenCanvasRenderingContext2D,
+    kind: 'resize' | 'transcode',
+  ): Promise<{ ownerImage: string; referencesChanged: boolean }> => {
+    profileOwned.add(ref);
+    profileAssets++;
+    const emittedThis = new Set<string>();
+    let ownerImage = srcPath; // falls back to the source if every format fails (caller leaves it un-renamed)
+    let firstEmitted = false;
+    let refsChanged = false;
+    for (const f of profileFormats) {
+      const fe = formatEncode(f, scale, profileGlobal);
+      const enc = await encodeCanvas(canvas, c2d, fe.targetMime, feToEncodeOpts(fe));
+      if (!enc) {
+        skipped.push({ assetRef: ref, reason: `variant ${f.format} skipped: encode to ${fe.targetMime} unavailable` });
+        continue;
+      }
+      const variantPath = renamedTo(srcPath, enc.mime);
+      if (emittedThis.has(variantPath)) {
+        skipped.push({ assetRef: ref, reason: `${f.format} fell back to ${enc.mime} and collides with another variant — skipped` });
+        continue;
+      }
+      emittedThis.add(variantPath);
+      out.push({ path: variantPath, bytes: enc.bytes });
+      profileFilesEmitted++;
+      if (!firstEmitted) {
+        // The FIRST emitted variant is the canonical rename (today's single-transcode behavior) — replaced
+        // + the loader row + the dedup owner image all point here, so dedup-repoint resolves to a real file.
+        firstEmitted = true;
+        ownerImage = variantPath;
+        replaced.add(srcPath);
+        if (variantPath !== srcPath) {
+          refsChanged = true;
+          changeRows.push(looseRenameChange(srcPath, variantPath, kind));
+        }
+      } else if (variantPath !== srcPath) {
+        // Additional formats are extra load targets (the loader picks by name) — a reference change too.
+        refsChanged = true;
+        changeRows.push(looseRenameChange(srcPath, variantPath, kind));
+      }
+    }
+    return { ownerImage, referencesChanged: refsChanged };
   };
 
   for (const op of plan.ops) {
@@ -1013,18 +1151,30 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         c2d.imageSmoothingQuality = 'high'; // best-effort downscale resampling (free quality win, §4c)
         c2d.drawImage(bmp, 0, 0, bmp.width, bmp.height, 0, 0, op.to.w, op.to.h);
         bmp.close();
-        // Effective per-asset options (folder/type overrides + scale-aware quality on the downscale).
-        const eff = effectiveFor(ref, srcW > 0 ? op.to.w / srcW : 1);
-        const enc = await encodeCanvas(canvas, c2d, eff.targetMime, encOptsFor(eff, true));
-        const newPath = renamedTo(path, enc!.mime); // same rename the owner-final-name prediction uses
-        out.push({ path: newPath, bytes: enc!.bytes });
-        replaced.add(path);
-        if (newPath !== path) {
-          referencesChanged = true; // a loose-image rename is NOT drop-in
-          changeRows.push(looseRenameChange(path, newPath, 'resize')); // loader-migration: logo.png → logo.webp
+        const scale = srcW > 0 ? op.to.w / srcW : 1;
+        if (profileOn && !profileOwned.has(ref)) {
+          // ROUND7 T8: format-only fan-out — emit one variant per profile format off this single downscaled
+          // canvas (B3 first-class, NOT a `_1x` tier hack). The standalone single-format emit below is
+          // skipped (profileOwned). dedup-repoint stays intact (the first variant is the canonical rename).
+          const r = await emitLooseProfileFanout(ref, path, scale, canvas, c2d, 'resize');
+          if (ownerActualName.has(ref)) ownerActualName.get(ref)!.image = r.ownerImage;
+          if (r.referencesChanged) referencesChanged = true;
+          vramSaved += Math.max(0, (origPx - op.to.w * op.to.h) * 4);
+          operations.push(`resize ${basename(path)} → ${op.to.w}×${op.to.h} (${profileFormats.length} format${profileFormats.length === 1 ? '' : 's'})`);
+        } else {
+          // Effective per-asset options (folder/type overrides + scale-aware quality on the downscale).
+          const eff = effectiveFor(ref, scale);
+          const enc = await encodeCanvas(canvas, c2d, eff.targetMime, encOptsFor(eff, true));
+          const newPath = renamedTo(path, enc!.mime); // same rename the owner-final-name prediction uses
+          out.push({ path: newPath, bytes: enc!.bytes });
+          replaced.add(path);
+          if (newPath !== path) {
+            referencesChanged = true; // a loose-image rename is NOT drop-in
+            changeRows.push(looseRenameChange(path, newPath, 'resize')); // loader-migration: logo.png → logo.webp
+          }
+          vramSaved += Math.max(0, (origPx - op.to.w * op.to.h) * 4);
+          operations.push(`resize ${basename(path)} → ${op.to.w}×${op.to.h} ${enc!.mime.replace('image/', '')}`);
         }
-        vramSaved += Math.max(0, (origPx - op.to.w * op.to.h) * 4);
-        operations.push(`resize ${basename(path)} → ${op.to.w}×${op.to.h} ${enc!.mime.replace('image/', '')}`);
       }
     } else if (op.kind === 'transcode') {
       const ref = op.assetRef;
@@ -1032,6 +1182,29 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       const bytes = bytesByRef.get(ref);
       if (!path || !bytes) {
         skipped.push({ assetRef: ref, reason: 'image unavailable' });
+        continue;
+      }
+      if (profileOn && !profileOwned.has(ref) && !atlasByRef.has(ref)) {
+        // ROUND7 T8: format-only fan-out — decode ONCE to a canvas, then emit one variant per profile format
+        // (B3 first-class). LOOSE images only (design scope "loose-transcode") — an ATLAS page keeps today's
+        // single-format transcode below so its manifest meta.image isn't left dangling across N variants.
+        // dedup-repoint stays intact: the first emitted variant is the canonical owner image
+        // (ownerActualName.image), and a complete encode failure leaves the owner on its ORIGINAL.
+        const bmp = await createImageBitmap(new Blob([bytes]));
+        const canvas = new OffscreenCanvas(bmp.width, bmp.height);
+        const c2d = canvas.getContext('2d');
+        if (!c2d) {
+          bmp.close();
+          skipped.push({ assetRef: ref, reason: 'no 2D context' });
+          if (ownerActualName.has(ref)) ownerActualName.get(ref)!.image = path;
+          continue;
+        }
+        c2d.drawImage(bmp, 0, 0);
+        bmp.close();
+        const r = await emitLooseProfileFanout(ref, path, 1, canvas, c2d, 'transcode');
+        if (ownerActualName.has(ref)) ownerActualName.get(ref)!.image = r.ownerImage;
+        if (r.referencesChanged) referencesChanged = true;
+        operations.push(`transcode ${basename(path)} → ${profileFormats.length} format${profileFormats.length === 1 ? '' : 's'}`);
         continue;
       }
       // Effective per-asset options (folder/type overrides; no downscale ⇒ scale 1 ⇒ quality unchanged).
@@ -1441,7 +1614,12 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       if (!bytes || !srcSize) continue;
       const isSpine = spineRefs.has(ref);
       const atlas = atlasByRef.get(ref);
-
+      // ROUND7 T9: Spine pages STAY PNG (runtime-safe) — a multi-format profile can't fan a Spine page out
+      // across webp/avif, so it degrades to a single PNG per tier. Surface ONE honest note per Spine asset
+      // (never a silent single-format result for a multi-format profile request). Single-format ⇒ no note.
+      if (profileOn && profileMulti && isSpine) {
+        skipped.push({ assetRef: ref, reason: 'export profile: Spine pages stay PNG — emitted PNG only (no webp/avif fan-out)' });
+      }
       const srcBmp = await createImageBitmap(new Blob([bytes]));
       const srcW = srcBmp.width;
       const srcH = srcBmp.height;
@@ -1480,55 +1658,92 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           break;
         }
         c2d.imageSmoothingQuality = 'high'; // best-effort resample — kernel/pre-blur disclosed honestly
-        // ONE drawImage from the SAME source bitmap (never tier-from-tier): src full rect → dst.
+        // ONE drawImage from the SAME source bitmap (never tier-from-tier): src full rect → dst. The canvas
+        // is composed ONCE per tier and REUSED across every format below (multiple getImageData / encode
+        // off the same c2d) — honesty + the cost cap preserved (round7-export-profile.md §5c).
         c2d.drawImage(srcBmp, 0, 0, srcW, srcH, 0, 0, dst.w, dst.h);
 
         // Effective per-asset encode options + scale-aware quality on the downscale (folds folder/type
         // overrides). The tiered output uses the POST-transcode mime so a format+tiered asset is one
         // encode per tier at the target. Spine pages stay PNG (runtime-safe), mirroring repack/resize.
         const eff = effectiveFor(ref, tier.scale);
-        const tierMime: ImageMime = isSpine ? 'image/png' : eff.targetMime;
-        const enc = await encodeCanvas(canvas, c2d, tierMime, encOptsFor(eff, true));
-        if (!enc) {
-          skipped.push({ assetRef: ref, reason: `tier skipped: encode to ${tierMime} unavailable` });
-          composeFailed = true;
-          break;
-        }
-
-        // Image path: insert the tier suffix before the extension, swapping ext for the emitted mime.
-        const tierImagePath = tieredName(imagePath, tier.suffix, enc.mime);
-        out.push({ path: tierImagePath, bytes: enc.bytes });
-        tierFilesEmitted++;
-
-        if (scaled) {
-          // Repoint imageRef at THIS tier's own image + stamp the exact ladder scale, so the per-tier
-          // manifest's meta.image/meta.scale describe THIS tier (emitTexturePackerJson / emitSpineAtlasText).
-          scaled.scale = tier.scale;
-          scaled.imageRef = basename(tierImagePath);
-          if (isSpine && spineInfo) {
-            out.push({ path: tieredName(spineInfo.path, tier.suffix), bytes: te.encode(emitSpineAtlasText(scaled)) });
-            tierFilesEmitted++;
-            if (skelBytes && skelPath) {
-              out.push({ path: tieredName(skelPath, tier.suffix), bytes: new Uint8Array(skelBytes) });
-              tierFilesEmitted++;
+        // ROUND7 T7: inner FORMAT loop — emit one file per (format × tier). PROFILE ON ⇒ fan out across the
+        // validated profile formats (formatEncode → encodeCanvas with lossless THREADED, B1). PROFILE OFF ⇒
+        // a SINGLE legacy descriptor reproducing today's `encOptsFor(eff, true)` exactly ⇒ byte-identical.
+        // Spine pages STAY PNG regardless (a webp/avif profile target degrades to PNG with one honest note).
+        const tierEncodes: { mime: ImageMime; encOpts: EncodeOpts; fmtLabel: string }[] = profileOn
+          ? profileFormats.map((f) => {
+              const fe = formatEncode(f, tier.scale, profileGlobal);
+              return { mime: isSpine ? 'image/png' : fe.targetMime, encOpts: feToEncodeOpts(fe), fmtLabel: f.format };
+            })
+          : [{ mime: isSpine ? 'image/png' : eff.targetMime, encOpts: encOptsFor(eff, true), fmtLabel: eff.targetMime }];
+        // B4 collision guard (round7-export-profile.md §5b/§9): two formats can resolve to the SAME actual
+        // mime post-encode via the AVIF→WebP→PNG / WebP→PNG fallbacks; emit the FIRST, SKIP the later (honest
+        // note) — never overwrite. Keyed on the actual emitted image path (which carries the post-encode ext).
+        const emittedThisTier = new Set<string>();
+        for (const te0 of tierEncodes) {
+          const enc = await encodeCanvas(canvas, c2d, te0.mime, te0.encOpts);
+          if (!enc) {
+            skipped.push({ assetRef: ref, reason: `tier skipped: encode to ${te0.mime} unavailable` });
+            // PROFILE OFF (single descriptor): a failed encode is fatal for the whole asset, as today.
+            // PROFILE ON (fan-out): skip just THIS format and try the next one (honest per-format note).
+            if (!profileOn) {
+              composeFailed = true;
+              break;
             }
-          } else if (manifestPath) {
-            out.push({ path: tieredName(manifestPath, tier.suffix), bytes: te.encode(emitTexturePackerJson(scaled)) });
-            tierFilesEmitted++;
+            continue;
           }
-        }
+          // Image path: insert the tier suffix before the extension, swapping ext for the emitted mime.
+          const tierImagePath = tieredName(imagePath, tier.suffix, enc.mime);
+          if (emittedThisTier.has(tierImagePath)) {
+            // B4: a later format fell back to a mime an earlier variant already emitted at this tier.
+            skipped.push({ assetRef: ref, reason: `${te0.fmtLabel} fell back to ${enc.mime} and collides with another variant — skipped` });
+            continue;
+          }
+          emittedThisTier.add(tierImagePath);
+          out.push({ path: tierImagePath, bytes: enc.bytes });
+          tierFilesEmitted++;
+          if (profileOn) profileFilesEmitted++;
 
-        tierVramBytes[ti] = (tierVramBytes[ti] ?? 0) + dst.w * dst.h * 4;
-        // Loader-migration: this tier's NEW load target — mirror the source (suffixed MANIFEST for an
-        // atlas/Spine asset, suffixed IMAGE for a loose one), so it matches what the loader actually calls.
-        tierTargetPaths.push(
-          scaled && isSpine && spineInfo
-            ? tieredName(spineInfo.path, tier.suffix)
-            : scaled && manifestPath
-              ? tieredName(manifestPath, tier.suffix)
-              : tierImagePath,
-        );
-        emittedAny = true;
+          if (scaled) {
+            // Repoint imageRef at THIS tier+format's own image + stamp the exact ladder scale, so the
+            // per-tier manifest's meta.image/meta.scale describe THIS emit (emitTexturePackerJson / Spine).
+            // Single-format ⇒ variantManifestName produces the LEGACY `_suffix.json` name (byte-identical);
+            // multi-format ⇒ the format token (`.webp`/`.avif`) disambiguates so the manifests never clobber.
+            scaled.scale = tier.scale;
+            scaled.imageRef = basename(tierImagePath);
+            if (isSpine && spineInfo) {
+              out.push({ path: variantManifestName(spineInfo.path, tier.suffix, enc.mime, profileMulti), bytes: te.encode(emitSpineAtlasText(scaled)) });
+              tierFilesEmitted++;
+              if (profileOn) profileFilesEmitted++;
+              if (skelBytes && skelPath) {
+                out.push({ path: variantManifestName(skelPath, tier.suffix, enc.mime, profileMulti), bytes: new Uint8Array(skelBytes) });
+                tierFilesEmitted++;
+                if (profileOn) profileFilesEmitted++;
+              }
+            } else if (manifestPath) {
+              out.push({ path: variantManifestName(manifestPath, tier.suffix, enc.mime, profileMulti), bytes: te.encode(emitTexturePackerJson(scaled)) });
+              tierFilesEmitted++;
+              if (profileOn) profileFilesEmitted++;
+            }
+          }
+
+          // Loader-migration: this variant's NEW load target — mirror the source (suffixed+tokened MANIFEST
+          // for an atlas/Spine asset, suffixed+tokened IMAGE for a loose one), so it matches the loader call.
+          tierTargetPaths.push(
+            scaled && isSpine && spineInfo
+              ? variantManifestName(spineInfo.path, tier.suffix, enc.mime, profileMulti)
+              : scaled && manifestPath
+                ? variantManifestName(manifestPath, tier.suffix, enc.mime, profileMulti)
+                : tierImagePath,
+          );
+          emittedAny = true;
+        }
+        if (composeFailed) break;
+        // VRAM ladder rung: ONE footprint per tier (the loaded tier's pixel area), regardless of how many
+        // FORMATS were emitted — the runtime loads ONE format at this tier, so format fan-out adds DISK
+        // only, never VRAM (invariant 5). Recorded once per tier, after the format loop.
+        if (emittedThisTier.size > 0) tierVramBytes[ti] = (tierVramBytes[ti] ?? 0) + dst.w * dst.h * 4;
       }
       srcBmp.close();
       if (composeFailed || !emittedAny) continue;
@@ -1548,8 +1763,67 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       // Loader-migration (SET→SET): the source load target → the full tier ladder of new load targets.
       changeRows.push(...tierChanges(tierSourceLoad, tierTargetPaths));
       tieredAssets++;
+      // ROUND7 T9: when the profile drove this multi-tier emit, count it as a fanned-out profile asset too
+      // (profileFilesEmitted was accrued per variant above). The asset is owned ⇒ no standalone op double-runs.
+      if (profileOn) {
+        profileAssets++;
+        profileOwned.add(ref);
+      }
       operations.push(`tier ${basename(ref)} → ${tiers.length} resolution${tiers.length === 1 ? '' : 's'}`);
     }
+  }
+
+  // ── FORMAT-ONLY EXPORT-PROFILE PASS (round7-export-profile.md §5d, finding [0] fix-a) ───────────────
+  // A format-only profile (≥1 format, single scale-1 tier ⇒ profileHasLowerTier=false ⇒ tieringOn=false)
+  // is an EXPLICIT request to emit the chosen formats for the FOLDER, not a fix that rides an existing
+  // analysis finding. The riding fan-out in the resize/transcode handlers only fires for assets the
+  // analysis FLAGGED (a `format` finding ⇒ transcode op, a `dimensions-oversize` finding ⇒ resize op —
+  // plan.ts:234/262). So a clean loose image (already a good format, not oversized) produced ZERO ops, the
+  // riding fan-out never ran, and the user got NOTHING and no feedback — a silent no-op that contradicts a
+  // "config-driven EXPORT profile" + violates the surfaced-never-silent honesty discipline (invariant 3).
+  // This first-class pass closes that gap: drive the fan-out over EVERY eligible loose asset (mirroring how
+  // the tier loop iterates `merged`), independent of whether the analysis flagged it. Multi-tier profiles
+  // are UNAFFECTED — they already iterate all of `merged` via the tier loop above (this pass is gated off
+  // for them by !profileHasLowerTier). Loose images only (design scope "loose-transcode/loose-resize"): an
+  // atlas page keeps its single-format manifest meta.image so it isn't left dangling across N variants.
+  // Respects every prior claim: `profileOwned` (already fanned out by a riding op), `replaced`/`dropped`
+  // (claimed by a transform), and the selective-fix tier exclusion is irrelevant (no tier kind here). Each
+  // eligible image is decoded ONCE to a scale-1 canvas; emitLooseProfileFanout owns the per-format emit +
+  // B4 collision guard + dedup-owner bookkeeping. Profile absent / multi-tier ⇒ this block never runs ⇒
+  // byte-identical to today. Deterministic: `merged` is a stable order; profileFormats is the given order.
+  if (profileOn && !profileHasLowerTier) {
+    for (const a of merged) {
+      if (a.kind !== 'image') continue; // loose images only (atlases keep their single-format manifest)
+      const ref = a.image.name;
+      if (profileOwned.has(ref)) continue; // a riding resize/transcode op already fanned this out
+      const imagePath = pathByRef.get(ref);
+      if (!imagePath) continue;
+      if (replaced.has(imagePath) || dropped.has(imagePath)) continue; // claimed by an earlier transform
+      const bytes = bytesByRef.get(ref);
+      if (!bytes) continue;
+      const bmp = await createImageBitmap(new Blob([bytes]));
+      const canvas = new OffscreenCanvas(bmp.width, bmp.height);
+      const c2d = canvas.getContext('2d');
+      if (!c2d) {
+        bmp.close();
+        skipped.push({ assetRef: ref, reason: 'export profile: no 2D context' });
+        continue;
+      }
+      c2d.drawImage(bmp, 0, 0); // scale 1 (the format-only profile's single top tier)
+      bmp.close();
+      const r = await emitLooseProfileFanout(ref, imagePath, 1, canvas, c2d, 'transcode');
+      if (ownerActualName.has(ref)) ownerActualName.get(ref)!.image = r.ownerImage;
+      if (r.referencesChanged) referencesChanged = true;
+      operations.push(`export profile ${basename(imagePath)} → ${profileFormats.length} format${profileFormats.length === 1 ? '' : 's'}`);
+    }
+  }
+
+  // A VALID profile that fanned out NOTHING (e.g. an atlas-only folder, or every loose image was already
+  // dropped/repacked/owned) — surface an honest `(profile)` skip so the user sees WHY their explicit
+  // request produced no variants (finding [0]: surfaced-never-silent). The receipt still carries
+  // exportProfile with assets=0 (above), so the two together are fully honest. profileOff ⇒ no note.
+  if (profileOn && profileAssets === 0) {
+    skipped.push({ assetRef: '(profile)', reason: 'export profile: no eligible loose images to emit (atlas-only folder or all claimed by another fix)' });
   }
 
   // ── SELECTIVE FIX honest skips (docs/improvements/selective-fix.md) ───────────────────────────────
@@ -1630,6 +1904,16 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     // (the top tier == the source footprint — tiers are alternatives, the runtime loads exactly one).
     ...(tieredAssets > 0 ? { scaleTiered: { tiers: tiers.length, filesEmitted: tierFilesEmitted, assets: tieredAssets } } : {}),
     ...(tieredAssets > 0 ? { tierVram: tiers.map((t, i) => ({ suffix: t.suffix, scale: t.scale, vramBytes: tierVramBytes[i]! })) } : {}),
+    // Config-driven export profile (round7-export-profile.md §3/§9, T9 — additive, optional). `formats`/
+    // `tiers` = the VALIDATED counts; `assets` = assets fanned out; `filesEmitted` = total variant files (Σ
+    // image + manifest/skeleton across formats × tiers). DISK-only — the runtime loads ONE format × ONE tier,
+    // so this contributes 0 to vramBytesAfter (the per-tier VRAM ladder stays `tierVram`; invariant 5).
+    // Surfaced whenever the profile was VALID (profileOn) — finding [0]: an explicit profile request must
+    // ALWAYS report what it produced, INCLUDING assets=0 (an honest "nothing to fan out" — never silent).
+    // `tiers` uses profileTiers.length (the validated profile ladder: a format-only profile carries a single
+    // scale-1 top tier even though the legacy `tiers` array is empty for it). Absent only when no valid
+    // profile ran ⇒ receipt byte-identical to today.
+    ...(profileOn ? { exportProfile: { formats: profileFormats.length, tiers: profileTiers.length, assets: profileAssets, filesEmitted: profileFilesEmitted } } : {}),
     // Edge-extrude (bleed, design OPTION A — additive, optional). extrudePx = the requested bleed width;
     // extrudedBlits = rectangle blits that got a real bleed; extrudeSkipped = blits where extrude was
     // REQUESTED but skipped (meshed clip / rotated — no polygon-edge/rotated extrude in v1). extrudeVramDelta

@@ -10,7 +10,7 @@
 //      shape is structurally identical to the worker's FixOverride (kept here so packages/fix stays a
 //      leaf — it must NOT import from the apps/web worker).
 
-import type { ImageMime } from '@asset-doctor/core';
+import type { FormatTarget, ImageMime } from '@asset-doctor/core';
 
 /** Floor below which scale-aware quality never drops, so a heavy downscale can't yield mush. */
 export const SCALE_QUALITY_FLOOR = 50;
@@ -45,12 +45,17 @@ export interface FixOverride {
   webpNearLossless?: number;
 }
 
-/** The override-resolvable subset of encode options — exactly the fields a FixOverride may set. */
+/** The override-resolvable subset of encode options — exactly the fields a FixOverride may set, PLUS
+ *  `lossless` (round7-export-profile.md B1). `lossless` is NOT override-settable in v1 (FixOverride has
+ *  no `lossless`); it defaults false and is threaded from the base so a profile asking for lossless
+ *  webp/png is genuinely lossless rather than silently lossy (invariant 3 — never a faked-lossless).
+ *  Default false ⇒ byte-identical to today's loose/tier encode path (which never set lossless). */
 export interface EffectiveOptions {
   quality: number;
   effort: number;
   targetMime: ImageMime;
   webpNearLossless: number;
+  lossless: boolean;
 }
 
 /** True iff `match` selects the asset at `ref` of kind `kind`. */
@@ -82,8 +87,92 @@ export function resolveOptions(
         effort: o.effort ?? out.effort,
         targetMime: o.targetMime ?? out.targetMime,
         webpNearLossless: o.webpNearLossless ?? out.webpNearLossless,
+        // `lossless` is NOT override-settable in v1 — it falls through from the base unchanged.
+        lossless: out.lossless,
       };
     }
   }
   return out;
+}
+
+/** Default lossy quality (0..100) when a FormatTarget omits `quality` (design §2). */
+export const DEFAULT_FORMAT_QUALITY = 85;
+
+/** The encode parameters one FormatTarget resolves to for a given scale — the EncodeOpts-shaped fields
+ *  the worker passes to encodeCanvas. `targetMime`/`quality`/`lossless`/`effort`/`webpNearLossless`
+ *  mirror the worker's EncodeOpts; the optional avif / png fields are forwarded only when set. */
+export interface FormatEncode {
+  targetMime: ImageMime;
+  /** 0..100 (the settings vocabulary; the worker divides by 100 for encodeCanvas's 0..1). */
+  quality: number;
+  lossless: boolean;
+  effort: number;
+  /** webp near-lossless 0..100 (100 ⇒ off). */
+  webpNearLossless: number;
+  avifQualityAlpha?: number;
+  avifSubsample?: number;
+  pngRecompressLevel?: number;
+}
+
+/**
+ * Map one FormatTarget + output scale + the profile's global knobs → a FormatEncode (design §4b). PURE
+ * and deterministic — the single source of truth for how a profile target becomes encode parameters, so
+ * the worker can't drift from this tested mapping. Rules:
+ *   - quality: the target's `quality` (default DEFAULT_FORMAT_QUALITY), folded through scaleAwareQuality
+ *     (floor SCALE_QUALITY_FLOOR) when enabled and downscaling. Ignored downstream for png/lossless.
+ *   - PNG: lossless implied (native lossless); quality is irrelevant; pngRecompressLevel forwarded.
+ *   - WEBP: lossless | near-lossless (`near`, 100/omit ⇒ off) | lossy. `near` is forwarded as
+ *     webpNearLossless; avif fields are not.
+ *   - AVIF: lossy only (validateProfile already rejected lossless-avif); avifQualityAlpha/avifSubsample
+ *     forwarded; webpNearLossless is off (100).
+ * `near`/`webpNearLossless` and the avif fields are forwarded ONLY for their owning format so an unrelated
+ * codec never sees a stray knob. No Date/random; integer math via scaleAwareQuality.
+ */
+export function formatEncode(
+  fmt: FormatTarget,
+  scale: number,
+  global: {
+    effort: number;
+    scaleAwareQuality: boolean;
+    avifQualityAlpha?: number;
+    avifSubsample?: number;
+    pngRecompressLevel?: number;
+  },
+): FormatEncode {
+  const baseQuality = fmt.quality ?? DEFAULT_FORMAT_QUALITY;
+  const quality = scaleAwareQuality(baseQuality, scale, global.scaleAwareQuality);
+
+  if (fmt.format === 'image/png') {
+    return {
+      targetMime: 'image/png',
+      quality, // irrelevant for png (native lossless); kept for shape consistency.
+      lossless: true, // PNG is always lossless in our wiring.
+      effort: global.effort,
+      webpNearLossless: 100, // off — not a webp.
+      pngRecompressLevel: global.pngRecompressLevel,
+    };
+  }
+
+  if (fmt.format === 'image/webp') {
+    // 100/omit ⇒ off. Lossless wins over near (a lossless emit ignores near-lossless).
+    const near = fmt.lossless ? 100 : (fmt.near ?? 100);
+    return {
+      targetMime: 'image/webp',
+      quality,
+      lossless: fmt.lossless ?? false,
+      effort: global.effort,
+      webpNearLossless: near,
+    };
+  }
+
+  // AVIF — lossy only (lossless-avif rejected by validateProfile). avif knobs forwarded.
+  return {
+    targetMime: 'image/avif',
+    quality,
+    lossless: false,
+    effort: global.effort,
+    webpNearLossless: 100, // off — not a webp.
+    avifQualityAlpha: global.avifQualityAlpha,
+    avifSubsample: global.avifSubsample,
+  };
 }

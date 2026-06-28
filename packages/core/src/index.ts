@@ -109,6 +109,66 @@ export interface ScaleTier {
   suffix: string;
 }
 
+/* ── Config-driven export profile (round7-export-profile.md §2) ────────────────────────────────
+ * v1 generalizes the fix engine's single hardcoded target/quality + closed tier ladder into a
+ * config-driven { resolutions × formats × per-format compression } profile. ADDITIVE on FixOptions:
+ * ABSENT ⇒ output byte-identical to today; a single-format profile ⇒ legacy file names. When present
+ * it is the SOLE source of formats + resolutions + per-format compression for the loose-transcode /
+ * loose-resize / tier (reference-changing) paths only; repack/merge sheets (lossless WebP) + Spine
+ * pages (PNG) keep their runtime-safe formats. Deterministic — every number is finite/integer, no
+ * Date.now / Math.random anywhere. Honest browser subset only (see ExportFormat). */
+
+/** Honest browser subset only: png | webp | avif. NO jpeg (no alpha — wrong for game atlases), NO
+ *  pngquant (lossy-PNG quantization is native-only). All three encode via OffscreenCanvas + lazy
+ *  @jsquash WASM (no native libs), matching encodeCanvas. */
+export type ExportFormat = 'image/png' | 'image/webp' | 'image/avif';
+
+/** One emit target inside a profile. `quality` 0..100 governs LOSSY encodes (webp/avif); it is
+ *  ignored when `lossless` is set or for png (native lossless). `lossless`: webp → @jsquash lossless;
+ *  png → native (+ oxipng when pngRecompressLevel is set); AVIF lossless is REJECTED by validateProfile
+ *  (no honest @jsquash lossless-avif path — never a faked-lossless, invariant 3). `near` (webp only)
+ *  0..100 maps to @jsquash near_lossless; 100/omit ⇒ off; ignored for non-webp. */
+export interface FormatTarget {
+  format: ExportFormat;
+  /** 0..100; omit ⇒ profile default 85. Ignored when `lossless` or for png. */
+  quality?: number;
+  /** webp/png only; REJECTED for avif (no faked-lossless). */
+  lossless?: boolean;
+  /** webp near-lossless 0..100 (100/omit ⇒ off). Ignored for non-webp. */
+  near?: number;
+}
+
+/** One resolution rung of a profile. `label` is presentation-only; `suffix` is the on-disk
+ *  RESOLUTION_TOKEN (the scale-tier suffix). Structurally a ScaleTier + label — the worker derives
+ *  ScaleTier[] by dropping `label` (tiersOf). `scale` ∈ (0,1] (1 = full source; NEVER upscale). */
+export interface ResolutionTier {
+  label: string;
+  scale: number;
+  suffix: string;
+}
+
+/** Config-driven export profile (v1). ADDITIVE on FixOptions — ABSENT ⇒ byte-identical to today.
+ *  When present it REPLACES the single targetMime + closed ladder for the loose-transcode /
+ *  loose-resize / tier (reference-changing) paths only. Repack/merge sheets + Spine pages keep their
+ *  runtime-safe formats. Validated fail-closed (validateProfile): ≥1 format, ≥1 tier with a scale===1
+ *  top, no lossless-AVIF, valid suffix tokens, no duplicate targets. Deterministic. */
+export interface ExportProfile {
+  /** ≥1; emits one file per (format × tier) per eligible asset. */
+  formats: FormatTarget[];
+  /** ≥1; MUST include exactly one scale===1 top tier (validateTiers). */
+  tiers: ResolutionTier[];
+  /** Encoder effort 0..6, all formats. Omit ⇒ 0 (native fast-path). */
+  effort?: number;
+  /** Lossless PNG recompress via @jsquash/oxipng level 0..6 on png emits. Omit ⇒ off. */
+  pngRecompressLevel?: number;
+  /** AVIF chroma subsample integer (3 = YUV444). Omit ⇒ @jsquash default. (UI stays gated.) */
+  avifSubsample?: number;
+  /** AVIF alpha quality (qualityAlpha). Omit ⇒ -1. */
+  avifQualityAlpha?: number;
+  /** Scale-aware quality (lower q on downscaled output). Pure deterministic formula. Omit ⇒ off. */
+  scaleAwareQuality?: boolean;
+}
+
 /* ── Feature 4: pack loose assets into spritesheets ───────────────────────────────────────────
  * Turns OWNED loose images into ONE logical sheet (TP JSON) or ONE logical Spine atlas (.atlas,
  * N page blocks). REFERENCE-CHANGING (FixReceipt.referencesChanged): the game must load the

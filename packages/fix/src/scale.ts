@@ -7,7 +7,7 @@
 // LOOP (apps/web worker) owns oversize clamping and stamps `.scale` on tiered atlases — neither of those
 // belongs here. We NEVER upscale (scale >= 1 ⇒ identity), matching scaleAtlas + the builder ladder.
 
-import type { ImageMime, ScaleTier, Size } from '@asset-doctor/core';
+import type { ExportProfile, FormatTarget, ImageMime, ResolutionTier, ScaleTier, Size } from '@asset-doctor/core';
 import { EXT } from './dedup-exec';
 
 /**
@@ -98,4 +98,101 @@ export function validateTiers(tiers: ScaleTier[]): TierValidation {
   // Normalize: stable high→low by scale, suffix as the deterministic tiebreaker.
   const sorted = [...tiers].sort((a, b) => b.scale - a.scale || a.suffix.localeCompare(b.suffix));
   return { ok: true, tiers: sorted };
+}
+
+/* ── Config-driven export profile helpers (round7-export-profile.md §4a) ───────────────────────────
+ * PURE string/validation helpers for the v1 export profile. The resolution axis reuses validateTiers
+ * UNCHANGED; this module adds: the ResolutionTier→ScaleTier strip, fail-closed profile validation that
+ * delegates the tier axis to validateTiers, and the format-token naming math (single-format ⇒ empty
+ * token ⇒ byte-identical legacy names; multi-format ⇒ the format token disambiguates). Deterministic. */
+
+/** Strip a ResolutionTier[] down to ScaleTier[] (drop `label`). Order-preserving; fresh objects so the
+ *  caller can't alias the input. Pure. */
+export function tiersOf(tiers: ResolutionTier[]): ScaleTier[] {
+  return tiers.map((t) => ({ scale: t.scale, suffix: t.suffix }));
+}
+
+/** Outcome of validateProfile: the validated formats (given order) + normalized high→low tier ladder,
+ *  or the structured list of rejection reasons (the worker turns each into a skipped[] honesty entry). */
+export type ProfileValidation =
+  | { ok: true; formats: FormatTarget[]; tiers: ScaleTier[] }
+  | { ok: false; errors: string[] };
+
+/** The honest browser-encodable format set (mirrors core ExportFormat). */
+const EXPORT_FORMATS = new Set<string>(['image/png', 'image/webp', 'image/avif']);
+
+/**
+ * Fail-closed validation of an export profile (design §4a). On success returns the formats in GIVEN
+ * order plus the normalized (high→low, validateTiers) tier ladder; on failure the structured reason
+ * list. The tier axis is delegated to validateTiers VERBATIM (so its errors are reused, never
+ * duplicated). Rejects:
+ *   - empty formats (nothing to emit);
+ *   - a format outside png/webp/avif;
+ *   - lossless:true on avif (no honest @jsquash lossless-avif path — never a faked-lossless);
+ *   - quality outside [0,100] (when present);
+ *   - near outside [0,100] (when present);
+ *   - DUPLICATE targets — same (format, lossless, quality, near) — which would clobber each other;
+ *   - every validateTiers rejection (delegated, errors prefixed so the source is clear).
+ * Deterministic: formats kept in given order, tiers via validateTiers' stable high→low sort. Pure.
+ */
+export function validateProfile(p: ExportProfile): ProfileValidation {
+  const errors: string[] = [];
+
+  // ── Format axis ──
+  if (p.formats.length === 0) errors.push('emptyFormats: no formats given');
+  const seen = new Set<string>();
+  for (const f of p.formats) {
+    if (!EXPORT_FORMATS.has(f.format)) {
+      errors.push(`badFormat: "${f.format}" (must be image/png|image/webp|image/avif)`);
+      continue; // a bad format can't meaningfully dup-check or lossless-check
+    }
+    if (f.lossless && f.format === 'image/avif') {
+      errors.push('losslessAvif: AVIF has no honest in-browser lossless path');
+    }
+    if (f.quality !== undefined && (!Number.isFinite(f.quality) || f.quality < 0 || f.quality > 100)) {
+      errors.push(`badQuality: ${String(f.quality)} (must be in [0,100])`);
+    }
+    if (f.near !== undefined && (!Number.isFinite(f.near) || f.near < 0 || f.near > 100)) {
+      errors.push(`badNear: ${String(f.near)} (must be in [0,100])`);
+    }
+    // Duplicate-target key: two targets that resolve to the SAME emitted bytes clobber each other. Key on
+    // the EFFECTIVE encode, not the raw fields, so e.g. {quality:undefined} and {quality:85} (the default,
+    // DEFAULT_FORMAT_QUALITY) are caught as the same emit. PNG is always native-lossless (quality/near/
+    // lossless irrelevant ⇒ any two PNG targets clobber); lossless ignores quality/near; near is WebP-only.
+    let key: string;
+    if (f.format === 'image/png') key = 'image/png';
+    else if (f.lossless) key = `${f.format}|L`;
+    else key = `${f.format}|q${f.quality ?? 85}${f.format === 'image/webp' ? `|n${f.near ?? 'off'}` : ''}`;
+    if (seen.has(key)) errors.push(`dupTarget: ${f.format}${f.lossless ? ' lossless' : ''}`);
+    else seen.add(key);
+  }
+
+  // ── Resolution axis (delegated to validateTiers — its errors are reused verbatim) ──
+  const tv = validateTiers(tiersOf(p.tiers));
+  if (!tv.ok) for (const e of tv.errors) errors.push(`tier ${e}`);
+
+  if (errors.length > 0) return { ok: false, errors };
+  // tv.ok is guaranteed here (any failure pushed into errors above).
+  return { ok: true, formats: [...p.formats], tiers: tv.ok ? tv.tiers : [] };
+}
+
+/** Format token for multi-format fan-out naming. Empty when NOT multi (single-format ⇒ byte-identical
+ *  legacy names — additivity load-bearing); otherwise the bare format extension ('.png'/'.webp'/'.avif')
+ *  WITHOUT a leading dot stripped (it is a token inserted into a name, see variantManifestName). Pure. */
+export function formatToken(mime: ImageMime, multi: boolean): string {
+  return multi ? EXT[mime] : '';
+}
+
+/** Variant manifest / skeleton / `.atlas` name for a profile emit: insert the resolution suffix and (when
+ *  multi-format) the format token BEFORE the manifest's own extension:
+ *    variantManifestName('ui/btn.json', '_720p', 'image/webp', false) → 'ui/btn_720p.json'        (single)
+ *    variantManifestName('ui/btn.json', '_720p', 'image/webp', true)  → 'ui/btn_720p.webp.json'   (multi)
+ *  Single-format (multi=false) ⇒ legacy `_720p.json` name (byte-identical). Pure string math; the
+ *  manifest's own extension (.json/.atlas) is preserved — only the format token (e.g. '.webp') is
+ *  injected before it, never an image ext swap. Deterministic. */
+export function variantManifestName(manifestPath: string, suffix: string, mime: ImageMime, multi: boolean): string {
+  const dot = manifestPath.lastIndexOf('.');
+  const ext = dot < 0 ? '' : manifestPath.slice(dot); // includes the leading dot, e.g. '.json'
+  const stem = dot < 0 ? manifestPath : manifestPath.slice(0, dot);
+  return `${stem}${suffix}${formatToken(mime, multi)}${ext}`;
 }

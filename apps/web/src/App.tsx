@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AnalysisReport, AssetMetrics, BundleAvailability, Finding, LazyMarking, ScaleTier, SkinGuard } from '@asset-doctor/core';
+import type { AnalysisReport, AssetMetrics, BundleAvailability, ExportFormat, ExportProfile, Finding, FormatTarget, LazyMarking, ResolutionTier, ScaleTier, SkinGuard } from '@asset-doctor/core';
 import type { PackMode, StaticGranularity } from '@asset-doctor/ingest';
 import { bundleOf, cmp } from '@asset-doctor/analysis';
-import { DEFAULT_SCALE_TIERS } from '@asset-doctor/fix';
+import { DEFAULT_SCALE_TIERS, RESOLUTION_TOKEN } from '@asset-doctor/fix';
 import {
   filesFromDataTransfer,
   filesFromInput,
@@ -757,6 +757,166 @@ function TierPanel({
   );
 }
 
+// ── Config-driven export profile (round7-export-profile.md §7, T11) — sibling of TierPanel, DEFAULT OFF ──
+// Generalizes the single hardcoded format + closed tier ladder into { formats × resolutions × per-format
+// compression }. OFF ⇒ exportProfile is undefined ⇒ byte-identical to today; the TierPanel above governs
+// tiers. ON ⇒ MUTUALLY EXCLUSIVE with the tier ladder (buildOptions omits scaleTiers + webpNearLossless).
+// AVIF lossless is DISABLED in the UI (no honest in-browser path — avifNoLossless note). Custom tiers add
+// rows on top of the default ladder; the suffix is validated client-side against RESOLUTION_TOKEN so a
+// non-clustering suffix is caught before the run (the worker also validates fail-closed). The shared
+// effort/scaleAwareQuality knobs live in SettingsPanel and are folded into the profile's global knobs.
+
+/** Per-format UI settings (the format checkbox state lives in `enabled`). Honest browser subset only. */
+export interface ProfileFormatState {
+  enabled: boolean;
+  /** 0..100 lossy quality (ignored when lossless or for png). */
+  quality: number;
+  /** webp/png lossless (AVIF disabled in the UI — no honest path). */
+  lossless: boolean;
+  /** webp near-lossless toggle (maps to near=60 when on; off ⇒ omit ⇒ near off). */
+  near: boolean;
+}
+
+export const FORMAT_KEYS: { mime: ExportFormat; key: string }[] = [
+  { mime: 'image/png', key: 'fix.profile.format.png' },
+  { mime: 'image/webp', key: 'fix.profile.format.webp' },
+  { mime: 'image/avif', key: 'fix.profile.format.avif' },
+];
+
+function ExportProfilePanel({
+  profileEnable,
+  setProfileEnable,
+  formats,
+  setFormats,
+  customTiers,
+  setCustomTiers,
+}: {
+  profileEnable: boolean;
+  setProfileEnable: (b: boolean) => void;
+  formats: Record<ExportFormat, ProfileFormatState>;
+  setFormats: (f: Record<ExportFormat, ProfileFormatState>) => void;
+  /** Extra resolution rows on top of the default ladder (the scale-1 top tier is always implied). */
+  customTiers: ResolutionTier[];
+  setCustomTiers: (t: ResolutionTier[]) => void;
+}) {
+  const { t } = useI18n();
+  const patch = (mime: ExportFormat, p: Partial<ProfileFormatState>): void => setFormats({ ...formats, [mime]: { ...formats[mime], ...p } });
+  const addTier = (): void => setCustomTiers([...customTiers, { label: '0.5×', scale: 0.5, suffix: '_540p' }]);
+  const patchTier = (i: number, p: Partial<ResolutionTier>): void => setCustomTiers(customTiers.map((tt, j) => (j === i ? { ...tt, ...p } : tt)));
+  const removeTier = (i: number): void => setCustomTiers(customTiers.filter((_, j) => j !== i));
+
+  return (
+    <details className="mt-2 rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
+      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">{t('fix.profile.title')}</summary>
+
+      <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.profile.hint')}</p>
+
+      <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
+        <input type="checkbox" checked={profileEnable} onChange={(e) => setProfileEnable(e.target.checked)} className="accent-teal" />
+        {t('fix.profile.enable')}
+      </label>
+
+      {profileEnable ? (
+        <div className="mt-2 space-y-3">
+          {/* ── Formats ── */}
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft/70">{t('fix.profile.formats')}</p>
+            <div className="mt-1 space-y-2">
+              {FORMAT_KEYS.map(({ mime, key }) => {
+                const f = formats[mime];
+                const isAvif = mime === 'image/avif';
+                const isPng = mime === 'image/png';
+                return (
+                  <div key={mime} className="rounded border border-line/70 p-1.5">
+                    <label className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
+                      <input type="checkbox" checked={f.enabled} onChange={(e) => patch(mime, { enabled: e.target.checked })} className="accent-teal" />
+                      {t(key)}
+                    </label>
+                    {f.enabled ? (
+                      <div className="mt-1.5 space-y-1 pl-4">
+                        {/* PNG is native-lossless; quality slider hidden. WebP/AVIF: hide quality when lossless. */}
+                        {!isPng && !f.lossless ? (
+                          <label className="flex items-center justify-between font-mono text-[10px] text-ink-soft">
+                            <span>
+                              {t('fix.profile.quality')} <span className="text-ink">{f.quality}</span>
+                            </span>
+                            <input type="range" min={0} max={100} step={1} value={f.quality} onChange={(e) => patch(mime, { quality: Number(e.target.value) })} className="ml-2 w-1/2 accent-teal" />
+                          </label>
+                        ) : null}
+                        {/* Lossless — DISABLED for AVIF (no honest path; avifNoLossless note). */}
+                        <label className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={isAvif ? t('fix.profile.avifNoLossless') : undefined}>
+                          <input type="checkbox" checked={!isAvif && f.lossless} disabled={isAvif} onChange={(e) => patch(mime, { lossless: e.target.checked })} className="accent-teal disabled:opacity-60" />
+                          {t('fix.profile.lossless')}
+                        </label>
+                        {/* WebP near-lossless (ignored when lossless on). */}
+                        {mime === 'image/webp' && !f.lossless ? (
+                          <label className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
+                            <input type="checkbox" checked={f.near} onChange={(e) => patch(mime, { near: e.target.checked })} className="accent-teal" />
+                            {t('fix.profile.nearLossless')}
+                          </label>
+                        ) : null}
+                        {isAvif ? <p className="font-mono text-[9px] leading-relaxed text-ink-soft/70">{t('fix.profile.avifNoLossless')}</p> : null}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ── Resolutions: the default ladder is always available; custom rows add to it ── */}
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft/70">{t('fix.profile.resolutions')}</p>
+            <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-soft/80">
+              {DEFAULT_SCALE_TIERS.map((tt) => tt.suffix).join('  ')}
+            </p>
+            {customTiers.map((tt, i) => {
+              const validSuffix = RESOLUTION_TOKEN.test(tt.suffix);
+              return (
+                <div key={i} className="mt-1 flex items-center gap-1.5">
+                  <span className="font-mono text-[10px] text-ink-soft">{t('fix.profile.tierScale')}</span>
+                  <input
+                    type="number"
+                    min={0.05}
+                    max={1}
+                    step={0.05}
+                    value={tt.scale}
+                    onChange={(e) => patchTier(i, { scale: Number(e.target.value) })}
+                    className="w-16 rounded border border-line bg-panel px-1 font-mono text-[10px] text-ink"
+                  />
+                  <input
+                    type="text"
+                    value={tt.suffix}
+                    onChange={(e) => patchTier(i, { suffix: e.target.value })}
+                    placeholder="_540p"
+                    className={`w-20 rounded border bg-panel px-1 font-mono text-[10px] text-ink ${validSuffix ? 'border-line' : 'border-crit'}`}
+                  />
+                  <button type="button" onClick={() => removeTier(i)} className="font-mono text-[10px] text-crit hover:underline" aria-label="remove">
+                    ✕
+                  </button>
+                  {!validSuffix ? <span className="font-mono text-[9px] text-crit">{t('fix.profile.tierBadSuffix', { suffix: tt.suffix })}</span> : null}
+                </div>
+              );
+            })}
+            <button type="button" onClick={addTier} className="mt-1 font-mono text-[10px] text-teal hover:underline">
+              + {t('fix.profile.addTier')}
+            </button>
+          </div>
+
+          {/* Honesty notes — reuse browser-limit disclosures + the profile-specific bundle/disk notes. */}
+          <ul className="space-y-1 border-t border-line pt-2 font-mono text-[10px] leading-relaxed text-ink-soft/80">
+            <li>{t('fix.profile.noBundleNote')}</li>
+            <li>{t('fix.profile.diskNote')}</li>
+            <li>{t('fix.skipped.whyNoKernel')}</li>
+            <li>{t('fix.skipped.whyNoPreBlur')}</li>
+            <li>{t('fix.skipped.whyNoPngquant')}</li>
+          </ul>
+        </div>
+      ) : null}
+    </details>
+  );
+}
+
 // The Phase-2 fix: repack + transcode the loaded folder in a worker, then download a drop-in
 // optimized .zip. Assets never leave the device. The Pro gate is OFF by default (free) and only
 // engages when VITE_PRO_GATE === 'true' — then a valid offline-verified entitlement is required.
@@ -815,6 +975,35 @@ function FixCard({ files }: { files: PickedFile[] }) {
     [tierEnable, tierSuffixes],
   );
 
+  // Config-driven export profile (round7-export-profile.md §7, T11/T12) — own Pro opt-in, DEFAULT OFF.
+  // OFF ⇒ exportProfile is undefined ⇒ byte-identical to today (the tier ladder above governs tiers). ON
+  // ⇒ MUTUALLY EXCLUSIVE with scaleTiers + webpNearLossless (omitted in buildOptions). Defaults reproduce
+  // today's single emit (AVIF q85) so a freshly-enabled profile with no edits is a no-surprise baseline.
+  const [profileEnable, setProfileEnable] = useState(false);
+  const [profileFormats, setProfileFormats] = useState<Record<ExportFormat, ProfileFormatState>>(() => ({
+    'image/png': { enabled: false, quality: 85, lossless: true, near: false },
+    'image/webp': { enabled: false, quality: 85, lossless: false, near: false },
+    'image/avif': { enabled: true, quality: 85, lossless: false, near: false },
+  }));
+  const [customTiers, setCustomTiers] = useState<ResolutionTier[]>([]);
+  // Derive the ExportProfile the worker consumes. Formats kept in the canonical FORMAT_KEYS order (PNG,
+  // WebP, AVIF) — deterministic. Tiers = the implied scale-1 top (validateProfile requires it) + any custom
+  // rows. Per-format compression: PNG is native-lossless (no quality field); WebP/AVIF carry quality unless
+  // lossless; WebP `near` maps to 60 (matching the shared near-lossless preset). Undefined when disabled OR
+  // no format selected (the worker would reject an empty-formats profile — never send a known-bad one).
+  const exportProfile: ExportProfile | undefined = useMemo(() => {
+    if (!profileEnable) return undefined;
+    const formats: FormatTarget[] = FORMAT_KEYS.filter(({ mime }) => profileFormats[mime].enabled).map(({ mime }) => {
+      const f = profileFormats[mime];
+      if (mime === 'image/png') return { format: mime }; // native lossless; quality irrelevant
+      if (mime === 'image/webp') return { format: mime, ...(f.lossless ? { lossless: true } : { quality: f.quality, ...(f.near ? { near: 60 } : {}) }) };
+      return { format: mime, quality: f.quality }; // AVIF: lossy only (UI disables lossless)
+    });
+    if (formats.length === 0) return undefined;
+    const tiers: ResolutionTier[] = [{ label: '1080p (full)', scale: 1, suffix: '_1080p' }, ...customTiers];
+    return { formats, tiers };
+  }, [profileEnable, profileFormats, customTiers]);
+
   // Top-level bundles with REAL folder structure: a ref with no "/" is its own singleton (a flat,
   // root-level loose file), which makes per-bundle marking meaningless noise. We collect only segments
   // that own ≥2 files AND contain a "/" somewhere; root-level loose files collapse into one implicit
@@ -863,7 +1052,9 @@ function FixCard({ files }: { files: PickedFile[] }) {
       // Feature 2/3 — omitted/false/empty values reproduce today's behavior in the worker.
       effort: effort > 0 ? effort : undefined,
       scaleAwareQuality: scaleAwareQ || undefined,
-      webpNearLossless: webpNearLossless ? 60 : undefined,
+      // ROUND7 T12: webpNearLossless is MUTUALLY EXCLUSIVE with an export profile — the profile carries its
+      // own per-format near-lossless, so omit the legacy global knob when a profile is sent (no double-source).
+      webpNearLossless: !exportProfile && webpNearLossless ? 60 : undefined,
       pngRecompressLevel: pngRecompress ? 2 : undefined,
       marking: aggressive && Object.keys(marking).length > 0 ? marking : undefined,
       skinGuard: aggressive && Object.keys(skinGuard).length > 0 ? skinGuard : undefined,
@@ -876,7 +1067,13 @@ function FixCard({ files }: { files: PickedFile[] }) {
       // Scale-tier export — only forwarded when enabled AND a real lower tier is selected (the
       // implied scale-1 top tier alone would just rename, not downscale). Off / top-only ⇒ undefined
       // ⇒ no tiering ⇒ byte-identical to today. The worker validates the ladder fail-closed.
-      scaleTiers: scaleTiers.length > 1 ? scaleTiers : undefined,
+      // ROUND7 T12: MUTUALLY EXCLUSIVE with the export profile — when a profile is sent it is the SOLE
+      // source of formats + resolutions, so scaleTiers is omitted (never both feed the tier axis, B3).
+      scaleTiers: !exportProfile && scaleTiers.length > 1 ? scaleTiers : undefined,
+      // Config-driven export profile (round7-export-profile.md §7) — forwarded only when enabled with ≥1
+      // format. Undefined ⇒ byte-identical to today. When sent it SUPERSEDES targetMime/scaleTiers/
+      // webpNearLossless for the loose/tier paths; the worker validates it fail-closed.
+      exportProfile,
       // Edge-extrude (bleed) — only forwarded when > 0; off ⇒ undefined ⇒ no gutter, byte-identical
       // to today. The plan sets each repack/pack op's symmetric gutter >= extrude (invariant 5: a
       // gutter can grow a sheet ⇒ VRAM reported honestly via extrudeVramDelta).
@@ -946,7 +1143,7 @@ function FixCard({ files }: { files: PickedFile[] }) {
   const sawPlan = useRef(false);
   useEffect(() => {
     if (sawPlan.current) setPhase({ t: 'idle' });
-  }, [aggressive, polygon, marking, effort, scaleAwareQ, webpNearLossless, pngRecompress, overrides, packLoose, packMode, packGranularity, packTrim, extrude, tierEnable, tierSuffixes]);
+  }, [aggressive, polygon, marking, effort, scaleAwareQ, webpNearLossless, pngRecompress, overrides, packLoose, packMode, packGranularity, packTrim, extrude, tierEnable, tierSuffixes, profileEnable, profileFormats, customTiers]);
   useEffect(() => {
     sawPlan.current = phase.t === 'plan';
   }, [phase.t]);
@@ -1020,6 +1217,15 @@ function FixCard({ files }: { files: PickedFile[] }) {
             setTierSuffixes={setTierSuffixes}
           />
 
+          <ExportProfilePanel
+            profileEnable={profileEnable}
+            setProfileEnable={setProfileEnable}
+            formats={profileFormats}
+            setFormats={setProfileFormats}
+            customTiers={customTiers}
+            setCustomTiers={setCustomTiers}
+          />
+
           {/* Default flow: PREVIEW the plan first (mode:'plan', cheap/pure) — a reference-changing paid
               fix shouldn't run blind. "Run fix" in the Plan card then commits the IDENTICAL options. */}
           <button
@@ -1076,6 +1282,15 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
           {t('fix.meshedCount', { n: receipt.meshSprites ?? 0 })} ·{' '}
           {receipt.polygonAreaSavedPct ? t('fix.tighter', { pct: Math.round(receipt.polygonAreaSavedPct * 100) }) : t('fix.tighterPlain')}
           <span className="mt-0.5 block text-ink-soft/80">{t('fix.meshNote')}</span>
+        </p>
+      ) : null}
+      {/* Export-profile summary: variant files emitted (formats × resolutions × assets). DISK-only fan-out —
+          the device loads ONE variant, so this is a count, never a saving (invariant 5). */}
+      {receipt.exportProfile ? (
+        <p className="font-mono text-[10px] text-ink-soft">
+          {t('fix.profile.title')} — {receipt.exportProfile.filesEmitted} files · {receipt.exportProfile.formats}×
+          {receipt.exportProfile.tiers} · {receipt.exportProfile.assets} assets
+          <span className="mt-0.5 block text-ink-soft/80">{t('fix.profile.diskNote')}</span>
         </p>
       ) : null}
       {receipt.referencesChanged ? <p className="font-mono text-[10px] text-warn">⚠ {t('fix.mergeWarn')}</p> : null}

@@ -16,17 +16,21 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import type { Atlas, Size } from '@asset-doctor/core';
+import type { Atlas, ExportProfile, Size } from '@asset-doctor/core';
 import { parseAtlas, parseAtlasManifest } from '@asset-doctor/parsers';
 import { groupVariants } from '@asset-doctor/analysis';
 import {
   DEFAULT_SCALE_TIERS,
   RESOLUTION_TOKEN,
   emitTexturePackerJson,
+  formatToken,
   scaleAtlas,
   scaleLoose,
   tieredName,
+  tiersOf,
+  validateProfile,
   validateTiers,
+  variantManifestName,
 } from '../src/index';
 
 // ── T1: scaleLoose — same 1px-floor downscale as scaleAtlas, never upscale ────────────────────────
@@ -268,5 +272,144 @@ describe('round-trip clustering (T-RT, correction 3)', () => {
     expect(v.groups).toHaveLength(1);
     expect(v.groups[0]?.members).toHaveLength(ladder.length);
     expect(v.loadedVramMax).toBe(vram(atlas.size)); // top tier == the source sheet footprint
+  });
+});
+
+// ── Config-driven export profile (round7-export-profile.md §4a) — tiersOf / validateProfile / naming ──
+const okTiers = [{ label: '1080p', scale: 1, suffix: '_1080p' }] as const;
+
+describe('tiersOf (export profile §4a)', () => {
+  it('strips the label, preserving order + scale + suffix', () => {
+    const tiers = [
+      { label: 'full', scale: 1, suffix: '_1080p' },
+      { label: 'half', scale: 0.5, suffix: '_540p' },
+    ];
+    expect(tiersOf(tiers)).toEqual([
+      { scale: 1, suffix: '_1080p' },
+      { scale: 0.5, suffix: '_540p' },
+    ]);
+  });
+
+  it('returns fresh objects (caller cannot alias the input)', () => {
+    const tiers = [{ label: 'full', scale: 1, suffix: '_1080p' }];
+    const out = tiersOf(tiers);
+    expect(out[0]).not.toBe(tiers[0] as unknown);
+  });
+});
+
+describe('validateProfile (export profile §4a)', () => {
+  it('accepts a valid multi-format / multi-tier profile, formats in given order, tiers high→low', () => {
+    const p: ExportProfile = {
+      formats: [
+        { format: 'image/avif', quality: 70 },
+        { format: 'image/webp', lossless: true },
+        { format: 'image/png' },
+      ],
+      tiers: [
+        { label: 'half', scale: 0.5, suffix: '_540p' },
+        { label: 'full', scale: 1, suffix: '_1080p' },
+      ],
+    };
+    const r = validateProfile(p);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.formats.map((f) => f.format)).toEqual(['image/avif', 'image/webp', 'image/png']); // given order
+      expect(r.tiers.map((t) => t.suffix)).toEqual(['_1080p', '_540p']); // delegated high→low sort
+    }
+  });
+
+  it('rejects empty formats', () => {
+    const r = validateProfile({ formats: [], tiers: [...okTiers] });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.some((e) => e.startsWith('emptyFormats'))).toBe(true);
+  });
+
+  it('rejects a format outside png/webp/avif (no jpeg — no alpha)', () => {
+    const r = validateProfile({ formats: [{ format: 'image/jpeg' as never }], tiers: [...okTiers] });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.some((e) => e.startsWith('badFormat'))).toBe(true);
+  });
+
+  it('rejects lossless AVIF (no honest in-browser lossless path — never a faked-lossless)', () => {
+    const r = validateProfile({ formats: [{ format: 'image/avif', lossless: true }], tiers: [...okTiers] });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.some((e) => e.startsWith('losslessAvif'))).toBe(true);
+  });
+
+  it('rejects quality / near outside [0,100]', () => {
+    const badQ = validateProfile({ formats: [{ format: 'image/webp', quality: 101 }], tiers: [...okTiers] });
+    const badN = validateProfile({ formats: [{ format: 'image/webp', near: -1 }], tiers: [...okTiers] });
+    expect(badQ.ok).toBe(false);
+    if (!badQ.ok) expect(badQ.errors.some((e) => e.startsWith('badQuality'))).toBe(true);
+    expect(badN.ok).toBe(false);
+    if (!badN.ok) expect(badN.errors.some((e) => e.startsWith('badNear'))).toBe(true);
+  });
+
+  it('rejects duplicate (format, lossless, quality, near) targets — they would clobber', () => {
+    const r = validateProfile({
+      formats: [
+        { format: 'image/webp', quality: 80 },
+        { format: 'image/webp', quality: 80 },
+      ],
+      tiers: [...okTiers],
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.some((e) => e.startsWith('dupTarget'))).toBe(true);
+  });
+
+  it('allows two webp targets that differ on lossless (not a dup)', () => {
+    const r = validateProfile({
+      formats: [
+        { format: 'image/webp', quality: 80 },
+        { format: 'image/webp', lossless: true },
+      ],
+      tiers: [...okTiers],
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it('delegates every tier rejection to validateTiers (prefixed "tier ...")', () => {
+    // no scale=1 top tier ⇒ validateTiers noTopTier, surfaced as a "tier ..." error here.
+    const r = validateProfile({
+      formats: [{ format: 'image/webp' }],
+      tiers: [{ label: 'half', scale: 0.5, suffix: '_540p' }],
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.some((e) => e.startsWith('tier ') && e.includes('noTopTier'))).toBe(true);
+  });
+
+  it('is deterministic: same input ⇒ deep-equal result', () => {
+    const p: ExportProfile = { formats: [{ format: 'image/avif', quality: 70 }], tiers: [...okTiers] };
+    expect(validateProfile(p)).toEqual(validateProfile(p));
+  });
+});
+
+describe('formatToken / variantManifestName (export profile §4a)', () => {
+  it('formatToken is empty when NOT multi (single-format ⇒ legacy byte-identical names)', () => {
+    expect(formatToken('image/webp', false)).toBe('');
+    expect(formatToken('image/avif', false)).toBe('');
+  });
+
+  it('formatToken is the bare format extension when multi', () => {
+    expect(formatToken('image/webp', true)).toBe('.webp');
+    expect(formatToken('image/avif', true)).toBe('.avif');
+    expect(formatToken('image/png', true)).toBe('.png');
+  });
+
+  it('variantManifestName: single-format keeps the legacy _suffix.json name', () => {
+    expect(variantManifestName('ui/btn.json', '_720p', 'image/webp', false)).toBe('ui/btn_720p.json');
+    expect(variantManifestName('skel.atlas', '_540p', 'image/avif', false)).toBe('skel_540p.atlas');
+  });
+
+  it('variantManifestName: multi-format injects the format token before the manifest ext', () => {
+    expect(variantManifestName('ui/btn.json', '_720p', 'image/webp', true)).toBe('ui/btn_720p.webp.json');
+    expect(variantManifestName('ui/btn.json', '_720p', 'image/avif', true)).toBe('ui/btn_720p.avif.json');
+    expect(variantManifestName('skel.atlas', '_540p', 'image/png', true)).toBe('skel_540p.png.atlas');
+  });
+
+  it('is deterministic string math', () => {
+    expect(variantManifestName('a/b/c.json', '_1080p', 'image/webp', true)).toBe(
+      variantManifestName('a/b/c.json', '_1080p', 'image/webp', true),
+    );
   });
 });
