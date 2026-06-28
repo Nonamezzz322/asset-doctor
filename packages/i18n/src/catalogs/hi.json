@@ -316,6 +316,8 @@
   "fix.pixiManifest": "PixiJS manifest.json बनाएँ",
   "fix.pixiManifestHint": "एक manifest.json जोड़ता है जो हर उत्सर्जित इमेज/शीट (और हर रिज़ॉल्यूशन टियर को अलग alias के रूप में) मैप करता है, ताकि कोई PixiJS गेम पूरे आउटपुट को Assets.init({ manifest }) से लोड कर सके। शीट्स .json/.atlas सूचीबद्ध करती हैं; Spine को अब भी pixi-spine चाहिए। बंद ⇒ कोई अतिरिक्त फ़ाइल नहीं।",
   "fix.pixiManifestReceipt": "{path} ({n} प्रविष्टियाँ)",
+  "fix.hashFilenames": "कंटेंट-हैश फ़ाइल नाम (cache-busting)",
+  "fix.hashFilenamesHint": "AD जिन इमेज/शीट को संदर्भित करता है उन सबका नाम name.<hash>.ext कर देता है (hash = अंतिम बाइट्स का sha256), ताकि आप ऑप्टिमाइज़्ड फ़ोल्डर को immutable लंबे-कैश हेडर के साथ सर्व कर सकें। .json/.atlas साइडकार हैश-की गई इमेज पर री-पॉइंट होते हैं, फिर स्वयं भी हैश होते हैं; लोडर-माइग्रेशन स्निपेट और PixiJS manifest हैश-किए नामों को संदर्भित करते हैं। स्केलेटन, manifest.json और बिना AD-स्वामित्व वाले संदर्भ की लूज़ इमेजें स्थिर नाम बनाए रखती हैं। बंद का मतलब आज के फ़ाइल नाम (बाइट-दर-बाइट समान)। PixiJS manifest के साथ सर्वोत्तम।",
   "license.locked": "Pro फ़िक्स अनलॉक करने के लिए लाइसेंस सक्रिय करें",
   "license.keyPlaceholder": "लाइसेंस कुंजी (AD-…)",
   "license.activate": "सक्रिय करें",

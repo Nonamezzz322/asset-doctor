@@ -110,8 +110,14 @@ export interface FixOptions {
    *  sheets list the `.json`/`.atlas` sidecar; Spine still needs `pixi-spine`. Implies no saving (invariant 5
    *  — the manifest sums nothing). */
   emitPixiManifest?: boolean;
-  /** RESERVED for a follow-up (content-hash cache-busting). Accepted + IGNORED in v1 (no UI, no worker
-   *  wiring) so the wire type is forward-stable. Absent/false ⇒ today. */
+  /** Content-hash cache-busting (docs/improvements/round9-cache-busting.md). When ON, every emitted
+   *  image/sheet AD references is renamed `name.<8hex>.ext` where the hash = sha256 of the FINAL emitted
+   *  bytes, and EVERY referrer is repointed at the hashed name (atlas meta.image / Spine .atlas texture
+   *  line / the PixiJS manifest src[] / dedup consumer meta.image / the loader-migration rows) so there is
+   *  never a broken reference chain. Order: image bytes → patch imageRef → emit sidecar → hash sidecar.
+   *  Carve-outs: manifest.json itself, the Spine skeleton, the dedup consumer .json name (its meta.image IS
+   *  repointed), and pass-through LOOSE images unless emitPixiManifest is also on (the manifest is then the
+   *  guaranteed referrer). ADDITIVE: absent/false ⇒ no hashing branch runs ⇒ zip BYTE-IDENTICAL to today. */
   hashFilenames?: boolean;
 }
 

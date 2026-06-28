@@ -990,6 +990,12 @@ function FixCard({ files }: { files: PickedFile[] }) {
   // output gains an additive `manifest.json` mapping every emitted image/sheet so a PixiJS game can load the
   // whole folder with one Assets.init({ manifest }). OFF ⇒ buildOptions omits it ⇒ zip byte-identical to today.
   const [emitPixiManifest, setEmitPixiManifest] = useState(false);
+  // Content-hash cache-busting (round9-cache-busting.md K9) — its OWN Pro opt-in, DEFAULT OFF. ON ⇒ every
+  // emitted image/sheet AD references is renamed name.<hash>.ext (hash = sha256 of the final bytes) and every
+  // referrer is repointed (atlas meta.image / Spine .atlas line 0 / the Pixi manifest src[] / dedup consumer
+  // meta.image / the loader-migration rows). Pairs with emitPixiManifest (the manifest is the guaranteed
+  // referrer for pass-through loose images). OFF ⇒ buildOptions omits it ⇒ zip byte-identical to today.
+  const [hashFilenames, setHashFilenames] = useState(false);
   // Derive the ExportProfile the worker consumes. Formats kept in the canonical FORMAT_KEYS order (PNG,
   // WebP, AVIF) — deterministic. Tiers = the implied scale-1 top (validateProfile requires it) + any custom
   // rows. Per-format compression: PNG is native-lossless (no quality field); WebP/AVIF carry quality unless
@@ -1088,6 +1094,9 @@ function FixCard({ files }: { files: PickedFile[] }) {
       // PixiJS-v8 asset manifest (round8-pixi-manifest.md) — forwarded only when enabled; off ⇒ undefined
       // ⇒ no manifest emitted ⇒ zip byte-identical to today.
       emitPixiManifest: emitPixiManifest || undefined,
+      // Content-hash cache-busting (round9-cache-busting.md) — forwarded only when enabled; off ⇒ undefined
+      // ⇒ no hashing branch runs in the worker ⇒ zip byte-identical to today.
+      hashFilenames: hashFilenames || undefined,
     };
   }
 
@@ -1238,6 +1247,13 @@ function FixCard({ files }: { files: PickedFile[] }) {
           <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.pixiManifestHint')}>
             <input type="checkbox" checked={emitPixiManifest} onChange={(e) => setEmitPixiManifest(e.target.checked)} className="accent-teal" />
             {t('fix.pixiManifest')}
+          </label>
+
+          {/* Content-hash cache-busting (round9-cache-busting.md K9) — additive, DEFAULT OFF. Pairs with the
+              Pixi manifest (the guaranteed referrer for pass-through loose images). Off ⇒ zip byte-identical. */}
+          <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.hashFilenamesHint')}>
+            <input type="checkbox" checked={hashFilenames} onChange={(e) => setHashFilenames(e.target.checked)} className="accent-teal" />
+            {t('fix.hashFilenames')}
           </label>
 
           {/* Default flow: PREVIEW the plan first (mode:'plan', cheap/pure) — a reference-changing paid

@@ -316,6 +316,8 @@
   "fix.pixiManifest": "Emit PixiJS manifest.json",
   "fix.pixiManifestHint": "Adds manifest.json mapping every emitted image/sheet (and each resolution tier as its own alias) so a PixiJS game can load the whole output with Assets.init({ manifest }). Sheets list the .json/.atlas; Spine still needs pixi-spine. Off ⇒ no extra file.",
   "fix.pixiManifestReceipt": "{path} ({n} entries)",
+  "fix.hashFilenames": "Content-hash filenames (cache-busting)",
+  "fix.hashFilenamesHint": "Renames every emitted image/sheet AD references to name.<hash>.ext (hash = sha256 of the final bytes) so you can serve the optimized folder with immutable long-cache headers. Sheet .json/.atlas sidecars are repointed to the hashed image, then hashed themselves; the loader-migration snippet and the PixiJS manifest reference the hashed names. The skeleton, manifest.json, and loose images with no AD-owned referrer keep stable names. Off means today's filenames (byte-identical). Best paired with the PixiJS manifest.",
   "license.locked": "Activate a license to unlock the Pro fix",
   "license.keyPlaceholder": "License key (AD-…)",
   "license.activate": "Activate",

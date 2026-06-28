@@ -84,6 +84,11 @@ import {
   // entry ⇒ zip byte-identical. countPixiManifestEntries gives the receipt count without re-parsing the JSON.
   buildPixiManifest,
   countPixiManifestEntries,
+  // PURE naming primitive of content-hash cache-busting (round9-cache-busting.md): insert `.<8hex>` before
+  // the final extension, preserving dir + any compound token. The worker computes the hash (shortHash of the
+  // FINAL emitted bytes) and threads the hashed name into out.push / the referrer (imageRef / .atlas line 0 /
+  // recordVariant.src / the loader-migration rows). Off ⇒ never called ⇒ emitted paths byte-identical to today.
+  hashedName,
   type ManifestAsset,
   type EmittedVariant,
   type ManifestAssetKind,
@@ -98,7 +103,7 @@ import { dedupKeepConsumerSkip, deselectedSkips, fixOpKind, summarizePlan, type 
 // GENUINE loader-CALL changes (merge/pack/tier/loose-rename/bare-drop — NOT dedup, which rewrites the
 // consumer manifest in place) as one-line builder calls; finalizeChanges sorts+dedups deterministically.
 // SAME constructors the unit test drives directly (the worker can't run in Node — createImageBitmap).
-import { dropChange, finalizeChanges, looseRenameChange, mergeChanges, packChanges, tierChanges } from '../lib/loader-migration';
+import { dropChange, finalizeChanges, looseRenameChange, mergeChanges, packChanges, repackChanges, tierChanges } from '../lib/loader-migration';
 import { canKeepSheetDiff, sheetGeometryProof } from './sheet-diff';
 import type { FixChange, FixInputFile, FixMode, FixOptions, FixReceipt, FixRequest, FixResponse, SheetDiff } from './fix-protocol';
 
@@ -130,6 +135,23 @@ const td = new TextDecoder();
 const te = new TextEncoder();
 // EXT (mime → ext) + renamedTo (the loose-image/owner rename) are imported from @asset-doctor/fix (PURE,
 // tested) — single source of truth shared with the Phase-A owner-final-name prediction.
+
+// ── Content-hash cache-busting (docs/improvements/round9-cache-busting.md K3) ──────────────────────────
+// HASH_LEN = the short content-hash width appended before the final extension (8 hex = 32 bits; the
+// directory + stem are preserved by hashedName, so a real collision is negligible — and the emitted-path
+// Set in the execute body catches the astronomically-rare different-bytes/same-stem case deterministically).
+const HASH_LEN = 8;
+// sha256 of the FINAL emitted bytes → first HASH_LEN hex. DEFENSIVE: encodeCanvas returns fresh
+// full-buffer-backed Uint8Arrays (byteOffset 0), but oxipng/other paths could hand back a subarray view, so
+// slice the EXACT bytes when the view is not the whole backing buffer (never hash a neighbor's bytes). PURE
+// WebCrypto (invariant 1: in-browser, no native libs/network). Deterministic: same bytes ⇒ same hash.
+const shortHash = async (bytes: Uint8Array): Promise<string> => {
+  const buf =
+    bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
+      ? bytes.buffer
+      : bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  return (await sha256Hex(buf as ArrayBuffer)).slice(0, HASH_LEN);
+};
 
 ctx.onmessage = async (e: MessageEvent<FixRequest>): Promise<void> => {
   if (e.data.type !== 'fix') return;
@@ -615,6 +637,46 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   // ref is the map key so all of an asset's tiers/formats accumulate into a single ManifestAsset.
   const manifestOn = opts.emitPixiManifest === true;
   const manifestAssets = manifestOn ? new Map<string, ManifestAsset>() : undefined;
+  // ── Content-hash cache-busting (round9-cache-busting.md K3) — GATED. ──────────────────────────────────
+  // OFF (the default) ⇒ hashOn false ⇒ every hashing branch short-circuits (hashedName / shortHash never
+  // called, imageRef keeps today's value, emitted paths unchanged) ⇒ dedupedOut unchanged ⇒ zip byte-
+  // identical to today. ON ⇒ each emitted image/sheet AD references gets `.<8hex>.ext` (hash = sha256 of the
+  // FINAL emitted bytes) and EVERY referrer is repointed (atlas meta.image / Spine .atlas line 0 / the Pixi
+  // manifest src[] / dedup consumer meta.image / the loader-migration rows) — no broken reference chain.
+  const hashOn = opts.hashFilenames === true;
+  // §6.4 collision tracking: the FULL sha256 of the bytes already emitted at each hashed path. 8-hex over
+  // the SAME stem makes a different-bytes collision ~1e-9, but if one occurs (a hashed path repeats with
+  // DIFFERENT bytes) we widen the colliding file to the full sha256 + surface an honest note rather than let
+  // dedupedOut clobber it. An IDENTICAL-bytes re-emit at the same path (a true dup of the same sheet) maps to
+  // the same full hash ⇒ NO widen (dedupedOut collapses it to one). Maps emitted path → its full content hash.
+  const emittedHashedPaths = new Map<string, string>();
+  // Compute the hashed emit path for `path` from its FINAL `bytes`, register it for collision tracking, and
+  // return it. OFF ⇒ returns `path` unchanged (never hashes). Deterministic: same bytes ⇒ same name. On the
+  // astronomically-rare DIFFERENT-bytes/same-8-hex-name collision, widen to the full 64-hex sha256 (still
+  // deterministic) and surface an honest skip note — never silently overwrite a distinct file.
+  const hashEmit = async (path: string, bytes: Uint8Array): Promise<string> => {
+    if (!hashOn) return path;
+    // The short (8-hex) hash names the file; the FULL (64-hex) hash is the collision discriminator stored in
+    // the map (two different byte streams that collide on the same 8-hex share that 8-hex by definition, so
+    // only the full hash can tell a true identical-bytes dup from a real collision).
+    const short = await shortHash(bytes);
+    const full = await sha256Hex(
+      bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
+        ? (bytes.buffer as ArrayBuffer)
+        : (bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer),
+    );
+    let emitted = hashedName(path, short);
+    const prior = emittedHashedPaths.get(emitted);
+    if (prior !== undefined && prior !== full) {
+      // Same 8-hex name, DIFFERENT bytes (a real collision) — widen this file to the full 64-hex hash so
+      // dedupedOut's last-write-wins never clobbers a distinct file. (prior === full ⇒ true identical-bytes
+      // dup ⇒ keep the 8-hex name; dedupedOut collapses the pair to one entry — correct.)
+      emitted = hashedName(path, full);
+      skipped.push({ assetRef: path, reason: 'cache-bust: 8-hex name collided with different bytes — widened to full hash' });
+    }
+    emittedHashedPaths.set(emitted, full);
+    return emitted;
+  };
   const recordVariant = (ref: string, kind: ManifestAssetKind, source: string, v: EmittedVariant): void => {
     if (!manifestAssets) return;
     let a = manifestAssets.get(ref);
@@ -725,6 +787,46 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   // plan prediction and skips (keeps) any consumer whose owner diverged.
   const ownerActualName = new Map<string, OwnerFinalName>();
   for (const [ref, fn] of ownerFinalName) ownerActualName.set(ref, { ...fn });
+  // Cache-bust (round9 K8): the owner's actual emitted image WITHOUT the content hash — the basis Phase C
+  // compares against the Phase-A prediction (also un-hashed). Defaults to the predicted image; transform
+  // handlers overwrite it alongside ownerActualName.image. Decoupling the divergence check from the hash
+  // means appending a content hash to a busted owner NEVER falsely degrades a dedup to keep-consumer (that
+  // guard is only for a real format divergence, e.g. an AVIF→PNG fallback). hashOff ⇒ equals the hashed name.
+  const ownerActualUnhashed = new Map<string, string>();
+  for (const [ref, fn] of ownerFinalName) ownerActualUnhashed.set(ref, fn.image);
+  // Cache-bust (round9 BLOCKER-0): a dedup OWNER that is a LOOSE image AND is NOT transcoded/resized never
+  // has its ownerActualName.image overwritten (only the transcode/resize/fan-out handlers do that), so it
+  // keeps its Phase-A default = the ORIGINAL un-hashed path. But that very image flows to the pass-through
+  // loop where, under hashOn, it is renamed to name.<hash>.ext and the original is NOT emitted. Phase C
+  // (below) would then write the consumer's meta.image = the un-hashed owner path while only the hashed
+  // file ships ⇒ runtime 404. Fix: pre-hash every non-transformed LOOSE owner HERE (from its FINAL bytes,
+  // which for a pass-through owner ARE the original bytes), record the hashed name in ownerActualName.image
+  // so Phase C repoints to the file that actually ships, and remember the mapping so the pass-through loop
+  // emits THAT same hashed path (once) instead of independently re-hashing. The un-hashed basis stays the
+  // original (ownerActualUnhashed default), so the Phase-C divergence guard still passes (hash ≠ divergence).
+  // A loose owner that IS later transcoded/resized has its original path `replaced.add`-ed and its
+  // ownerActualName.image overwritten with the correct transcoded hash, so the pass-through `continue`s past
+  // its (now-replaced) original ⇒ this pre-hash is harmlessly superseded. hashOff ⇒ this block is skipped
+  // (hashEmit short-circuits) ⇒ ownerActualName.image stays the original ⇒ byte-identical to today.
+  const prehashedLooseOwner = new Map<string, string>(); // original owner image path → its hashed emit path
+  if (hashOn) {
+    for (const [ref, fn] of ownerFinalName) {
+      if (kindOf(ref) !== 'loose') continue;
+      const p = pathByRef.get(ref);
+      // ONLY pre-hash a loose owner the plan does NOT rename (its predicted final image === its original
+      // path). A loose owner the plan transcodes (predicted image has a swapped extension) is handled by the
+      // transcode/fan-out handler, which `replaced.add`s the original and overwrites ownerActualName.image
+      // with the correctly-hashed transcoded name. Skipping it here avoids registering a hash for a file
+      // that is never emitted (which could spuriously trip §6.4 collision widening for a real file).
+      if (fn.image !== p) continue;
+      const b = p ? bytesByRef.get(ref) : undefined;
+      if (!p || !b) continue;
+      const hashed = await hashEmit(p, new Uint8Array(b));
+      if (hashed === p) continue;
+      ownerActualName.get(ref)!.image = hashed; // Phase C repoints meta.image at the file that ships
+      prehashedLooseOwner.set(p, hashed); // pass-through emits this exact name (no independent re-hash)
+    }
+  }
   // Owner-aware drops are DEFERRED to Phase C (executed after all transforms settle the owner names).
   // Selective fix: a deselected `dedup` kind drops NONE of these (filtered out here ⇒ no repoint/drop work
   // in Phase C); the honest skip is surfaced once via deselectedSkips below (not per consumer). When dedup
@@ -896,11 +998,16 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     canvas: OffscreenCanvas,
     c2d: OffscreenCanvasRenderingContext2D,
     kind: 'resize' | 'transcode',
-  ): Promise<{ ownerImage: string; referencesChanged: boolean }> => {
+  ): Promise<{ ownerImage: string; ownerImageUnhashed: string; referencesChanged: boolean }> => {
     profileOwned.add(ref);
     profileAssets++;
     const emittedThis = new Set<string>();
     let ownerImage = srcPath; // falls back to the source if every format fails (caller leaves it un-renamed)
+    // Cache-bust (round9 K8): the un-hashed canonical owner image (the renamedTo() name BEFORE the content
+    // hash). Phase C compares THIS against the Phase-A prediction (also un-hashed), so appending a content
+    // hash never trips the divergence guard (which exists for a real format divergence like a PNG fallback).
+    // The hashed `ownerImage` is what the dedup repoint actually writes into meta.image. Off ⇒ they're equal.
+    let ownerImageUnhashed = srcPath;
     let firstEmitted = false;
     let refsChanged = false;
     for (const f of profileFormats) {
@@ -916,27 +1023,34 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         continue;
       }
       emittedThis.add(variantPath);
-      out.push({ path: variantPath, bytes: enc.bytes });
+      // Cache-bust (round9 K4): hash the FINAL emitted bytes and thread the hashed name into out.push, the
+      // Pixi manifest src[], the loader-migration row, AND the dedup owner image. The format-fallback
+      // collision guard above keys on the UNHASHED variantPath (so two formats falling back to the same mime
+      // are de-duped pre-hash); hashing then makes each kept variant's name content-addressed. Off ⇒ emittedPath
+      // === variantPath (today's behavior, byte-identical).
+      const emittedPath = await hashEmit(variantPath, enc.bytes);
+      out.push({ path: emittedPath, bytes: enc.bytes });
       // Pixi manifest: each fanned-out format is a `src` candidate of the SAME (loose, suffix:'') entry.
-      recordVariant(ref, 'loose', srcPath, { scale, suffix: '', src: variantPath });
+      recordVariant(ref, 'loose', srcPath, { scale, suffix: '', src: emittedPath });
       profileFilesEmitted++;
       if (!firstEmitted) {
         // The FIRST emitted variant is the canonical rename (today's single-transcode behavior) — replaced
         // + the loader row + the dedup owner image all point here, so dedup-repoint resolves to a real file.
         firstEmitted = true;
-        ownerImage = variantPath;
+        ownerImage = emittedPath;
+        ownerImageUnhashed = variantPath; // the canonical rename BEFORE hashing (Phase-C divergence basis)
         replaced.add(srcPath);
-        if (variantPath !== srcPath) {
+        if (emittedPath !== srcPath) {
           refsChanged = true;
-          changeRows.push(looseRenameChange(srcPath, variantPath, kind));
+          changeRows.push(looseRenameChange(srcPath, emittedPath, kind));
         }
-      } else if (variantPath !== srcPath) {
+      } else if (emittedPath !== srcPath) {
         // Additional formats are extra load targets (the loader picks by name) — a reference change too.
         refsChanged = true;
-        changeRows.push(looseRenameChange(srcPath, variantPath, kind));
+        changeRows.push(looseRenameChange(srcPath, emittedPath, kind));
       }
     }
-    return { ownerImage, referencesChanged: refsChanged };
+    return { ownerImage, ownerImageUnhashed, referencesChanged: refsChanged };
   };
 
   for (const op of plan.ops) {
@@ -977,11 +1091,26 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           continue;
         }
         const imagePath = pathByRef.get(ref)!;
-        out.push({ path: imagePath, bytes: enc.bytes });
-        out.push({ path: info.path, bytes: te.encode(emitSpineAtlasText(na)) });
+        // Cache-bust chain (round9 K6): hash the PNG bytes → patch na.imageRef (the .atlas texture line, line 0)
+        // to the hashed basename → emit the .atlas (it now points at the hashed PNG) → hash the joined .atlas.
+        // PNG bytes are preserved (Spine pages stay PNG). hashOff ⇒ emittedImage===imagePath, emittedAtlas===
+        // info.path, no row ⇒ byte-identical drop-in to today.
+        const emittedImage = await hashEmit(imagePath, enc.bytes);
+        if (hashOn) na.imageRef = basename(emittedImage);
+        out.push({ path: emittedImage, bytes: enc.bytes });
+        const atlasBytes = te.encode(emitSpineAtlasText(na));
+        const emittedAtlas = await hashEmit(info.path, atlasBytes);
+        out.push({ path: emittedAtlas, bytes: atlasBytes });
         // Pixi manifest: a Spine sheet loads via its `.atlas` SIDECAR (Pixi/pixi-spine reads the page from it).
-        recordVariant(ref, 'spine', imagePath, { scale: 1, suffix: '', src: info.path });
-        captureSheetDiff(ref, atlas.size, na, enc.bytes, basename(imagePath), atlas);
+        recordVariant(ref, 'spine', emittedImage, { scale: 1, suffix: '', src: emittedAtlas });
+        // A single Spine repack keeps the .atlas name today (drop-in, no row). When hashing renames it the
+        // load call changes — emit ONE loader-migration row + referencesChanged (gated on the name change ⇒
+        // hashOff ⇒ no row, identical). Spine .atlas carries no static page-image map (read from inside it).
+        if (emittedAtlas !== info.path) {
+          referencesChanged = true;
+          changeRows.push(...repackChanges(info.path, emittedAtlas));
+        }
+        captureSheetDiff(ref, atlas.size, na, enc.bytes, basename(emittedImage), atlas);
         replaced.add(imagePath);
         replaced.add(info.path);
         vramSaved += r.vramBytesBefore - r.vramBytesAfter;
@@ -1084,30 +1213,50 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         const ext = EXT[sheet!.mime] ?? '.png';
         if (merge) {
           const stem = `atlas-merged${r.atlases.length > 1 ? `-${i}` : ''}`;
-          na.imageRef = `${stem}${ext}`;
-          out.push({ path: `${baseDir}${stem}${ext}`, bytes: sheet!.bytes });
-          out.push({ path: `${baseDir}${stem}.json`, bytes: te.encode(emitTexturePackerJson(na)) });
+          // Cache-bust chain (round9 K5): hash the IMAGE bytes → patch na.imageRef to the hashed basename →
+          // emit the sidecar (it now embeds the hashed meta.image) → hash the sidecar. So the .json points at
+          // a page image that exists. hashOff ⇒ emittedImage/emittedJson === today's plain paths (byte-identical).
+          const emittedImage = await hashEmit(`${baseDir}${stem}${ext}`, sheet!.bytes);
+          na.imageRef = basename(emittedImage);
+          out.push({ path: emittedImage, bytes: sheet!.bytes });
+          const jsonBytes = te.encode(emitTexturePackerJson(na));
+          const emittedJson = await hashEmit(`${baseDir}${stem}.json`, jsonBytes);
+          out.push({ path: emittedJson, bytes: jsonBytes });
           // Pixi manifest: one entry per merged page `.json` (distinct ref per page so aliases never collide).
-          recordVariant(`${baseDir}${stem}.json`, 'atlas', `${baseDir}${stem}${ext}`, { scale: 1, suffix: '', src: `${baseDir}${stem}.json` });
-          mergedManifestPaths.push(`${baseDir}${stem}.json`); // loader-migration: a NEW manifest to load
-          mergedPageImages.push(`${baseDir}${stem}${ext}`); // ...and its REAL page image (na.imageRef on disk)
+          recordVariant(emittedJson, 'atlas', emittedImage, { scale: 1, suffix: '', src: emittedJson });
+          mergedManifestPaths.push(emittedJson); // loader-migration: a NEW manifest to load
+          mergedPageImages.push(emittedImage); // ...and its REAL page image (na.imageRef on disk)
           // Sheet-diff: group[0] is the representative source page ("1 of N" — merge folds many into few).
-          captureSheetDiff(refs[0]!, group[0]!.size, na, sheet!.bytes, `${stem}${ext} (1 of ${refs.length})`, group[0]);
+          captureSheetDiff(refs[0]!, group[0]!.size, na, sheet!.bytes, `${basename(na.imageRef)} (1 of ${refs.length})`, group[0]);
         } else {
           const ref = refs[0]!;
           const origPath = pathByRef.get(ref)!;
           const imagePath = sheet!.mime === 'image/webp' ? origPath.replace(/\.[a-z0-9]+$/i, '.webp') : origPath;
           if (sheet!.mime === 'image/webp') na.imageRef = na.imageRef.replace(/\.[a-z0-9]+$/i, '.webp');
-          out.push({ path: imagePath, bytes: sheet!.bytes });
+          // Cache-bust chain (round9 K5): hash the IMAGE bytes → patch na.imageRef to the hashed basename →
+          // emit the sidecar → hash it. hashOff ⇒ emittedImage === imagePath, emittedJson === mPath (identical).
+          const emittedImage = await hashEmit(imagePath, sheet!.bytes);
+          na.imageRef = basename(emittedImage);
+          out.push({ path: emittedImage, bytes: sheet!.bytes });
           captureSheetDiff(ref, group[0]!.size, na, sheet!.bytes, basename(na.imageRef), group[0]);
           replaced.add(origPath);
           replaced.add(imagePath);
           const mPath = manifestPathOf(ref);
           if (mPath) {
-            out.push({ path: mPath, bytes: te.encode(emitTexturePackerJson(na)) });
+            const jsonBytes = te.encode(emitTexturePackerJson(na));
+            const emittedJson = await hashEmit(mPath, jsonBytes);
+            out.push({ path: emittedJson, bytes: jsonBytes });
             replaced.add(mPath);
             // Pixi manifest: a repacked sheet loads via its `.json` SIDECAR (Pixi reads meta.image), NOT the image.
-            recordVariant(ref, 'atlas', imagePath, { scale: 1, suffix: '', src: mPath });
+            recordVariant(ref, 'atlas', emittedImage, { scale: 1, suffix: '', src: emittedJson });
+            // Cache-bust (round9 K5): a single repack normally keeps the .json name (rewritten in place) so the
+            // load.atlas call is unchanged ⇒ drop-in, no row. When hashing RENAMES the sidecar the load call
+            // genuinely changes — emit ONE loader-migration row + flag referencesChanged so the game updates
+            // its load.atlas(key, json, image). Gated on the name actually changing ⇒ hashOff ⇒ no row (identical).
+            if (emittedJson !== mPath) {
+              referencesChanged = true;
+              changeRows.push(...repackChanges(mPath, emittedJson, emittedImage));
+            }
           }
           operations.push(`repack ${basename(ref)}${polySelected ? ' (polygon)' : ''} → ${na.size.w}×${na.size.h} ${sheet!.mime.replace('image/', '')}`);
         }
@@ -1170,19 +1319,51 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         bmp.close();
         const srcMime = mimeOf(path);
         const blob = await canvas.convertToBlob({ type: srcMime });
-        out.push({ path, bytes: new Uint8Array(await blob.arrayBuffer()) });
+        const imgBytes = new Uint8Array(await blob.arrayBuffer());
+        // Cache-bust chain (round9 K5/B1): the resize-atlas path keeps the source filename+format ⇒ a pure
+        // drop-in today (no row). Hashing demotes it to a reference-changing event: hash the IMAGE bytes →
+        // patch scaled.imageRef to the hashed basename → emit the sidecar (it embeds the hashed image) → hash
+        // the sidecar → emit ONE loader-migration row + referencesChanged. hashOff ⇒ emittedImage===path,
+        // emittedSidecar===the original sidecar, no row ⇒ byte-identical drop-in to today.
+        const emittedImage = await hashEmit(path, imgBytes);
+        if (hashOn) scaled.imageRef = basename(emittedImage);
+        out.push({ path: emittedImage, bytes: imgBytes });
         replaced.add(path);
         if (spineRefs.has(ref)) {
           const info = spineInfoOf(ref);
           if (info) {
-            out.push({ path: info.path, bytes: te.encode(emitSpineAtlasText(scaled)) });
+            const atlasBytes = te.encode(emitSpineAtlasText(scaled));
+            const emittedAtlas = await hashEmit(info.path, atlasBytes);
+            out.push({ path: emittedAtlas, bytes: atlasBytes });
             replaced.add(info.path);
+            // Pixi manifest + loader row are added ONLY under hashing — resize-atlas is a stable-name drop-in
+            // today (NOT in the manifest, no row), so gating on hashOn keeps the hashOff path (incl. manifest-on)
+            // byte-identical. A Spine sheet loads via its `.atlas` SIDECAR (the hashed image is its texture line).
+            if (hashOn) {
+              recordVariant(ref, 'spine', emittedImage, { scale: 1, suffix: '', src: emittedAtlas });
+              if (emittedAtlas !== info.path) {
+                referencesChanged = true;
+                changeRows.push(...repackChanges(info.path, emittedAtlas)); // Spine .atlas carries no page-image map
+              }
+            }
           }
         } else {
           const mPath = manifestPathOf(ref);
           if (mPath) {
-            out.push({ path: mPath, bytes: te.encode(emitTexturePackerJson(scaled)) });
+            const jsonBytes = te.encode(emitTexturePackerJson(scaled));
+            const emittedJson = await hashEmit(mPath, jsonBytes);
+            out.push({ path: emittedJson, bytes: jsonBytes });
             replaced.add(mPath);
+            // Pixi manifest + loader row are added ONLY under hashing — resize-atlas is a stable-name drop-in
+            // today (NOT in the manifest, no row), so gating on hashOn keeps the hashOff path (incl. manifest-on)
+            // byte-identical. A resized atlas loads via its `.json` SIDECAR (Pixi reads meta.image = hashed image).
+            if (hashOn) {
+              recordVariant(ref, 'atlas', emittedImage, { scale: 1, suffix: '', src: emittedJson });
+              if (emittedJson !== mPath) {
+                referencesChanged = true;
+                changeRows.push(...repackChanges(mPath, emittedJson, emittedImage));
+              }
+            }
           }
         }
         vramSaved += Math.max(0, (origPx - scaled.size.w * scaled.size.h) * 4);
@@ -1205,7 +1386,12 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           // canvas (B3 first-class, NOT a `_1x` tier hack). The standalone single-format emit below is
           // skipped (profileOwned). dedup-repoint stays intact (the first variant is the canonical rename).
           const r = await emitLooseProfileFanout(ref, path, scale, canvas, c2d, 'resize');
-          if (ownerActualName.has(ref)) ownerActualName.get(ref)!.image = r.ownerImage;
+          if (ownerActualName.has(ref)) {
+            // Cache-bust (round9 K8): the dedup owner image is the fan-out's first (content-hashed) variant;
+            // the un-hashed name is the Phase-C divergence basis (a hash is not a divergence). hashOff ⇒ equal.
+            ownerActualName.get(ref)!.image = r.ownerImage;
+            ownerActualUnhashed.set(ref, r.ownerImageUnhashed);
+          }
           if (r.referencesChanged) referencesChanged = true;
           vramSaved += Math.max(0, (origPx - op.to.w * op.to.h) * 4);
           operations.push(`resize ${basename(path)} → ${op.to.w}×${op.to.h} (${profileFormats.length} format${profileFormats.length === 1 ? '' : 's'})`);
@@ -1214,13 +1400,16 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           const eff = effectiveFor(ref, scale);
           const enc = await encodeCanvas(canvas, c2d, eff.targetMime, encOptsFor(eff, true));
           const newPath = renamedTo(path, enc!.mime); // same rename the owner-final-name prediction uses
-          out.push({ path: newPath, bytes: enc!.bytes });
+          // Cache-bust (round9 K4): hash the FINAL bytes; thread the hashed name into out.push, the Pixi
+          // manifest src[], and the loader-migration row. Off ⇒ emittedPath === newPath (byte-identical).
+          const emittedPath = await hashEmit(newPath, enc!.bytes);
+          out.push({ path: emittedPath, bytes: enc!.bytes });
           // Pixi manifest: a resized loose image loads directly (single format, single tier).
-          recordVariant(ref, 'loose', path, { scale: 1, suffix: '', src: newPath });
+          recordVariant(ref, 'loose', path, { scale: 1, suffix: '', src: emittedPath });
           replaced.add(path);
-          if (newPath !== path) {
+          if (emittedPath !== path) {
             referencesChanged = true; // a loose-image rename is NOT drop-in
-            changeRows.push(looseRenameChange(path, newPath, 'resize')); // loader-migration: logo.png → logo.webp
+            changeRows.push(looseRenameChange(path, emittedPath, 'resize')); // loader-migration: logo.png → logo.webp
           }
           vramSaved += Math.max(0, (origPx - op.to.w * op.to.h) * 4);
           operations.push(`resize ${basename(path)} → ${op.to.w}×${op.to.h} ${enc!.mime.replace('image/', '')}`);
@@ -1252,7 +1441,12 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         c2d.drawImage(bmp, 0, 0);
         bmp.close();
         const r = await emitLooseProfileFanout(ref, path, 1, canvas, c2d, 'transcode');
-        if (ownerActualName.has(ref)) ownerActualName.get(ref)!.image = r.ownerImage;
+        if (ownerActualName.has(ref)) {
+          // Cache-bust (round9 K8): dedup owner image = the fan-out's first (hashed) variant; un-hashed for
+          // Phase C's divergence comparison (a content hash is not a divergence). hashOff ⇒ the two are equal.
+          ownerActualName.get(ref)!.image = r.ownerImage;
+          ownerActualUnhashed.set(ref, r.ownerImageUnhashed);
+        }
         if (r.referencesChanged) referencesChanged = true;
         operations.push(`transcode ${basename(path)} → ${profileFormats.length} format${profileFormats.length === 1 ? '' : 's'}`);
         continue;
@@ -1268,16 +1462,23 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         continue;
       }
       const newPath = renamedTo(path, enc.mime); // same rename the owner-final-name prediction uses
-      out.push({ path: newPath, bytes: enc.bytes });
+      // Cache-bust (round9 K4): hash the FINAL bytes; the hashed name is the dedup owner image (consumers
+      // repoint to it) AND the loader-migration `to`. The un-hashed newPath is the Phase-C divergence basis.
+      const emittedPath = await hashEmit(newPath, enc.bytes);
+      out.push({ path: emittedPath, bytes: enc.bytes });
       // Pixi manifest: a transcoded loose image loads directly (single format, single tier).
-      recordVariant(ref, 'loose', path, { scale: 1, suffix: '', src: newPath });
+      recordVariant(ref, 'loose', path, { scale: 1, suffix: '', src: emittedPath });
       replaced.add(path);
       // Phase B bookkeeping: if this transcoded image is a retained dedup OWNER, record its ACTUAL final
-      // image path so Phase C points consumers at the real (possibly PNG-fallback) name, not the guess.
-      if (ownerActualName.has(ref)) ownerActualName.get(ref)!.image = newPath;
-      if (newPath !== path) {
+      // image path so Phase C points consumers at the real (possibly PNG-fallback, now content-hashed) name,
+      // not the guess. The un-hashed name is recorded in parallel for Phase C's divergence comparison (K8).
+      if (ownerActualName.has(ref)) {
+        ownerActualName.get(ref)!.image = emittedPath;
+        ownerActualUnhashed.set(ref, newPath);
+      }
+      if (emittedPath !== path) {
         referencesChanged = true; // a loose-image rename is NOT drop-in
-        changeRows.push(looseRenameChange(path, newPath, 'transcode')); // loader-migration: logo.png → logo.webp
+        changeRows.push(looseRenameChange(path, emittedPath, 'transcode')); // loader-migration: logo.png → logo.webp
       }
       operations.push(`transcode ${basename(path)} → ${enc.mime.replace('image/', '')}`);
     } else if (op.kind === 'drop' && op.ownerRef == null) {
@@ -1430,16 +1631,23 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         // packLoose synthesized imageRef from the *requested* target ext; re-point it at the ACTUAL emitted
         // mime (e.g. AVIF→WebP/PNG fallback) so meta.image / the page header name matches the real file.
         const pageBase = i === 0 ? stem : `${stem}_${i}`;
-        na.imageRef = `${pageBase}${ext}`;
-        emitted.push({ path: join(group.outDir, `${pageBase}${ext}`), bytes: enc.bytes });
+        // Cache-bust chain (round9 K5/K6): hash THIS page's IMAGE bytes → patch na.imageRef to the hashed
+        // basename (the meta.image for a static page; the .atlas texture line for a Spine page) BEFORE building
+        // the sidecar/block, so the referrer points at the page image that exists. hashOff ⇒ the emitted paths
+        // === today's plain ones (byte-identical). The Spine .atlas is hashed LAST (joined, below).
+        const emittedImage = await hashEmit(join(group.outDir, `${pageBase}${ext}`), enc.bytes);
+        na.imageRef = basename(emittedImage);
+        emitted.push({ path: emittedImage, bytes: enc.bytes });
         if (isSpine) {
-          spineBlocks.push(emitSpineAtlasText(na));
+          spineBlocks.push(emitSpineAtlasText(na)); // block now points at the hashed page image (line 0 / texture)
         } else {
-          emitted.push({ path: join(group.outDir, `${pageBase}.json`), bytes: te.encode(emitTexturePackerJson(na)) });
+          const jsonBytes = te.encode(emitTexturePackerJson(na));
+          const emittedJson = await hashEmit(join(group.outDir, `${pageBase}.json`), jsonBytes);
+          emitted.push({ path: emittedJson, bytes: jsonBytes });
           // Pixi manifest: one entry per packed static page `.json` (distinct ref per page; Pixi reads meta.image).
-          recordVariant(join(group.outDir, `${pageBase}.json`), 'atlas', join(group.outDir, `${pageBase}${ext}`), { scale: 1, suffix: '', src: join(group.outDir, `${pageBase}.json`) });
-          packManifestPaths.push(join(group.outDir, `${pageBase}.json`)); // loader-migration: a NEW sheet manifest
-          packPageImages.push(join(group.outDir, `${pageBase}${ext}`)); // ...and its REAL page image (na.imageRef on disk)
+          recordVariant(emittedJson, 'atlas', emittedImage, { scale: 1, suffix: '', src: emittedJson });
+          packManifestPaths.push(emittedJson); // loader-migration: a NEW sheet manifest
+          packPageImages.push(emittedImage); // ...and its REAL page image (na.imageRef on disk)
           // Sheet-diff (STATIC pages only): loose has no source atlas ⇒ occBefore=0 (honest "0% packed").
           // The representative "before" is the first packed loose region's source image (its full dims).
           const beforeRef = regions[0]!.ref;
@@ -1452,11 +1660,15 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       }
       if (isSpine) {
         // ONE `.atlas` = the per-page blocks concatenated (blank line between), each region already under
-        // ITS page header (per-bin atlases). The skeleton .json/.skel is passed through untouched below.
-        emitted.push({ path: join(group.outDir, `${stem}.atlas`), bytes: te.encode(spineBlocks.join('\n')) });
+        // ITS page header (per-bin atlases), each texture line already pointing at the hashed page image.
+        // Cache-bust (round9 K6): hash the JOINED .atlas bytes LAST (after every page block is assembled) so
+        // the .atlas name reflects its final content. The skeleton .json/.skel is passed through untouched below.
+        const atlasBytes = te.encode(spineBlocks.join('\n'));
+        const emittedAtlas = await hashEmit(join(group.outDir, `${stem}.atlas`), atlasBytes);
+        emitted.push({ path: emittedAtlas, bytes: atlasBytes });
         // Pixi manifest: a packed Spine group loads via its single multi-page `.atlas` SIDECAR (needs pixi-spine).
-        recordVariant(join(group.outDir, `${stem}.atlas`), 'spine', join(group.outDir, `${stem}.atlas`), { scale: 1, suffix: '', src: join(group.outDir, `${stem}.atlas`) });
-        packManifestPaths.push(join(group.outDir, `${stem}.atlas`)); // loader-migration: the NEW Spine .atlas
+        recordVariant(emittedAtlas, 'spine', emittedAtlas, { scale: 1, suffix: '', src: emittedAtlas });
+        packManifestPaths.push(emittedAtlas); // loader-migration: the NEW Spine .atlas
         packPageImages.push(''); // Spine .atlas has no static-JSON page image (setChanges skips non-.json entries)
       }
 
@@ -1546,7 +1758,11 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       skipped.push({ assetRef: consumerRef, reason: `dedup skipped: owner ${basename(ownerRef)} renamed by scale tiering — kept duplicate` });
       continue;
     }
-    if (!predicted || !actual || actual.image !== predicted.image) {
+    // Compare the owner's actual emitted name against the prediction on the UN-HASHED basis (round9 K8): a
+    // content hash appended by cache-busting is NOT a divergence — only a real format change (e.g. an
+    // AVIF→PNG fallback) is. `actual.image` (used for the repoint below) carries the hashed name; the
+    // un-hashed name lives in ownerActualUnhashed. hashOff ⇒ the two are equal ⇒ identical to today.
+    if (!predicted || !actual || (ownerActualUnhashed.get(ownerRef) ?? actual.image) !== predicted.image) {
       looseRepathSkipped++;
       skipped.push({ assetRef: consumerRef, reason: `dedup skipped: owner ${basename(ownerRef)} final name diverged — kept duplicate` });
       continue;
@@ -1752,17 +1968,27 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           // Image path: insert the tier suffix before the extension, swapping ext for the emitted mime.
           const tierImagePath = tieredName(imagePath, tier.suffix, enc.mime);
           if (emittedThisTier.has(tierImagePath)) {
-            // B4: a later format fell back to a mime an earlier variant already emitted at this tier.
+            // B4: a later format fell back to a mime an earlier variant already emitted at this tier. The guard
+            // keys on the UN-hashed tier image name so a format-fallback collision is caught before hashing.
             skipped.push({ assetRef: ref, reason: `${te0.fmtLabel} fell back to ${enc.mime} and collides with another variant — skipped` });
             continue;
           }
           emittedThisTier.add(tierImagePath);
-          out.push({ path: tierImagePath, bytes: enc.bytes });
+          // Cache-bust chain (round9 K7/M1): compute the hashed image + hashed sidecar names ONCE per
+          // (tier×format) iteration and thread the SAME locals into out.push / recordVariant / tierChanges AND
+          // tierTargetPaths (never re-derive an un-hashed name). Order: hash the IMAGE → patch scaled.imageRef →
+          // emit sidecar → hash sidecar. hashOff ⇒ emittedImage===tierImagePath, emittedSidecar===the plain
+          // variantManifestName (byte-identical). The skeleton copy is NOT hashed (runtime-convention referrer).
+          const emittedImage = await hashEmit(tierImagePath, enc.bytes);
+          out.push({ path: emittedImage, bytes: enc.bytes });
           tierFilesEmitted++;
           if (profileOn) profileFilesEmitted++;
+          // The variant's NEW load target = the suffixed+tokened MANIFEST (atlas/Spine) or the IMAGE (loose);
+          // computed once below (hashed) and pushed into tierTargetPaths + recordVariant.
+          let emittedLoadTarget = emittedImage;
           // Pixi manifest: a LOOSE tier loads the IMAGE directly; record here (the atlas/Spine sidecar push
           // below records those tiers). Variants sharing tier.suffix (e.g. avif+webp) merge into one entry.
-          if (!scaled) recordVariant(ref, 'loose', imagePath, { scale: tier.scale, suffix: tier.suffix, src: tierImagePath });
+          if (!scaled) recordVariant(ref, 'loose', imagePath, { scale: tier.scale, suffix: tier.suffix, src: emittedImage });
 
           if (scaled) {
             // Repoint imageRef at THIS tier+format's own image + stamp the exact ladder scale, so the
@@ -1770,37 +1996,39 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
             // Single-format ⇒ variantManifestName produces the LEGACY `_suffix.json` name (byte-identical);
             // multi-format ⇒ the format token (`.webp`/`.avif`) disambiguates so the manifests never clobber.
             scaled.scale = tier.scale;
-            scaled.imageRef = basename(tierImagePath);
+            scaled.imageRef = basename(emittedImage);
             if (isSpine && spineInfo) {
-              out.push({ path: variantManifestName(spineInfo.path, tier.suffix, enc.mime, profileMulti), bytes: te.encode(emitSpineAtlasText(scaled)) });
+              const atlasBytes = te.encode(emitSpineAtlasText(scaled));
+              const emittedSidecar = await hashEmit(variantManifestName(spineInfo.path, tier.suffix, enc.mime, profileMulti), atlasBytes);
+              out.push({ path: emittedSidecar, bytes: atlasBytes });
+              emittedLoadTarget = emittedSidecar;
               // Pixi manifest: a Spine tier loads via its per-tier `.atlas` SIDECAR (one entry per tier suffix).
-              recordVariant(ref, 'spine', imagePath, { scale: tier.scale, suffix: tier.suffix, src: variantManifestName(spineInfo.path, tier.suffix, enc.mime, profileMulti) });
+              recordVariant(ref, 'spine', imagePath, { scale: tier.scale, suffix: tier.suffix, src: emittedSidecar });
               tierFilesEmitted++;
               if (profileOn) profileFilesEmitted++;
               if (skelBytes && skelPath) {
+                // Skeleton copy is NOT content-hashed (K7): it is referenced by runtime convention, no
+                // AD-owned writable link. Emit one per-tier copy under its suffixed name, unchanged.
                 out.push({ path: variantManifestName(skelPath, tier.suffix, enc.mime, profileMulti), bytes: new Uint8Array(skelBytes) });
                 tierFilesEmitted++;
                 if (profileOn) profileFilesEmitted++;
               }
             } else if (manifestPath) {
-              out.push({ path: variantManifestName(manifestPath, tier.suffix, enc.mime, profileMulti), bytes: te.encode(emitTexturePackerJson(scaled)) });
+              const jsonBytes = te.encode(emitTexturePackerJson(scaled));
+              const emittedSidecar = await hashEmit(variantManifestName(manifestPath, tier.suffix, enc.mime, profileMulti), jsonBytes);
+              out.push({ path: emittedSidecar, bytes: jsonBytes });
+              emittedLoadTarget = emittedSidecar;
               // Pixi manifest: an atlas tier loads via its per-tier `.json` SIDECAR (one entry per tier suffix;
               // avif+webp at the same tier merge into one entry's `src`). Pixi reads meta.image from the sidecar.
-              recordVariant(ref, 'atlas', imagePath, { scale: tier.scale, suffix: tier.suffix, src: variantManifestName(manifestPath, tier.suffix, enc.mime, profileMulti) });
+              recordVariant(ref, 'atlas', imagePath, { scale: tier.scale, suffix: tier.suffix, src: emittedSidecar });
               tierFilesEmitted++;
               if (profileOn) profileFilesEmitted++;
             }
           }
 
-          // Loader-migration: this variant's NEW load target — mirror the source (suffixed+tokened MANIFEST
-          // for an atlas/Spine asset, suffixed+tokened IMAGE for a loose one), so it matches the loader call.
-          tierTargetPaths.push(
-            scaled && isSpine && spineInfo
-              ? variantManifestName(spineInfo.path, tier.suffix, enc.mime, profileMulti)
-              : scaled && manifestPath
-                ? variantManifestName(manifestPath, tier.suffix, enc.mime, profileMulti)
-                : tierImagePath,
-          );
+          // Loader-migration: this variant's NEW load target — the SAME hashed local computed above (never
+          // re-derived via a second variantManifestName call, M1), so the row references the file that exists.
+          tierTargetPaths.push(emittedLoadTarget);
           emittedAny = true;
         }
         if (composeFailed) break;
@@ -1876,7 +2104,12 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       c2d.drawImage(bmp, 0, 0); // scale 1 (the format-only profile's single top tier)
       bmp.close();
       const r = await emitLooseProfileFanout(ref, imagePath, 1, canvas, c2d, 'transcode');
-      if (ownerActualName.has(ref)) ownerActualName.get(ref)!.image = r.ownerImage;
+      if (ownerActualName.has(ref)) {
+        // Cache-bust (round9 K8): dedup owner image = the fan-out's first (hashed) variant; un-hashed for
+        // Phase C's divergence comparison (a content hash is not a divergence). hashOff ⇒ the two are equal.
+        ownerActualName.get(ref)!.image = r.ownerImage;
+        ownerActualUnhashed.set(ref, r.ownerImageUnhashed);
+      }
       if (r.referencesChanged) referencesChanged = true;
       operations.push(`export profile ${basename(imagePath)} → ${profileFormats.length} format${profileFormats.length === 1 ? '' : 's'}`);
     }
@@ -1909,9 +2142,29 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     : undefined;
   for (const f of files) {
     if (replaced.has(f.path) || dropped.has(f.path)) continue;
-    out.push({ path: f.path, bytes: new Uint8Array(f.bytes) });
+    const bytes = new Uint8Array(f.bytes);
     const looseRef = looseRefByPath?.get(f.path);
-    if (looseRef) recordVariant(looseRef, 'loose', f.path, { scale: 1, suffix: '', src: f.path });
+    // Cache-bust (round9 BLOCKER-0): a non-transformed LOOSE dedup OWNER was pre-hashed before Phase C (its
+    // hashed name is already in ownerActualName.image, which the consumer's meta.image now points at). Emit
+    // it at THAT exact pre-hashed path — REGARDLESS of `looseRef`/manifestOn — because the consumer atlas
+    // manifest (always re-emitted by Phase C) is the guaranteed AD-owned referrer, so the rename can't 404.
+    // Reusing the recorded name (not re-hashing) keeps the emission single-sourced and order-safe.
+    const prehashed = hashOn ? prehashedLooseOwner.get(f.path) : undefined;
+    // Cache-bust pass-through gate (round9 K8/B2): a pass-through LOOSE image is content-hashed ONLY when it
+    // is a recorded loose ref — which (looseRefByPath being built solely when manifestOn) ALSO means the Pixi
+    // manifest is emitted, the GUARANTEED referrer AD can patch. A loose image with no AD-owned referrer
+    // (manifest off, OR a hand-authored/unparsed manifest, OR a name hard-coded in game code) is NOT hashed
+    // (its rename would 404). Non-asset pass-throughs (README/font/audio/unparsed .json) are never `looseRef`
+    // ⇒ never hashed. hashOff or no manifest ⇒ emitted at f.path unchanged (byte-identical to today).
+    const emittedPath = prehashed ?? (hashOn && looseRef ? await hashEmit(f.path, bytes) : f.path);
+    out.push({ path: emittedPath, bytes });
+    if (looseRef) recordVariant(looseRef, 'loose', f.path, { scale: 1, suffix: '', src: emittedPath });
+    if (looseRef && emittedPath !== f.path) {
+      // The manifest src[] (recorded above) is the guaranteed referrer; also surface an honest loader-migration
+      // row so a game loading this image directly (not via the manifest) learns the new name.
+      referencesChanged = true;
+      changeRows.push(looseRenameChange(f.path, emittedPath, 'transcode'));
+    }
   }
 
   post({ type: 'fix-progress', label: 'zipping', done: total - 1, total });

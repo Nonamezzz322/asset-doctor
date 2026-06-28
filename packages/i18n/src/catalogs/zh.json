@@ -305,6 +305,8 @@
   "fix.pixiManifest": "生成 PixiJS manifest.json",
   "fix.pixiManifestHint": "添加 manifest.json，映射每个输出的图像/图集（每个分辨率层级作为独立别名），让 PixiJS 游戏可用 Assets.init({ manifest }) 一次性加载整个输出。图集列出 .json/.atlas；Spine 仍需 pixi-spine。关闭 ⇒ 不生成额外文件。",
   "fix.pixiManifestReceipt": "{path}（{n} 条）",
+  "fix.hashFilenames": "内容哈希文件名（缓存清除）",
+  "fix.hashFilenamesHint": "将 AD 引用的每个图像/图集重命名为 name.<hash>.ext（hash = 最终字节的 sha256），以便用不可变的长缓存头分发优化后的文件夹。.json/.atlas 边车文件会重新指向哈希后的图像，然后自身也被哈希；加载器迁移片段和 PixiJS manifest 都引用哈希后的名称。骨架、manifest.json 以及没有 AD 拥有引用的散图保持稳定名称。关闭即为当前文件名（逐字节一致）。建议与 PixiJS manifest 搭配使用。",
   "license.locked": "激活许可证以解锁 Pro 修复",
   "license.keyPlaceholder": "许可证密钥（AD-…）",
   "license.activate": "激活",

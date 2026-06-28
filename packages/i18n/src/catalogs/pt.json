@@ -319,6 +319,8 @@
   "fix.pixiManifest": "Gerar manifest.json do PixiJS",
   "fix.pixiManifestHint": "Adiciona um manifest.json que mapeia cada imagem/folha emitida (e cada nível de resolução como seu próprio alias) para que um jogo PixiJS carregue toda a saída com Assets.init({ manifest }). As folhas listam o .json/.atlas; Spine ainda precisa do pixi-spine. Desligado ⇒ sem arquivo extra.",
   "fix.pixiManifestReceipt": "{path} ({n} entradas)",
+  "fix.hashFilenames": "Nomes com hash de conteúdo (cache-busting)",
+  "fix.hashFilenamesHint": "Renomeia cada imagem/folha que o AD referencia para name.<hash>.ext (hash = sha256 dos bytes finais) para que você possa servir a pasta otimizada com cabeçalhos de cache longo imutáveis. Os sidecars .json/.atlas são reapontados para a imagem com hash e depois recebem hash também; o trecho de migração do carregador e o manifest do PixiJS referenciam os nomes com hash. O esqueleto, manifest.json e imagens avulsas sem uma referência de propriedade do AD mantêm nomes estáveis. Desligado significa os nomes de arquivo de hoje (idêntico byte a byte). Melhor junto com o manifest do PixiJS.",
   "license.locked": "Ative uma licença para desbloquear o ajuste Pro",
   "license.keyPlaceholder": "Chave de licença (AD-…)",
   "license.activate": "Ativar",

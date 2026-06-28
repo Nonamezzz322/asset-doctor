@@ -71,8 +71,8 @@ export type { SpriteMesh } from '@asset-doctor/core';
 // PURE deterministic builder for the additive, opt-in `manifest.json` the fix output can emit so a PixiJS v8
 // game loads the whole output with Assets.init({ manifest }). Emits a REAL { bundles:[{name,assets:[{alias,src}]}] }
 // and NOTHING else (no version/meta, no `data.resolution` — Pixi #10108; tiers = one alias-suffixed entry each).
-// hashedName ships as a tested-but-unused helper (cache-busting deferred). Imported by the fix worker so its
-// manifest can't drift from the tested source.
+// hashedName is the naming primitive of content-hash cache-busting (round9-cache-busting.md), wired by the
+// worker's hashFilenames option. Imported by the fix worker so its manifest can't drift from the tested source.
 export { buildPixiManifest, countPixiManifestEntries, hashedName } from './pixi-manifest';
 export type {
   PixiAssetsManifest,
@@ -83,3 +83,9 @@ export type {
   ManifestAssetKind,
   BuildPixiManifestOptions,
 } from './pixi-manifest';
+
+// ── Content-hash cache-busting (round9-cache-busting.md) ───────────────────────────────────────
+// PURE test-double mirroring the worker's in-place `imageRef`-patch (returns a NEW atlas {...atlas, imageRef}).
+// NEVER called by the worker (it owns the one in-place mutation); exists for golden-testing the reference chain
+// image→imageRef→sidecar. The naming primitive `hashedName` is exported above with buildPixiManifest.
+export { withHashedImageRef } from './cache-bust';

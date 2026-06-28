@@ -195,9 +195,9 @@ export function countPixiManifestEntries(assets: ManifestAsset[]): number {
 }
 
 /**
- * Insert a short content hash before the FINAL extension of a path. PURE string helper — SHIPPED + TESTED but
- * UNUSED in v1 (cache-busting deferred to a follow-up RFC; see round8 §8). Preserves the directory and any
- * compound token (e.g. '_540p'):
+ * Insert a short content hash before the FINAL extension of a path. PURE string helper — the naming primitive
+ * of content-hash cache-busting (docs/improvements/round9-cache-busting.md), wired by the worker's
+ * `hashFilenames` option. Preserves the directory and any compound token (e.g. '_540p'):
  *   hashedName('a/b_540p.webp', 'a1b2c3d4') === 'a/b_540p.a1b2c3d4.webp'
  *   hashedName('noext', 'deadbeef')         === 'noext.deadbeef'   (no extension ⇒ append)
  */
