@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import type { AnalysisReport, Atlas, Blit, DedupGroup, FixOp, PackGroup } from '@asset-doctor/core';
 import { parseAtlas, parseAtlasManifest, parseSpineAtlasText, parseSpinePage } from '@asset-doctor/parsers';
 import { analyze, DEFAULT_THRESHOLDS } from '@asset-doctor/analysis';
-import { ACC_CELL, emitSpineAtlasText, emitTexturePackerJson, pack, planFix, repackAtlases, repackAtlasesPolygon, scaleAtlas, type MaskItem, type Placement, type RawMesh } from '../src/index';
+import { ACC_CELL, buildAtlasAliasMap, emitSpineAtlasText, emitTexturePackerJson, pack, planFix, repackAtlases, repackAtlasesPolygon, scaleAtlas, type AtlasAliasMap, type MaskItem, type Placement, type RawMesh } from '../src/index';
 
 const fixDir = fileURLToPath(new URL('../../../fixtures/sample-projects/tp-hash-symbols/', import.meta.url));
 function loadAtlas(): Atlas {
@@ -14,6 +14,22 @@ function loadAtlas(): Atlas {
   if (!res.ok || res.asset.kind !== 'atlas') throw new Error('fixture parse failed');
   return res.asset.atlas;
 }
+
+// The frame-redundant fixture: a 256×32 strip, 100% packed (8×32×32). The four idle_* frames are
+// byte-identical pixel regions (one cluster of 4 distinct rects) + four distinct walk_* frames.
+const frDir = fileURLToPath(new URL('../../../fixtures/sample-projects/frame-redundant/', import.meta.url));
+function loadFrameRedundantAtlas(): Atlas {
+  const manifest = JSON.parse(readFileSync(`${frDir}anim.json`, 'utf8')) as unknown;
+  const bytes = new Uint8Array(readFileSync(`${frDir}anim.png`));
+  const res = parseAtlas(manifest, { ref: 'anim.png', bytes });
+  if (!res.ok || res.asset.kind !== 'atlas') throw new Error('frame-redundant fixture parse failed');
+  return res.asset.atlas;
+}
+// The documented cluster: idle_* share one region hash, walk_* each distinct (mirrors the analysis golden,
+// robust to parser ordering). The alias map is built from these hashes exactly as the worker builds it.
+const frFrameHashes = (atlas: Atlas): (string | null)[] => atlas.sprites.map((s) => (s.name.startsWith('idle_') ? 'idle' : s.name));
+const frAliasMaps = (atlas: Atlas): Map<string, AtlasAliasMap> =>
+  new Map([[atlas.name, buildAtlasAliasMap(atlas.sprites, frFrameHashes(atlas), DEFAULT_THRESHOLDS.frameRedundancy!.minDuplicates)]]);
 
 const overlap = (a: Placement, b: Placement): boolean =>
   a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
@@ -988,5 +1004,164 @@ describe('polygon mode — UV/spill correctness (l)', () => {
     for (let i = 0; i < r.atlases.length; i++) {
       expect(emitTexturePackerJson(r2.atlases[i]!)).toBe(emitTexturePackerJson(r.atlases[i]!));
     }
+  });
+});
+
+// ── Frame-redundancy aliasing (round19, BLOCKER B1 + drop-in proofs) ─────────────────────────────────
+// The frame-redundant fixture is 100% packed (no occupancy/wasted finding), so the FINDING must emit its
+// OWN repack op for aliasing to ever fire — and repackAtlases must pack ONE representative per byte-identical
+// cluster while every alias name still resolves at the shared rect, with EXACT before→after VRAM.
+describe('frame-redundancy aliasing (round19)', () => {
+  it('repackAtlases with alias maps: 5 representatives packed, all 8 names resolve, 4 idle share ONE rect', () => {
+    const atlas = loadFrameRedundantAtlas();
+    const r = repackAtlases([atlas], { allowRotation: false, padding: 2, maxSize: 4096 }, frAliasMaps(atlas));
+    // aliasedFrames === the detector's `dupes`: 4 idle ⇒ 3 beyond the kept representative.
+    expect(r.aliasedFrames).toBe(3);
+    // ONE Blit per representative — pixels written once (5 reps = 1 idle + 4 walk).
+    expect(r.blits.length).toBe(5);
+    // EVERY original frame name still resolves in the emitted manifest (drop-in).
+    const out = r.atlases.flatMap((a) => a.sprites);
+    expect(out.map((s) => s.name).sort()).toEqual(atlas.sprites.map((s) => s.name).sort());
+    expect(out.length).toBe(8);
+    // The four idle_* sprites share ONE {x,y,w,h} (aliased onto the representative's final rect).
+    const idleRects = new Set(out.filter((s) => s.name.startsWith('idle_')).map((s) => `${s.frame.x},${s.frame.y},${s.frame.w},${s.frame.h}`));
+    expect(idleRects.size).toBe(1);
+    // The shared idle rect equals the representative's (idle_0) rect — only ONE blit lands there.
+    const idleRect = [...idleRects][0]!;
+    const blitsAtIdle = r.blits.filter((b) => `${b.to.x},${b.to.y},${b.to.w},${b.to.h}` === idleRect);
+    expect(blitsAtIdle.length).toBe(1);
+  });
+
+  it('honest dual occupancy + EXACT VRAM: source 100% before, smaller sheet after, no estimate', () => {
+    const atlas = loadFrameRedundantAtlas();
+    const aliased = repackAtlases([atlas], { allowRotation: false, padding: 2, maxSize: 4096 }, frAliasMaps(atlas));
+    const plain = repackAtlases([atlas], { allowRotation: false, padding: 2, maxSize: 4096 }); // no aliasing
+    // occupancyBefore counts ALL source sprites (duplicates and all) via the DUAL accumulator — the 256×32
+    // strip was genuinely 100% packed (truthful "before", not deflated by dropping the aliases).
+    expect(aliased.occupancyBefore).toBeCloseTo(1, 5);
+    expect(aliased.vramBytesBefore).toBe(256 * 32 * 4); // exact w·h·4 of the source sheet
+    // occupancyAfter counts ONLY the 5 packed representatives over the new sheet area — strictly LESS filled
+    // than packing all 8 into the same bin (honest dual accumulator, not one shared coveredArea).
+    expect(aliased.occupancyAfter).toBeLessThan(plain.occupancyAfter);
+    // Aliasing NEVER costs VRAM (≤), the value is EXACT (straight from repackAtlases, no estimate) +
+    // deterministic. For this tiny fixture both fit the same POT bin, so the win is fewer Blits (pixels written
+    // ONCE) + a smaller covered area, not a POT-tier drop here.
+    expect(aliased.vramBytesAfter).toBeLessThanOrEqual(plain.vramBytesAfter);
+    expect(aliased.blits.length).toBeLessThan(plain.blits.length); // 5 < 8 — pixels de-duplicated
+    expect(repackAtlases([atlas], { allowRotation: false, padding: 2, maxSize: 4096 }, frAliasMaps(atlas)).vramBytesAfter).toBe(aliased.vramBytesAfter);
+  });
+
+  it('each alias keeps its OWN trim / sourceSize / spriteSourceSize / pivot (only the rect is shared)', () => {
+    const atlas = loadFrameRedundantAtlas();
+    const r = repackAtlases([atlas], { allowRotation: false, padding: 2, maxSize: 4096 }, frAliasMaps(atlas));
+    const out = new Map(r.atlases.flatMap((a) => a.sprites).map((s) => [s.name, s]));
+    for (const src of atlas.sprites) {
+      const o = out.get(src.name)!;
+      expect(o.rotated).toBe(src.rotated);
+      expect(o.trimmed).toBe(src.trimmed);
+      expect(o.sourceSize).toEqual(src.sourceSize);
+      expect(o.spriteSourceSize).toEqual(src.spriteSourceSize);
+      expect(o.pivot).toEqual(src.pivot);
+    }
+  });
+
+  it('emitted manifest round-trips through the parser with every aliased name present', () => {
+    const atlas = loadFrameRedundantAtlas();
+    const repacked = repackAtlases([atlas], { allowRotation: false, padding: 2, maxSize: 4096 }, frAliasMaps(atlas)).atlases[0]!;
+    const json = emitTexturePackerJson(repacked);
+    const res = parseAtlasManifest(JSON.parse(json), { imageRef: repacked.imageRef, imageSize: repacked.size });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.atlas.sprites.map((s) => s.name).sort()).toEqual(atlas.sprites.map((s) => s.name).sort());
+  });
+
+  it('absent alias maps ⇒ output byte-identical to today (additivity regression)', () => {
+    const atlas = loadFrameRedundantAtlas();
+    const a = repackAtlases([atlas], { allowRotation: false, padding: 2, maxSize: 4096 });
+    const b = repackAtlases([atlas], { allowRotation: false, padding: 2, maxSize: 4096 }, new Map());
+    expect(emitTexturePackerJson(a.atlases[0]!)).toBe(emitTexturePackerJson(b.atlases[0]!));
+    expect(a.aliasedFrames).toBeUndefined(); // no aliasMaps ⇒ no aliasedFrames field
+    expect(b.aliasedFrames).toBeUndefined();
+    expect(a.blits.length).toBe(8); // all 8 frames packed + blitted (today's behavior)
+  });
+
+  it('BLOCKER B1: a fully-packed frame-redundant atlas STILL gets a repack op from the finding', async () => {
+    const atlas = loadFrameRedundantAtlas();
+    const report = await analyze(
+      [{ kind: 'atlas', atlas, image: { name: 'anim.png', imageRef: 'anim.png', size: { w: 256, h: 32 }, mime: 'image/png', byteSize: 4000 } }],
+      undefined,
+      { frameHashes: [{ atlasRef: 'anim.png', frameHashes: frFrameHashes(atlas) }] },
+    );
+    // The atlas is 100% packed ⇒ NO occupancy / wasted-regions finding would schedule a repack.
+    expect(report.findings.some((f) => f.rule === 'occupancy' || f.rule === 'wasted-regions')).toBe(false);
+    // ...but the frame-redundancy finding fired, and (frameRedundancy default ON) it emits its OWN repack op.
+    expect(report.findings.some((f) => f.rule === 'frame-redundancy')).toBe(true);
+    const base = { targetMime: 'image/webp' as const, quality: 0.9, lossless: true, padding: 2, maxSize: 4096, maxEdge: 2048, aggressive: false };
+    const onOps = planFix(report, base).ops.filter((o) => o.kind === 'repack');
+    expect(onOps).toHaveLength(1);
+    expect(onOps[0]!.kind === 'repack' && onOps[0]!.atlasRefs).toEqual(['anim.png']);
+  });
+
+  it('frameRedundancy:false ⇒ NO new repack op (byte-identical to today; finding stays diagnosis-only)', async () => {
+    const atlas = loadFrameRedundantAtlas();
+    const report = await analyze(
+      [{ kind: 'atlas', atlas, image: { name: 'anim.png', imageRef: 'anim.png', size: { w: 256, h: 32 }, mime: 'image/png', byteSize: 4000 } }],
+      undefined,
+      { frameHashes: [{ atlasRef: 'anim.png', frameHashes: frFrameHashes(atlas) }] },
+    );
+    const base = { targetMime: 'image/webp' as const, quality: 0.9, lossless: true, padding: 2, maxSize: 4096, maxEdge: 2048, aggressive: false };
+    expect(planFix(report, { ...base, frameRedundancy: false }).ops.some((o) => o.kind === 'repack')).toBe(false);
+  });
+
+  it('honesty pin: aliasedFrames realized === the finding`s measured dupes on the same inputs', async () => {
+    const atlas = loadFrameRedundantAtlas();
+    const report = await analyze(
+      [{ kind: 'atlas', atlas, image: { name: 'anim.png', imageRef: 'anim.png', size: { w: 256, h: 32 }, mime: 'image/png', byteSize: 4000 } }],
+      undefined,
+      { frameHashes: [{ atlasRef: 'anim.png', frameHashes: frFrameHashes(atlas) }] },
+    );
+    const fr = report.findings.find((f) => f.rule === 'frame-redundancy')!;
+    const realized = repackAtlases([atlas], { allowRotation: false, padding: 2, maxSize: 4096 }, frAliasMaps(atlas)).aliasedFrames;
+    expect(realized).toBe(fr.params!.dupes); // the fix realizes EXACTLY what the diagnosis measured
+  });
+
+  it('honesty (finding [0]): a pre-aliased cluster (5 names / 3 distinct rects) reports dupes=2, NOT 4', () => {
+    // Five byte-identical names but only THREE distinct packed rects (two PAIRS share a rect: x=0 ×2, x=32 ×2,
+    // x=64 ×1) — an explicitly-supported pre-aliased Spine/TP sheet. The detector's distinct-rect guard collapses
+    // each shared rect to ONE recoverable unit ⇒ dupes = distinctRects(3) − 1 = 2. The OLD per-non-rep tally
+    // would have over-reported 4 (cluster-size 5 − 1). repackAtlases.aliasedFrames must MATCH the alias map (and
+    // thus the finding's dupes) by construction. Mirrors the alias.test.ts DISTINCT-RECT GUARD case.
+    const sp = (name: string, x: number): Atlas['sprites'][number] => ({ name, frame: { x, y: 0, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 32, h: 32 } });
+    const sprites = [sp('a', 0), sp('b', 0), sp('c', 32), sp('d', 32), sp('e', 64)];
+    const atlas: Atlas = { name: 'pre.png', imageRef: 'pre.png', size: { w: 96, h: 32 }, sprites, source: { kind: 'pixi' } };
+    const hashes = ['h', 'h', 'h', 'h', 'h']; // all five hash-identical
+    const am = buildAtlasAliasMap(atlas.sprites, hashes, 3);
+    expect(am.aliasedFrames).toBe(2); // distinctRects(3) − 1, the honest measured value
+    const r = repackAtlases([atlas], { allowRotation: false, padding: 0, maxSize: 4096 }, new Map([[atlas.name, am]]));
+    expect(r.aliasedFrames).toBe(am.aliasedFrames); // === 2 by construction (no per-sprite re-tally)
+    expect(r.aliasedFrames).toBe(2);
+    // Drop-in still holds: every original name resolves, all five aliased onto the ONE representative rect (the
+    // whole hash-cluster shares one packed region; only the SURFACED count, not the geometry, was the bug).
+    const out = r.atlases.flatMap((a) => a.sprites);
+    expect(out.map((s) => s.name).sort()).toEqual(['a', 'b', 'c', 'd', 'e']);
+    expect(new Set(out.map((s) => `${s.frame.x},${s.frame.y},${s.frame.w},${s.frame.h}`)).size).toBe(1);
+    expect(r.blits.length).toBe(1); // pixels written ONCE
+  });
+
+  it('EXACT VRAM win across a POT tier: dropping duplicates shrinks the sheet to the next-smaller bin', () => {
+    // A synthetic strip of eight 256×256 frames (no padding). Three distinct (a,b,c) + a 5-way duplicate
+    // cluster (the five `dup_*` share one region). Packing all 8 needs a 1024×512 bin (8·256² = 524288 px);
+    // aliasing to FOUR representatives (1 rep + a,b,c) fits a 512×512 bin (4·256² = 262144 px) — a real
+    // POT-tier VRAM drop (524288·4 → 262144·4), reported EXACTLY (Σ w·h·4 of the bins, no estimate).
+    const frame = (name: string, i: number): Atlas['sprites'][number] => ({ name, frame: { x: i * 256, y: 0, w: 256, h: 256 }, rotated: false, trimmed: false, sourceSize: { w: 256, h: 256 } });
+    const sprites = ['dup_0', 'dup_1', 'dup_2', 'dup_3', 'dup_4', 'a', 'b', 'c'].map((n, i) => frame(n, i));
+    const atlas: Atlas = { name: 'big.png', imageRef: 'big.png', size: { w: 2048, h: 256 }, sprites, source: { kind: 'pixi' } };
+    const hashes = atlas.sprites.map((s) => (s.name.startsWith('dup_') ? 'dup' : s.name));
+    const am = new Map([[atlas.name, buildAtlasAliasMap(atlas.sprites, hashes, 3)]]);
+    const aliased = repackAtlases([atlas], { allowRotation: false, padding: 0, maxSize: 4096 }, am);
+    const plain = repackAtlases([atlas], { allowRotation: false, padding: 0, maxSize: 4096 });
+    expect(aliased.aliasedFrames).toBe(4); // distinctRects(5) − 1 kept
+    expect(aliased.atlases.flatMap((a) => a.sprites)).toHaveLength(8); // all 8 names still resolve
+    expect(aliased.vramBytesAfter).toBeLessThan(plain.vramBytesAfter); // a genuine POT-tier VRAM drop
+    expect(aliased.vramBytesAfter).toBe(aliased.atlases.reduce((n, a) => n + a.size.w * a.size.h * 4, 0)); // EXACT Σ w·h·4, no estimate
   });
 });

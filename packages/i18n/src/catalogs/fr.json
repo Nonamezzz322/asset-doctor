@@ -439,5 +439,8 @@
   "license.err.reactivate": "Veuillez réactiver cet appareil",
   "license.err.network": "Impossible de joindre le serveur de licences",
   "license.err.rate_limited": "Trop de tentatives — attendez une minute",
-  "license.err.generic": "Échec de l'activation"
+  "license.err.generic": "Échec de l'activation",
+  "fix.settings.frameRedundancy": "Aliaser les images d’animation en double",
+  "fix.settings.frameRedundancyHint": "Empaqueter une seule fois les images d’animation identiques octet pour octet et pointer chaque nom en double vers la région partagée : feuille plus petite et moins de VRAM. Sans changement de chargement : chaque nom d’image reste résolu. VRAM exacte, sans estimation.",
+  "fix.framesAliased": { "$count": "n", "one": "{n} image en double aliasée vers une région partagée — VRAM {before:bytes} → {after:bytes} (tous les noms d’images restent résolus)", "other": "{n} images en double aliasées vers une région partagée — VRAM {before:bytes} → {after:bytes} (tous les noms d’images restent résolus)" }
 }

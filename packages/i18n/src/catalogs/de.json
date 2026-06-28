@@ -436,5 +436,8 @@
   "license.err.reactivate": "Bitte dieses Gerät erneut aktivieren",
   "license.err.network": "Lizenzserver nicht erreichbar",
   "license.err.rate_limited": "Zu viele Versuche — eine Minute warten",
-  "license.err.generic": "Aktivierung fehlgeschlagen"
+  "license.err.generic": "Aktivierung fehlgeschlagen",
+  "fix.settings.frameRedundancy": "Doppelte Animationsframes verweisen",
+  "fix.settings.frameRedundancyHint": "Byte-identische Animationsframes einmal packen und jeden doppelten Namen auf die gemeinsame Region zeigen lassen — kleineres Sheet und weniger VRAM. Drop-in: jeder Framename wird weiterhin aufgelöst. Exakter VRAM, keine Schätzung.",
+  "fix.framesAliased": { "$count": "n", "one": "{n} doppelten Frame auf eine gemeinsame Region verwiesen — VRAM {before:bytes} → {after:bytes} (alle Framenamen werden weiterhin aufgelöst)", "other": "{n} doppelte Frames auf eine gemeinsame Region verwiesen — VRAM {before:bytes} → {after:bytes} (alle Framenamen werden weiterhin aufgelöst)" }
 }

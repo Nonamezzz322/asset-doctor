@@ -68,6 +68,16 @@ export interface PlanOptions {
    *  the actual bleed to it (`effectiveExtrude = min(extrude, gutter)`). Absent/0/negative ⇒ NO op
    *  carries `extrude` ⇒ the plan is byte-identical to today (default OFF). */
   extrude?: number;
+  /** Frame-redundancy aliasing (round19, BLOCKER B1). A `frame-redundancy` finding fires on a (usually
+   *  FULLY-PACKED) atlas whose duplicate frames fill the sheet — so it produces NO occupancy/wasted finding
+   *  and NO repack op today, meaning aliasing inside an existing repack would NEVER fire on the target case.
+   *  THEREFORE the finding must emit its OWN repack op (reusing the `repack` OpKind so tally/manifest/
+   *  selective-fix/receipt all work) so the worker can alias the byte-identical frames onto one region. This
+   *  flag gates that new op: ON (the worker's default) ⇒ a frame-redundancy finding adds a repack op (guarded
+   *  against double-emit with the occupancy path's `repacked` set). `false` ⇒ NO new op ⇒ byte-identical to
+   *  today (the finding stays a diagnosis-only verdict). The aliasing itself happens worker-side inside
+   *  `repackAtlases` (the plan carries no pixels); the plan only schedules the repack. */
+  frameRedundancy?: boolean;
 }
 
 /**
@@ -265,7 +275,10 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
     const eligible = opts.tierEligible ?? (() => true);
     const willRepack = new Set<string>();
     for (const f of report.findings) {
-      if ((f.rule === 'occupancy' || f.rule === 'wasted-regions') && !protectedOwners.has(f.assetRef)) willRepack.add(f.assetRef);
+      // round19: a frame-redundancy finding ALSO becomes a pass-1 repack (B1) when the opt is on, so a
+      // frame-redundant atlas must be pre-excluded from tiering exactly like occupancy/wasted-regions.
+      const isFrameRepack = f.rule === 'frame-redundancy' && opts.frameRedundancy !== false && f.scope !== 'folder';
+      if ((f.rule === 'occupancy' || f.rule === 'wasted-regions' || isFrameRepack) && !protectedOwners.has(f.assetRef)) willRepack.add(f.assetRef);
     }
     for (const f of report.findings) {
       if (f.scope === 'folder') continue; // per-asset only — folder findings have no single tier target
@@ -295,6 +308,20 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
         resized.add(f.assetRef);
         ops.push({ kind: 'resize', assetRef: f.assetRef, to: { w: Math.round(w * s), h: Math.round(h * s) }, targetMime: opts.targetMime, quality: opts.quality });
       }
+    } else if (f.rule === 'frame-redundancy' && opts.frameRedundancy !== false) {
+      // BLOCKER B1: a frame-redundant atlas is usually FULLY packed (its duplicate frames fill the sheet),
+      // so it triggers NO occupancy/wasted finding and therefore NO repack op above. Emit our OWN repack
+      // (reusing the `repack` OpKind so the dry-run tally, change-manifest, selective-fix mask, and receipt
+      // grouping all work unchanged) so the worker can ALIAS the byte-identical frames onto one shared
+      // region. The aliasing itself is worker-side (it builds the per-atlas alias map from the raw frame
+      // hashes and threads it into repackAtlases — the finding's flat `relatedRefs` can't reconstruct
+      // clusters). GUARDS: owners are never repack targets; the `repacked` set prevents a double-emit when
+      // the occupancy path ALREADY scheduled this atlas (that repack aliases too, since the worker passes
+      // the same alias maps). Gated on opts.frameRedundancy !== false ⇒ false/absent-when-set ⇒ no new op
+      // ⇒ byte-identical to today. Folder findings have no single atlas target — skip them.
+      if (f.scope === 'folder' || protectedOwners.has(f.assetRef) || repacked.has(f.assetRef)) continue;
+      repacked.add(f.assetRef);
+      ops.push({ kind: 'repack', atlasRefs: [f.assetRef], targetMime: opts.targetMime, pot: true, allowRotation: false, padding: opts.padding, maxSize: opts.maxSize, ...extrudeField });
     } else if (opts.aggressive && (f.rule === 'duplicate-exact' || f.rule === 'duplicate-similar')) {
       // Owner-aware drops already emitted in pass 0a when groups supplied; only exact dupes are
       // owner-modelled, so near-duplicates still use the legacy bare-drop path either way.

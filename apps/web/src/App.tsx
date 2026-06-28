@@ -532,6 +532,8 @@ function SettingsPanel({
   setOpaqueAlpha,
   bestFormatPerImage,
   setBestFormatPerImage,
+  frameRedundancy,
+  setFrameRedundancy,
   overrides,
   setOverrides,
 }: {
@@ -547,6 +549,8 @@ function SettingsPanel({
   setOpaqueAlpha: (b: boolean) => void;
   bestFormatPerImage: boolean;
   setBestFormatPerImage: (b: boolean) => void;
+  frameRedundancy: boolean;
+  setFrameRedundancy: (b: boolean) => void;
   overrides: { match: string; quality: number }[];
   setOverrides: (o: { match: string; quality: number }[]) => void;
 }) {
@@ -586,6 +590,12 @@ function SettingsPanel({
       <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.settings.bestFormatHint')}>
         <input type="checkbox" checked={bestFormatPerImage} onChange={(e) => setBestFormatPerImage(e.target.checked)} className="accent-teal" />
         {t('fix.settings.bestFormat')}
+      </label>
+      {/* Frame-redundancy aliasing (round19) — DEFAULT ON. Byte-identical animation frames within an atlas share
+          ONE packed region; every name still resolves, the sheet shrinks, exact VRAM before→after (invariant 5). */}
+      <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.settings.frameRedundancyHint')}>
+        <input type="checkbox" checked={frameRedundancy} onChange={(e) => setFrameRedundancy(e.target.checked)} className="accent-teal" />
+        {t('fix.settings.frameRedundancy')}
       </label>
 
       <div className="mt-3 border-t border-line pt-2">
@@ -1261,6 +1271,11 @@ function FixCard({ files }: { files: PickedFile[] }) {
   // (invariant 3); a format transcode is DISK-only (invariant 5). Off ⇒ every op carries the global target
   // ⇒ byte-identical to today. An active export profile / a per-folder override still take precedence.
   const [bestFormatPerImage, setBestFormatPerImage] = useState(false);
+  // Frame-redundancy aliasing (round19) — DEFAULT ON (drop-in, lossless, shrinks the sheet). Byte-identical
+  // animation frames within an atlas are aliased onto ONE shared packed region — every original name still
+  // resolves, the sheet is smaller, exact VRAM before→after (invariant 5, no estimate). Off ⇒ no hashing, no
+  // new op, no aliasing ⇒ byte-identical to today (the frame-redundancy finding stays a diagnosis-only verdict).
+  const [frameRedundancy, setFrameRedundancy] = useState(true);
   const [overrides, setOverrides] = useState<{ match: string; quality: number }[]>([]);
 
   // Feature 4 — own Pro opt-in, DEFAULT OFF (NOT under aggressive). Defaults reproduce today: off ⇒ no
@@ -1477,6 +1492,10 @@ function FixCard({ files }: { files: PickedFile[] }) {
       // bestMime). An active exportProfile / a per-folder override still take precedence (worker-side). DISK-
       // only (invariant 5 — both formats decode to RGBA8888); honest (invariant 3 — bestMime is measured).
       bestFormatPerImage: bestFormatPerImage || undefined,
+      // Frame-redundancy aliasing (round19) — DEFAULT ON. The worker treats undefined as ON, so we only send
+      // `false` when the user opts OUT (keeps a default run's option bag byte-identical to today's absent
+      // field). ON ⇒ duplicate frames alias onto one packed region (drop-in, exact VRAM before→after).
+      frameRedundancy: frameRedundancy ? undefined : false,
       marking: aggressive && Object.keys(marking).length > 0 ? marking : undefined,
       skinGuard: aggressive && Object.keys(skinGuard).length > 0 ? skinGuard : undefined,
       overrides: overrides.length > 0 ? overrides.filter((o) => o.match.trim() !== '') : undefined,
@@ -1621,7 +1640,7 @@ function FixCard({ files }: { files: PickedFile[] }) {
   const sawPlan = useRef(false);
   useEffect(() => {
     if (sawPlan.current) setPhase({ t: 'idle' });
-  }, [aggressive, polygon, marking, effort, scaleAwareQ, webpNearLossless, pngRecompress, opaqueAlpha, bestFormatPerImage, overrides, packLoose, packMode, packGranularity, packTrim, extrude, tierEnable, tierSuffixes, profileEnable, profileFormats, customTiers, profileOverrides, ktx2Enable, pngquantEnable]);
+  }, [aggressive, polygon, marking, effort, scaleAwareQ, webpNearLossless, pngRecompress, opaqueAlpha, bestFormatPerImage, frameRedundancy, overrides, packLoose, packMode, packGranularity, packTrim, extrude, tierEnable, tierSuffixes, profileEnable, profileFormats, customTiers, profileOverrides, ktx2Enable, pngquantEnable]);
   // Consent is NEVER sticky: drop the per-run "uploaded to server" acknowledgement the moment BOTH backend
   // ops are disabled OR the backend becomes unreachable, so a fresh run can't inherit a prior tick. The user
   // must re-consent each time the upload path could engage.
@@ -1681,6 +1700,8 @@ function FixCard({ files }: { files: PickedFile[] }) {
             setOpaqueAlpha={setOpaqueAlpha}
             bestFormatPerImage={bestFormatPerImage}
             setBestFormatPerImage={setBestFormatPerImage}
+            frameRedundancy={frameRedundancy}
+            setFrameRedundancy={setFrameRedundancy}
             overrides={overrides}
             setOverrides={setOverrides}
           />
@@ -1821,6 +1842,14 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
           {t('fix.meshedCount', { n: receipt.meshSprites ?? 0 })} ·{' '}
           {receipt.polygonAreaSavedPct ? t('fix.tighter', { pct: Math.round(receipt.polygonAreaSavedPct * 100) }) : t('fix.tighterPlain')}
           <span className="mt-0.5 block text-ink-soft/80">{t('fix.meshNote')}</span>
+        </p>
+      ) : null}
+      {/* Frame-redundancy aliasing (round19): byte-identical animation frames aliased onto a shared region. The
+          VRAM win is EXACT (vramBytesBefore→After of the de-duplicated sheet, no estimate — invariant 5); every
+          original name still resolves in the emitted manifest. Present ONLY when ≥1 frame was aliased. */}
+      {(receipt.framesAliased ?? 0) > 0 ? (
+        <p className="font-mono text-[10px] text-ink-soft">
+          {t('fix.framesAliased', { n: receipt.framesAliased ?? 0, before: receipt.vramBytesBefore, after: receipt.vramBytesAfter })}
         </p>
       ) : null}
       {/* Export-profile summary: variant files emitted (formats × resolutions × assets). DISK-only fan-out —

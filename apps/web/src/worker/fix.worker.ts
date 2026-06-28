@@ -5,10 +5,10 @@
 // (native WebP, or AVIF via @jsquash with honest fallback), drop exact duplicates, and zip a drop-in
 // optimized folder. Assets never leave the device. Every fix the browser can't do lands in skipped[].
 
-import type { Asset, Atlas, Blit, FixOp, FormatTarget, ImageMime, ImageFeatures, PackGroup, Rect, ScaleTier, Size, TrimRect } from '@asset-doctor/core';
+import type { Asset, Atlas, AtlasFrameHashes, Blit, FixOp, FormatTarget, ImageMime, ImageFeatures, PackGroup, Rect, ScaleTier, Size, Sprite, TrimRect } from '@asset-doctor/core';
 import { groupFiles, groupLooseForPacking, keyOf, type LooseImage, type RawFile } from '@asset-doctor/ingest';
 import { parseAtlas, parseImage, parseSpineAtlasText, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
-import { analyze, buildDedupGroups, hasResolutionToken, mergeSharedAtlases, occupancyValue, type EncodeSizer } from '@asset-doctor/analysis';
+import { analyze, buildDedupGroups, DEFAULT_THRESHOLDS, hasResolutionToken, mergeSharedAtlases, occupancyValue, type EncodeSizer } from '@asset-doctor/analysis';
 import {
   emitSpineAtlasText,
   emitTexturePackerJson,
@@ -17,6 +17,12 @@ import {
   repackAtlases,
   repackAtlasesPolygon,
   scaleAtlas,
+  // Frame-redundancy aliasing (round19) — PURE byte-identical-frame clustering (mirrors the detector's
+  // distinct-rect logic). The worker pre-hashes qualifying merged atlas pages, builds these per-atlas alias
+  // maps, and threads them into repackAtlases so duplicate frames share ONE packed region (one Blit per
+  // representative) while every original name still resolves. Single Vitest-covered source so it can't drift.
+  buildAtlasAliasMaps,
+  type AtlasAliasMap,
   // PURE edge-extrude (bleed) geometry (design OPTION A / docs/improvements/edge-extrude.md). The worker
   // reserves a symmetric gutter in pack()/packLoose()/repackAtlases() via `gutter`, then turns each
   // ExtrudeRect into ONE drawImage AFTER the main blit. effectiveExtrude clamps the bleed to the op's
@@ -104,7 +110,7 @@ import {
   type EmittedVariant,
   type ManifestAssetKind,
 } from '@asset-doctor/fix';
-import { dHashFromGray, isFlat, luma } from '../lib/perceptual';
+import { dHashFromGray, extractFrameRegions, isFlat, luma } from '../lib/perceptual';
 import { makeZip, type ZipEntry } from './zip';
 // PURE dry-run plan summary (docs/improvements/dry-run-plan-preview.md): tallies the STRUCTURED FixOp[]
 // the execute path would run + the worker-side tier multiplier into the receipt's OpKind vocabulary. No
@@ -286,8 +292,42 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
 
   // aggressive dedup needs per-image features (SHA-256 + dHash); skip the decode cost otherwise.
   const features = opts.aggressive ? await computeFeatures(bytesByRef) : undefined;
-  // measure format savings (native WebP) so format findings → transcode ops appear
-  const report = await analyze(merged, undefined, { missingImages: grouped.missing, encodeImage: makeEncoder(bytesByRef), ...(features ? { features } : {}) });
+
+  // ── Frame-redundancy aliasing (round19, BLOCKER B1 + MAJOR M1) ─────────────────────────────────────
+  // A frame-redundant atlas is usually FULLY packed (its duplicate frames fill the sheet), so it triggers
+  // NO occupancy/wasted finding ⇒ NO repack today. For the finding to fire (and emit its OWN repack op) the
+  // worker MUST compute per-atlas sprite-region hashes and feed them into analyze() BEFORE planFix. This is
+  // ONE full-resolution decode per QUALIFYING merged atlas page — identical magnitude to the composePageEncode
+  // source decode a repack already pays — gated to pages with ≥ minDuplicates sprites (a cheaper pre-filter:
+  // a sheet with fewer sprites can never reach the gate) and bounded by extractFrameRegions' own px/sprite
+  // caps. `frameRedundancy:false` ⇒ skip the whole pass (no hashing, no finding, no new op ⇒ byte-identical).
+  // The map is REUSED below to build the per-atlas alias maps threaded into repackAtlases. Respect cancelled.
+  const frameRedundancyOn = opts.frameRedundancy !== false;
+  const minDuplicates = DEFAULT_THRESHOLDS.frameRedundancy?.minDuplicates ?? Infinity;
+  const frameHashByRef = new Map<string, (string | null)[]>();
+  if (frameRedundancyOn) {
+    for (const a of merged) {
+      if (cancelled) return; // superseded — stop before the next (heavy) page decode
+      if (a.kind !== 'atlas') continue;
+      // Cheap pre-filter: a page with fewer than minDuplicates sprites can never reach the cluster gate.
+      if (a.atlas.sprites.length < minDuplicates) continue;
+      const bytes = bytesByRef.get(a.atlas.name);
+      if (!bytes) continue;
+      const hashes = await hashAtlasFrames(bytes, a.atlas.sprites);
+      if (hashes) frameHashByRef.set(a.atlas.name, hashes);
+    }
+    if (cancelled) return;
+  }
+  const frameHashes: AtlasFrameHashes[] = [...frameHashByRef].map(([atlasRef, hashes]) => ({ atlasRef, frameHashes: hashes }));
+
+  // measure format savings (native WebP) so format findings → transcode ops appear; feed the frame-region
+  // hashes so the frame-redundancy finding fires (and its plan branch emits a repack op for the aliasing).
+  const report = await analyze(merged, undefined, {
+    missingImages: grouped.missing,
+    encodeImage: makeEncoder(bytesByRef),
+    ...(features ? { features } : {}),
+    ...(frameHashes.length ? { frameHashes } : {}),
+  });
 
   // Owner/consumer dedup (Feature 1, aggressive only): decide which exact-dup copy is the OWNER (kept,
   // references repointed) and which are CONSUMERS (dropped). Pure + load-order-safe; takes spineRefs
@@ -411,6 +451,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       // `format` transcode op to the winner the diagnosis already measured (params.bestMime) instead of the
       // single global targetMime. Off ⇒ every op carries opts.targetMime ⇒ byte-identical to today.
       bestFormatPerImage: opts.bestFormatPerImage,
+      // Frame-redundancy aliasing (round19, B1): forward the toggle so a frame-redundancy finding emits its
+      // OWN repack op (the atlas is usually fully packed ⇒ no occupancy repack would schedule it). The
+      // aliasing itself is worker-side (alias maps below, threaded into repackAtlases). false ⇒ no new op.
+      frameRedundancy: frameRedundancyOn,
       isAtlasRef: (ref) => atlasByRef.has(ref),
       // Edge-extrude (bleed, design OPTION A): forward the UI knob. planFix floors it to a non-negative
       // int and STAMPS it onto every repack/pack op (the only ops whose worker compose blits a rectangle
@@ -423,6 +467,23 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     dedupGroups,
     packGroups,
   );
+
+  // ── Frame-redundancy alias maps (round19) ──────────────────────────────────────────────────────────
+  // Build the per-atlas {representative → [aliasNames]} decision from the raw frame hashes (the finding's
+  // flat relatedRefs can't reconstruct clusters — raw hashes are the only source of truth). REUSES the
+  // detector's distinct-rect guard (rules.ts) byte-for-byte, so pre-aliased source rects never double-count
+  // and the aliasedFrames realized below EQUALS the finding's `dupes`. Threaded into every repackAtlases call
+  // (single, merge, Spine). Empty when frameRedundancy is off / no atlas has duplicates ⇒ repackAtlases
+  // falls through to today's byte-identical path. Keyed by Atlas.name (= the merged-atlas name hashed above).
+  const aliasMinDistinct = report.thresholds.frameRedundancy?.minDuplicates ?? Infinity;
+  const aliasMaps: Map<string, AtlasAliasMap> =
+    frameRedundancyOn && frameHashByRef.size
+      ? buildAtlasAliasMaps(
+          merged.flatMap((a) => (a.kind === 'atlas' ? [a.atlas] : [])),
+          frameHashByRef,
+          aliasMinDistinct,
+        )
+      : new Map();
 
   // ── SELECTIVE FIX (docs/improvements/selective-fix.md) ────────────────────────────────────────────
   // The dev can DESELECT op categories in the dry-run Plan card; the deselected OpKinds arrive in
@@ -1123,6 +1184,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   };
 
   let vramSaved = 0;
+  let framesAliasedTotal = 0; // round19: Σ byte-identical frames aliased onto a shared region across repacks
   let meshSpritesTotal = 0; // Σ sprites carrying a mesh in the SELECTED polygon results (0 on fallback)
   let polyVramBefore = 0; // Σ vramBytesBefore of polygon-WON ops (basis for the honest saved-% figure)
   let polyVramAfter = 0; // Σ vramBytesAfter of those same ops
@@ -1274,7 +1336,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         if (opts.polygon) skipped.push({ assetRef: ref, reason: 'polygon mode not supported for Spine (no mesh slot in .atlas)' });
         // Edge-extrude: reserve a symmetric gutter so the bleed has room. gutter=0 ⇒ today's repack exactly.
         const { gutter, eff } = extrudeOf(op);
-        const r = repackAtlases([atlas], { allowRotation: false, padding: op.padding, maxSize: op.maxSize, ...(gutter ? { gutter } : {}) });
+        const r = repackAtlases([atlas], { allowRotation: false, padding: op.padding, maxSize: op.maxSize, ...(gutter ? { gutter } : {}) }, aliasMaps);
         if (r.atlases.length !== 1) {
           skipped.push({ assetRef: ref, reason: 'Spine repack spilled into multiple sheets' });
           continue;
@@ -1315,9 +1377,12 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         // HONESTY (invariant 5): if the gutter grew this sheet's POT, the .atlas `size:` line + PNG dims
         // changed — surface the VRAM growth (no "identical round-trip" claim when the bin grew). The delta
         // is the gutter pack's footprint minus the SAME pack with no gutter.
-        if (gutter > 0) extrudeVramDelta += r.vramBytesAfter - repackAtlases([atlas], { allowRotation: false, padding: op.padding, maxSize: op.maxSize }).vramBytesAfter;
+        if (gutter > 0) extrudeVramDelta += r.vramBytesAfter - repackAtlases([atlas], { allowRotation: false, padding: op.padding, maxSize: op.maxSize }, aliasMaps).vramBytesAfter;
         if (tieringOn) tierTransformed.add(ref); // repacked → tier loop surfaces an honest skip (§7 v1 scope)
-        operations.push(`repack ${basename(ref)} (spine) → ${na.size.w}×${na.size.h}`);
+        // Frame-redundancy (round19): count + surface the byte-identical frames this repack aliased onto a
+        // shared region (the smaller-sheet VRAM win is ALREADY inside vramSaved). 0/absent ⇒ today's string.
+        framesAliasedTotal += r.aliasedFrames ?? 0;
+        operations.push(`repack ${basename(ref)} (spine) → ${na.size.w}×${na.size.h}${r.aliasedFrames ? ` (${r.aliasedFrames} frames aliased)` : ''}`);
         continue;
       }
       for (const rf of op.atlasRefs) if (spineRefs.has(rf)) skipped.push({ assetRef: rf, reason: 'Spine atlas not mergeable in v1' });
@@ -1365,7 +1430,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         }
         const poly = repackAtlasesPolygon(group, masks, meshById, { allowRotation: false, padding: 0, maxSize: op.maxSize, emitMesh: true });
         // The rectangle fallback owns the gutter (only it composes with extrude); the polygon nester never does.
-        const rect = repackAtlases(group, { allowRotation: false, padding: op.padding, maxSize: op.maxSize, ...(gutter ? { gutter } : {}) });
+        const rect = repackAtlases(group, { allowRotation: false, padding: op.padding, maxSize: op.maxSize, ...(gutter ? { gutter } : {}) }, aliasMaps);
         if (polygonWins(poly, rect)) {
           r = poly;
           polySelected = true; // receipt stats are accrued only AFTER this op composes (below), never on a later skip
@@ -1374,7 +1439,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           for (const rf of refs) skipped.push({ assetRef: rf, reason: 'polygon mode: no measurable VRAM win, used rectangle packing' });
         }
       } else {
-        r = repackAtlases(group, { allowRotation: false, padding: op.padding, maxSize: op.maxSize, ...(gutter ? { gutter } : {}) });
+        r = repackAtlases(group, { allowRotation: false, padding: op.padding, maxSize: op.maxSize, ...(gutter ? { gutter } : {}) }, aliasMaps);
       }
 
       if (!merge && r.atlases.length !== 1) {
@@ -1462,7 +1527,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
               changeRows.push(...repackChanges(mPath, emittedJson, emittedImage));
             }
           }
-          operations.push(`repack ${basename(ref)}${polySelected ? ' (polygon)' : ''} → ${na.size.w}×${na.size.h} ${sheet!.mime.replace('image/', '')}`);
+          operations.push(`repack ${basename(ref)}${polySelected ? ' (polygon)' : ''} → ${na.size.w}×${na.size.h} ${sheet!.mime.replace('image/', '')}${r.aliasedFrames ? ` (${r.aliasedFrames} frames aliased)` : ''}`);
         }
       }
       if (!composeOk) {
@@ -1479,15 +1544,18 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           if (mp) dropped.add(mp);
         }
         referencesChanged = true;
-        operations.push(`merge ${refs.length} atlases → ${r.atlases.length} sheet${r.atlases.length === 1 ? '' : 's'}`);
+        operations.push(`merge ${refs.length} atlases → ${r.atlases.length} sheet${r.atlases.length === 1 ? '' : 's'}${r.aliasedFrames ? ` (${r.aliasedFrames} frames aliased)` : ''}`);
         // Loader-migration (SET→SET): each OLD atlas manifest the game loaded → the merged manifest set.
         changeRows.push(...mergeChanges(refs.map((rf) => manifestPathOf(rf)).filter((m): m is string => !!m), mergedManifestPaths, mergedPageImages));
       }
       vramSaved += r.vramBytesBefore - r.vramBytesAfter;
+      // Frame-redundancy (round19): count the byte-identical frames this repack/merge aliased (the
+      // smaller-sheet VRAM win is ALREADY inside vramSaved). 0/absent ⇒ no change to the receipt.
+      framesAliasedTotal += r.aliasedFrames ?? 0;
       // HONESTY (invariant 5): a symmetric gutter CAN grow a sheet to the next POT ⇒ MORE VRAM. When the
       // rectangle path shipped WITH a gutter, surface the truthful delta (gutter pack footprint − the SAME
       // pack with no gutter). The growth is ALSO already inside vramSaved/vramBytes* — never claimed free.
-      if (composeExtrude > 0 && gutter > 0) extrudeVramDelta += r.vramBytesAfter - repackAtlases(group, { allowRotation: false, padding: op.padding, maxSize: op.maxSize }).vramBytesAfter;
+      if (composeExtrude > 0 && gutter > 0) extrudeVramDelta += r.vramBytesAfter - repackAtlases(group, { allowRotation: false, padding: op.padding, maxSize: op.maxSize }, aliasMaps).vramBytesAfter;
       // Accrue polygon receipt stats only now that the op has fully composed (skips above never reach here),
       // so meshSprites / polygonAreaSavedPct reflect ONLY sheets that actually shipped.
       if (polySelected) {
@@ -2686,6 +2754,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     ...(extrudedBlits > 0 ? { extrudePx: extrudePxApplied, extrudedBlits } : {}),
     ...(extrudeSkippedCount > 0 ? { extrudeSkipped: extrudeSkippedCount } : {}),
     ...(extrudeVramDelta !== 0 ? { extrudeVramDelta } : {}),
+    // Frame-redundancy aliasing (round19, additive/optional): the total byte-identical frames aliased onto a
+    // shared region. The smaller-sheet VRAM win is ALREADY inside vramBytesBefore/After (exact). 0 ⇒ omitted
+    // ⇒ receipt byte-identical to today (no frame-redundancy finding, or the toggle was off).
+    ...(framesAliasedTotal > 0 ? { framesAliased: framesAliasedTotal } : {}),
     // Sheet-diff X-ray (round6-f1-sheet-diff.md, additive/optional): before/after FilmViewer pairs for the
     // first SHEET_DIFF_MAX composed sheets; sheetDiffsTotal counts ALL composed ("showing N of M"). Empty
     // ⇒ both omitted ⇒ receipt byte-identical to today.
@@ -2933,6 +3005,46 @@ async function computeFeatures(bytesByRef: Map<string, ArrayBuffer>): Promise<Im
 async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Frame-redundancy hashing in the fix path (round19) — the SAME pure-core split as analyze.worker.ts: ONE
+ *  full-resolution decode per atlas page, then the PURE extractFrameRegions does the caps/bounds/flat-guard/
+ *  region-extraction off that single buffer; each surviving region's tightly-packed RGBA bytes are SHA-256'd
+ *  here (crypto.subtle is async). Index-aligned to `sprites`. Returns null (whole page skipped) when
+ *  OffscreenCanvas is unavailable, the decode fails, the 2d context is unavailable, or the page exceeds the
+ *  size/sprite caps — the rule simply never fires for that page. Identical magnitude to the composePageEncode
+ *  source decode a repack already pays. Deterministic (stable SHA + deterministic flat threshold). */
+async function hashAtlasFrames(pageBytes: ArrayBuffer, sprites: Sprite[]): Promise<(string | null)[] | null> {
+  if (typeof OffscreenCanvas === 'undefined') return null;
+  try {
+    const bmp = await createImageBitmap(new Blob([pageBytes]));
+    const { width, height } = bmp;
+    if (width <= 0 || height <= 0) {
+      bmp.close();
+      return null;
+    }
+    const canvas = new OffscreenCanvas(width, height);
+    const c2d = canvas.getContext('2d', { willReadFrequently: true });
+    if (!c2d) {
+      bmp.close();
+      return null;
+    }
+    c2d.drawImage(bmp, 0, 0);
+    bmp.close();
+    const page = c2d.getImageData(0, 0, width, height).data; // one full-res read; the pure helper does the rest
+    const regions = extractFrameRegions(
+      page,
+      width,
+      height,
+      sprites.map((sp) => sp.frame),
+    );
+    if (!regions) return null; // whole page skipped (caps) — honest, the rule never fires for it
+    const out: (string | null)[] = [];
+    for (const region of regions) out.push(region === null ? null : await sha256Hex(region.buffer as ArrayBuffer));
+    return out;
+  } catch {
+    return null;
+  }
 }
 
 async function dHashHex(bytes: ArrayBuffer): Promise<string | null> {

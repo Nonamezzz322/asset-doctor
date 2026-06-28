@@ -10,13 +10,28 @@ GitHub creds — user pushes); commit hashes below are over that base.
 
 ---
 
-## Round 19 — selection only (design pending; session-limit) — 2026-06-29
-Selection chose 3, but the design phase hit the session limit (resets ~01:20 Kyiv) → designs not produced.
-Picks to design+build on resume: **(a) frame-redundancy FIX** (alias N byte-identical frames to ONE packed
-region in the repack — turns the r18 detector into a Pro fix; exact VRAM via repack, drop-in via the manifest);
-**(b) fix-worker memory bounds** (LRU-evict + `close()` decoded ImageBitmaps with a byte budget; free on
-finish/cancel); **(c) trim-margin detector** (transparent padding baked inside packed rects → exact recoverable VRAM).
-Status: re-run the design, then impl each.
+## Round 19 — selection (3 picks; #0 shipped) — 2026-06-29
+Picks: **(a) frame-redundancy FIX** (shipped, #0 below); **(b) fix-worker memory bounds**; **(c) trim-margin
+detector**. Designs for (b)/(c) pending.
+
+- **#0 Frame-redundancy FIX** (`docs/improvements/round19-frame-redundancy-fix.md`) — turns the r18 detector
+  into a Pro fix: alias N byte-identical animation frames within an atlas onto ONE packed region in the repack
+  (one Blit per representative; every original name still resolves via the manifest), exact VRAM before→after
+  (no estimate), drop-in by construction. Review verdict from the design's own skeptic: **SALVAGEABLE +
+  BLOCKER B1 fixed** — a frame-redundant atlas is usually FULLY packed (its duplicates fill the sheet ⇒ no
+  occupancy/wasted finding ⇒ no repack today), so the FINDING itself now emits its OWN `repack` op (reuses the
+  `repack` OpKind ⇒ tally/manifest/selective-fix/receipt unchanged), and the WORKER pre-hashes qualifying merged
+  atlas pages BEFORE `analyze()` (one decode/qualifying page, ≥minDuplicates pre-filter, respects cancel) so the
+  finding actually fires. `repackAtlases` gained an optional `aliasMaps` arg: packs ONE representative per
+  byte-identical cluster, emits a Sprite for each alias name at the shared rect copying the alias's OWN
+  trim/pivot/sourceSize, with a DUAL occupancy accumulator (source=all sprites before, packed=reps after).
+  Pure `packages/fix/src/alias.ts` mirrors the detector's distinct-rect guard byte-for-byte (pre-aliased rects
+  never double-count; `aliasedFrames` === the finding's `dupes`). New `FixOptions.frameRedundancy`
+  (default ON) + App toggle + `PlanOptions.frameRedundancy` + `RepackResult.aliasedFrames` +
+  `FixReceipt.framesAliased` + receipt line + i18n ×9. Additive: absent/false ⇒ no hashing, no new op, no
+  aliasing ⇒ byte-identical. Tests: pure `alias.test.ts` (8) + end-to-end on the fully-packed
+  `frame-redundant` fixture (B1 op fires, all 8 names resolve, 4 idle share one rect, exact VRAM, honesty pin
+  `aliasedFrames === dupes`) + a synthetic POT-tier VRAM-drop proof. Gate: typecheck + test (388 fix) + lint green.
 
 ## Round 18 — robustness + moat + analysis depth — 2026-06-29
 - `4870cc1` **Abortable workers** — `AbortSignal` seam through analyze + fix workers + clients; cooperative cancel flag; a superseded drop aborts the prior run. Additive (no signal ⇒ byte-identical). Review SHIP.

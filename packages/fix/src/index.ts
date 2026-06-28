@@ -10,6 +10,11 @@ export { effectiveExtrude, canExtrude, extrudePlan } from './extrude';
 export type { ExtrudeRect } from './extrude';
 export { repackAtlases, repackAtlasesPolygon, polygonWins, scaleAtlas } from './repack';
 export type { RepackOptions, PolygonRepackOptions } from './repack';
+// Frame-redundancy aliasing (round19) — PURE byte-identical-frame clustering that mirrors the detector's
+// distinct-rect logic. The worker feeds the result into repackAtlases so duplicate frames share ONE packed
+// region (one Blit per representative) while EVERY original name still resolves in the emitted manifest.
+export { buildAtlasAliasMap, buildAtlasAliasMaps } from './alias';
+export type { AtlasAliasMap } from './alias';
 export { emitTexturePackerJson, emitSpineAtlasText } from './manifest';
 // Feature 4 (pack loose assets) — PURE alpha-bbox → trim metadata; the SINGLE home of the Spine Y-flip
 // (spineOffsetFrom). See docs/spritesheet-packing-design.md § 3a.

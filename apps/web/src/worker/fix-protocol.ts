@@ -106,6 +106,18 @@ export interface FixOptions {
   /** Bypass the minLooseImages floor (a forced 1-region sheet is valid). Default false. */
   packForced?: boolean;
 
+  // ── Frame-redundancy aliasing (round19) — DEFAULT ON (drop-in, lossless, shrinks the sheet). ──
+  /** Alias byte-identical animation frames within an atlas onto ONE shared packed region (round19). The
+   *  diagnosis MEASURES the duplicate frames (frame-redundancy finding, hashed off the decoded page); when
+   *  this is ON (the default — undefined is treated as ON) the worker pre-hashes qualifying merged atlas pages
+   *  BEFORE analyze so the finding fires, the finding emits its OWN repack op (a frame-redundant atlas is
+   *  usually FULLY packed ⇒ no occupancy/wasted repack would otherwise schedule it), and repackAtlases packs
+   *  ONE representative per byte-identical cluster while emitting a Sprite for EACH alias name at the shared
+   *  rect (its own trim/pivot preserved). DROP-IN: every original frame name still resolves; the sheet is
+   *  smaller (exact VRAM before→after, no estimate). `false` ⇒ no hashing, no new op, no aliasing ⇒
+   *  byte-identical to today (the finding stays a diagnosis-only verdict). */
+  frameRedundancy?: boolean;
+
   // ── Edge-extrude (bleed) — own Pro toggle, DEFAULT OFF (0). ──
   /** Replicate each rectangle sprite's outermost edge rows/cols into the symmetric packing gutter (px),
    *  to kill bilinear/mipmap seams in packed sheets. UI knob 0(off)/1/2. The plan sets each repack/pack
@@ -361,6 +373,12 @@ export interface FixReceipt {
    *  (invariant 5: a symmetric gutter can grow a bin — never claimed free). Reported SEPARATELY; the
    *  growth is ALSO already reflected in vramBytes*. Absent/0 ⇒ no bin grew. */
   extrudeVramDelta?: number;
+  /** Frame-redundancy aliasing (round19): the total count of byte-identical animation frames ALIASED onto a
+   *  shared packed region across every repack this run (Σ RepackResult.aliasedFrames). Every aliased name
+   *  still resolves in the emitted manifest — its pixels are just written ONCE — and the sheet shrank, so the
+   *  VRAM win is ALREADY inside vramBytesBefore/After (exact, no estimate). Absent/0 ⇒ no frames were aliased
+   *  (no frame-redundancy finding, or the toggle was off) ⇒ receipt byte-identical to today. */
+  framesAliased?: number;
   /** Before/after X-ray of the repacked/merged/packed/Spine-repacked sheets, capped at the first N=6
    *  composed (≤8 MB/side). `sheetDiffsTotal` = how many were composed in all, so the UI can say
    *  "showing N of M". The bytes are transferred to the main thread. Additive: empty ⇒ both omitted ⇒

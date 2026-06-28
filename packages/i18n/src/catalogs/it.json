@@ -439,5 +439,8 @@
   "license.err.reactivate": "Riattiva questo dispositivo",
   "license.err.network": "Impossibile contattare il server delle licenze",
   "license.err.rate_limited": "Troppi tentativi — attendi un minuto",
-  "license.err.generic": "Attivazione non riuscita"
+  "license.err.generic": "Attivazione non riuscita",
+  "fix.settings.frameRedundancy": "Collega i fotogrammi di animazione duplicati",
+  "fix.settings.frameRedundancyHint": "Impacchetta una sola volta i fotogrammi di animazione identici byte per byte e fai puntare ogni nome duplicato alla regione condivisa: foglio più piccolo e meno VRAM. Drop-in: ogni nome di fotogramma viene ancora risolto. VRAM esatta, nessuna stima.",
+  "fix.framesAliased": { "$count": "n", "one": "Collegato {n} fotogramma duplicato a una regione condivisa — VRAM {before:bytes} → {after:bytes} (tutti i nomi dei fotogrammi vengono ancora risolti)", "other": "Collegati {n} fotogrammi duplicati a una regione condivisa — VRAM {before:bytes} → {after:bytes} (tutti i nomi dei fotogrammi vengono ancora risolti)" }
 }

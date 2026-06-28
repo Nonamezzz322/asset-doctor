@@ -436,5 +436,8 @@
   "license.err.reactivate": "कृपया इस डिवाइस को फिर से सक्रिय करें",
   "license.err.network": "लाइसेंस सर्वर से संपर्क नहीं हो सका",
   "license.err.rate_limited": "बहुत अधिक प्रयास — एक मिनट रुकें",
-  "license.err.generic": "सक्रियण विफल"
+  "license.err.generic": "सक्रियण विफल",
+  "fix.settings.frameRedundancy": "डुप्लिकेट एनिमेशन फ़्रेम को एलियास करें",
+  "fix.settings.frameRedundancyHint": "बाइट-समान एनिमेशन फ़्रेम को एक ही बार पैक करें और हर डुप्लिकेट नाम को साझा क्षेत्र की ओर इंगित करें — छोटी शीट और कम VRAM. ड्रॉप-इन: हर फ़्रेम नाम अब भी हल होता है. सटीक VRAM, कोई अनुमान नहीं.",
+  "fix.framesAliased": { "$count": "n", "one": "{n} डुप्लिकेट फ़्रेम को साझा क्षेत्र पर एलियास किया — VRAM {before:bytes} → {after:bytes} (सभी फ़्रेम नाम अब भी हल होते हैं)", "other": "{n} डुप्लिकेट फ़्रेम को साझा क्षेत्र पर एलियास किया — VRAM {before:bytes} → {after:bytes} (सभी फ़्रेम नाम अब भी हल होते हैं)" }
 }

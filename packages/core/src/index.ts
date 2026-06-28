@@ -677,6 +677,12 @@ export interface RepackResult {
   occupancyAfter: number;
   vramBytesBefore: number;
   vramBytesAfter: number;
+  /** Frame-redundancy aliasing (round19): the count of byte-identical frame names that were ALIASED onto a
+   *  shared packed region instead of packing their own copy — every alias name still resolves in the emitted
+   *  manifest, but its pixels are written ONCE (one Blit per representative). This is the count of source
+   *  sprites BEYOND the one kept per byte-identical cluster (Σ over clusters of distinctRects − 1 ⇒ matches the
+   *  frame-redundancy finding's `dupes`). Absent/0 ⇒ no aliasMaps were supplied ⇒ byte-identical to today. */
+  aliasedFrames?: number;
 }
 
 /** One emitted file in the optimized download. `originalPath` drives the zip tree; `bytes` is the new

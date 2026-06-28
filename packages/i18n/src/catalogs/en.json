@@ -416,5 +416,8 @@
   "license.err.reactivate": "Please activate this device again",
   "license.err.network": "Couldn't reach the licensing server",
   "license.err.rate_limited": "Too many attempts — wait a minute",
-  "license.err.generic": "Activation failed"
+  "license.err.generic": "Activation failed",
+  "fix.settings.frameRedundancy": "Alias duplicate animation frames",
+  "fix.settings.frameRedundancyHint": "Pack byte-identical animation frames once and point every duplicate name at the shared region — a smaller sheet and less VRAM. Drop-in: every frame name still resolves. Exact VRAM, no estimate.",
+  "fix.framesAliased": { "$count": "n", "one": "Aliased {n} duplicate frame onto a shared region — VRAM {before:bytes} → {after:bytes} (all frame names still resolve)", "other": "Aliased {n} duplicate frames onto a shared region — VRAM {before:bytes} → {after:bytes} (all frame names still resolve)" }
 }
