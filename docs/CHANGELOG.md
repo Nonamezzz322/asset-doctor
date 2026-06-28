@@ -33,6 +33,34 @@ detector**. Designs for (b)/(c) pending.
   `frame-redundant` fixture (B1 op fires, all 8 names resolve, 4 idle share one rect, exact VRAM, honesty pin
   `aliasedFrames === dupes`) + a synthetic POT-tier VRAM-drop proof. Gate: typecheck + test (388 fix) + lint green.
 
+- **#1 Fix-worker memory bounds** (`docs/improvements/round19-fix-worker-memory-bounds.md`) — bounds the
+  fix-worker's decoded-source resident set so a multi-dozen-page Pro fix can't pile hundreds of MB of decoded
+  ImageBitmaps resident and OOM the tab (the worst failure on the PAID path: `bitmapOf`'s old `bmpCache`
+  never `.close()`d/evicted/drained, holding every decode for the whole run). New PURE Node-testable policy
+  `apps/web/src/lib/bitmap-budget.ts`: `BitmapBudget<Closeable>` — an LRU keyed by ref, bounded by a
+  documented byte budget (`BITMAP_BUDGET_BYTES` = 256 MB ≈ 16 full 2048² RGBA pages, Σ w·h·4), with a
+  close-callback, a `pin`/`unpinAll` set for the in-flight op's source refs (the LRU NEVER evicts a pinned
+  bitmap), and a `drain()` that close()s + clears everything. Over-budget insert close()+evicts the LRU
+  UNPINNED entry (≠ the just-inserted ref) until under budget OR only pinned/this remain (a single page > the
+  whole budget is admitted; all-pinned-over-budget is tolerated — correctness over the bound, surfaced via
+  `peakCount`). Worker wiring: `bitmapOf` routes through it; `bmpBudget` is hoisted at the top of `runFix` and
+  the whole body wrapped in `try { … } finally { bmpBudget?.drain() }` so a finished/superseded run (incl.
+  every round18 cancel `return` and a thrown error) frees native memory immediately (composes with the
+  abortable-workers cancel path; plan-mode / pre-decode cancel ⇒ `bmpBudget` undefined ⇒ drain no-op). A
+  `teardownPrevOp()` at the TOP of each `plan.ops` iteration (and once after) unpins + drops the prior op's
+  per-op `maskCache`/`meshCache`/`trimCache` entries — ONE site that fires regardless of the body's 20+
+  `continue` exits. `pin(srcRefs)` early in the merge/polygon (group atlases) + pack (`group.regions`)
+  branches stops a re-decode storm within one multi-source op. Optional descriptive receipt note
+  `FixReceipt.decodeWorkingSet { decodedPages, budgetBytes }` (gated on `peakCount > 0`; NEVER a VRAM/saving
+  number — invariant 5). CORRECTNESS: a miss re-decodes safely from the whole-run-retained `bytesByRef` (a
+  wrongly-evicted entry costs CPU, never a wrong pixel); the LRU never evicts a ref the current op still needs.
+  ADDITIVITY: under the byte budget nothing evicts ⇒ same decode set + order ⇒ output byte-identical to before.
+  DETERMINISM: eviction only frees memory (recency = call order, ties by Map insertion order). Tests: PURE
+  headless `apps/web/src/lib/bitmap-budget.test.ts` (13) — eviction-over-budget + close-fires +
+  nothing-under-budget + recency-refresh + never-evict-the-pinned-ref (+ unpin makes it evictable, all-pinned
+  tolerated) + single-oversized-admitted + drain-closes-once/idempotent + replace-frees-stale + peakCount +
+  determinism. Additive: under budget ⇒ byte-identical. Gate: typecheck + test (web 389) + lint green.
+
 ## Round 18 — robustness + moat + analysis depth — 2026-06-29
 - `4870cc1` **Abortable workers** — `AbortSignal` seam through analyze + fix workers + clients; cooperative cancel flag; a superseded drop aborts the prior run. Additive (no signal ⇒ byte-identical). Review SHIP.
 - `1c6902d` **correlateFix(receipt)** — measured before→after fix probe → one localized doctor verdict (reuses `CorrelatedFinding` + variant-suffixed i18n; measured-only, honest). Review SHIP.

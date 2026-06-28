@@ -1,4 +1,12 @@
-import type { ExportProfile, ImageMime, LazyMarking, OverlayZone, Rect, ScaleTier, SkinGuard } from '@asset-doctor/core';
+import type {
+  ExportProfile,
+  ImageMime,
+  LazyMarking,
+  OverlayZone,
+  Rect,
+  ScaleTier,
+  SkinGuard,
+} from '@asset-doctor/core';
 import type { PackMode, StaticGranularity } from '@asset-doctor/ingest';
 // Type-only import (erased under verbatimModuleSyntax ⇒ no runtime cycle with op-manifest, which already
 // type-imports FixPlanSummary/PlanOpCounts from here). op-manifest.ts is the documented OWNER of the OpKind
@@ -440,6 +448,12 @@ export interface FixReceipt {
    *  failed / asset 404'd) ⇒ the measured number is NOT a win here — disclosed so it is never mis-sold.
    *  Absent ⇒ no probe ran (or every probed page got real compression). */
   probedKtx2Fallback?: boolean;
+  /** round19-fix-worker-memory-bounds.md (#1): DESCRIPTIVE working-set note — the high-water count of decoded
+   *  SOURCE bitmaps held at once during the fix and the byte budget that bounded them. This is a transient
+   *  CPU-side decode working-set bound, NOT a VRAM figure: it is NEVER folded into vramBytesBefore/After or
+   *  any saving (invariant 5). Present only when ≥1 source bitmap was decoded (gated on peakCount > 0) ⇒ a
+   *  no-decode run omits it ⇒ receipt byte-identical to today. The UI may show or ignore it (additive). */
+  decodeWorkingSet?: { decodedPages: number; budgetBytes: number };
   /** True iff this run produced ≥1 `.ktx2`/`.ktx2.json` page (round15-emit-the-exact-pixi-v8-ktx2-loader-
    *  migration). The `.ktx2`/`.ktx2.json` paths live in `out`/the manifest variants (the loader resolves
    *  them via the entry's `src`), NOT in `changes[]` — so this boolean is the only seam that lets the
@@ -458,7 +472,9 @@ export interface FixReceipt {
  *  Counts the STRUCTURED FixOp[] the execute path would run (repack/merge split by atlasRefs.length;
  *  drop/dedup split by ownerRef; resize/transcode/pack literal) PLUS the worker-side `tier` multiplier
  *  (an upper bound — tiering can still be refused at pixel time). Zero-count kinds are OMITTED. */
-export type PlanOpCounts = Partial<Record<'repack' | 'resize' | 'transcode' | 'drop' | 'merge' | 'pack' | 'dedup' | 'tier', number>>;
+export type PlanOpCounts = Partial<
+  Record<'repack' | 'resize' | 'transcode' | 'drop' | 'merge' | 'pack' | 'dedup' | 'tier', number>
+>;
 
 /** The dry-run preview the worker posts in 'plan' mode. Deterministic; carries NO pixels and — by
  *  design — NO byte/VRAM savings (counts only, until execute). */
