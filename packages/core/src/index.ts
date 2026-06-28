@@ -136,6 +136,14 @@ export interface FormatTarget {
   lossless?: boolean;
   /** webp near-lossless 0..100 (100/omit ⇒ off). Ignored for non-webp. */
   near?: number;
+  /** PNG ONLY (round13-pngquant-backend.md): route this PNG target through the OPT-IN pngquant backend
+   *  (lossy-indexed re-compression). DISK-ONLY — a quantized PNG still decodes to full RGBA8888 on the GPU
+   *  ⇒ ZERO footprint/VRAM change (vramCeiling stays raster w·h·4, invariant 5). The win is a SMALLER
+   *  DOWNLOAD, never a GPU win. validateProfile MUST reject it on any non-png format AND must split the PNG
+   *  dup-target key (`image/png|lossy` vs `image/png`) so a lossless+lossy PNG pair is not a false dupTarget
+   *  (B2). Backend OFF/declined/quality-floor ⇒ the worker emits a lossless PNG instead (honest fallback).
+   *  Omit/false ⇒ ordinary (native lossless) PNG, byte-identical to today. */
+  pngLossy?: boolean;
 }
 
 /** One resolution rung of a profile. `label` is presentation-only; `suffix` is the on-disk

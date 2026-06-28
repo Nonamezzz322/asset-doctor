@@ -16,6 +16,7 @@ import {
   backendReachable,
   encodeRemote,
   KTX2_PROFILE,
+  PNGQUANT_PROFILE,
 } from '../src/lib/backend-client';
 
 const CFG = { apiBase: 'https://api.example.dev', token: 'tok-abc' };
@@ -83,6 +84,22 @@ describe('encodeRemote — success', () => {
     expect(Array.from(Buffer.from(body.png as string, 'base64'))).toEqual(Array.from(PNG));
   });
 
+  it('round13: op:pngquant sends the pinned PNGQUANT_PROFILE (op-keyed, not the ktx2 profile) + returns the PNG bytes', async () => {
+    const pngOut = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 7, 7]); // a (pretend) re-compressed PNG
+    let captured: { init?: RequestInit } | undefined;
+    mockFetch((_url, init) => {
+      captured = { init };
+      return new Response(pngOut, { status: 200, headers: { 'Content-Type': 'image/png' } });
+    });
+    const res = await encodeRemote(PNG, 'pngquant', 64, 64, CFG);
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(Array.from(res.bytes)).toEqual(Array.from(pngOut));
+    const body = JSON.parse(captured!.init!.body as string) as Record<string, unknown>;
+    expect(body.op).toBe('pngquant');
+    expect(body.profile).toBe(PNGQUANT_PROFILE); // op-keyed: pngquant-256-fs, NOT uastc-zstd-mip
+    expect(body.profile).not.toBe(KTX2_PROFILE);
+  });
+
   it('strips a trailing slash from apiBase (no double slash in the URL)', async () => {
     let url = '';
     mockFetch((u) => {
@@ -111,6 +128,17 @@ describe('encodeRemote — honest failures (never throws)', () => {
     const res = await encodeRemote(PNG, 'ktx2', 64, 64, CFG);
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.code).toBe('http_503');
+  });
+
+  it('round13 M1: relays the pngquant quality_floor 422 code verbatim (the worker treats it as kept-original)', async () => {
+    mockFetch(() =>
+      new Response(JSON.stringify({ error: 'quality floor not met; original kept', code: 'quality_floor' }), {
+        status: 422,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    const res = await encodeRemote(PNG, 'pngquant', 64, 64, CFG);
+    expect(res).toEqual({ ok: false, code: 'quality_floor', message: 'quality floor not met; original kept' });
   });
 
   it('returns code:empty when a 200 has a ZERO-length body (no .ktx2 produced)', async () => {

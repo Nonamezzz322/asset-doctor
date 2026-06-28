@@ -149,15 +149,23 @@ function validateFormatList(formats: FormatTarget[], label: string, errors: stri
     if (f.near !== undefined && (!Number.isFinite(f.near) || f.near < 0 || f.near > 100)) {
       errors.push(`${pre}badNear: ${String(f.near)} (must be in [0,100])`);
     }
+    // round13 B2: `pngLossy` is PNG-ONLY (it routes the page through the pngquant backend). On any non-png
+    // target it is meaningless — fail the profile closed rather than silently ignore it (invariant 3).
+    if (f.pngLossy && f.format !== 'image/png') {
+      errors.push(`${pre}pngLossyNonPng: pngLossy is only valid on image/png (got "${f.format}")`);
+    }
     // Duplicate-target key: two targets that resolve to the SAME emitted bytes clobber each other. Key on
     // the EFFECTIVE encode, not the raw fields, so e.g. {quality:undefined} and {quality:85} (the default,
     // DEFAULT_FORMAT_QUALITY) are caught as the same emit. PNG is always native-lossless (quality/near/
-    // lossless irrelevant ⇒ any two PNG targets clobber); lossless ignores quality/near; near is WebP-only.
+    // lossless irrelevant ⇒ any two PLAIN PNG targets clobber); lossless ignores quality/near; near is
+    // WebP-only. round13 B2: a `pngLossy` PNG (pngquant-routed) emits DIFFERENT bytes than a plain lossless
+    // PNG, so its dup-key MUST split (`image/png|lossy` vs `image/png`) — else a lossless+lossy PNG pair is a
+    // false dupTarget and the whole profile fails closed.
     let key: string;
-    if (f.format === 'image/png') key = 'image/png';
+    if (f.format === 'image/png') key = f.pngLossy ? 'image/png|lossy' : 'image/png';
     else if (f.lossless) key = `${f.format}|L`;
     else key = `${f.format}|q${f.quality ?? 85}${f.format === 'image/webp' ? `|n${f.near ?? 'off'}` : ''}`;
-    if (seen.has(key)) errors.push(`${pre}dupTarget: ${f.format}${f.lossless ? ' lossless' : ''}`);
+    if (seen.has(key)) errors.push(`${pre}dupTarget: ${f.format}${f.pngLossy ? ' lossy' : f.lossless ? ' lossless' : ''}`);
     else seen.add(key);
   }
 }

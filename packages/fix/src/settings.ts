@@ -124,6 +124,13 @@ export interface FormatEncode {
   avifQualityAlpha?: number;
   avifSubsample?: number;
   pngRecompressLevel?: number;
+  /** PNG ONLY (round13-pngquant-backend.md): this PNG target asked for OPT-IN pngquant lossy-indexed
+   *  re-compression (FormatTarget.pngLossy). PURE MARKER ONLY — formatEncode never uploads; the worker reads
+   *  this at the PNG-emit site and routes the composed lossless PNG page through the pngquant backend (or, on
+   *  backend-off/declined/quality-floor, keeps the lossless PNG with an honest skip). DISK-ONLY: a quantized
+   *  PNG still decodes to full RGBA8888 on the GPU ⇒ ZERO VRAM change (no VRAM field, ever). Absent/false ⇒
+   *  an ordinary native-lossless PNG, byte-identical to today. NEVER set for webp/avif. */
+  nativePng?: boolean;
 }
 
 /**
@@ -149,13 +156,19 @@ export function formatEncode(
   const quality = scaleAwareQuality(baseQuality, scale, global.scaleAwareQuality);
 
   if (fmt.format === 'image/png') {
+    // A `pngLossy` PNG target requests OPT-IN pngquant lossy-indexed re-compression (round13). We still
+    // describe a LOSSLESS PNG encode here (the worker composes the page losslessly first, then the pngquant
+    // post-pass re-compresses its bytes IN PLACE) and carry the `nativePng` marker so the worker can route
+    // it. The marker is PURE — formatEncode decides, never uploads. Omit/false ⇒ ordinary native-lossless PNG
+    // ⇒ no marker key ⇒ byte-identical to today.
     return {
       targetMime: 'image/png',
       quality, // irrelevant for png (native lossless); kept for shape consistency.
-      lossless: true, // PNG is always lossless in our wiring.
+      lossless: true, // PNG is always lossless in our wiring (pngquant re-compresses the composed bytes).
       effort: global.effort,
       webpNearLossless: 100, // off — not a webp.
       pngRecompressLevel: global.pngRecompressLevel,
+      ...(fmt.pngLossy ? { nativePng: true } : {}),
     };
   }
 

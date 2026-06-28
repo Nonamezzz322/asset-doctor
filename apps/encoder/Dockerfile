@@ -1,13 +1,14 @@
-# apps/encoder — KTX2 native-encode SIDECAR.
+# apps/encoder — native-encode SIDECAR (KTX2 via toktx + lossy-indexed PNG via pngquant).
 #
 # WHY A SEPARATE IMAGE FROM apps/api: apps/api is a pure-Go (CGO_ENABLED=0) binary on
 # gcr.io/distroless/static-debian12 — it has NO shell and CANNOT exec a native CLI. KTX2 encoding shells
-# out to `toktx` (KhronosGroup/KTX-Software), so it MUST live in its own image on a base that carries the
-# pinned native binary. This image is reached ONLY by apps/api over an internal docker network (see
-# README + docker-compose); it is never bound to the host or tailnet.
+# out to `toktx` (KhronosGroup/KTX-Software) and lossy-PNG to `pngquant`, so they MUST live in their own
+# image on a base that carries the pinned native binaries. This image is reached ONLY by apps/api over an
+# internal docker network (see README + docker-compose); it is never bound to the host or tailnet.
 #
 # SECURITY POSTURE (load-bearing): runs as a NON-root user, expects a READ-ONLY root filesystem at
 # runtime with a scratch tmpfs mounted at /tmp (the only writable path), holds NO secrets and NO DB.
+# pngquant (round13) reads PNG from STDIN and writes to STDOUT — it needs NO writable path of its own.
 
 # ---- Stage 1: build the Go binary (static, no cgo) ----
 FROM golang:1.26-bookworm AS build
@@ -30,8 +31,18 @@ ARG KTX_VERSION=4.4.2
 ARG KTX_DEB=KTX-Software-${KTX_VERSION}-Linux-x86_64.deb
 ARG KTX_SHA1=b7d4a0833a5aff570f01f56413e40ea8db291212
 
+# PIN: pngquant from the Debian bookworm repo. Pinning the exact apt version keeps OUTPUT BYTES stable —
+# pngquant is built against libimagequant, and a point-release can change dithering bytes, so a bump is
+# DELIBERATE: re-run the determinism golden (round13 M3) when you change this. Override at build time with
+# --build-arg PNGQUANT_VERSION=… if the repo moves. IMAGE-SIZE (honest): pngquant pulls libpng16-16 +
+# libimagequant0 (both small; libpng is usually already pulled by the base/toktx deps), so the net add is a
+# single-digit-MB binary + at most one small lib — NO new network capability, posture unchanged.
+ARG PNGQUANT_VERSION=2.17.0-1
+
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl \
+ # pngquant: pinned apt package (round13). Fails the build loudly if the pinned version is unavailable.
+ && apt-get install -y --no-install-recommends "pngquant=${PNGQUANT_VERSION}" \
  && curl -fsSL -o /tmp/ktx.deb \
       "https://github.com/KhronosGroup/KTX-Software/releases/download/v${KTX_VERSION}/${KTX_DEB}" \
  && echo "${KTX_SHA1}  /tmp/ktx.deb" | sha1sum -c - \
@@ -40,22 +51,28 @@ RUN apt-get update \
  && apt-get purge -y curl \
  && apt-get autoremove -y \
  && rm -rf /var/lib/apt/lists/* /tmp/ktx.deb \
- # Prove toktx is present + record its version into the build log (deploy-time sanity check).
+ # Prove both native tools are present + record their versions into the build log (deploy-time sanity check
+ # + the determinism-pin discipline: a version line in the log to compare against on a bump).
  && toktx --version \
- # Resolve the real install path (the .deb installs under /usr) and pin a STABLE absolute symlink so
- # TOKTX_PATH never depends on the .deb's internal layout. Fail the build loudly if toktx is missing.
+ && pngquant --version \
+ # Resolve the real install paths and pin STABLE absolute symlinks so TOKTX_PATH/PNGQUANT_PATH never depend
+ # on a package's internal layout. Fail the build loudly if either binary is missing.
  && ln -sf "$(command -v toktx)" /usr/local/bin/toktx \
- && test -x /usr/local/bin/toktx
+ && test -x /usr/local/bin/toktx \
+ && ln -sf "$(command -v pngquant)" /usr/local/bin/pngquant \
+ && test -x /usr/local/bin/pngquant
 
 # Non-root system user (no home, login shell disabled).
 RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin encoder
 
 COPY --from=build /out/encoder /usr/local/bin/encoder
 
-# Defaults: listen on the internal :8090, exec the system toktx, scratch temps under /tmp.
+# Defaults: listen on the internal :8090, exec the system toktx + pngquant, scratch temps under /tmp.
 # /tmp MUST be a writable tmpfs at runtime; the rest of the FS is expected read-only (see compose).
+# pngquant streams via stdin/stdout so it does not write to /tmp — only toktx does.
 ENV ADDR=:8090 \
     TOKTX_PATH=/usr/local/bin/toktx \
+    PNGQUANT_PATH=/usr/local/bin/pngquant \
     TMP_DIR=/tmp
 
 EXPOSE 8090

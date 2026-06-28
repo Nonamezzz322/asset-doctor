@@ -140,10 +140,14 @@ export interface FixOptions {
   hashFilenames?: boolean;
 }
 
-/** Native op kinds the OPT-IN backend can perform (round12-backend-processing.md §2). v1 = KTX2 only
- *  (UASTC → Zstd, baked mips). A closed verb set so the worker can never request an op the gateway/sidecar
- *  doesn't allow-list. Additive: a future value here NEVER changes the default (no-backend) path. */
-export type NativeOpKind = 'ktx2';
+/** Native op kinds the OPT-IN backend can perform (round12-backend-processing.md §2 + round13-pngquant-
+ *  backend.md). A closed verb set so the worker can never request an op the gateway/sidecar doesn't
+ *  allow-list. Additive: a future value here NEVER changes the default (no-backend) path.
+ *  - `ktx2`     : UASTC → Zstd, baked mips. The one honest GPU-VRAM win (block-compressed ≤1 B/px).
+ *  - `pngquant` : lossy-indexed PNG re-compression. DISK-ONLY: a quantized PNG still decodes to full
+ *                 RGBA8888 on the GPU ⇒ ZERO VRAM change (vramCeiling stays raster w·h·4). The win is a
+ *                 SMALLER DOWNLOAD / cache, NEVER a GPU/VRAM win — there is no pngquant VRAM field, ever. */
+export type NativeOpKind = 'ktx2' | 'pngquant';
 
 /** OPT-IN backend configuration (round12-backend-processing.md §5). PRESENT ⇒ the user configured a host
  *  AND we hold a valid entitlement token; the worker may offer native ops. ABSENT on FixOptions ⇒ the whole
@@ -320,13 +324,34 @@ export interface FixReceipt {
    *  zip-entry name (`manifest.json`, or a collision-avoiding fallback). Absent ⇒ no manifest emitted ⇒
    *  receipt byte-identical to today. Names/structure only — sums no saving (invariant 5). */
   pixiManifest?: { assets: number; path: string };
-  /** OPT-IN backend native ops summary (round12-backend-processing.md §7, Phase 3). Present ONLY when the
-   *  user consented AND ≥1 page was actually offered to the backend. `op` = the native op kind (v1 'ktx2');
-   *  `uploaded` = pages sent; `produced` = `.ktx2` files received + added to the zip; `failed` = pages that
-   *  fell back to the browser raster page (unreachable / declined / encode error — each surfaced in
-   *  skipped[]); `host` = the gateway origin (no token, no bytes). Absent ⇒ no backend op ran ⇒ receipt
-   *  byte-identical to today. */
-  backendNative?: { op: NativeOpKind; uploaded: number; produced: number; failed: number; host: string };
+  /** OPT-IN backend native ops summary (round12-backend-processing.md §7 + round13-pngquant-backend.md,
+   *  Phase 3). An ARRAY — ONE entry per native op that actually ran this run (B3: a single op-discriminated
+   *  field, never a parallel per-op field). Present ONLY when the user consented AND ≥1 page was actually
+   *  offered to the backend; an empty/absent array ⇒ no backend op ran ⇒ receipt byte-identical to today.
+   *  Per entry:
+   *  - `op`       : the native op kind ('ktx2' | 'pngquant').
+   *  - `uploaded` : pages sent to the backend.
+   *  - `produced` : output files received + folded into the zip (`.ktx2` for ktx2; in-place re-compressed
+   *                 PNG pages for pngquant).
+   *  - `failed`   : pages that fell back to the browser raster/lossless page (unreachable / declined /
+   *                 encode error — each surfaced in skipped[]). NOTE (M1): a pngquant quality-floor decline
+   *                 is NOT a failure — the original is kept, it does NOT increment `failed`.
+   *  - `host`     : the gateway origin (no token, no bytes).
+   *  - `bytesBefore` / `bytesAfter` (pngquant ONLY): REAL MEASURED disk byte sums — the original page bytes
+   *                 vs the pngquant'd bytes. The honest "smaller download" claim. There is NO VRAM field for
+   *                 pngquant (it decodes to full RGBA8888 ⇒ vramCeiling unchanged, invariant 5). The KTX2
+   *                 worst-case VRAM ceiling stays the SEPARATE sibling field `ktx2VramBytesWorstCase`. */
+  backendNative?: {
+    op: NativeOpKind;
+    uploaded: number;
+    produced: number;
+    failed: number;
+    host: string;
+    /** pngquant ONLY: real measured original page byte sum (disk). Omitted for ktx2. */
+    bytesBefore?: number;
+    /** pngquant ONLY: real measured re-compressed page byte sum (disk). Omitted for ktx2. */
+    bytesAfter?: number;
+  }[];
   /** HONEST worst-case GPU VRAM CEILING (bytes) of the produced `.ktx2` pages — Σ vramCeilingOfPage('ktx2-
    *  uastc', w, h, mipsBaked). This is an UPPER BOUND ("GPU VRAM ≤ …"), NEVER w·h·4 and NEVER folded into the
    *  hard vramBytesAfter (invariant 5): the runtime may transcode to BC1/ETC1 (≤0.5 B/px) or fall back to

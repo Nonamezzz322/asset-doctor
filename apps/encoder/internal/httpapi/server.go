@@ -2,7 +2,8 @@
 // it sits on an internal docker network and trusts apps/api (the gateway) to have verified the license
 // entitlement, applied per-license quota, and bounded the body BEFORE proxying here. This layer is the
 // last line of defense: it re-applies hard size/dimension/pixel caps, bounds concurrency, and never logs
-// image bytes. The actual KTX2 encode is behind the encode.Encoder interface (mocked in tests).
+// image bytes. The actual native encode (KTX2 via toktx, or pngquant) is behind the encode.Encoder
+// interface, routed by op through encode.Dispatcher (mocked in tests).
 package httpapi
 
 import (
@@ -64,8 +65,8 @@ type processRequest struct {
 	PNG     string `json:"png"`     // base64 std-encoded PNG bytes
 	W       int    `json:"w"`       // declared width  (cross-checked against caps; trusted from gateway)
 	H       int    `json:"h"`       // declared height
-	Op      string `json:"op"`      // "ktx2"
-	Profile string `json:"profile"` // "uastc-zstd-mip"
+	Op      string `json:"op"`      // "ktx2" | "pngquant"
+	Profile string `json:"profile"` // op-specific: "uastc-zstd-mip" (ktx2) | "pngquant-256-fs" (pngquant)
 }
 
 func (s *Server) handleProcess(w http.ResponseWriter, r *http.Request) {
@@ -88,12 +89,19 @@ func (s *Server) handleProcess(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Op / profile allowlist → 415 (we don't implement it). Closed sets: no flag injection possible.
-	if encode.Op(req.Op) != encode.KTX2 {
+	if !encode.SupportedOps[encode.Op(req.Op)] {
 		writeErr(w, http.StatusUnsupportedMediaType, "unsupported_op", "unsupported op")
 		return
 	}
 	if !encode.SupportedProfiles[encode.Profile(req.Profile)] {
 		writeErr(w, http.StatusUnsupportedMediaType, "unsupported_profile", "unsupported profile")
+		return
+	}
+	// op×profile compatibility → 415 (M2 seam): each op accepts exactly ONE profile. This rejects a valid
+	// op + valid-but-foreign profile (e.g. {pngquant, uastc-zstd-mip}) so a request can never smuggle one
+	// op's flags into another op's encoder.
+	if want, ok := encode.RequiredProfile(encode.Op(req.Op)); !ok || want != encode.Profile(req.Profile) {
+		writeErr(w, http.StatusUnsupportedMediaType, "unsupported_profile", "op/profile combination not supported")
 		return
 	}
 
@@ -133,11 +141,13 @@ func (s *Server) handleProcess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// M2: PROPAGATE the validated Op (do NOT hard-code KTX2) so the Dispatcher can route pngquant. The op
+	// has already passed SupportedOps + op×profile compat above.
 	out, err := s.enc.Encode(r.Context(), encode.Request{
 		PNG:     png,
 		W:       req.W,
 		H:       req.H,
-		Op:      encode.KTX2,
+		Op:      encode.Op(req.Op),
 		Profile: encode.Profile(req.Profile),
 	})
 	if err != nil {
@@ -156,11 +166,16 @@ func (s *Server) handleProcess(w http.ResponseWriter, r *http.Request) {
 }
 
 // mapEncodeError translates an Encoder error into a stable status + code. The full error (which may carry
-// a trimmed toktx stderr — never image bytes) is logged SERVER-SIDE; the client gets a generic message.
+// a trimmed native stderr — never image bytes) is logged SERVER-SIDE; the client gets a generic message.
 func (s *Server) mapEncodeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, encode.ErrUnsupported):
 		writeErr(w, http.StatusUnsupportedMediaType, "unsupported_op", "unsupported op or profile")
+	case errors.Is(err, encode.ErrQualityFloor):
+		// M1: pngquant declined because it couldn't meet the quality floor. This is NOT a failure — it is a
+		// distinct, honest outcome the client treats as "kept the original". A 422 (not a 502) keeps it out
+		// of the receipt's `failed` count. No image bytes anywhere; nothing to log.
+		writeErr(w, http.StatusUnprocessableEntity, "quality_floor", "quality floor not met; original kept")
 	case errors.Is(err, encode.ErrEncodeFailed):
 		// We log the detail (dimensions + trimmed stderr) but NOT the image bytes.
 		s.logger.Printf("encode: %v", err)

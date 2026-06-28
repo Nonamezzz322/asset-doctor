@@ -23,9 +23,21 @@ import type { NativeOpKind } from '../worker/fix-protocol';
  *  (no flag injection). Mips baked ⇒ the worker charges the ×4/3 ceiling on the produced .ktx2 (honest VRAM). */
 export const KTX2_PROFILE = 'uastc-zstd-mip';
 
-/** The pinned profile bakes a full mip chain — the worker MUST charge MIP_OVERHEAD on the produced page's
- *  VRAM ceiling (vramCeilingOfPage(..., mips=true)). Kept here so the wire profile + the VRAM accounting
- *  can't drift. */
+/** The pinned pngquant profile the apps/encoder sidecar allow-lists (round13-pngquant-backend.md): 256-color
+ *  lossy-indexed PNG with Floyd–Steinberg dithering + a quality FLOOR. Sent verbatim in `profile` so the
+ *  encode is deterministic + the sidecar rejects anything else (closed set, no flag injection). DISK-ONLY:
+ *  the output decodes to full RGBA8888 on the GPU ⇒ ZERO VRAM change (no VRAM accounting for pngquant). */
+export const PNGQUANT_PROFILE = 'pngquant-256-fs';
+
+/** Map a native op kind → its pinned wire profile. The SINGLE place the op↔profile pairing lives, so the
+ *  worker can never request an op with the wrong profile (the sidecar would 415 it via RequiredProfile). */
+export function profileForOp(op: NativeOpKind): string {
+  return op === 'pngquant' ? PNGQUANT_PROFILE : KTX2_PROFILE;
+}
+
+/** The pinned KTX2 profile bakes a full mip chain — the worker MUST charge MIP_OVERHEAD on the produced
+ *  page's VRAM ceiling (vramCeilingOfPage(..., mips=true)). Kept here so the wire profile + the VRAM
+ *  accounting can't drift. pngquant has NO mip/VRAM analogue (disk-only). */
 export const KTX2_PROFILE_BAKES_MIPS = true;
 
 /** Result of one remote encode attempt. `ok` ⇒ `bytes` is the .ktx2; otherwise `code`/`message` describe
@@ -63,14 +75,17 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
-/** Encode ONE page's PNG bytes to `.ktx2` via the OPT-IN gateway. CONTRACT (round12 §6): POST a JSON
- *  envelope `{png: base64, w, h, op, profile}` with `Authorization: Bearer <token>`; on 200 the body is
- *  RAW .ktx2 octet-stream; on any non-2xx a `{error,code}` JSON the gateway/sidecar already speak. The
- *  caller has ALREADY checked consent + reachability — this function performs the upload. It NEVER throws:
- *  every failure becomes `{ok:false,...}` so the worker can fall back to the browser raster page honestly.
+/** Encode ONE page's PNG bytes via the OPT-IN gateway for the given native op. CONTRACT (round12 §6 +
+ *  round13): POST a JSON envelope `{png: base64, w, h, op, profile}` with `Authorization: Bearer <token>`;
+ *  on 200 the body is the RAW output octet-stream — `.ktx2` for op:ktx2, a re-compressed `image/png` for
+ *  op:pngquant; on any non-2xx a `{error,code}` JSON the gateway/sidecar already speak. The pngquant
+ *  quality-floor decline surfaces as code `quality_floor` (HTTP 422) — the caller treats THAT as "kept the
+ *  original", NOT a failure (round13 M1). The caller has ALREADY checked consent + reachability — this
+ *  function performs the upload. It NEVER throws: every failure becomes `{ok:false,...}` so the worker can
+ *  fall back to the browser page honestly.
  *
  *  @param pngBytes  the page encoded as PNG (lossless) by the worker — the sidecar decodes this, not the
- *                   atlas's original lossy bytes, so the KTX2 source matches what the browser composed.
+ *                   atlas's original lossy bytes, so the produced output matches what the browser composed.
  */
 export async function encodeRemote(
   pngBytes: Uint8Array,
@@ -90,7 +105,7 @@ export async function encodeRemote(
     const res = await fetch(`${base}/v1/encode`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.token}` },
-      body: JSON.stringify({ png: toBase64(pngBytes), w, h, op, profile: KTX2_PROFILE }),
+      body: JSON.stringify({ png: toBase64(pngBytes), w, h, op, profile: profileForOp(op) }),
       signal: ctrl.signal,
     });
     if (!res.ok) {

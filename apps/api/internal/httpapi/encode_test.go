@@ -215,6 +215,79 @@ func TestEncodeHappyPathProxies(t *testing.T) {
 	}
 }
 
+// --- round13 T8: the gateway is OP-AGNOSTIC — pngquant proxies through entitlement+quota IDENTICALLY ---
+//
+// The gateway (handleEncode) reads the body and forwards it verbatim; it NEVER inspects `op`/`profile`, so a
+// new sidecar op needs ZERO gateway code change. This table-driven test proves the SAME entitlement gate,
+// the SAME per-license quota path, and verbatim body-forwarding hold for `op:pngquant` exactly as for
+// `op:ktx2` — the only difference is the bytes the (mock) sidecar streams back.
+func TestEncodeOpAgnosticProxy(t *testing.T) {
+	const ktx2Body = `{"png":"UE5HREFUQQ==","w":256,"h":256,"op":"ktx2","profile":"uastc-zstd-mip"}`
+	const pngquantBody = `{"png":"UE5HREFUQQ==","w":256,"h":256,"op":"pngquant","profile":"pngquant-256-fs"}`
+	cases := []struct {
+		name     string
+		body     string
+		sidecarCT string
+		sidecarOut string
+	}{
+		{"ktx2", ktx2Body, "application/octet-stream", "KTX2-OK"},
+		{"pngquant", pngquantBody, "image/png", "PNGQUANT-OK"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// The sidecar echoes op-specific bytes so we can assert the gateway streams them straight back.
+			sc := &fakeSidecar{handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", tc.sidecarCT)
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(tc.sidecarOut))
+			}}
+			s, h := newEncodeServer(t, sc)
+			rec := postEncode(h, tokenFor(t, s, "AD-OPAG"), tc.body)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d body=%q, want 200", rec.Code, rec.Body.String())
+			}
+			if rec.Body.String() != tc.sidecarOut {
+				t.Fatalf("proxied body = %q, want the sidecar's %q", rec.Body.String(), tc.sidecarOut)
+			}
+			if got := rec.Header().Get("Content-Type"); got != tc.sidecarCT {
+				t.Fatalf("Content-Type = %q, want %q (relayed verbatim)", got, tc.sidecarCT)
+			}
+			if sc.count() != 1 {
+				t.Fatalf("sidecar calls = %d, want 1", sc.count())
+			}
+			// The gateway forwards the EXACT body upstream — op/profile ride through untouched (no re-encode).
+			sc.mu.Lock()
+			got := string(sc.lastBody)
+			sc.mu.Unlock()
+			if got != tc.body {
+				t.Fatalf("forwarded body = %q, want verbatim %q", got, tc.body)
+			}
+		})
+	}
+}
+
+// TestEncodePngQuantQuotaShared: the per-license daily quota is OP-AGNOSTIC — a pngquant encode counts
+// against the same budget as a ktx2 encode (v1 keeps one quota knob; round13 §3). With dailyQuota=3, three
+// pngquant encodes pass and the fourth is rate-limited, exactly as for ktx2.
+func TestEncodePngQuantQuotaShared(t *testing.T) {
+	const pngquantBody = `{"png":"UE5HREFUQQ==","w":64,"h":64,"op":"pngquant","profile":"pngquant-256-fs"}`
+	sc := &fakeSidecar{}
+	s, h := newEncodeServer(t, sc) // EncodeDailyQuotaPerLicense = 3
+	tok := tokenFor(t, s, "AD-PQ-QUOTA")
+	for i := 0; i < 3; i++ {
+		if rec := postEncode(h, tok, pngquantBody); rec.Code != http.StatusOK {
+			t.Fatalf("encode #%d status = %d, want 200 (within quota)", i+1, rec.Code)
+		}
+	}
+	rec := postEncode(h, tok, pngquantBody)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("4th encode status = %d, want 429 (daily quota)", rec.Code)
+	}
+	if errCode(t, rec) != "rate_limited" {
+		t.Fatalf("code = %q, want rate_limited", errCode(t, rec))
+	}
+}
+
 // --- T7: route is DEAD when native is OFF (default) -------------------------------------------------
 
 func TestEncodeRouteAbsentWhenNativeOff(t *testing.T) {

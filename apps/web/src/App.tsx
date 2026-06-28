@@ -14,7 +14,7 @@ import { keyOf } from './lib/group';
 import { attachProbeReadings } from './lib/probe-run';
 import { runAnalysis, type Progress } from './lib/worker-client';
 import { planFix, runFix, type FixOutcome, type FixProgress } from './lib/fix-client';
-import type { BackendOptions, FixChange, FixOptions, FixPlanSummary, FixReceipt, SheetDiff } from './worker/fix-protocol';
+import type { BackendOptions, FixChange, FixOptions, FixPlanSummary, FixReceipt, NativeOpKind, SheetDiff } from './worker/fix-protocol';
 import { fmtBytes } from './lib/format';
 import { groupOps, OP_KIND_ORDER, REFERENCE_CHANGING, type OpKind } from './lib/op-manifest';
 import { migrationSnippet, type Engine } from './lib/loader-migration';
@@ -752,6 +752,8 @@ function BackendKtx2Panel({
   ready,
   ktx2Enable,
   setKtx2Enable,
+  pngquantEnable,
+  setPngquantEnable,
   consent,
   setConsent,
 }: {
@@ -759,10 +761,13 @@ function BackendKtx2Panel({
   ready: boolean;
   ktx2Enable: boolean;
   setKtx2Enable: (b: boolean) => void;
+  pngquantEnable: boolean;
+  setPngquantEnable: (b: boolean) => void;
   consent: boolean;
   setConsent: (b: boolean) => void;
 }) {
   const { t } = useI18n();
+  const anyEnable = ktx2Enable || pngquantEnable;
   return (
     <details className="mt-2 rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
       <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">{t('fix.backend.title')}</summary>
@@ -779,18 +784,32 @@ function BackendKtx2Panel({
             {t('fix.backend.ktx2')}
           </label>
 
-          {ktx2Enable ? (
+          {/* round13: the OPT-IN pngquant op (lossy-indexed PNG → smaller DOWNLOAD only; NO GPU/VRAM change).
+              Shares this panel's host + consent + reachability. Takes effect with the PNG-lossy profile toggle. */}
+          <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.backend.pngquantHint')}>
+            <input type="checkbox" checked={pngquantEnable} onChange={(e) => setPngquantEnable(e.target.checked)} className="accent-teal" />
+            {t('fix.backend.pngquant')}
+          </label>
+
+          {anyEnable ? (
             <>
-              {/* Reachability status from the healthz probe (fired only after Pro unlock + this toggle). */}
+              {/* Reachability status from the healthz probe (fired only after Pro unlock + a toggle). */}
               <p className={`mt-2 font-mono text-[10px] ${ready ? 'text-ok' : 'text-warn'}`}>
                 {ready ? t('fix.backend.reachable') : t('fix.backend.unreachable')}
               </p>
 
-              {/* The THREE honest costs (round12 B3/B4): bigger zip, conditional VRAM, transcoder dependency. */}
+              {/* Honest costs. KTX2 (round12 B3/B4): bigger zip, conditional VRAM, transcoder dependency.
+                  pngquant (round13): a SMALLER DOWNLOAD on disk, but ZERO GPU/VRAM change (it decodes to full
+                  RGBA8888). Each op's costs shown only when that op is on. */}
               <ul className="mt-2 list-disc space-y-1 pl-4 font-mono text-[10px] leading-relaxed text-ink-soft/80">
-                <li>{t('fix.backend.costZip')}</li>
-                <li>{t('fix.backend.costVram')}</li>
-                <li>{t('fix.backend.costLoader')}</li>
+                {ktx2Enable ? (
+                  <>
+                    <li>{t('fix.backend.costZip')}</li>
+                    <li>{t('fix.backend.costVram')}</li>
+                    <li>{t('fix.backend.costLoader')}</li>
+                  </>
+                ) : null}
+                {pngquantEnable ? <li>{t('fix.backend.costPngquant')}</li> : null}
               </ul>
 
               {/* CONSENT — the explicit "these images are uploaded to the server" acknowledgement. Enabled
@@ -920,6 +939,11 @@ export interface ProfileFormatState {
   lossless: boolean;
   /** webp near-lossless toggle (maps to near=60 when on; off ⇒ omit ⇒ near off). */
   near: boolean;
+  /** PNG ONLY (round13): route this PNG target through the OPT-IN pngquant backend (lossy-indexed
+   *  re-compression → smaller download). Maps to FormatTarget.pngLossy. Has effect ONLY when the pngquant
+   *  backend op is also enabled + consented; otherwise the worker emits a lossless PNG (honest fallback).
+   *  DISK-ONLY — no VRAM change. Off ⇒ ordinary native-lossless PNG (byte-identical to today). */
+  pngLossy?: boolean;
 }
 
 export const FORMAT_KEYS: { mime: ExportFormat; key: string }[] = [
@@ -1023,6 +1047,15 @@ function ExportProfilePanel({
                           <input type="checkbox" checked={!isAvif && f.lossless} disabled={isAvif} onChange={(e) => patch(mime, { lossless: e.target.checked })} className="accent-teal disabled:opacity-60" />
                           {t('fix.profile.lossless')}
                         </label>
+                        {/* PNG lossy (round13 pngquant) — the OPT-IN backend-routed lossy-indexed PNG (smaller
+                            download, NO VRAM change). Sibling to the AVIF-4:4:4 override preset. Effective only
+                            when the pngquant backend op is also enabled + consented; else a lossless PNG ships. */}
+                        {isPng ? (
+                          <label className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.profile.pngLossyHint')}>
+                            <input type="checkbox" checked={!!f.pngLossy} onChange={(e) => patch(mime, { pngLossy: e.target.checked })} className="accent-teal" />
+                            {t('fix.profile.pngLossy')}
+                          </label>
+                        ) : null}
                         {/* WebP near-lossless (ignored when lossless on). */}
                         {mime === 'image/webp' && !f.lossless ? (
                           <label className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
@@ -1206,7 +1239,7 @@ function FixCard({ files }: { files: PickedFile[] }) {
   // today's single emit (AVIF q85) so a freshly-enabled profile with no edits is a no-surprise baseline.
   const [profileEnable, setProfileEnable] = useState(false);
   const [profileFormats, setProfileFormats] = useState<Record<ExportFormat, ProfileFormatState>>(() => ({
-    'image/png': { enabled: false, quality: 85, lossless: true, near: false },
+    'image/png': { enabled: false, quality: 85, lossless: true, near: false, pngLossy: false },
     'image/webp': { enabled: false, quality: 85, lossless: false, near: false },
     'image/avif': { enabled: true, quality: 85, lossless: false, near: false },
   }));
@@ -1239,6 +1272,12 @@ function FixCard({ files }: { files: PickedFile[] }) {
   // API base is set AND we hold a stored entitlement token (the gateway requires the Bearer token).
   const backendConfigured = API_BASE !== '' && loadStoredEntitlement() != null;
   const [ktx2Enable, setKtx2Enable] = useState(false);
+  // round13: the OPT-IN pngquant op (lossy-indexed PNG → smaller download, DISK-ONLY). Shares the SAME
+  // backend host + consent + healthz gate as KTX2 (no new privacy surface). DEFAULT OFF ⇒ no `pngquant` op
+  // forwarded ⇒ the worker's pngquant path is dead ⇒ byte-identical to today.
+  const [pngquantEnable, setPngquantEnable] = useState(false);
+  // Either backend op being enabled opens the shared backend path (healthz probe + consent).
+  const backendAnyEnable = ktx2Enable || pngquantEnable;
   const [backendConsent, setBackendConsent] = useState(false);
   const [backendReady, setBackendReady] = useState(false);
   // Derive the ExportProfile the worker consumes. Formats kept in the canonical FORMAT_KEYS order (PNG,
@@ -1250,7 +1289,7 @@ function FixCard({ files }: { files: PickedFile[] }) {
     if (!profileEnable) return undefined;
     const formats: FormatTarget[] = FORMAT_KEYS.filter(({ mime }) => profileFormats[mime].enabled).map(({ mime }) => {
       const f = profileFormats[mime];
-      if (mime === 'image/png') return { format: mime }; // native lossless; quality irrelevant
+      if (mime === 'image/png') return { format: mime, ...(f.pngLossy ? { pngLossy: true } : {}) }; // native lossless unless pngLossy (round13 pngquant)
       if (mime === 'image/webp') return { format: mime, ...(f.lossless ? { lossless: true } : { quality: f.quality, ...(f.near ? { near: 60 } : {}) }) };
       return { format: mime, quality: f.quality }; // AVIF: lossy only (UI disables lossless)
     });
@@ -1303,12 +1342,13 @@ function FixCard({ files }: { files: PickedFile[] }) {
     };
   }, []);
 
-  // OPT-IN backend healthz probe (round12 §4): fire the GET probe ONLY AFTER Pro unlock + a configured host
-  // + the KTX2 toggle ON, so a non-paying / pre-opt-in visitor's browser never pings the encoder host on
-  // page load. Re-probes whenever those preconditions flip. NO token, NO bytes (backendReachable is a bare
-  // GET). When unreachable, the consent step stays disabled with an honest "backend unreachable" note.
+  // OPT-IN backend healthz probe (round12 §4 + round13): fire the GET probe ONLY AFTER Pro unlock + a
+  // configured host + EITHER backend op toggle ON (ktx2 or pngquant), so a non-paying / pre-opt-in visitor's
+  // browser never pings the encoder host on page load. Re-probes whenever those preconditions flip. NO token,
+  // NO bytes (backendReachable is a bare GET). When unreachable, the consent step stays disabled with an
+  // honest "backend unreachable" note.
   useEffect(() => {
-    if (!(unlocked && ktx2Enable && backendConfigured)) {
+    if (!(unlocked && backendAnyEnable && backendConfigured)) {
       setBackendReady(false);
       return;
     }
@@ -1320,7 +1360,7 @@ function FixCard({ files }: { files: PickedFile[] }) {
     return () => {
       alive = false;
     };
-  }, [unlocked, ktx2Enable, backendConfigured]);
+  }, [unlocked, backendAnyEnable, backendConfigured]);
 
   // ONE source of truth for the FixOptions both the dry-run preview (mode:'plan') and the execute run
   // (mode:'execute') send — so "Run fix" commits the EXACT plan the preview described, byte-for-byte.
@@ -1385,12 +1425,18 @@ function FixCard({ files }: { files: PickedFile[] }) {
   }
 
   /** The `backend` FixOptions field, or undefined when ANY precondition is unmet (default OFF). HONESTY: the
-   *  token comes from the stored entitlement; consent is the live per-run checkbox. */
+   *  token comes from the stored entitlement; consent is the live per-run checkbox. `ops` lists EXACTLY the
+   *  native ops the user opted into (ktx2 and/or pngquant) — empty ⇒ the worker has nothing to offer (we omit
+   *  the whole field). Both ops share the SAME host + token + consent (no new privacy surface). */
   function buildBackendOptions(): BackendOptions | undefined {
-    if (!(ktx2Enable && backendConfigured && backendReady && backendConsent)) return undefined;
+    if (!(backendAnyEnable && backendConfigured && backendReady && backendConsent)) return undefined;
     const stored = loadStoredEntitlement();
     if (!stored) return undefined; // configured implies a token, but never send without one
-    return { apiBase: API_BASE, token: stored.token, ops: ['ktx2'], consent: true };
+    const ops: NativeOpKind[] = [];
+    if (ktx2Enable) ops.push('ktx2');
+    if (pngquantEnable) ops.push('pngquant');
+    if (ops.length === 0) return undefined; // nothing opted in ⇒ dead path
+    return { apiBase: API_BASE, token: stored.token, ops, consent: true };
   }
 
   // Monotonic preview request id — guards against an out-of-order worker resolve when rapid toggles spawn
@@ -1452,13 +1498,13 @@ function FixCard({ files }: { files: PickedFile[] }) {
   const sawPlan = useRef(false);
   useEffect(() => {
     if (sawPlan.current) setPhase({ t: 'idle' });
-  }, [aggressive, polygon, marking, effort, scaleAwareQ, webpNearLossless, pngRecompress, overrides, packLoose, packMode, packGranularity, packTrim, extrude, tierEnable, tierSuffixes, profileEnable, profileFormats, customTiers, profileOverrides, ktx2Enable]);
-  // Consent is NEVER sticky: drop the per-run "uploaded to server" acknowledgement the moment KTX2 is
-  // disabled OR the backend becomes unreachable, so a fresh run can't inherit a prior tick. The user must
-  // re-consent each time the upload path could engage.
+  }, [aggressive, polygon, marking, effort, scaleAwareQ, webpNearLossless, pngRecompress, overrides, packLoose, packMode, packGranularity, packTrim, extrude, tierEnable, tierSuffixes, profileEnable, profileFormats, customTiers, profileOverrides, ktx2Enable, pngquantEnable]);
+  // Consent is NEVER sticky: drop the per-run "uploaded to server" acknowledgement the moment BOTH backend
+  // ops are disabled OR the backend becomes unreachable, so a fresh run can't inherit a prior tick. The user
+  // must re-consent each time the upload path could engage.
   useEffect(() => {
-    if (!(ktx2Enable && backendReady)) setBackendConsent(false);
-  }, [ktx2Enable, backendReady]);
+    if (!(backendAnyEnable && backendReady)) setBackendConsent(false);
+  }, [backendAnyEnable, backendReady]);
   useEffect(() => {
     sawPlan.current = phase.t === 'plan';
   }, [phase.t]);
@@ -1565,6 +1611,8 @@ function FixCard({ files }: { files: PickedFile[] }) {
             ready={backendReady}
             ktx2Enable={ktx2Enable}
             setKtx2Enable={setKtx2Enable}
+            pngquantEnable={pngquantEnable}
+            setPngquantEnable={setPngquantEnable}
             consent={backendConsent}
             setConsent={setBackendConsent}
           />
@@ -1641,28 +1689,39 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
       {receipt.pixiManifest ? (
         <p className="font-mono text-[10px] text-ink-soft">{t('fix.pixiManifestReceipt', { path: receipt.pixiManifest.path, n: receipt.pixiManifest.assets })}</p>
       ) : null}
-      {/* OPT-IN backend native KTX2 receipt (round12-backend-processing.md §7): how many pages were uploaded /
-          produced / fell back to the browser image, the gateway host, the SEPARATE worst-case VRAM CEILING
-          (≤, never w·h·4 — invariant 5), and the honest disclosures (bigger zip + the required KTX2 transcoder
-          bundle the game must add). Present ONLY when the user consented + ≥1 page was offered. */}
-      {receipt.backendNative ? (
-        <div className="mt-1 space-y-1 rounded-md border border-line bg-bg p-2">
+      {/* OPT-IN backend native ops receipt (round12 §7 + round13): ONE block per op. KTX2 reports the SEPARATE
+          worst-case VRAM CEILING (≤, never w·h·4 — invariant 5) + the transcoder-bundle requirement. pngquant
+          reports the REAL measured DISK saving ("smaller download") and NEVER a VRAM/GPU win (it decodes to
+          full RGBA8888). Present ONLY when the user consented + ≥1 page was offered. */}
+      {receipt.backendNative?.map((bn) => (
+        <div key={bn.op} className="mt-1 space-y-1 rounded-md border border-line bg-bg p-2">
           <p className="font-mono text-[10px] text-ink-soft">
-            {t('fix.backend.receipt', {
-              produced: receipt.backendNative.produced,
-              uploaded: receipt.backendNative.uploaded,
-              host: receipt.backendNative.host,
-            })}
+            {bn.op === 'pngquant'
+              ? t('fix.backend.receiptPngquant', {
+                  produced: bn.produced,
+                  uploaded: bn.uploaded,
+                  host: bn.host,
+                  before: bn.bytesBefore ?? 0,
+                  after: bn.bytesAfter ?? 0,
+                })
+              : t('fix.backend.receipt', {
+                  produced: bn.produced,
+                  uploaded: bn.uploaded,
+                  host: bn.host,
+                })}
           </p>
-          {receipt.backendNative.failed > 0 ? (
-            <p className="font-mono text-[10px] text-warn">{t('fix.backend.receiptFailed', { failed: receipt.backendNative.failed })}</p>
+          {bn.failed > 0 ? (
+            <p className="font-mono text-[10px] text-warn">{t('fix.backend.receiptFailed', { failed: bn.failed })}</p>
           ) : null}
-          {(receipt.ktx2VramBytesWorstCase ?? 0) > 0 ? (
+          {/* KTX2 worst-case VRAM ceiling rides on the ktx2 entry only; pngquant is DISK-ONLY (no VRAM field). */}
+          {bn.op === 'ktx2' && (receipt.ktx2VramBytesWorstCase ?? 0) > 0 ? (
             <p className="font-mono text-[10px] text-ink-soft">{t('fix.backend.receiptVram', { bytes: receipt.ktx2VramBytesWorstCase ?? 0 })}</p>
           ) : null}
-          <p className="font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.backend.receiptLoader')}</p>
+          {bn.op === 'ktx2' ? (
+            <p className="font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.backend.receiptLoader')}</p>
+          ) : null}
         </div>
-      ) : null}
+      )) ?? null}
       {receipt.referencesChanged ? <p className="font-mono text-[10px] text-warn">⚠ {t('fix.mergeWarn')}</p> : null}
       {/* Loader-migration guide (docs/improvements/loader-migration.md): when the fix recorded genuine
           loader-CALL rewrites, surface a concrete repointing list + an engine-aware copy-pasteable snippet

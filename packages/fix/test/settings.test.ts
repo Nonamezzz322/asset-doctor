@@ -151,6 +151,20 @@ describe('formatEncode (export profile §4b)', () => {
     expect(fe.avifQualityAlpha).toBeUndefined();
   });
 
+  it('png plain: NO nativePng marker (byte-identical to today — additive omit)', () => {
+    const fe = formatEncode({ format: 'image/png' }, 1, globalKnobs);
+    expect(fe.targetMime).toBe('image/png');
+    expect(fe.lossless).toBe(true);
+    expect('nativePng' in fe).toBe(false); // omitted, never `false` — keeps the legacy shape exactly
+  });
+
+  it('png pngLossy: emits nativePng:true (still a lossless encode — pngquant re-compresses in-place later)', () => {
+    const fe = formatEncode({ format: 'image/png', pngLossy: true }, 1, globalKnobs);
+    expect(fe.targetMime).toBe('image/png');
+    expect(fe.lossless).toBe(true); // the worker composes a lossless PNG; the pngquant post-pass re-encodes it
+    expect(fe.nativePng).toBe(true);
+  });
+
   it('avif: lossy only, forwards avif knobs, webpNearLossless off, no png knob', () => {
     const fe = formatEncode({ format: 'image/avif', quality: 70 }, 1, {
       ...globalKnobs,

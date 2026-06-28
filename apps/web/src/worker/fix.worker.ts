@@ -747,6 +747,45 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     if (!backendOn) return;
     ktx2Candidates.push(c);
   };
+  // ── OPT-IN backend native pngquant (round13-pngquant-backend.md, Phase 3) — GATED collector ───────────
+  // Same gate shape as backendOn, but for the 'pngquant' op. SAFETY (load-bearing): pngquantOn false ⇒
+  // recordPngquantCandidate is a no-op ⇒ the candidates array stays empty ⇒ the post-pass below never runs ⇒
+  // `out` is unchanged ⇒ zip BYTE-IDENTICAL to today. Unlike KTX2 (an ADDITIVE sibling .ktx2), pngquant is an
+  // IN-PLACE post-pass: it REPLACES the already-composed PNG page's bytes at the SAME path (B4, via the
+  // pre-zip Map last-write-wins) — NO new file, NO referencesChanged, NO VRAM field (disk-only; a quantized
+  // PNG still decodes to full RGBA8888 on the GPU ⇒ vramCeiling unchanged, invariant 5).
+  const pngquantOn =
+    opts.backend != null &&
+    opts.backend.consent === true &&
+    opts.backend.ops.includes('pngquant') &&
+    opts.backend.apiBase.trim() !== '' &&
+    opts.backend.token.trim() !== '';
+  // One emitted PNG page eligible for in-place pngquant re-compression. `path` = the exact emitted page path
+  // already in `out` (the post-pass REPLACES the bytes here, never adds a file); `bytes` = the composed
+  // lossless PNG bytes (pngquant re-encodes THESE, so the disk delta is real + the pixels match the browser
+  // page); `w/h` = page dims (only the upload envelope needs them — pngquant adds NO VRAM accounting). Only a
+  // `nativePng`-marked PNG target (FormatTarget.pngLossy) records here, so the export-profile produces the
+  // PNG and pngquant merely re-compresses its bytes — clean deterministic either/or (no double-emit/race).
+  interface PngquantCandidate {
+    ref: string;
+    path: string;
+    bytes: Uint8Array;
+    w: number;
+    h: number;
+  }
+  const pngquantCandidates: PngquantCandidate[] = [];
+  const recordPngquantCandidate = (c: PngquantCandidate): void => {
+    if (!pngquantOn) return;
+    pngquantCandidates.push(c);
+  };
+  // round13 finding [0]: pngquant is SCOPED to single-tier loose pages in v1 (it is a page re-compressor; an
+  // atlas sheet / a per-tier downscale is out of scope). The candidate is therefore recorded ONLY in
+  // emitLooseProfileFanout. But a `nativePng`-marked PNG can also flow through the MULTI-TIER loop (a profile
+  // with a lower tier, or any atlas/Spine page) — there the lossless PNG ships WITHOUT a pngquant attempt.
+  // Per invariant 3 (never a silent skip) that decline must be SURFACED, not dropped: emit ONE honest
+  // skipped[] note per ref (mirroring the tier loop's other v1-scope notes — Spine-stays-PNG :2034,
+  // tierTransformed :2011). Gated on pngquantOn so backend-off stays byte-identical. Once-per-ref via this set.
+  const pngquantTierSkipNoted = new Set<string>();
   const skipped: { assetRef: string; reason: string }[] = [];
   // ROUND7 T6: an invalid export profile rejected above ⇒ no emit + honest `(profile)` reasons. Seed
   // `skipped` with them so the receipt is honest (never a silent drop). Valid/absent profile ⇒ empty.
@@ -1110,6 +1149,13 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       // Pixi manifest: each fanned-out format is a `src` candidate of the SAME (loose, suffix:'') entry.
       recordVariant(ref, 'loose', srcPath, { scale, suffix: '', src: emittedPath });
       profileFilesEmitted++;
+      // round13: a `nativePng`-marked PNG (FormatTarget.pngLossy) → record this page for the IN-PLACE
+      // pngquant post-pass (it REPLACES `emittedPath`'s bytes via the pre-zip Map, never adds a file).
+      // No-op unless pngquantOn; clean either/or — only PNG targets carry the marker so there is no race
+      // with the webp/avif siblings of this same ref. Off/declined/floor ⇒ the lossless PNG above is KEPT.
+      if (enc.mime === 'image/png' && fe.nativePng) {
+        recordPngquantCandidate({ ref, path: emittedPath, bytes: enc.bytes, w: canvas.width, h: canvas.height });
+      }
       if (!firstEmitted) {
         // The FIRST emitted variant is the canonical rename (today's single-transcode behavior) — replaced
         // + the loader row + the dedup owner image all point here, so dedup-repoint resolves to a real file.
@@ -2047,10 +2093,12 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         // validated profile formats (formatEncode → encodeCanvas with lossless THREADED, B1). PROFILE OFF ⇒
         // a SINGLE legacy descriptor reproducing today's `encOptsFor(eff, true)` exactly ⇒ byte-identical.
         // Spine pages STAY PNG regardless (a webp/avif profile target degrades to PNG with one honest note).
-        const tierEncodes: { mime: ImageMime; encOpts: EncodeOpts; fmtLabel: string }[] = rp
+        const tierEncodes: { mime: ImageMime; encOpts: EncodeOpts; fmtLabel: string; nativePng?: boolean }[] = rp
           ? rp.formats.map((f) => {
               const fe = formatEncode(f, tier.scale, rp.global);
-              return { mime: isSpine ? 'image/png' : fe.targetMime, encOpts: feToEncodeOpts(fe), fmtLabel: f.format };
+              // round13: thread the `nativePng` marker (FormatTarget.pngLossy) so the tier PNG-emit site can be
+              // HONEST about pngquant being out of v1 scope on the multi-tier/atlas path (see the skip below).
+              return { mime: isSpine ? 'image/png' : fe.targetMime, encOpts: feToEncodeOpts(fe), fmtLabel: f.format, nativePng: fe.nativePng };
             })
           : [{ mime: isSpine ? 'image/png' : eff.targetMime, encOpts: encOptsFor(eff, true), fmtLabel: eff.targetMime }];
         // B4 collision guard (round7-export-profile.md §5b/§9): two formats can resolve to the SAME actual
@@ -2087,6 +2135,14 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           out.push({ path: emittedImage, bytes: enc.bytes });
           tierFilesEmitted++;
           if (profileOn) profileFilesEmitted++;
+          // round13 finding [0]: a `nativePng`-marked PNG (FormatTarget.pngLossy) reached the MULTI-TIER path
+          // (a profile with a lower tier, or an atlas/Spine page). pngquant is single-tier-loose-only in v1 —
+          // so this lossless PNG ships WITHOUT a pngquant attempt. NEVER a silent drop (invariant 3): surface
+          // ONE honest skipped[] note per ref. Gated on pngquantOn so backend-off/declined ⇒ byte-identical.
+          if (pngquantOn && enc.mime === 'image/png' && te0.nativePng && !pngquantTierSkipNoted.has(ref)) {
+            pngquantTierSkipNoted.add(ref);
+            skipped.push({ assetRef: ref, reason: 'pngquant skipped: lossy PNG applies only to single-tier loose pages — emitted lossless' });
+          }
           // The variant's NEW load target = the suffixed+tokened MANIFEST (atlas/Spine) or the IMAGE (loose);
           // computed once below (hashed) and pushed into tierTargetPaths + recordVariant.
           let emittedLoadTarget = emittedImage;
@@ -2356,6 +2412,54 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     }
   }
 
+  // ── OPT-IN backend native pngquant IN-PLACE post-pass (round13-pngquant-backend.md, Phase 3 T11) ───────
+  // SAFETY (load-bearing): pngquantOn false ⇒ pngquantCandidates is empty ⇒ this loop never runs ⇒ `out` is
+  // unchanged ⇒ the zip is BYTE-IDENTICAL to today. It runs ONLY when the user configured a backend AND
+  // ticked per-run consent AND a `nativePng`-marked PNG page exists. Assets leave the device HERE (and in the
+  // KTX2 pass) and only here.
+  //
+  // For each eligible composed PNG page already in `out`:
+  //   1. upload its lossless PNG bytes via encodeRemote('pngquant', …) → the gateway verifies the token +
+  //      quota-limits + reverse-proxies to the apps/encoder sidecar; on 200 we get the re-compressed PNG.
+  //   2. REPLACE the page bytes at the SAME path (push a new `out` entry at c.path; the pre-zip Map below is
+  //      last-write-wins, so the pngquant bytes win — NO new file, NO referencesChanged: a quantized PNG is
+  //      a drop-in for the lossless one, the loader calls the SAME name).
+  //   3. accumulate REAL measured disk byte sums (bytesBefore = the lossless page; bytesAfter = the quantized
+  //      page) — the honest "smaller download" claim. NO VRAM field (disk-only; vramCeiling stays w·h·4).
+  // On a quality-floor DECLINE (M1: code 'quality_floor') we KEEP the lossless page — it is NOT a failure and
+  // does NOT increment `failed`. On any other failure (unreachable / declined / encode error) we KEEP the
+  // lossless page, surface an HONEST skipped[] note, and DO count it as failed.
+  let pngquantUploaded = 0;
+  let pngquantProduced = 0;
+  let pngquantFailed = 0;
+  let pngquantBytesBefore = 0;
+  let pngquantBytesAfter = 0;
+  if (pngquantOn && pngquantCandidates.length > 0) {
+    const backend = opts.backend!; // pngquantOn guarantees presence + consent
+    let i = 0;
+    for (const c of pngquantCandidates) {
+      post({ type: 'fix-progress', label: `pngquant ${basename(c.path)}`, done: i++, total: pngquantCandidates.length });
+      pngquantUploaded++;
+      const res = await encodeRemote(c.bytes, 'pngquant', c.w, c.h, { apiBase: backend.apiBase, token: backend.token });
+      if (!res.ok) {
+        if (res.code === 'quality_floor') {
+          // HONEST DECLINE (M1): pngquant couldn't beat the floor → keep the lossless PNG. NOT a failure.
+          skipped.push({ assetRef: c.ref, reason: 'pngquant kept original: could not meet the quality floor' });
+        } else {
+          pngquantFailed++;
+          skipped.push({ assetRef: c.ref, reason: `pngquant skipped: backend ${res.code} — kept lossless PNG` });
+        }
+        continue;
+      }
+      // REPLACE in place (same path). The pre-zip Map is last-write-wins, so this overrides the lossless page.
+      // NO referencesChanged (drop-in same-name), NO new file, NO VRAM field (disk-only — invariant 5).
+      out.push({ path: c.path, bytes: res.bytes });
+      pngquantProduced++;
+      pngquantBytesBefore += c.bytes.length;
+      pngquantBytesAfter += res.bytes.length;
+    }
+  }
+
   post({ type: 'fix-progress', label: 'zipping', done: total - 1, total });
   // `out` path-dedup before zip (design §6 step 9): last-write-wins for a deliberate replace; guards
   // against a duplicate path ever reaching makeZip. Order-preserving on first appearance (determinism).
@@ -2391,6 +2495,18 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   // run made, sorted+deduped deterministically. DEDUP contributed ZERO rows (B1). Attached ONLY when
   // referencesChanged AND ≥1 real row exists — drop-in / no-op runs omit it ⇒ receipt byte-identical.
   const changes = finalizeChanges(changeRows);
+  // OPT-IN backend native ops (round12 §7 + round13): ONE backendNative entry per op that actually ran
+  // (uploaded>0). KTX2 carries the SEPARATE ktx2VramBytesWorstCase sibling (GPU-VRAM win); pngquant carries
+  // bytesBefore/bytesAfter (REAL measured disk-only "smaller download") and NO VRAM field — a quantized PNG
+  // decodes to full RGBA8888 ⇒ vramCeiling unchanged (invariant 5). Empty ⇒ omitted ⇒ byte-identical to today.
+  const backendHost = opts.backend ? opts.backend.apiBase.replace(/\/+$/, '') : '';
+  const backendNative: NonNullable<FixReceipt['backendNative']> = [];
+  if (ktx2Op && ktx2Uploaded > 0) {
+    backendNative.push({ op: ktx2Op, uploaded: ktx2Uploaded, produced: ktx2Produced, failed: ktx2Failed, host: backendHost });
+  }
+  if (pngquantUploaded > 0) {
+    backendNative.push({ op: 'pngquant', uploaded: pngquantUploaded, produced: pngquantProduced, failed: pngquantFailed, host: backendHost, bytesBefore: pngquantBytesBefore, bytesAfter: pngquantBytesAfter });
+  }
   const receipt: FixReceipt = {
     diskBytesBefore: diskBefore,
     diskBytesAfter: diskAfter,
@@ -2459,12 +2575,11 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     // PixiJS-v8 asset manifest (round8-pixi-manifest.md, additive/optional): present ONLY when the opt-in
     // ran with ≥1 recorded entry. Absent ⇒ no manifest emitted ⇒ receipt byte-identical to today.
     ...(pixiManifest ? { pixiManifest } : {}),
-    // OPT-IN backend native KTX2 (round12-backend-processing.md §7, additive/optional). Present ONLY when
-    // the user consented AND ≥1 page was offered to the backend (uploaded>0). `host` is the gateway origin
-    // (no token, no bytes). ktx2VramBytesWorstCase is the SEPARATE worst-case VRAM CEILING of the produced
-    // .ktx2 pages (≤, never w·h·4, never folded into vramBytesAfter — invariant 5). Absent ⇒ no backend op
-    // ran ⇒ receipt byte-identical to today.
-    ...(ktx2Op && ktx2Uploaded > 0 ? { backendNative: { op: ktx2Op, uploaded: ktx2Uploaded, produced: ktx2Produced, failed: ktx2Failed, host: opts.backend!.apiBase.replace(/\/+$/, '') } } : {}),
+    // OPT-IN backend native ops (round12 §7 + round13, additive/optional). An ARRAY: one entry per op that
+    // ran (uploaded>0) — ktx2 and/or pngquant. `host` is the gateway origin (no token, no bytes). ktx2 carries
+    // the SEPARATE ktx2VramBytesWorstCase sibling (GPU win); pngquant carries bytesBefore/After (disk-only
+    // "smaller download") and NO VRAM field (invariant 5). Empty ⇒ omitted ⇒ receipt byte-identical to today.
+    ...(backendNative.length > 0 ? { backendNative } : {}),
     ...(ktx2VramBytesWorstCase > 0 ? { ktx2VramBytesWorstCase } : {}),
   };
   // Direct postMessage (not the `post` wrapper) so the sheet-diff byte buffers transfer zero-copy. The

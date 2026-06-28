@@ -18,6 +18,11 @@ type Config struct {
 	// a pinned release and sets this; locally it defaults to "toktx" on PATH (tests never exec it).
 	ToktxPath string
 
+	// PngQuantPath is the absolute path to the pinned `pngquant` binary (lossy-indexed PNG). The Dockerfile
+	// installs a pinned apt package and sets this; locally it defaults to "pngquant" on PATH (tests never
+	// exec it). DISK-ONLY op — the sidecar still holds no secrets.
+	PngQuantPath string
+
 	// TmpDir is the scratch directory for ephemeral temp-in/temp-out files. In compose this is a tmpfs
 	// (RAM-backed, never persisted). Falls back to the OS temp dir.
 	TmpDir string
@@ -49,6 +54,7 @@ func Load() *Config {
 	return &Config{
 		Addr:          env("ADDR", ":8090"),
 		ToktxPath:     env("TOKTX_PATH", "toktx"),
+		PngQuantPath:  env("PNGQUANT_PATH", "pngquant"),
 		TmpDir:        env("TMP_DIR", os.TempDir()),
 		MaxBodyBytes:  envInt64("MAX_BODY_BYTES", 32<<20), // 32 MiB
 		MaxDim:        envInt("MAX_DIM", 8192),

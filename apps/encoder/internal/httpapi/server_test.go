@@ -76,6 +76,17 @@ func validProcessBody(png []byte, w, h int) string {
 	return string(b)
 }
 
+func validPngQuantBody(png []byte, w, h int) string {
+	b, _ := json.Marshal(processRequest{
+		PNG:     base64.StdEncoding.EncodeToString(png),
+		W:       w,
+		H:       h,
+		Op:      "pngquant",
+		Profile: "pngquant-256-fs",
+	})
+	return string(b)
+}
+
 func do(s *Server, method, path, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	rec := httptest.NewRecorder()
@@ -130,6 +141,80 @@ func TestProcessSuccess(t *testing.T) {
 	}
 	if string(fe.lastReq.PNG) != "PNGDATA" {
 		t.Fatalf("encoder PNG mismatch: %q", fe.lastReq.PNG)
+	}
+}
+
+// TestProcessPngQuantSuccess: a valid pngquant request routes through, the encoder receives the propagated
+// Op (M2 — NOT hard-coded KTX2) + its profile, and the bytes stream back.
+func TestProcessPngQuantSuccess(t *testing.T) {
+	want := []byte("PNGQUANT-FAKE-BYTES")
+	fe := &fakeEncoder{out: want}
+	s, _ := newTestServer(t, fe)
+	rec := do(s, http.MethodPost, "/process", validPngQuantBody([]byte("PNGDATA"), 256, 256))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%q, want 200", rec.Code, rec.Body.String())
+	}
+	if !bytes.Equal(rec.Body.Bytes(), want) {
+		t.Fatalf("body = %q, want %q", rec.Body.Bytes(), want)
+	}
+	// M2: the server must PROPAGATE the op (pngquant), not hard-code KTX2.
+	if fe.lastReq.Op != encode.PngQuant || fe.lastReq.Profile != encode.ProfilePngQuant256 {
+		t.Fatalf("encoder got op=%q profile=%q, want pngquant/pngquant-256-fs", fe.lastReq.Op, fe.lastReq.Profile)
+	}
+}
+
+// TestProcessOpProfileMismatch: a known op + a known-but-foreign profile (the OTHER op's profile) → 415.
+func TestProcessOpProfileMismatch(t *testing.T) {
+	s, _ := newTestServer(t, &fakeEncoder{out: []byte("x")})
+	cases := []struct{ op, profile string }{
+		{"pngquant", "uastc-zstd-mip"}, // pngquant with the ktx2 profile
+		{"ktx2", "pngquant-256-fs"},    // ktx2 with the pngquant profile
+	}
+	for _, tc := range cases {
+		t.Run(tc.op+"/"+tc.profile, func(t *testing.T) {
+			body, _ := json.Marshal(processRequest{
+				PNG: base64.StdEncoding.EncodeToString([]byte("x")), W: 16, H: 16, Op: tc.op, Profile: tc.profile,
+			})
+			rec := do(s, http.MethodPost, "/process", string(body))
+			if rec.Code != http.StatusUnsupportedMediaType {
+				t.Fatalf("status = %d, want 415", rec.Code)
+			}
+			if c := decodeErr(t, rec).Code; c != "unsupported_profile" {
+				t.Fatalf("code = %q, want unsupported_profile", c)
+			}
+		})
+	}
+}
+
+// TestProcessQualityFloor: pngquant's honest quality-floor decline (ErrQualityFloor) maps to a DISTINCT
+// 422/quality_floor (NOT 502/encode_failed) so the client keeps the original without polluting `failed`.
+func TestProcessQualityFloor(t *testing.T) {
+	fe := &fakeEncoder{err: encode.ErrQualityFloor}
+	s, _ := newTestServer(t, fe)
+	rec := do(s, http.MethodPost, "/process", validPngQuantBody([]byte("PNGDATA"), 64, 64))
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", rec.Code)
+	}
+	if c := decodeErr(t, rec).Code; c != "quality_floor" {
+		t.Fatalf("code = %q, want quality_floor", c)
+	}
+}
+
+// TestNoImageByteLoggingPngQuant: the no-leak guarantee holds on the pngquant path too (error path logs
+// the most detail).
+func TestNoImageByteLoggingPngQuant(t *testing.T) {
+	const marker = "SECRET-PNG-PIXELS-DO-NOT-LOG"
+	fe := &fakeEncoder{err: encode.ErrEncodeFailed}
+	s, logBuf := newTestServer(t, fe)
+	rec := do(s, http.MethodPost, "/process", validPngQuantBody([]byte(marker), 64, 64))
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", rec.Code)
+	}
+	if strings.Contains(logBuf.String(), marker) {
+		t.Fatalf("image bytes leaked into logs: %s", logBuf.String())
+	}
+	if strings.Contains(rec.Body.String(), marker) {
+		t.Fatalf("image bytes leaked into response: %s", rec.Body.String())
 	}
 }
 

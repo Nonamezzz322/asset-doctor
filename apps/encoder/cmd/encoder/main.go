@@ -27,7 +27,12 @@ func main() {
 	cfg := config.Load()
 	logger := log.New(os.Stderr, "encoder ", log.LstdFlags|log.LUTC)
 
-	enc := encode.NewToktxEncoder(cfg.ToktxPath, cfg.TmpDir, cfg.ExecTimeout)
+	// Dispatcher routes each Op to its concrete encoder (KTX2→toktx, pngquant→pngquant). Adding an op never
+	// touches the HTTP layer — only this wiring + the encode allowlists.
+	enc := &encode.Dispatcher{
+		Toktx:    encode.NewToktxEncoder(cfg.ToktxPath, cfg.TmpDir, cfg.ExecTimeout),
+		PngQuant: encode.NewPngQuantEncoder(cfg.PngQuantPath, cfg.TmpDir, cfg.ExecTimeout),
+	}
 	srv := &http.Server{
 		Addr:    cfg.Addr,
 		Handler: httpapi.New(cfg, enc, logger).Router(),
@@ -49,8 +54,8 @@ func main() {
 	})
 
 	go func() {
-		logger.Printf("encoder sidecar listening on %s (toktx=%s, tmp=%s, maxConcurrent=%d)",
-			cfg.Addr, cfg.ToktxPath, cfg.TmpDir, cfg.MaxConcurrent)
+		logger.Printf("encoder sidecar listening on %s (toktx=%s, pngquant=%s, tmp=%s, maxConcurrent=%d)",
+			cfg.Addr, cfg.ToktxPath, cfg.PngQuantPath, cfg.TmpDir, cfg.MaxConcurrent)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Fatalf("serve: %v", err)
 		}

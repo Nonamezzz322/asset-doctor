@@ -368,6 +368,47 @@ describe('validateProfile (export profile §4a)', () => {
     expect(r.ok).toBe(true);
   });
 
+  it('B2: a lossless PNG + a pngLossy PNG pair is NOT a dupTarget (split dup-key image/png vs image/png|lossy)', () => {
+    const r = validateProfile({
+      formats: [
+        { format: 'image/png' }, // plain native-lossless PNG
+        { format: 'image/png', pngLossy: true }, // pngquant-routed (different emitted bytes)
+      ],
+      tiers: [...okTiers],
+    });
+    expect(r.ok).toBe(true); // would falsely fail closed without the dup-key split
+  });
+
+  it('still rejects two PLAIN PNG targets (they emit identical bytes ⇒ clobber)', () => {
+    const r = validateProfile({
+      formats: [{ format: 'image/png' }, { format: 'image/png' }],
+      tiers: [...okTiers],
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.some((e) => e.startsWith('dupTarget'))).toBe(true);
+  });
+
+  it('still rejects two pngLossy PNG targets (same pngquant emit ⇒ clobber)', () => {
+    const r = validateProfile({
+      formats: [
+        { format: 'image/png', pngLossy: true },
+        { format: 'image/png', pngLossy: true },
+      ],
+      tiers: [...okTiers],
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.some((e) => e.startsWith('dupTarget') && e.includes('lossy'))).toBe(true);
+  });
+
+  it('rejects pngLossy on a non-png format (pngLossy is PNG-only)', () => {
+    const r = validateProfile({
+      formats: [{ format: 'image/webp', pngLossy: true } as never],
+      tiers: [...okTiers],
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.some((e) => e.startsWith('pngLossyNonPng'))).toBe(true);
+  });
+
   it('delegates every tier rejection to validateTiers (prefixed "tier ...")', () => {
     // no scale=1 top tier ⇒ validateTiers noTopTier, surfaced as a "tier ..." error here.
     const r = validateProfile({
