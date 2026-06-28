@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { AnalysisReport, Finding, ThresholdConfig } from '@asset-doctor/core';
 import type { RuntimeReport } from '@asset-doctor/probe/runtime';
-import { correlate } from '../src/index';
+import { correlate, correlateFix, type MeasuredSheetDiff } from '../src/index';
 
 const TH: ThresholdConfig = {
   occupancy: { warn: 0.8, crit: 0.6 },
@@ -92,5 +92,74 @@ describe('correlate — static × runtime', () => {
     const c = correlate(stat({}), rt({}));
     expect(c.findings).toHaveLength(0);
     expect(c.summary).toMatch(/consistent/);
+  });
+});
+
+const sheet = (over: Partial<MeasuredSheetDiff> = {}): MeasuredSheetDiff => ({ name: 's', ...over });
+
+describe('correlateFix — MEASURED before→after fix probe → CorrelatedFinding verdicts', () => {
+  it('120→30 measured draws → one crit batching verdict (variant:measured)', () => {
+    const out = correlateFix({ sheetDiffs: [sheet({ drawCallsBefore: 80, drawCallsAfter: 20 }), sheet({ drawCallsBefore: 40, drawCallsAfter: 10 })] });
+    expect(out).toHaveLength(1);
+    const f = out[0]!;
+    expect(f.rule).toBe('batching');
+    expect(f.id).toBe('corrfix:batching');
+    expect(f.severity).toBe('crit'); // ratio 0.25 ≤ 0.34
+    expect(f.estimate?.drawCallsAfter).toBe(30);
+    expect(f.params?.drawCalls).toBe(120);
+    expect(f.params?.drawCallsAfter).toBe(30);
+    expect(f.params?.variant).toBe('measured');
+  });
+
+  it('100→60 measured draws → warn; 100→90 → info', () => {
+    expect(correlateFix({ sheetDiffs: [sheet({ drawCallsBefore: 100, drawCallsAfter: 60 })] })[0]!.severity).toBe('warn'); // ratio 0.60
+    expect(correlateFix({ sheetDiffs: [sheet({ drawCallsBefore: 100, drawCallsAfter: 90 })] })[0]!.severity).toBe('info'); // ratio 0.90
+  });
+
+  it('decoded VRAM 40MB→25MB → vram verdict with measured saving + distinct params', () => {
+    const out = correlateFix({ sheetDiffs: [sheet({ decodedVramBefore: 40 * MB, decodedVramAfter: 25 * MB })] });
+    expect(out).toHaveLength(1);
+    const f = out[0]!;
+    expect(f.rule).toBe('vram');
+    expect(f.id).toBe('corrfix:vram');
+    expect(f.severity).toBe('warn'); // decoded-VRAM win is device-local, never crit
+    expect(f.estimate?.vramBytesSaved).toBe(15 * MB);
+    expect(f.params?.decodedBefore).toBe(40 * MB);
+    expect(f.params?.decodedAfter).toBe(25 * MB);
+    expect(f.params?.variant).toBe('measured');
+    // invariant 5: decoded VRAM stays in its own params keys, never folded into a static vramBytes
+    expect(f.params?.vramBytes).toBeUndefined();
+  });
+
+  it('both metrics win → two findings, batching first (stable order)', () => {
+    const out = correlateFix({ sheetDiffs: [sheet({ drawCallsBefore: 100, drawCallsAfter: 30, decodedVramBefore: 40 * MB, decodedVramAfter: 20 * MB })] });
+    expect(out.map((f) => f.rule)).toEqual(['batching', 'vram']);
+  });
+
+  it('only one metric wins → only that finding', () => {
+    const out = correlateFix({ sheetDiffs: [sheet({ drawCallsBefore: 100, drawCallsAfter: 30, decodedVramBefore: 20 * MB, decodedVramAfter: 20 * MB })] });
+    expect(out.map((f) => f.rule)).toEqual(['batching']);
+  });
+
+  it('Σafter >= Σbefore (no measured win / POT padding raised it) → no fabricated verdict', () => {
+    expect(correlateFix({ sheetDiffs: [sheet({ drawCallsBefore: 30, drawCallsAfter: 30 })] })).toEqual([]);
+    expect(correlateFix({ sheetDiffs: [sheet({ drawCallsBefore: 30, drawCallsAfter: 40 })] })).toEqual([]);
+    expect(correlateFix({ sheetDiffs: [sheet({ decodedVramBefore: 10 * MB, decodedVramAfter: 12 * MB })] })).toEqual([]);
+  });
+
+  it('additivity — absent / empty sheetDiffs ⇒ [] (receipt byte-identical to today)', () => {
+    expect(correlateFix({})).toEqual([]);
+    expect(correlateFix({ sheetDiffs: [] })).toEqual([]);
+  });
+
+  it('one-sided probe (only *Before or only *After) ⇒ excluded (both-required)', () => {
+    expect(correlateFix({ sheetDiffs: [sheet({ drawCallsBefore: 100 })] })).toEqual([]);
+    // pure-pack fix: pack pages carry only *After (no source atlas ⇒ no honest before) ⇒ no verdict
+    expect(correlateFix({ sheetDiffs: [sheet({ drawCallsAfter: 10 }), sheet({ decodedVramAfter: 5 * MB })] })).toEqual([]);
+  });
+
+  it('non-finite / NaN fields are excluded; Σbefore===0 guarded (no NaN verdict)', () => {
+    expect(correlateFix({ sheetDiffs: [sheet({ drawCallsBefore: Number.NaN, drawCallsAfter: 10 })] })).toEqual([]);
+    expect(correlateFix({ sheetDiffs: [sheet({ drawCallsBefore: 0, drawCallsAfter: 0 })] })).toEqual([]);
   });
 });

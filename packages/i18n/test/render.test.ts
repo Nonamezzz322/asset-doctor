@@ -19,7 +19,7 @@ import {
   groupVariants,
   variantsFinding,
 } from '@asset-doctor/analysis';
-import { correlate } from '@asset-doctor/correlate';
+import { correlate, correlateFix } from '@asset-doctor/correlate';
 import { detectLocale, renderCorrelated, renderFinding, translate } from '../src/index';
 
 const img = (name: string, w: number, h: number, byteSize = 1000, mime: ImageAsset['mime'] = 'image/png'): Asset => ({
@@ -125,6 +125,46 @@ describe('renderCorrelated — English catalog reproduces the baked correlate st
       expect(r.runtimeEvidence, `${f.rule}.runtime`).toBe(f.runtimeEvidence);
       expect(r.diagnosis, `${f.rule}.diag`).toBe(f.diagnosis);
       expect(r.fix, `${f.rule}.fix`).toBe(f.fix);
+    }
+  });
+
+  // BLOCKER 1 regression: the new `variant:'measured'` pickV branch must NOT disturb the live path.
+  // The live correlate findings carry no `variant`, so renderCorrelated must stay byte-identical to the
+  // baked English fields with the branch in place.
+  it('live findings are byte-identical via the catalog despite the new measured branch', () => {
+    const sa = shouldAtlasFinding(Array.from({ length: 8 }, (_, i) => img(`s${i}.png`, 64, 64, 100)), cfg)!;
+    const reports = [
+      correlate(stat([sa]), rt({ drawCalls: { avg: 4, max: 60 }, textureBinds: { avg: 128, max: 128 } })),
+      correlate(stat([], { loadedVramBytes: 10 * 1048576 }), rt({ vramBytes: 100 * 1048576 })),
+      correlate(stat([]), rt({ uploadsDuringGameplay: 3, hitches: [{ frame: 1, ms: 5, cause: 'texture upload' }] })),
+      correlate(stat([]), rt({ shaderCompilesDuringGameplay: 2, hitches: [{ frame: 1, ms: 7, cause: 'shader compile' }] })),
+      correlate(stat([]), rt({ redundantBinds: 600, frames: 100 })),
+    ];
+    for (const f of reports.flatMap((r) => r.findings)) {
+      const r = renderCorrelated(f, 'en');
+      expect(r).toEqual({ title: f.title, staticEvidence: f.staticEvidence, runtimeEvidence: f.runtimeEvidence, diagnosis: f.diagnosis, fix: f.fix });
+    }
+  });
+
+  it('correlateFix measured verdicts render via the *_measured templates (en + ru, brace-free)', () => {
+    const fixes = correlateFix({ sheetDiffs: [{ name: 's', drawCallsBefore: 120, drawCallsAfter: 30, decodedVramBefore: 40 * 1048576, decodedVramAfter: 25 * 1048576 }] });
+    expect(fixes.map((f) => f.rule)).toEqual(['batching', 'vram']);
+    const en0 = renderCorrelated(fixes[0]!, 'en');
+    expect(en0.title).toBe('120 → 30 draw calls — measured on this device');
+    expect(en0.title).toContain('measured');
+    expect(en0.runtimeEvidence).toContain('120');
+    expect(en0.runtimeEvidence).toContain('30');
+    const en1 = renderCorrelated(fixes[1]!, 'en');
+    expect(en1.title).toContain('measured');
+    expect(en1.title).toContain('40.0 MB');
+    expect(en1.title).toContain('25.0 MB');
+    expect(en1.diagnosis).toContain('w·h·4'); // invariant 5 disclosure kept in the copy
+    for (const f of fixes) {
+      const ru = renderCorrelated(f, 'ru');
+      for (const v of [ru.title, ru.staticEvidence, ru.runtimeEvidence, ru.diagnosis, ru.fix]) {
+        expect(v.length).toBeGreaterThan(0);
+        expect(v).not.toContain('{');
+      }
     }
   });
 });

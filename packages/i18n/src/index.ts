@@ -165,12 +165,17 @@ export function renderCorrelated(f: CorrelatedFinding, locale: Locale): Rendered
   const sv = String(p.staticVariant ?? '');
   const subj = String(p.subjectVariant ?? '');
   const hitch = Number(p.hitchMs ?? 0) > 0;
+  // measured-fix verdicts (correlateFix) carry `variant:'measured'`; prefer the `*_${mv}` template when
+  // present, else fall through to the live logic. Generalizes the existing `static_${sv}`/`diag_${subj}`
+  // routing — live findings carry no `variant` ⇒ `mv` empty ⇒ `pickV` === `pick` (live path untouched).
+  const mv = String(p.variant ?? '');
+  const pickV = (suffix: string, fallback: string): string => (mv && has(`${suffix}_${mv}`) ? translate(locale, `${k}.${suffix}_${mv}`, p) : pick(suffix, fallback));
   return {
-    title: pick('title', f.title),
-    staticEvidence: sv && has(`static_${sv}`) ? translate(locale, `${k}.static_${sv}`, p) : pick('static', f.staticEvidence),
-    runtimeEvidence: hitch && has('runtime_hitch') ? translate(locale, `${k}.runtime_hitch`, p) : pick('runtime', f.runtimeEvidence),
-    diagnosis: subj && has(`diag_${subj}`) ? translate(locale, `${k}.diag_${subj}`, p) : pick('diag', f.diagnosis),
-    fix: subj && has(`fix_${subj}`) ? translate(locale, `${k}.fix_${subj}`, p) : pick('fix', f.fix),
+    title: mv && has(`title_${mv}`) ? translate(locale, `${k}.title_${mv}`, p) : pick('title', f.title),
+    staticEvidence: sv && has(`static_${sv}`) ? translate(locale, `${k}.static_${sv}`, p) : pickV('static', f.staticEvidence),
+    runtimeEvidence: hitch && has('runtime_hitch') ? translate(locale, `${k}.runtime_hitch`, p) : pickV('runtime', f.runtimeEvidence),
+    diagnosis: subj && has(`diag_${subj}`) ? translate(locale, `${k}.diag_${subj}`, p) : pickV('diag', f.diagnosis),
+    fix: subj && has(`fix_${subj}`) ? translate(locale, `${k}.fix_${subj}`, p) : pickV('fix', f.fix),
   };
 }
 

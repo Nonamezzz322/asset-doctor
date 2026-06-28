@@ -19,6 +19,8 @@ import { fmtBytes } from './lib/format';
 import { groupOps, OP_KIND_ORDER, REFERENCE_CHANGING, type OpKind } from './lib/op-manifest';
 import { migrationSnippet, type Engine } from './lib/loader-migration';
 import { LOCALES, NATIVE_NAME, useI18n } from './lib/i18n';
+import { correlateFix } from '@asset-doctor/correlate';
+import { renderCorrelated } from '@asset-doctor/i18n';
 import { API_BASE, isProUnlocked, loadStoredEntitlement, maybeRefresh, PRO_GATE_ENABLED } from './lib/license';
 import { backendReachable } from './lib/backend-client';
 import { ActivatePanel, ProBadge } from './components/LicensePanel';
@@ -1799,6 +1801,15 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
           MEASURED states (`→`, NEVER a pct — the VRAM ReceiptRow above is the SOLE saving claim, invariant
           5). Capped at the first N composed (≤8 MB/side); "showing N of M" when more were composed. Gated
           on a non-empty sheetDiffs[] so absent/empty runs render byte-identical to today (spread-omitted). */}
+      {/* round18 correlateFix: the MEASURED before→after sheet probe (attachSheetProbes filled the
+          per-sheet draw-call and decoded-VRAM readings on the main thread) turned into a localized
+          doctor's verdict via the SAME CorrelatedFinding + renderCorrelated machinery as the extension
+          overlay — "measured N→M draw calls on your GPU this run" / measured decoded-VRAM. HONEST: only
+          emitted when both before+after probes are present; a field absent (no WebGL / pure-pack page)
+          means no verdict. ADDITIVE: empty list renders nothing (byte-identical to today). Sits ABOVE the
+          per-sheet strip as the aggregate measured read; never folded into the static VRAM ReceiptRow
+          (invariant 5). */}
+      <FixVerdicts receipt={receipt} />
       {(receipt.sheetDiffs?.length ?? 0) > 0 ? <SheetDiffs sheetDiffs={receipt.sheetDiffs ?? []} total={receipt.sheetDiffsTotal ?? 0} /> : null}
       {/* Per-file change manifest — the existing receipt.operations[] trail, grouped by verb, collapsed
           by default (instant-wow headline stays first). Reference-changing verbs (merge/dedup/pack/tier)
@@ -1983,6 +1994,33 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
       <button type="button" onClick={onRedownload} className="w-full rounded-lg border border-line px-3 py-1.5 font-mono text-[11px] text-teal transition hover:border-teal">
         ↓ {t('fix.download')}
       </button>
+    </div>
+  );
+}
+
+// round18 correlateFix verdict surface — turns the MEASURED before→after sheet probe into the SAME
+// localized doctor's verdict the extension overlay shows (renderCorrelated path), reusing the batching/vram
+// CorrelatedFinding families (NOT a new finding type). HONEST: correlateFix only emits when both probe
+// halves exist; absent ⇒ [] ⇒ this renders nothing (additive). Severity-bordered like the static findings.
+const FIX_VERDICT_SEV: Record<Severity, string> = { crit: 'border-crit text-crit', warn: 'border-warn text-warn', ok: 'border-ok text-ok', info: 'border-info text-info' };
+function FixVerdicts({ receipt }: { receipt: FixReceipt }) {
+  const { locale, t } = useI18n();
+  const verdicts = correlateFix(receipt);
+  if (verdicts.length === 0) return null;
+  return (
+    <div className="space-y-1.5 text-left">
+      {verdicts.map((f) => {
+        const r = renderCorrelated(f, locale);
+        const sev = FIX_VERDICT_SEV[f.severity] ?? FIX_VERDICT_SEV.info;
+        return (
+          <div key={f.id} className={`rounded-md border-l-2 ${sev} bg-bg p-2 pl-2.5`}>
+            <p className="font-mono text-[11px] font-semibold">[{t(`severity.${f.severity}`)}] {r.title}</p>
+            <p className="mt-0.5 font-mono text-[10px] text-ink-soft">{r.runtimeEvidence}</p>
+            <p className="mt-0.5 font-mono text-[10px] leading-relaxed text-ink-soft/80">{r.diagnosis}</p>
+            <p className="mt-0.5 font-mono text-[10px] text-teal">→ {r.fix}</p>
+          </div>
+        );
+      })}
     </div>
   );
 }

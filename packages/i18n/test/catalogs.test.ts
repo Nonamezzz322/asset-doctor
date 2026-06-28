@@ -41,6 +41,17 @@ describe('catalog completeness (all 9 locales)', () => {
     }
   });
 
+  it('every locale renders the measured-fix correlate keys (round18) without leftover braces', () => {
+    const draws = { drawCalls: 120, drawCallsAfter: 30 };
+    const decoded = { decodedBefore: 40 * 1048576, decodedAfter: 25 * 1048576 };
+    for (const loc of LOCALES) {
+      expect(translate(loc, 'corr.batching.title_measured', draws)).not.toContain('{');
+      expect(translate(loc, 'corr.batching.runtime_measured', draws)).not.toContain('{');
+      expect(translate(loc, 'corr.vram.title_measured', decoded)).not.toContain('{');
+      expect(translate(loc, 'corr.vram.runtime_measured', decoded)).not.toContain('{');
+    }
+  });
+
   it('every locale renders the receipt change-manifest keys without leftover braces', () => {
     for (const loc of LOCALES) {
       expect(translate(loc, 'fix.changes.title', { n: 2 })).not.toContain('{');

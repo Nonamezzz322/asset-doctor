@@ -28,8 +28,35 @@ export interface CorrelationReport {
   summary: string;
 }
 
+/** Narrow structural slice of a fix-receipt sheet diff — the MEASURED before→after probe fields the
+ *  fix engine fills on the main thread (apps/web `attachSheetProbes`). `apps/web`'s `SheetDiff` is
+ *  structurally assignable to this, so `correlateFix(receipt)` takes the real receipt with NO cast and
+ *  NO dependency edge from `correlate` to `apps/web` (TS structural typing). Every field is OPTIONAL —
+ *  absent ⇒ no probe ran (no WebGL / pack page with no source atlas) ⇒ no measured verdict (honesty). */
+export interface MeasuredSheetDiff {
+  name?: string;
+  /** MEASURED issued GL draw calls of the SOURCE sheet on the user's GPU this run. */
+  drawCallsBefore?: number;
+  /** MEASURED issued GL draw calls of the EMITTED sheet — the honest "after". */
+  drawCallsAfter?: number;
+  /** MEASURED decoded texture VRAM (Σ w·h·4 over uploaded textures) of the SOURCE sheet — the REAL GPU
+   *  footprint, a DIFFERENT quantity from any static w·h·4 estimate (invariant 5). */
+  decodedVramBefore?: number;
+  /** MEASURED decoded texture VRAM of the EMITTED sheet. */
+  decodedVramAfter?: number;
+}
+
+/** Narrow structural slice of a fix-receipt — only the measured sheet probes `correlateFix` reads. */
+export interface FixProbeReceipt {
+  sheetDiffs?: MeasuredSheetDiff[];
+}
+
 const DRAW_CALL_BUDGET = 50; // a healthy max draw-calls/frame for a 2D HTML5 game
 const REDUNDANT_PER_FRAME = 5; // redundant binds/frame above this = state thrash
+// Post-fix MEASURED draw-call reduction → severity. NEW editorial cutoffs (NOT inherited from
+// correlate()'s idealDraws*3 *trigger*): a real measured reduction is graded by magnitude.
+const FIX_BATCH_CRIT_RATIO = 0.34; // ≈3×+ fewer measured draws
+const FIX_BATCH_WARN_RATIO = 0.67; // ≈1.5×+ fewer measured draws
 const fmtMB = (n: number): string => `${(n / 1048576).toFixed(1)} MB`;
 
 export function correlate(stat: AnalysisReport, rt: RuntimeReport): CorrelationReport {
@@ -147,4 +174,84 @@ export function correlate(stat: AnalysisReport, rt: RuntimeReport): CorrelationR
       ? `${out.length} correlated issue${out.length === 1 ? '' : 's'}: static structure + live GPU workload point to the same fixes.`
       : `No static↔runtime issues correlated — folder structure and live workload look consistent.`,
   };
+}
+
+/** Sum a measured before/after pair over the sheets where BOTH fields are finite — the honest
+ *  comparison window. Pack pages (no source atlas) carry only an `*After`, so they are excluded:
+ *  no honest before ⇒ no measured win (invariant 3). Returns null when no sheet qualifies. */
+function sumMeasuredPair(
+  sheets: MeasuredSheetDiff[],
+  before: keyof MeasuredSheetDiff,
+  after: keyof MeasuredSheetDiff,
+): { before: number; after: number } | null {
+  let b = 0;
+  let a = 0;
+  let n = 0;
+  for (const s of sheets) {
+    const bv = s[before];
+    const av = s[after];
+    if (typeof bv === 'number' && typeof av === 'number' && Number.isFinite(bv) && Number.isFinite(av)) {
+      b += bv;
+      a += av;
+      n++;
+    }
+  }
+  return n > 0 ? { before: b, after: a } : null;
+}
+
+/** correlateFix — turn the MEASURED before→after fix probe (apps/web `attachSheetProbes`:
+ *  `SheetDiff.drawCalls*` / `decodedVram*`) into the SAME `CorrelatedFinding` shape + `batching`/`vram`
+ *  rule families + `messageKey`/`params` discipline as `correlate()`, so `renderCorrelated` localizes
+ *  these post-fix verdicts with no new finding type. The `variant:'measured'` tag routes the renderer
+ *  to the `*_measured` templates ("measured N→M draw calls on your GPU this run").
+ *
+ *  HONESTY (the whole point): verdicts use ONLY measured numbers from the receipt. A field absent
+ *  (no WebGL / no probe ran / pack page with no source atlas) ⇒ NO verdict — never a fabricated win.
+ *  ADDITIVITY: empty/absent sheetDiffs ⇒ `[]` ⇒ the receipt UI is byte-identical to today.
+ *  INVARIANT 5: the decoded-VRAM verdict uses distinct `decodedBefore`/`decodedAfter` params + the
+ *  `variant:'measured'` tag and "distinct from the w·h·4 disk-side estimate" copy — NEVER folded into
+ *  the static `vramBytes`/`w·h·4` saving. DETERMINISM: fixed iteration, fixed finding order
+ *  (batching then vram), no `Date.now`/`Math.random`/locale formatting (that lives in `renderCorrelated`). */
+export function correlateFix(receipt: FixProbeReceipt): CorrelatedFinding[] {
+  const out: CorrelatedFinding[] = [];
+  const sheets = receipt.sheetDiffs ?? [];
+
+  // Batching — MEASURED issued draw calls before→after over sheets with BOTH probes.
+  const draws = sumMeasuredPair(sheets, 'drawCallsBefore', 'drawCallsAfter');
+  if (draws && draws.before > 0 && draws.after < draws.before) {
+    const ratio = draws.after / draws.before;
+    const severity: Severity = ratio <= FIX_BATCH_CRIT_RATIO ? 'crit' : ratio <= FIX_BATCH_WARN_RATIO ? 'warn' : 'info';
+    out.push({
+      id: 'corrfix:batching',
+      rule: 'batching',
+      severity,
+      title: `${draws.before} → ${draws.after} draw calls — measured on this device`,
+      staticEvidence: `the applied fix repacked the probed sheets`,
+      runtimeEvidence: `measured ${draws.before} → ${draws.after} draw calls after the fix`,
+      diagnosis: `Re-probing the repacked sheets on your GPU issued fewer draw calls — sprites now batch.`,
+      fix: `Ship the repacked sheets; this batching win is measured, not estimated.`,
+      estimate: { drawCallsAfter: draws.after },
+      params: { drawCalls: draws.before, drawCallsAfter: draws.after, variant: 'measured' },
+    });
+  }
+
+  // VRAM — MEASURED decoded texture VRAM before→after. Device-local ⇒ never crit; never folded into the
+  // static w·h·4 saving (invariant 5): distinct params keys + the "distinct from w·h·4" copy.
+  const vram = sumMeasuredPair(sheets, 'decodedVramBefore', 'decodedVramAfter');
+  if (vram && vram.before > 0 && vram.after < vram.before) {
+    out.push({
+      id: 'corrfix:vram',
+      rule: 'vram',
+      severity: 'warn',
+      title: `Decoded-texture VRAM ${fmtMB(vram.before)} → ${fmtMB(vram.after)} (measured, this device)`,
+      staticEvidence: `the applied fix re-probed the sheets on your GPU`,
+      runtimeEvidence: `measured decoded VRAM ${fmtMB(vram.before)} → ${fmtMB(vram.after)} after the fix`,
+      diagnosis: `The repacked sheets decode to less GPU texture memory on this device — distinct from the w·h·4 disk-side estimate.`,
+      fix: `Ship the repacked sheets; this decoded-VRAM reading is device-local, not a cross-device guarantee.`,
+      estimate: { vramBytesSaved: vram.before - vram.after },
+      params: { decodedBefore: vram.before, decodedAfter: vram.after, variant: 'measured' },
+    });
+  }
+
+  return out;
 }
