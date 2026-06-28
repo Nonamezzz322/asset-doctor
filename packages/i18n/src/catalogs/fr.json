@@ -124,6 +124,17 @@
   "find.format-lossless.title": "{target} (sans perte) convient à {contentClass}",
   "find.format-lossless.detail": "{contentClass} se compresse mieux sans perte — lossy q0.9 effilocherait les bords nets. Préférez {target} sans perte. Estimation avec perte −{saved:bytes} ; le correctif Pro encode sans perte, donc les octets différeront.",
   "find.format-lossless.fix": "Transcodez en {target} sans perte pour la distribution.",
+  "find.frame-redundancy.title": {
+    "$count": "dupes",
+    "one": "{dupes} image redondante — pixels identiques réutilisés",
+    "other": "{dupes} images redondantes — pixels identiques réutilisés"
+  },
+  "find.frame-redundancy.detail": {
+    "$count": "dupes",
+    "one": "{dupes} image dans {groups} groupe(s) a des régions de pixels identiques octet pour octet dans cet atlas. Elles occupent {vram:bytes} de VRAM ({area}px × 4) qu'un réempaquetage dédupliqué récupère, plus ~{disk:bytes} de disque d'atlas (estimation par surface).",
+    "other": "{dupes} images dans {groups} groupe(s) ont des régions de pixels identiques octet pour octet dans cet atlas. Elles occupent {vram:bytes} de VRAM ({area}px × 4) qu'un réempaquetage dédupliqué récupère, plus ~{disk:bytes} de disque d'atlas (estimation par surface)."
+  },
+  "find.frame-redundancy.fix": "Référencez une seule image partagée au lieu d'empaqueter des copies identiques, ou réempaquetez dédupliqué.",
   "find.duplicate-exact.title": "{n}× fichier identique",
   "find.duplicate-exact.detail": "Copies identiques au byte près : {refs}. Gardez-en une et référencez-la — chaque copie est aussi un upload de texture distinct ({vram:bytes} de VRAM chacune).",
   "find.duplicate-exact.fix": "Dédupliquez : gardez une seule copie et mettez à jour les références.",

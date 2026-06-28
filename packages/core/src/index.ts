@@ -265,7 +265,9 @@ export type Rule =
   | 'atlas-merge'
   | 'integrity-missing-image'
   | 'variants'
-  | 'mipmap-cost';
+  | 'mipmap-cost'
+  // per-atlas group: frames whose pixel REGIONS are identical within ONE atlas (redundant frames)
+  | 'frame-redundancy';
 
 /** Mipmap chain multiplier on base texture VRAM: a full chain adds Σ(1/4ⁿ) for n≥1 → 4/3 (+33%).
  *  The ONE place this factor lives — both the static analysis path AND the runtime probe import it
@@ -302,7 +304,7 @@ export type TextureFootprintFormat = 'raster' | CompressedTextureFormat;
 
 /** Highlight zones drawn on the film-viewer snapshot, in atlas pixel coords. */
 export interface OverlayZone {
-  kind: 'empty' | 'transparent' | 'bleeding';
+  kind: 'empty' | 'transparent' | 'bleeding' | 'duplicate-frame';
   rects: Rect[];
 }
 
@@ -365,6 +367,18 @@ export interface ImageFeatures {
    *  short-circuit on the first non-opaque pixel so most images bail instantly. Additive: only ever SET
    *  when true; absent (not opaque, decode skipped/failed, or no host scan) ⇒ today's behavior. */
   opaque?: boolean;
+}
+
+/** Per-atlas sprite-region hashes computed by the host (worker) from the ALREADY-DECODED atlas page, fed
+ *  to analysis for the within-atlas `frame-redundancy` check (frames whose PIXEL REGIONS are identical).
+ *  `atlasRef` === Atlas.name (post-merge); `frameHashes` is index-aligned to the merged atlas's sprites:
+ *  entry i is the hex SHA of sprite i's region pixels, or `null` when the host SKIPPED that sprite (a flat
+ *  /solid region — which would falsely cluster — or a decode/read failure). A `null` is NEVER clustered.
+ *  Additive: absent (no host hashing — CLI/headless) ⇒ the frame-redundancy finding never fires ⇒
+ *  byte-identical to today, gated exactly like the dHash `ImageFeatures`. */
+export interface AtlasFrameHashes {
+  atlasRef: string;
+  frameHashes: (string | null)[];
 }
 
 /* ── Bundle / lazy marking (Feature 3 — UI-sourced) ────────────────────────────────────────
@@ -529,6 +543,15 @@ export interface ThresholdConfig {
    *  absent ⇒ the wasted-alpha finding is suppressed (CLI/budget configs that don't opt in — it is also
    *  browser-only, NOT enumerated by resolveThresholds, so the CLI never opts in). */
   wastedAlpha?: { minEdgePx: number; minDiskSaving: number };
+  /** Frame-redundancy (within-atlas duplicate frames) gate. `minDuplicates` — the size a cluster of
+   *  byte-identical sprite REGIONS must reach before the finding fires (a single accidental dupe pair is
+   *  often a deliberate shared region; a real redundant animation set is many). Counted by DISTINCT rect
+   *  so two manifest names pointing at the SAME packed rect (pre-aliased Spine/TP sheets) never inflate the
+   *  count. Recoverable atlas AREA → VRAM (the duplicate regions pin sheet space); the disk number is an
+   *  area-proportional ESTIMATE (no per-region disk bytes exist), the two never conflated (invariant 5).
+   *  Optional/additive: absent ⇒ the frame-redundancy finding is suppressed (CLI/budget configs that don't
+   *  opt in). Browser-only — NOT enumerated by resolveThresholds (mirrors solidFill/wastedAlpha). */
+  frameRedundancy?: { minDuplicates: number };
 }
 
 export interface AnalysisReport {

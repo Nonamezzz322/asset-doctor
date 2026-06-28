@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { Asset, Atlas, ImageAsset, ImageMime, Rect } from '@asset-doctor/core';
 import { parseAtlas, parseImage } from '@asset-doctor/parsers';
-import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, wastedAlphaFinding, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, frameRedundancyFinding, wastedAlphaFinding, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -447,6 +447,161 @@ describe('wasted-alpha (fully-opaque image carrying a dead alpha channel)', () =
       features: [{ assetRef: 'flat.png', contentHash: 'h', opaque: true }],
     });
     expect(noDep.findings.find((f) => f.rule === 'wasted-alpha')).toBeUndefined();
+  });
+});
+
+describe('frame-redundancy (within-atlas duplicate frames)', () => {
+  // A pure atlas with N frames at DISTINCT packed rects (so the distinct-rect guard never collapses them
+  // unless they truly alias). The test injects the region hashes directly — no canvas, fully deterministic.
+  const animAtlas = (name: string, frames: { x: number; y: number; w: number; h: number }[]): Atlas => ({
+    name,
+    imageRef: name,
+    size: { w: 256, h: 256 },
+    sprites: frames.map((f, i) => ({ name: `f${i}`, frame: f, rotated: false, trimmed: false, sourceSize: { w: f.w, h: f.h } })),
+    source: { kind: 'pixi' },
+  });
+  const animAsset = (atlas: Atlas, byteSize = 8000): Asset => ({
+    kind: 'atlas',
+    atlas,
+    image: { name: atlas.name, imageRef: atlas.imageRef, size: atlas.size, mime: 'image/png', byteSize },
+  });
+  // 4 frames in a row (distinct rects), 3 sharing one region hash → 2 recoverable beyond the kept one.
+  const fourFrames = [
+    { x: 0, y: 0, w: 32, h: 32 },
+    { x: 32, y: 0, w: 32, h: 32 },
+    { x: 64, y: 0, w: 32, h: 32 },
+    { x: 96, y: 0, w: 32, h: 32 },
+  ];
+
+  it('a cluster ≥ minDuplicates ⇒ warn, exact VRAM, refs, one overlay zone per cluster', () => {
+    const atlas = animAtlas('anim.png', fourFrames);
+    const f = frameRedundancyFinding(atlas, DEFAULT_THRESHOLDS, ['aa', 'aa', 'aa', 'bb'], 8000)!;
+    expect(f).not.toBeNull();
+    expect(f.rule).toBe('frame-redundancy');
+    expect(f.severity).toBe('warn');
+    expect(f.messageKey).toBe('frame-redundancy');
+    // 3 distinct dupe rects → 2 recoverable; each 32×32 = 1024px → 2048px → ×4 = 8192 bytes VRAM.
+    expect(f.params?.dupes).toBe(2);
+    expect(f.params?.groups).toBe(1);
+    expect(f.estimate?.vramBytesSaved).toBe(2 * 32 * 32 * 4);
+    expect(f.params?.area).toBe(2 * 32 * 32);
+    expect(f.relatedRefs).toEqual(['f0', 'f1', 'f2']); // sorted dupe refs
+    expect(f.overlay).toHaveLength(1); // one zone per cluster
+    expect(f.overlay?.[0]?.kind).toBe('duplicate-frame');
+    expect(f.overlay?.[0]?.rects).toHaveLength(2); // the redundant rects (representative excluded)
+    // disk is an area-proportional estimate: 8000 × (2048 / 4096) = 4000.
+    expect(f.estimate?.diskBytesSaved).toBe(4000);
+    expect(f.params?.disk).toBe(4000);
+  });
+
+  it('two separate clusters ⇒ two overlay zones, summed recoverable area', () => {
+    const six = [
+      { x: 0, y: 0, w: 32, h: 32 }, { x: 32, y: 0, w: 32, h: 32 }, { x: 64, y: 0, w: 32, h: 32 },
+      { x: 0, y: 32, w: 16, h: 16 }, { x: 32, y: 32, w: 16, h: 16 }, { x: 64, y: 32, w: 16, h: 16 },
+    ];
+    const f = frameRedundancyFinding(animAtlas('two.png', six), DEFAULT_THRESHOLDS, ['aa', 'aa', 'aa', 'bb', 'bb', 'bb'], 9000)!;
+    expect(f.params?.groups).toBe(2);
+    expect(f.params?.dupes).toBe(4); // 2 from each cluster
+    expect(f.overlay).toHaveLength(2);
+    // recoverable area = 2×(32²) + 2×(16²) = 2048 + 512 = 2560 px.
+    expect(f.params?.area).toBe(2 * 32 * 32 + 2 * 16 * 16);
+    expect(f.estimate?.vramBytesSaved).toBe((2 * 1024 + 2 * 256) * 4);
+  });
+
+  it('below minDuplicates ⇒ null (a stray dupe pair is not a verdict)', () => {
+    // 2 frames sharing a hash < minDuplicates (3).
+    const f = frameRedundancyFinding(animAtlas('p.png', fourFrames), DEFAULT_THRESHOLDS, ['aa', 'aa', 'bb', 'cc'], 8000);
+    expect(f).toBeNull();
+  });
+
+  it('null hashes never cluster (host-skipped flat regions)', () => {
+    // Four nulls would falsely cluster if treated as a value — must be skipped entirely.
+    const f = frameRedundancyFinding(animAtlas('n.png', fourFrames), DEFAULT_THRESHOLDS, [null, null, null, null], 8000);
+    expect(f).toBeNull();
+  });
+
+  it('pre-aliased frames (same rect, same hash) ⇒ collapse to one distinct rect ⇒ null', () => {
+    // 3 manifest names ALL pointing at the identical packed rect: one GPU region, not three dupes.
+    const aliased = animAtlas('alias.png', [
+      { x: 0, y: 0, w: 32, h: 32 },
+      { x: 0, y: 0, w: 32, h: 32 },
+      { x: 0, y: 0, w: 32, h: 32 },
+      { x: 32, y: 0, w: 32, h: 32 },
+    ]);
+    const f = frameRedundancyFinding(aliased, DEFAULT_THRESHOLDS, ['aa', 'aa', 'aa', 'bb'], 8000);
+    expect(f).toBeNull(); // distinctRects = 1 < minDuplicates → no finding
+  });
+
+  it('no frameRedundancy config ⇒ null (CLI / budget configs that don\'t opt in)', () => {
+    const cfg = { ...DEFAULT_THRESHOLDS };
+    delete cfg.frameRedundancy;
+    expect(frameRedundancyFinding(animAtlas('p.png', fourFrames), cfg, ['aa', 'aa', 'aa', 'bb'], 8000)).toBeNull();
+  });
+
+  it('length mismatch ⇒ null (stale/desynced dep, never mis-key a region)', () => {
+    expect(frameRedundancyFinding(animAtlas('p.png', fourFrames), DEFAULT_THRESHOLDS, ['aa', 'aa'], 8000)).toBeNull();
+  });
+
+  it('analyze threads frameHashes to an ATLAS and does NOT fold the disk estimate into potentialDiskSaved', async () => {
+    const atlas = animAtlas('anim.png', fourFrames);
+    const baseline = await analyze([animAsset(atlas)]); // no frameHashes ⇒ rule dormant
+    expect(baseline.findings.some((f) => f.rule === 'frame-redundancy')).toBe(false);
+
+    const report = await analyze([animAsset(atlas)], undefined, {
+      frameHashes: [{ atlasRef: 'anim.png', frameHashes: ['aa', 'aa', 'aa', 'bb'] }],
+    });
+    const fr = report.findings.find((f) => f.rule === 'frame-redundancy');
+    expect(fr?.assetRef).toBe('anim.png');
+    expect(fr?.estimate?.vramBytesSaved).toBe(2 * 32 * 32 * 4);
+    // The disk number is an area-proportional ESTIMATE — NEVER folded into the aggregate (invariant 5).
+    expect(report.totals.potentialDiskSaved).toBe(baseline.totals.potentialDiskSaved);
+  });
+
+  it('absent frameHashes ⇒ byte-identical to today (CLI / headless unaffected)', async () => {
+    const atlas = animAsset(animAtlas('anim.png', fourFrames));
+    const a = await analyze([atlas]);
+    const b = await analyze([atlas], undefined, {});
+    expect(a.findings.some((f) => f.rule === 'frame-redundancy')).toBe(false);
+    expect(b.findings.some((f) => f.rule === 'frame-redundancy')).toBe(false);
+  });
+
+  it('golden: frame-redundant fixture fires warn with the documented cluster', async () => {
+    // This package is headless/pure — it can't decode the fixture PNG (no canvas/pngjs dep). It verifies the
+    // RULE wiring given the documented cluster (idle_* share one region, walk_* distinct). The REAL decode
+    // path — fixture PNG → pure extractFrameRegions → SHA → this same finding — is asserted end-to-end in
+    // apps/web/src/lib/perceptual.test.ts (where the page is actually decoded), which is what proves the
+    // textured fixture reproduces the defect through production code, not just through injected hashes.
+    interface FrExpected { atlas: { w: number; h: number }; recoverableArea: number; vramBytesSaved: number; findings: { rule: string; severity: string }[] }
+    const expected = readJson('frame-redundant/expected.json') as FrExpected;
+    const parsed = parseAtlas(readJson('frame-redundant/anim.json'), {
+      ref: 'anim.png',
+      bytes: readBytes('frame-redundant/anim.png'),
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok || parsed.asset.kind !== 'atlas') return;
+
+    // Index-aligned hashes BY SPRITE NAME so the golden is robust to parser ordering: idle_* share one hash,
+    // walk_* each get their own — mirroring the documented cluster in expected.json.
+    const hashByName = (n: string): string => (n.startsWith('idle_') ? 'idle' : n);
+    const frameHashes = parsed.asset.atlas.sprites.map((s) => hashByName(s.name));
+    expect(frameHashes.filter((h) => h === 'idle')).toHaveLength(4); // sanity: the cluster is present
+
+    const report = await analyze([parsed.asset], undefined, {
+      frameHashes: [{ atlasRef: 'anim.png', frameHashes }],
+    });
+    const fr = report.findings.find((f) => f.rule === 'frame-redundancy');
+    expect(fr?.severity).toBe('warn');
+    expect(fr?.estimate?.vramBytesSaved).toBe(expected.vramBytesSaved);
+    expect(fr?.params?.area).toBe(expected.recoverableArea);
+    expect(sig(report.findings.filter((f) => f.rule === 'frame-redundancy'))).toEqual(sig(expected.findings));
+  });
+
+  it('a LOOSE asset never fires frame-redundancy even if a hash entry names it', async () => {
+    const loose: Asset = { kind: 'image', image: { name: 'x.png', imageRef: 'x.png', size: { w: 64, h: 64 }, mime: 'image/png', byteSize: 1000 } };
+    const report = await analyze([loose], undefined, {
+      frameHashes: [{ atlasRef: 'x.png', frameHashes: ['aa', 'aa', 'aa'] }],
+    });
+    expect(report.findings.some((f) => f.rule === 'frame-redundancy')).toBe(false);
   });
 });
 

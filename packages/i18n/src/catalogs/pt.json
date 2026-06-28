@@ -124,6 +124,17 @@
   "find.format-lossless.title": "{target} (sem perdas) combina com {contentClass}",
   "find.format-lossless.detail": "{contentClass} comprime melhor sem perdas — lossy q0.9 desfiaria as bordas nítidas. Prefira {target} sem perdas. Estimativa com perdas −{saved:bytes}; o arranjo Pro codifica sem perdas, então os bytes vão diferir.",
   "find.format-lossless.fix": "Transcodifique para {target} sem perdas para entrega.",
+  "find.frame-redundancy.title": {
+    "$count": "dupes",
+    "one": "{dupes} quadro redundante — pixels idênticos reutilizados",
+    "other": "{dupes} quadros redundantes — pixels idênticos reutilizados"
+  },
+  "find.frame-redundancy.detail": {
+    "$count": "dupes",
+    "one": "{dupes} quadro em {groups} grupo(s) tem regiões de pixels byte a byte idênticas neste atlas. Eles fixam {vram:bytes} de VRAM ({area}px × 4) que um reempacotamento desduplicado recupera, mais ~{disk:bytes} de disco do atlas (estimativa por área).",
+    "other": "{dupes} quadros em {groups} grupo(s) têm regiões de pixels byte a byte idênticas neste atlas. Eles fixam {vram:bytes} de VRAM ({area}px × 4) que um reempacotamento desduplicado recupera, mais ~{disk:bytes} de disco do atlas (estimativa por área)."
+  },
+  "find.frame-redundancy.fix": "Referencie um único quadro compartilhado em vez de empacotar cópias idênticas, ou reempacote desduplicado.",
   "find.duplicate-exact.title": "{n}× arquivo idêntico",
   "find.duplicate-exact.detail": "Cópias idênticas byte a byte: {refs}. Mantenha uma e referencie-a — cada cópia também é um upload de textura separado ({vram:bytes} de VRAM cada).",
   "find.duplicate-exact.fix": "Desduplique: mantenha uma única cópia e atualize as referências.",

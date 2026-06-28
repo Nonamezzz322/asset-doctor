@@ -1,0 +1,24 @@
+{
+  "kind": "frame-redundancy",
+  "feature": "within-atlas-duplicate-frames",
+  "atlas": {
+    "w": 256,
+    "h": 32
+  },
+  "duplicateCluster": [
+    "idle_0",
+    "idle_1",
+    "idle_2",
+    "idle_3"
+  ],
+  "minDuplicates": 3,
+  "recoverableArea": 3072,
+  "vramBytesSaved": 12288,
+  "findings": [
+    {
+      "rule": "frame-redundancy",
+      "severity": "warn"
+    }
+  ],
+  "note": "One atlas whose four idle_* frames are TEXTURED (a 2-color checker) and byte-identical 32×32 pixel regions (a wasted duplicate animation set), plus four distinct textured walk_* frames. The frames are textured — NOT a single solid color — so they clear the production flat-guard (box-average to 9×8 → grayStdDev ≥ 6) and the within-atlas frame-redundancy detector clusters them off the REAL decoded page (worker hashAtlasFrames / pure extractFrameRegions): 4 idle frames → 3 recoverable beyond the kept one. Recoverable atlas AREA → VRAM (vramBytesSaved, exact); the disk number is an area-proportional ESTIMATE, never conflated (invariant 5). The detector MEASURES the duplicate set + wasted bytes; de-duplicating the frames is the Pro fix's job (generation — invariant 3)."
+}

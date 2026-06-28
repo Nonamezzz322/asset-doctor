@@ -2,7 +2,7 @@
 // Finding(s) with a verdict, the proof (numbers), a fix, and — where visual — overlay zones.
 // We measure; we never fabricate. Thresholds come from config, never inline magic numbers.
 
-import { MIP_OVERHEAD, type Atlas, type ContentClass, type Finding, type ImageAsset, type ImageMime, type Severity, type Size, type ThresholdConfig } from '@asset-doctor/core';
+import { MIP_OVERHEAD, type Atlas, type ContentClass, type Finding, type ImageAsset, type ImageMime, type OverlayZone, type Rect, type Severity, type Size, type ThresholdConfig } from '@asset-doctor/core';
 import { buildCoverage, defaultCell, mergeEmptyRects, summarizeEmpty } from './grid';
 
 const BYTES_PER_PX = 4; // RGBA8888
@@ -150,6 +150,122 @@ export function solidFillFinding(ref: string, size: Size, cfg: ThresholdConfig):
     estimate: { vramBytesSaved: vram - BYTES_PER_PX },
     messageKey: 'solid-fill',
     params: { w: size.w, h: size.h, vram },
+  };
+}
+
+/** Within-atlas duplicate-frame detector. The host (worker) hashes each sprite's PIXEL REGION from the
+ *  ALREADY-DECODED atlas page (`frameHashes`, index-aligned to `atlas.sprites`; `null` = host-skipped flat
+ *  region or read failure, never clustered). We CLUSTER frames whose region hash is byte-identical — these
+ *  are redundant frames wasting atlas AREA. We MEASURE the recoverable set (every duplicate beyond the one
+ *  representative kept per cluster) and report:
+ *    • VRAM — the recoverable distinct-rect area × 4 (the atlas space the duplicates pin; a repack that
+ *      drops them shrinks the sheet). Honest, exact area arithmetic.
+ *    • DISK — an AREA-PROPORTIONAL ESTIMATE only (no per-region disk bytes exist): the image's byteSize
+ *      scaled by recoverableArea / Σ(all frame areas). Guarded on Σ > 0; carried separately, NEVER folded
+ *      into the aggregate potentialDiskSaved (invariant 5: VRAM and disk are distinct quantities).
+ *  DISTINCT-RECT GUARD (invariant 3, honesty): two manifest names pointing at the IDENTICAL packed rect
+ *  (x,y,w,h) — a pre-aliased Spine/TP sheet — are ALREADY one region on the GPU, so they cluster by hash
+ *  but contribute ONE recoverable unit, never an inflated count. We generate NOTHING (the dedup is the fix
+ *  engine's job); we record the measured duplicate set + one OverlayZone per cluster. Returns null below the
+ *  gate, with no config, on a length mismatch, or when no cluster reaches minDuplicates. */
+export function frameRedundancyFinding(
+  atlas: Atlas,
+  cfg: ThresholdConfig,
+  frameHashes: (string | null)[],
+  imageByteSize: number,
+): Finding | null {
+  if (!cfg.frameRedundancy) return null;
+  // Defensive: the host hashes index-aligned to the SAME (post-merge) sprite list. A mismatch means the
+  // dep is stale/desynced — bail rather than mis-key a region (additive: no finding, byte-identical).
+  if (frameHashes.length !== atlas.sprites.length) return null;
+
+  const rectKey = (r: Rect): string => `${r.x},${r.y},${r.w},${r.h}`;
+
+  // Cluster sprite INDICES by region hash (skip nulls — a host-skipped flat region never clusters). Insertion
+  // order of indices is ascending (we iterate sprites in order), so each cluster's index list is sorted.
+  const clusters = new Map<string, number[]>();
+  for (let i = 0; i < atlas.sprites.length; i++) {
+    const h = frameHashes[i];
+    if (h == null) continue;
+    const g = clusters.get(h) ?? [];
+    g.push(i);
+    clusters.set(h, g);
+  }
+
+  const dupRefs: string[] = []; // every sprite name in a qualifying duplicate cluster (proof)
+  const overlay: OverlayZone[] = []; // one zone per cluster (FilmViewer rotates hue by zone index)
+  let recoverableArea = 0; // Σ over clusters of (distinctRects − 1) × rectArea — the reclaimable atlas px
+  let totalDuplicates = 0; // count of recoverable frames (distinct rects beyond the one kept), for the title
+
+  // Deterministic cluster ordering: by the first (lowest) sprite index in each cluster.
+  const ordered = [...clusters.values()].sort((a, b) => a[0]! - b[0]!);
+  for (const indices of ordered) {
+    // DISTINCT-RECT GUARD: collapse manifest names that alias the SAME packed rect — one recoverable unit.
+    const byRect = new Map<string, number[]>();
+    for (const i of indices) {
+      const key = rectKey(atlas.sprites[i]!.frame);
+      const g = byRect.get(key) ?? [];
+      g.push(i);
+      byRect.set(key, g);
+    }
+    const distinctRects = byRect.size;
+    if (distinctRects < cfg.frameRedundancy.minDuplicates) continue; // not enough genuinely-distinct dupes
+
+    // The duplicates this cluster recovers: every DISTINCT rect beyond the one representative we keep. Area
+    // is uniform within a hash cluster (identical region pixels ⇒ identical w×h), so use the first rect's.
+    const rect = atlas.sprites[indices[0]!]!.frame;
+    const rectArea = rect.w * rect.h;
+    recoverableArea += (distinctRects - 1) * rectArea;
+    totalDuplicates += distinctRects - 1;
+
+    for (const i of indices) dupRefs.push(atlas.sprites[i]!.name);
+    // One overlay zone per cluster — the redundant rects (skip the representative we'd keep = the first
+    // distinct rect, by its lowest index). Deterministic: distinct rects ordered by their lowest index.
+    const distinctOrdered = [...byRect.values()].sort((a, b) => a[0]! - b[0]!);
+    const zoneRects: Rect[] = distinctOrdered.slice(1).map((g) => ({ ...atlas.sprites[g[0]!]!.frame }));
+    overlay.push({ kind: 'duplicate-frame', rects: zoneRects });
+  }
+
+  if (totalDuplicates < 1) return null; // no cluster reached the gate
+  dupRefs.sort();
+
+  const vram = recoverableArea * BYTES_PER_PX;
+  // DISK is an area-proportional ESTIMATE (no per-region disk bytes): byteSize × recoverableArea / Σ(all
+  // frame areas). Guard Σ > 0 (an atlas of zero-area frames ⇒ skip the disk estimate, emit VRAM only — but
+  // totalDuplicates ≥ 1 already implies a non-zero rectArea, so Σ > 0 holds; the guard is belt-and-braces).
+  const allFrameArea = atlas.sprites.reduce((s, sp) => s + sp.frame.w * sp.frame.h, 0);
+  const diskEstimate = allFrameArea > 0 ? Math.round((imageByteSize * recoverableArea) / allFrameArea) : 0;
+  const clusterCount = overlay.length;
+
+  // Baked English — MUST mirror the en catalog templates byte-for-byte (the renderFinding drift guard). The
+  // headline `dupes` count drives the plural (title + detail); `groups` is a plain count. The disk clause
+  // always renders (diskEstimate is 0 only for a degenerate zero-area atlas that cannot reach the gate).
+  const frameWord = totalDuplicates === 1 ? 'frame' : 'frames';
+  return {
+    id: `${atlas.name}:frame-redundancy`,
+    rule: 'frame-redundancy',
+    severity: 'warn',
+    assetRef: atlas.name,
+    relatedRefs: dupRefs,
+    title: `${totalDuplicates} redundant ${frameWord} — identical pixels reused`,
+    detail:
+      `${totalDuplicates} ${frameWord} in ${clusterCount} group(s) have byte-identical pixel regions ` +
+      `within this atlas. They pin ${fmtBytes(vram)} of VRAM (${recoverableArea}px × 4) that a ` +
+      `de-duplicated repack reclaims, plus ~${fmtBytes(diskEstimate)} of atlas disk (area estimate).`,
+    fix: 'Reference one shared frame instead of packing identical copies, or repack de-duplicated.',
+    // VRAM is exact area arithmetic; diskBytesSaved is an area-proportional ESTIMATE, kept here for the
+    // finding's own readout but NOT folded into the aggregate potentialDiskSaved (see analyze.ts).
+    estimate: { vramBytesSaved: vram, ...(diskEstimate > 0 ? { diskBytesSaved: diskEstimate } : {}) },
+    overlay,
+    messageKey: 'frame-redundancy',
+    params: {
+      dupes: totalDuplicates,
+      groups: clusterCount,
+      refs: dupRefs.join(', '),
+      vram,
+      area: recoverableArea,
+      disk: diskEstimate,
+    },
   };
 }
 

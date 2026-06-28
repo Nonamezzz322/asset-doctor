@@ -102,6 +102,17 @@
   "find.format-lossless.title": "{target} (lossless) suits this {contentClass}",
   "find.format-lossless.detail": "{contentClass} compresses better lossless — lossy q0.9 would fray hard edges. Prefer lossless {target}. Lossy estimate −{saved:bytes}; the Pro fix encodes lossless, so bytes will differ.",
   "find.format-lossless.fix": "Transcode to lossless {target} for delivery.",
+  "find.frame-redundancy.title": {
+    "$count": "dupes",
+    "one": "{dupes} redundant frame — identical pixels reused",
+    "other": "{dupes} redundant frames — identical pixels reused"
+  },
+  "find.frame-redundancy.detail": {
+    "$count": "dupes",
+    "one": "{dupes} frame in {groups} group(s) have byte-identical pixel regions within this atlas. They pin {vram:bytes} of VRAM ({area}px × 4) that a de-duplicated repack reclaims, plus ~{disk:bytes} of atlas disk (area estimate).",
+    "other": "{dupes} frames in {groups} group(s) have byte-identical pixel regions within this atlas. They pin {vram:bytes} of VRAM ({area}px × 4) that a de-duplicated repack reclaims, plus ~{disk:bytes} of atlas disk (area estimate)."
+  },
+  "find.frame-redundancy.fix": "Reference one shared frame instead of packing identical copies, or repack de-duplicated.",
   "find.duplicate-exact.title": "{n}× identical file",
   "find.duplicate-exact.detail": "Byte-identical copies: {refs}. Keep one and reference it — each copy is also a separate texture upload ({vram:bytes} VRAM each).",
   "find.duplicate-exact.fix": "De-duplicate: keep a single copy and update references.",

@@ -25,4 +25,9 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   // flagging; the measured opaque re-encode (same format) must save ≥ minDiskSaving of disk bytes before
   // the finding fires. DISK-only (invariant 5: the GPU still allocates RGBA8888). Loose-only; atlases
   // never trip it. Browser-only — NOT in resolveThresholds (the CLI/budget gate never opts in).
+  frameRedundancy: { minDuplicates: 3 }, // CALIBRATE — within-atlas duplicate-frame gate. A cluster of
+  // byte-identical sprite REGIONS this large (counted by DISTINCT packed rect) before the finding fires:
+  // a stray dupe pair is often a deliberate shared region, a redundant animation set is many. Recoverable
+  // atlas AREA → VRAM; the disk number is an area-proportional ESTIMATE (invariant 5). Browser-only — NOT
+  // in resolveThresholds (the worker hashes regions off the already-decoded page; the CLI never opts in).
 };

@@ -129,6 +129,129 @@ export function alphaFullyOpaque(rgba: Uint8ClampedArray | number[]): boolean {
   return true;
 }
 
+/** Axis-aligned packed rect of a sprite AS PLACED in the atlas page (already w/h-swapped when rotated). */
+export interface FrameRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Per-page caps mirroring the worker's full-frame opaque scan (instant-wow ≤10s). A page above the px cap
+ *  or with more than the sprite cap is skipped WHOLE (the rule never fires for it) rather than risking a
+ *  slow read — honestly, not silently. Same ceilings the worker used inline; single-sourced here so the
+ *  pure logic the rule depends on is one testable unit. */
+export const FRAME_HASH_MAX_PX = 4096 * 4096 * 1.5; // ≈ 25.2 MP — generous loose-art ceiling
+export const FRAME_HASH_MAX_SPRITES = 4096; // real animation sheets are well under this
+
+/** Area-average a sub-rect of a full-resolution RGBA page down to a 9×8 grayscale sample (the same grid the
+ *  dHash/flat-guard uses). Pure box filter: each of the 72 cells averages the source pixels that map into
+ *  it (deterministic — no canvas resampler), then converts to luma. Mirrors the worker's old
+ *  `drawImage(bmp, x,y,w,h, 0,0, 9,8)` downscale but canvas-free so the flat-guard is unit-testable. */
+function regionGray9x8(
+  page: Uint8ClampedArray | Uint8Array,
+  pageW: number,
+  rect: FrameRect,
+): number[] {
+  const gray: number[] = [];
+  for (let cy = 0; cy < DH; cy++) {
+    for (let cx = 0; cx < DW; cx++) {
+      // Source span [sx0, sx1) × [sy0, sy1) inside the region that maps to cell (cx, cy).
+      const sx0 = rect.x + Math.floor((cx * rect.w) / DW);
+      const sx1 = rect.x + Math.max(Math.floor(((cx + 1) * rect.w) / DW), Math.floor((cx * rect.w) / DW) + 1);
+      const sy0 = rect.y + Math.floor((cy * rect.h) / DH);
+      const sy1 = rect.y + Math.max(Math.floor(((cy + 1) * rect.h) / DH), Math.floor((cy * rect.h) / DH) + 1);
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let n = 0;
+      for (let sy = sy0; sy < sy1; sy++) {
+        for (let sx = sx0; sx < sx1; sx++) {
+          const i = (pageW * sy + sx) * 4;
+          r += page[i] ?? 0;
+          g += page[i + 1] ?? 0;
+          b += page[i + 2] ?? 0;
+          n++;
+        }
+      }
+      if (n === 0) {
+        gray.push(0);
+      } else {
+        gray.push(0.299 * (r / n) + 0.587 * (g / n) + 0.114 * (b / n));
+      }
+    }
+  }
+  return gray;
+}
+
+/** Extract a sprite's RGBA region bytes (tightly packed, row-major w×h) from the full-resolution page
+ *  buffer. The returned bytes are exactly what the host SHA-256s for the frame hash — identical region
+ *  pixels (anywhere on the page) ⇒ identical bytes ⇒ identical hash (deterministic, position-independent). */
+function extractRegion(
+  page: Uint8ClampedArray | Uint8Array,
+  pageW: number,
+  rect: FrameRect,
+): Uint8Array {
+  const out = new Uint8Array(rect.w * rect.h * 4);
+  let o = 0;
+  for (let yy = 0; yy < rect.h; yy++) {
+    const rowStart = (pageW * (rect.y + yy) + rect.x) * 4;
+    for (let xx = 0; xx < rect.w * 4; xx++) out[o++] = page[rowStart + xx] ?? 0;
+  }
+  return out;
+}
+
+/** PURE core of the within-atlas frame-redundancy hashing (the load-bearing half of the worker's
+ *  `hashAtlasFrames` — canvas-free, deterministic, unit-testable). Given an ALREADY-DECODED full-resolution
+ *  RGBA page + the sprite rects AS PLACED, returns a per-rect array index-aligned to `rects`:
+ *    • the tightly-packed region RGBA bytes (what the host SHA-256s) for a TEXTURED region — identical
+ *      region pixels (anywhere on the page) ⇒ identical bytes ⇒ identical hash (clusters by content);
+ *    • `null` for a region that is flat/near-uniform (box-averaged 9×8 grayStdDev < the dHash flat
+ *      threshold — a featureless fill would falsely cluster, mirroring the dHash isFlat skip), or whose rect
+ *      is zero/negative/out-of-bounds (can't be hashed honestly → never clustered).
+ *  Returns the WHOLE page as `null` (no regions extracted) when there are more than FRAME_HASH_MAX_SPRITES
+ *  rects or the page exceeds FRAME_HASH_MAX_PX (skipped honestly — the rule simply never fires for that
+ *  page). Splitting extraction (pure, sync) from the SHA (async crypto.subtle, in the worker) keeps the
+ *  region-extraction + flat-guard + caps + bounds — everything the rule's runtime correctness depends on —
+ *  unit-testable canvas-free; the worker just maps each non-null region through its hash. */
+export function extractFrameRegions(
+  page: Uint8ClampedArray | Uint8Array,
+  pageW: number,
+  pageH: number,
+  rects: FrameRect[],
+): (Uint8Array | null)[] | null {
+  if (rects.length > FRAME_HASH_MAX_SPRITES) return null;
+  if (pageW <= 0 || pageH <= 0 || pageW * pageH > FRAME_HASH_MAX_PX) return null;
+  const out: (Uint8Array | null)[] = [];
+  for (const rect of rects) {
+    const { x, y, w, h } = rect;
+    if (w <= 0 || h <= 0 || x < 0 || y < 0 || x + w > pageW || y + h > pageH) {
+      out.push(null);
+      continue;
+    }
+    if (isFlat(regionGray9x8(page, pageW, rect))) {
+      out.push(null); // featureless region — never cluster (same skip as the dHash path)
+      continue;
+    }
+    out.push(extractRegion(page, pageW, rect));
+  }
+  return out;
+}
+
+/** Convenience: `extractFrameRegions` then map each non-null region through `hash` (a sync stand-in in
+ *  tests; the worker uses its own async SHA loop instead, since crypto.subtle is async). Deterministic. */
+export function hashFrameRegions(
+  page: Uint8ClampedArray | Uint8Array,
+  pageW: number,
+  pageH: number,
+  rects: FrameRect[],
+  hash: (bytes: Uint8Array) => string,
+): (string | null)[] | null {
+  const regions = extractFrameRegions(page, pageW, pageH, rects);
+  if (!regions) return null;
+  return regions.map((r) => (r === null ? null : hash(r)));
+}
+
 /** Classify a 9×8 RGBA sample into a coarse content class for the format-suitability verdict.
  *  Order (design §4): hard alpha first (a flat icon WITH a hard cutout is 'alpha-art', so checking
  *  alpha before variance keeps it out of the 'flat' bucket) → low-variance fill ('flat') → else

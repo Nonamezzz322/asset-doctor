@@ -120,6 +120,17 @@
   "find.format-lossless.title": "{target}（无损）适合此 {contentClass}",
   "find.format-lossless.detail": "{contentClass} 无损压缩效果更好——lossy q0.9 会使硬边缘出现毛刺。建议使用无损 {target}。有损估算 −{saved:bytes}；Pro 修复以无损方式编码，因此字节数会不同。",
   "find.format-lossless.fix": "转码为无损 {target} 用于分发。",
+  "find.frame-redundancy.title": {
+    "$count": "dupes",
+    "one": "{dupes} 个冗余帧 — 复用了完全相同的像素",
+    "other": "{dupes} 个冗余帧 — 复用了完全相同的像素"
+  },
+  "find.frame-redundancy.detail": {
+    "$count": "dupes",
+    "one": "{dupes} 个帧（共 {groups} 组）在此图集中具有逐字节相同的像素区域。它们占用 {vram:bytes} 显存（{area}px × 4），去重重排即可回收，另加约 {disk:bytes} 的图集磁盘（按面积估算）。",
+    "other": "{dupes} 个帧（共 {groups} 组）在此图集中具有逐字节相同的像素区域。它们占用 {vram:bytes} 显存（{area}px × 4），去重重排即可回收，另加约 {disk:bytes} 的图集磁盘（按面积估算）。"
+  },
+  "find.frame-redundancy.fix": "引用同一个共享帧，而不是打包完全相同的副本，或进行去重重排。",
   "find.duplicate-exact.title": "{n}× 完全相同的文件",
   "find.duplicate-exact.detail": "字节完全相同的副本：{refs}。保留一份并引用它 — 每份副本也是一次单独的纹理上传（各占 {vram:bytes} VRAM）。",
   "find.duplicate-exact.fix": "去重：仅保留一份副本并更新引用。",

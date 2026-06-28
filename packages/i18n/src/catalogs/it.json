@@ -124,6 +124,17 @@
   "find.format-lossless.title": "{target} (lossless) è adatto a {contentClass}",
   "find.format-lossless.detail": "{contentClass} si comprime meglio in lossless — lossy q0.9 sfilaccerebbe i bordi netti. Preferisci {target} lossless. Stima con perdita −{saved:bytes}; la correzione Pro codifica lossless, quindi i byte differiranno.",
   "find.format-lossless.fix": "Transcodifica in {target} lossless per la distribuzione.",
+  "find.frame-redundancy.title": {
+    "$count": "dupes",
+    "one": "{dupes} fotogramma ridondante — pixel identici riutilizzati",
+    "other": "{dupes} fotogrammi ridondanti — pixel identici riutilizzati"
+  },
+  "find.frame-redundancy.detail": {
+    "$count": "dupes",
+    "one": "{dupes} fotogramma in {groups} gruppo(i) ha regioni di pixel identiche byte per byte in questo atlante. Bloccano {vram:bytes} di VRAM ({area}px × 4) che un ricompattamento deduplicato recupera, più ~{disk:bytes} di disco dell'atlante (stima per area).",
+    "other": "{dupes} fotogrammi in {groups} gruppo(i) hanno regioni di pixel identiche byte per byte in questo atlante. Bloccano {vram:bytes} di VRAM ({area}px × 4) che un ricompattamento deduplicato recupera, più ~{disk:bytes} di disco dell'atlante (stima per area)."
+  },
+  "find.frame-redundancy.fix": "Riferisci un singolo fotogramma condiviso invece di impacchettare copie identiche, o ricompatta deduplicato.",
   "find.duplicate-exact.title": "{n}× file identico",
   "find.duplicate-exact.detail": "Copie byte-identiche: {refs}. Tienine una e referenziala — ogni copia è anche un caricamento texture separato ({vram:bytes} VRAM ciascuna).",
   "find.duplicate-exact.fix": "Deduplica: tieni una sola copia e aggiorna i riferimenti.",

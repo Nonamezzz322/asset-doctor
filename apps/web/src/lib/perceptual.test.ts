@@ -1,20 +1,28 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { PNG, type PNGImage } from 'pngjs';
 import { describe, expect, it } from 'vitest';
 import type { ContentClass } from '@asset-doctor/core';
+import { frameRedundancyFinding, DEFAULT_THRESHOLDS } from '@asset-doctor/analysis';
+import { parseAtlas } from '@asset-doctor/parsers';
 import {
   alphaFullyOpaque,
   classifyContent,
   dHashFromGray,
+  extractFrameRegions,
   grayStdDev,
   hasHardAlpha,
+  hashFrameRegions,
   isFlat,
   isSolidColor,
   luma,
   FLAT_STD,
+  FRAME_HASH_MAX_PX,
+  FRAME_HASH_MAX_SPRITES,
   SOLID_STD,
+  type FrameRect,
 } from './perceptual';
 
 const N = 9 * 8; // 72 samples — the 9×8 dHash grid
@@ -352,4 +360,173 @@ describe('isSolidColor over the solid-fill fixtures (golden cross-check)', () =>
       expect(solidFixture(img.name)).toBe(img.solid); // detector agrees with the golden
     });
   }
+});
+
+// ── extractFrameRegions / hashFrameRegions: the PURE load-bearing half of the worker's hashAtlasFrames
+// (the per-region extraction + flat-guard + caps + bounds that decide whether a region is hashed or nulled).
+// Previously this lived only inside the worker (canvas drawImage/getImageData) and had ZERO coverage; the
+// flat-guard there is exactly what silently neuters a solid-color fixture, so it MUST be tested directly.
+describe('extractFrameRegions / hashFrameRegions (pure frame-region hashing core)', () => {
+  // A short, deterministic stand-in hash for the tests — the worker plugs SHA-256; here a stable hex digest
+  // of the bytes is enough to assert "identical regions ⇒ same hash, distinct ⇒ different".
+  const h = (b: Uint8Array): string => createHash('sha256').update(b).digest('hex');
+
+  // Build a W×H RGBA page; `paint(x,y)` returns the [r,g,b,a] for each pixel.
+  function page(W: number, H: number, paint: (x: number, y: number) => [number, number, number, number]): Uint8ClampedArray {
+    const buf = new Uint8ClampedArray(W * H * 4);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const [r, g, b, a] = paint(x, y);
+        const i = (W * y + x) * 4;
+        buf[i] = r; buf[i + 1] = g; buf[i + 2] = b; buf[i + 3] = a;
+      }
+    }
+    return buf;
+  }
+  // A coarse 2-color checker (textured ⇒ clears the flat-guard) parameterised by its two colors + offset, so
+  // two cells can be made byte-identical (same colors) or distinct (different colors).
+  const checker =
+    (a: [number, number, number], b: [number, number, number], sq = 4) =>
+    (lx: number, ly: number): [number, number, number, number] =>
+      ((Math.floor(lx / sq) + Math.floor(ly / sq)) & 1 ? a : b).concat(255) as [number, number, number, number];
+
+  it('identical textured regions ⇒ identical hash; a distinct textured region ⇒ different hash', () => {
+    const W = 48, H = 16;
+    const A: [number, number, number] = [200, 60, 30];
+    const B: [number, number, number] = [20, 40, 200];
+    const C: [number, number, number] = [30, 200, 60];
+    const pa = checker(A, B);
+    const pc = checker(A, C);
+    // cells 0 and 1 share the (A,B) checker (byte-identical); cell 2 uses (A,C) (distinct).
+    const buf = page(W, H, (x, y) => (x < 32 ? pa(x % 16, y) : pc(x % 16, y)));
+    const rects: FrameRect[] = [
+      { x: 0, y: 0, w: 16, h: 16 },
+      { x: 16, y: 0, w: 16, h: 16 },
+      { x: 32, y: 0, w: 16, h: 16 },
+    ];
+    const hashes = hashFrameRegions(buf, W, H, rects, h)!;
+    expect(hashes[0]).not.toBeNull();
+    expect(hashes[0]).toBe(hashes[1]); // identical pixels ⇒ identical hash (position-independent)
+    expect(hashes[2]).not.toBe(hashes[0]); // distinct pixels ⇒ distinct hash
+  });
+
+  it('a flat / solid-color region ⇒ null (never clustered — the bug the old fixture hid)', () => {
+    const W = 32, H = 16;
+    const buf = page(W, H, () => [42, 161, 152, 255]); // single solid color everywhere (DUP_COLOR)
+    const rects: FrameRect[] = [
+      { x: 0, y: 0, w: 16, h: 16 },
+      { x: 16, y: 0, w: 16, h: 16 },
+    ];
+    const hashes = hashFrameRegions(buf, W, H, rects, h)!;
+    expect(hashes).toEqual([null, null]); // solid ⇒ flat-guard nulls both ⇒ they can never cluster
+  });
+
+  it('zero / negative / out-of-bounds rects ⇒ null (can\'t be hashed honestly)', () => {
+    const W = 32, H = 16;
+    const buf = page(W, H, checker([200, 60, 30], [20, 40, 200]));
+    const rects: FrameRect[] = [
+      { x: 0, y: 0, w: 0, h: 16 }, // zero width
+      { x: 0, y: 0, w: 16, h: -4 }, // negative height
+      { x: -1, y: 0, w: 16, h: 16 }, // negative x
+      { x: 24, y: 0, w: 16, h: 16 }, // x + w (40) > W (32)
+      { x: 0, y: 8, w: 16, h: 16 }, // y + h (24) > H (16)
+    ];
+    expect(hashFrameRegions(buf, W, H, rects, h)).toEqual([null, null, null, null, null]);
+  });
+
+  it('sprite-count cap ⇒ whole page null (skipped honestly, the rule never fires)', () => {
+    const buf = page(8, 8, checker([200, 60, 30], [20, 40, 200], 2));
+    const rects: FrameRect[] = Array.from({ length: FRAME_HASH_MAX_SPRITES + 1 }, () => ({ x: 0, y: 0, w: 4, h: 4 }));
+    expect(extractFrameRegions(buf, 8, 8, rects)).toBeNull();
+    expect(hashFrameRegions(buf, 8, 8, rects, h)).toBeNull();
+  });
+
+  it('page-size cap (px) ⇒ whole page null (no slow read on an outlier sheet)', () => {
+    // A page whose declared dimensions exceed FRAME_HASH_MAX_PX (we don't allocate it — the cap is checked
+    // from the passed dimensions before any per-region work).
+    const W = 8192, H = Math.ceil(FRAME_HASH_MAX_PX / W) + 1; // W×H just over the cap
+    expect(W * H).toBeGreaterThan(FRAME_HASH_MAX_PX);
+    const tiny = new Uint8ClampedArray(4); // dimensions, not the buffer, drive the cap
+    const rects: FrameRect[] = [{ x: 0, y: 0, w: 4, h: 4 }];
+    expect(extractFrameRegions(tiny, W, H, rects)).toBeNull();
+  });
+
+  it('zero / negative page dimensions ⇒ null', () => {
+    const rects: FrameRect[] = [{ x: 0, y: 0, w: 4, h: 4 }];
+    expect(extractFrameRegions(new Uint8ClampedArray(0), 0, 8, rects)).toBeNull();
+    expect(extractFrameRegions(new Uint8ClampedArray(0), 8, 0, rects)).toBeNull();
+  });
+
+  it('extractFrameRegions: identical regions ⇒ byte-identical buffers, distinct ⇒ not', () => {
+    const W = 48, H = 16;
+    const pa = checker([200, 60, 30], [20, 40, 200]);
+    const pc = checker([200, 60, 30], [30, 200, 60]);
+    const buf = page(W, H, (x, y) => (x < 32 ? pa(x % 16, y) : pc(x % 16, y)));
+    const regions = extractFrameRegions(buf, W, H, [
+      { x: 0, y: 0, w: 16, h: 16 },
+      { x: 16, y: 0, w: 16, h: 16 },
+      { x: 32, y: 0, w: 16, h: 16 },
+    ])!;
+    expect(Buffer.from(regions[0]!)).toEqual(Buffer.from(regions[1]!)); // identical pixels
+    expect(Buffer.from(regions[0]!)).not.toEqual(Buffer.from(regions[2]!)); // distinct
+    expect(regions[0]).toHaveLength(16 * 16 * 4); // tightly packed w×h×4
+  });
+});
+
+// ── END-TO-END: the frame-redundant fixture PNG, fed through the REAL production hashing path (decode →
+// pure extractFrameRegions → SHA → frameRedundancyFinding). This is the assertion that was MISSING: the old
+// golden hand-supplied non-flat hashes by NAME, so a solid-color fixture (which the flat-guard nulls) passed
+// the golden yet produced ZERO findings in the real worker. With the fixture repainted TEXTURED-but-identical,
+// the cluster must fire through the same decode+flat-guard+SHA the worker runs. No canvas — pngjs decodes the
+// PNG to the same RGBA buffer createImageBitmap+getImageData would, and the SHA stand-in is byte-stable.
+describe('frame-redundancy END-TO-END: fixture reproduces the defect through the real decode path', () => {
+  const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../../fixtures/sample-projects/frame-redundant');
+  const sha = (b: Uint8Array): string => createHash('sha256').update(b).digest('hex');
+
+  it('the four textured idle frames cluster (identical hash); the four walk frames are distinct & non-null', () => {
+    const png = PNG.sync.read(readFileSync(join(FIXTURES, 'anim.png')));
+    const manifest = JSON.parse(readFileSync(join(FIXTURES, 'anim.json'), 'utf8')) as {
+      frames: Record<string, { frame: FrameRect }>;
+    };
+    const names = Object.keys(manifest.frames);
+    const rects = names.map((n) => manifest.frames[n]!.frame);
+    const hashes = hashFrameRegions(new Uint8ClampedArray(png.data), png.width, png.height, rects, sha)!;
+    expect(hashes).not.toBeNull();
+    const byName = Object.fromEntries(names.map((n, i) => [n, hashes[i]]));
+
+    const idle = ['idle_0', 'idle_1', 'idle_2', 'idle_3'].map((n) => byName[n]);
+    expect(idle.every((x) => x != null)).toBe(true); // NOT nulled by the flat-guard (textured, not solid)
+    expect(new Set(idle).size).toBe(1); // all four share ONE region hash ⇒ they cluster
+    const walk = ['walk_0', 'walk_1', 'walk_2', 'walk_3'].map((n) => byName[n]);
+    expect(walk.every((x) => x != null)).toBe(true); // each walk frame is textured ⇒ hashed, not skipped
+    expect(new Set(walk).size).toBe(4); // four distinct hashes
+    expect(new Set([...idle, ...walk]).size).toBe(5); // no walk frame collides with the idle cluster
+  });
+
+  it('the rule FIRES warn from the real region hashes, matching expected.json', () => {
+    const png = PNG.sync.read(readFileSync(join(FIXTURES, 'anim.png')));
+    const expected = JSON.parse(readFileSync(join(FIXTURES, 'expected.json'), 'utf8')) as {
+      recoverableArea: number;
+      vramBytesSaved: number;
+    };
+    const parsed = parseAtlas(JSON.parse(readFileSync(join(FIXTURES, 'anim.json'), 'utf8')), {
+      ref: 'anim.png',
+      bytes: new Uint8Array(readFileSync(join(FIXTURES, 'anim.png'))),
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok || parsed.asset.kind !== 'atlas') return;
+    const atlas = parsed.asset.atlas;
+
+    // Hash index-aligned to the PARSED sprite order (exactly what the worker passes analyze()).
+    const rects = atlas.sprites.map((s) => s.frame);
+    const frameHashes = hashFrameRegions(new Uint8ClampedArray(png.data), png.width, png.height, rects, sha)!;
+    expect(frameHashes.filter((x) => x != null && frameHashes.filter((y) => y === x).length === 4)).toHaveLength(4);
+
+    const finding = frameRedundancyFinding(atlas, DEFAULT_THRESHOLDS, frameHashes, atlas.size.w * atlas.size.h);
+    expect(finding).not.toBeNull();
+    expect(finding!.severity).toBe('warn');
+    expect(finding!.rule).toBe('frame-redundancy');
+    expect(finding!.estimate?.vramBytesSaved).toBe(expected.vramBytesSaved);
+    expect(finding!.params?.area).toBe(expected.recoverableArea);
+  });
 });

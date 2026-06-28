@@ -8,6 +8,7 @@ import type {
   Asset,
   AssetMetrics,
   Atlas,
+  AtlasFrameHashes,
   ContentClass,
   Finding,
   ImageAsset,
@@ -21,6 +22,7 @@ import { DEFAULT_THRESHOLDS } from './config';
 import {
   dimensionFindings,
   formatFinding,
+  frameRedundancyFinding,
   occupancyFinding,
   occupancyValue,
   solidFillFinding,
@@ -53,6 +55,11 @@ export interface AnalyzeDeps {
   encodeOpaque?: OpaqueEncodeSizer;
   /** Per-image features (content hash + dHash) for folder-level duplicate detection. */
   features?: ImageFeatures[];
+  /** Per-atlas sprite-region hashes (keyed by post-merge atlas.name, index-aligned to the merged sprite
+   *  list) for the within-atlas frame-redundancy check. The worker computes these from the ALREADY-DECODED
+   *  atlas page (one decode/page, bounded); headless/CLI omits them ⇒ the finding never fires (additive,
+   *  byte-identical — gated exactly like the dHash features). */
+  frameHashes?: AtlasFrameHashes[];
   /** Manifests whose referenced image is missing from the folder. */
   missingImages?: { manifest: string; image: string }[];
   /** Would-be assets the host could NOT parse (ingest skip-points + worker parse failures) — surfaced
@@ -98,6 +105,12 @@ export async function analyze(
   const opaqueByRef = new Set<string>();
   for (const f of deps.features ?? []) if (f.opaque) opaqueByRef.add(f.assetRef);
 
+  // Per-atlas sprite-region hashes (within-atlas frame-redundancy), keyed by post-merge atlas.name. The
+  // host hashes regions off the already-decoded page; absent ⇒ empty ⇒ no frame-redundancy finding ⇒
+  // byte-identical to today (CLI / headless tests unaffected).
+  const frameHashByRef = new Map<string, (string | null)[]>();
+  for (const fh of deps.frameHashes ?? []) frameHashByRef.set(fh.atlasRef, fh.frameHashes);
+
   // Per-loose-ref disk saving already counted by the FORMAT finding (transcode to AVIF/WebP). The
   // wasted-alpha finding for the SAME ref overlaps it (re-encoding the format ALSO drops the dead alpha
   // plane — most of the alpha saving is already inside the transcode estimate), so summing both would
@@ -139,6 +152,16 @@ export async function analyze(
       if (waste) findings.push(waste);
       findings.push(...dimensionFindings(atlas.name, atlas.size, cfg));
       await addFormat(atlas.name, image, 'unknown'); // M1: atlases keep today's lossy verdict
+      // Within-atlas frame redundancy: frames whose pixel REGIONS are byte-identical (host-hashed off the
+      // already-decoded page). Only when the host supplied region hashes for THIS atlas (absent ⇒ no
+      // finding ⇒ byte-identical). The recoverable disk number is an area-proportional ESTIMATE, so it is
+      // DELIBERATELY NOT folded into potentialDiskSaved — same MAX-de-overlap honesty precedent as the
+      // wasted-alpha/format aggregate below (we never sum an estimate onto measured savings, invariant 5).
+      const fh = frameHashByRef.get(atlas.name);
+      if (fh) {
+        const fr = frameRedundancyFinding(atlas, cfg, fh, image.byteSize);
+        if (fr) findings.push(fr);
+      }
       // The packed rects the host render-probe replays as sprites. Keyed by atlas.name === the
       // assetRef pushed above. `frame` is the rect AS PLACED in the atlas image (already w/h-swapped
       // when rotated), which is exactly what probeAtlas wants.

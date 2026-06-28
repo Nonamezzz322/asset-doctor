@@ -3,11 +3,12 @@ import type { AssetMetrics, Finding, OverlayZone } from '@asset-doctor/core';
 import { fmtBytes, fmtSignedBytes } from '../lib/format';
 import { useI18n } from '../lib/i18n';
 
-// Overlay styles (§5): empty = red, transparent = yellow, bleeding = teal.
+// Overlay styles (§5): empty = red, transparent = yellow, bleeding = teal, duplicate-frame = teal.
 const ZONE_STYLE: Record<OverlayZone['kind'], { stroke: string; fill: string }> = {
   empty: { stroke: '#e5484d', fill: 'rgba(229,72,77,0.18)' },
   transparent: { stroke: '#d98a00', fill: 'rgba(217,138,0,0.14)' },
   bleeding: { stroke: '#0e8c8c', fill: 'rgba(14,140,140,0.14)' },
+  'duplicate-frame': { stroke: '#0e8c8c', fill: 'rgba(14,140,140,0.18)' },
 };
 
 const MAX_W = 760;
@@ -58,10 +59,13 @@ export function FilmViewer({
       for (const f of findings) {
         if (!f.overlay) continue;
         const active = highlightId === undefined || f.id === highlightId;
-        for (const zone of f.overlay) {
+        f.overlay.forEach((zone, zi) => {
           const style = ZONE_STYLE[zone.kind];
           ctx.save();
           ctx.globalAlpha = active ? 1 : 0.2;
+          // Rotate hue per cluster so adjacent duplicate-frame groups read as distinct (each cluster is its
+          // own OverlayZone). Other zone kinds keep their fixed §5 color (zi has no effect on them).
+          if (zone.kind === 'duplicate-frame' && zi > 0) ctx.filter = `hue-rotate(${(zi * 47) % 360}deg)`;
           ctx.setLineDash([6, 4]);
           ctx.lineWidth = 1.5;
           ctx.strokeStyle = style.stroke;
@@ -75,7 +79,7 @@ export function FilmViewer({
             ctx.strokeRect(x + 0.5, y + 0.5, Math.max(0, w - 1), Math.max(0, h - 1));
           }
           ctx.restore();
-        }
+        });
       }
     });
 

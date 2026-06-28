@@ -124,6 +124,17 @@
   "find.format-lossless.title": "{target} (sin pérdida) conviene para {contentClass}",
   "find.format-lossless.detail": "{contentClass} comprime mejor sin pérdida — lossy q0.9 deshilacharía los bordes nítidos. Prefiere {target} sin pérdida. Estimación con pérdida −{saved:bytes}; el arreglo Pro codifica sin pérdida, así que los bytes diferirán.",
   "find.format-lossless.fix": "Transcodifica a {target} sin pérdida para la entrega.",
+  "find.frame-redundancy.title": {
+    "$count": "dupes",
+    "one": "{dupes} fotograma redundante — píxeles idénticos reutilizados",
+    "other": "{dupes} fotogramas redundantes — píxeles idénticos reutilizados"
+  },
+  "find.frame-redundancy.detail": {
+    "$count": "dupes",
+    "one": "{dupes} fotograma en {groups} grupo(s) tiene regiones de píxeles byte a byte idénticas en este atlas. Fijan {vram:bytes} de VRAM ({area}px × 4) que un reempaquetado deduplicado recupera, más ~{disk:bytes} de disco del atlas (estimación por área).",
+    "other": "{dupes} fotogramas en {groups} grupo(s) tienen regiones de píxeles byte a byte idénticas en este atlas. Fijan {vram:bytes} de VRAM ({area}px × 4) que un reempaquetado deduplicado recupera, más ~{disk:bytes} de disco del atlas (estimación por área)."
+  },
+  "find.frame-redundancy.fix": "Referencia un solo fotograma compartido en vez de empaquetar copias idénticas, o reempaqueta deduplicado.",
   "find.duplicate-exact.title": "{n}× archivo idéntico",
   "find.duplicate-exact.detail": "Copias idénticas byte a byte: {refs}. Conserva una y referénciala: cada copia es también una subida de textura aparte ({vram:bytes} de VRAM cada una).",
   "find.duplicate-exact.fix": "Deduplica: conserva una sola copia y actualiza las referencias.",

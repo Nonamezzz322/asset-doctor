@@ -122,6 +122,17 @@
   "find.format-lossless.title": "{target} (verlustfrei) passt zu {contentClass}",
   "find.format-lossless.detail": "{contentClass} komprimiert verlustfrei besser — lossy q0.9 würde harte Kanten ausfransen. Verlustfreies {target} bevorzugen. Verlustbehaftete Schätzung −{saved:bytes}; der Pro-Fix kodiert verlustfrei, daher weichen die Bytes ab.",
   "find.format-lossless.fix": "Für die Auslieferung verlustfrei nach {target} transkodieren.",
+  "find.frame-redundancy.title": {
+    "$count": "dupes",
+    "one": "{dupes} redundanter Frame — identische Pixel wiederverwendet",
+    "other": "{dupes} redundante Frames — identische Pixel wiederverwendet"
+  },
+  "find.frame-redundancy.detail": {
+    "$count": "dupes",
+    "one": "{dupes} Frame in {groups} Gruppe(n) hat byte-identische Pixelregionen in diesem Atlas. Sie belegen {vram:bytes} VRAM ({area}px × 4), die ein deduplizierter Repack zurückgewinnt, plus ~{disk:bytes} Atlas-Speicher (Flächenschätzung).",
+    "other": "{dupes} Frames in {groups} Gruppe(n) haben byte-identische Pixelregionen in diesem Atlas. Sie belegen {vram:bytes} VRAM ({area}px × 4), die ein deduplizierter Repack zurückgewinnt, plus ~{disk:bytes} Atlas-Speicher (Flächenschätzung)."
+  },
+  "find.frame-redundancy.fix": "Verweise auf einen gemeinsamen Frame statt identische Kopien zu packen, oder dedupliziert neu packen.",
   "find.duplicate-exact.title": "{n}× identische Datei",
   "find.duplicate-exact.detail": "Byte-identische Kopien: {refs}. Eine behalten und referenzieren — jede Kopie ist auch ein eigener Textur-Upload ({vram:bytes} VRAM pro Stück).",
   "find.duplicate-exact.fix": "Deduplizieren: eine einzige Kopie behalten und Referenzen aktualisieren.",

@@ -14,6 +14,7 @@ export {
   occupancyFinding,
   dimensionFindings,
   solidFillFinding,
+  frameRedundancyFinding,
   wastedAlphaFinding,
   wastedRegions,
   formatFinding,

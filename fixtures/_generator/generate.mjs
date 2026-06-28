@@ -41,6 +41,25 @@ function fillRect(png, x, y, w, h, [r, g, b]) {
   }
 }
 
+/** Paint a coarse 2-color checker into [x,y,w,h]. TEXTURED (not a single fill), so its box-averaged 9×8
+ *  grayStdDev clears the dHash flat-guard (≥ 6) — the frame-redundancy detector hashes the region instead
+ *  of nulling it as featureless. `sq` is the checker square size in px; same (x,y,w,h,a,b,sq) ⇒ byte-for-byte
+ *  identical region (so duplicate frames cluster by SHA through the REAL decode path, not just injected hashes). */
+function fillChecker(png, x, y, w, h, a, b, sq = 8) {
+  for (let yy = 0; yy < h; yy++) {
+    for (let xx = 0; xx < w; xx++) {
+      const cx = Math.floor(xx / sq);
+      const cy = Math.floor(yy / sq);
+      const [r, g, bl] = (cx + cy) & 1 ? a : b;
+      const i = (png.width * (y + yy) + (x + xx)) << 2;
+      png.data[i] = r;
+      png.data[i + 1] = g;
+      png.data[i + 2] = bl;
+      png.data[i + 3] = 255;
+    }
+  }
+}
+
 function atlasPng(size, frames) {
   const png = new PNG({ width: size.w, height: size.h });
   png.data.fill(0); // transparent background
@@ -1626,6 +1645,104 @@ the test reads the PNG directly (no 9×8 downsample):
 decodes to RGBA8888 and allocates the same VRAM. The finding reports \`diskBytesSaved\` and **never** a VRAM
 win. The diagnosis MEASURES (opaque or not) and reports the byte cost; the opaque re-encode itself is the
 **Pro fix's** job (generation — invariant 3).
+`,
+  );
+}
+
+/* ── Case 19: frame-redundant — within-atlas duplicate-frame detector golden (docs/improvements/round18-animation-frame-redundancy-detector-.md) ──
+ * ONE atlas whose frames have BYTE-IDENTICAL pixel regions — wasted duplicate frames. The within-atlas
+ * frame-redundancy detector hashes each sprite's REGION off the already-decoded page (worker hashAtlasFrames)
+ * and clusters identical regions; the recoverable atlas AREA → VRAM (a repack drops the dupes), and a
+ * separate area-proportional DISK estimate (invariant 5 — the two are never conflated).
+ *
+ * An 8-frame strip on a 256×64 sheet (8 × 32×32 cells in a row). Four frames (idle_0..3) carry the SAME
+ * solid color → identical 32×32 regions → ONE cluster of 4 (3 recoverable beyond the kept one); the other
+ * four carry distinct colors → no cluster. So the golden cluster reaches minDuplicates (3) and fires WARN.
+ * The golden frame hashes are NOT authored here (they depend on PNG encoding); instead the regression test
+ * hand-supplies deterministic region hashes (the 4 idle frames share one hash, the rest distinct) so the
+ * pure rule is exercised canvas-free, matching expected.json's documented cluster. */
+{
+  const CELL = 32;
+  const N = 8;
+  const size = { w: CELL * N, h: CELL }; // 256×32 strip — one row of 8 cells
+  // The four redundant idle frames share ONE textured pattern (a 2-color checker). TEXTURED — not a solid
+  // fill — so the production flat-guard (box-average to 9×8 → grayStdDev ≥ 6) does NOT null them, yet they
+  // are byte-for-byte identical regions ⇒ they cluster by SHA through the REAL worker decode path. (The old
+  // fixture used a SINGLE solid color, which isFlat skips → the finding never fired in the real worker.)
+  const DUP_A = [42, 161, 152];
+  const DUP_B = [16, 32, 42]; // film-dark — high luma contrast with DUP_A so the 9×8 average stays textured
+  // idle_0..3 share the SAME checker (identical regions); walk_0..3 each get a DISTINCT (still textured) one.
+  const frames = [];
+  for (let i = 0; i < 4; i++) frames.push(fr(`idle_${i}`, i * CELL, 0, CELL, CELL));
+  for (let i = 0; i < 4; i++) frames.push(fr(`walk_${i}`, (4 + i) * CELL, 0, CELL, CELL));
+
+  const png = new PNG({ width: size.w, height: size.h });
+  png.data.fill(0);
+  frames.forEach((f, i) => {
+    if (i < 4) {
+      fillChecker(png, f.frame.x, f.frame.y, f.frame.w, f.frame.h, DUP_A, DUP_B); // identical idle pattern
+    } else {
+      // Distinct textured walk frame: a checker of a bright palette color against film-dark, so the 9×8
+      // box-average keeps HIGH luma contrast (clears the flat-guard) AND each frame hashes to a unique value
+      // (distinct bright color per frame ⇒ no false cluster with idle or with each other).
+      const bright = COLORS[(i - 4) % COLORS.length];
+      const dark = [16, 32, 42]; // film-dark — low luma so every walk pair stays well above the flat threshold
+      fillChecker(png, f.frame.x, f.frame.y, f.frame.w, f.frame.h, bright, dark);
+    }
+  });
+  const sheet = PNG.sync.write(png);
+
+  writeCase(
+    'frame-redundant',
+    {
+      'anim.png': sheet,
+      'anim.json': hashManifest('anim.png', size, frames),
+      'expected.json': {
+        kind: 'frame-redundancy',
+        feature: 'within-atlas-duplicate-frames',
+        atlas: { w: size.w, h: size.h },
+        // The redundant cluster — the 4 idle frames share one TEXTURED 32×32 region (a checker, not a solid
+        // fill: solid regions are nulled by the production flat-guard and would never cluster).
+        duplicateCluster: ['idle_0', 'idle_1', 'idle_2', 'idle_3'],
+        minDuplicates: 3,
+        // Recoverable beyond the one representative kept: 3 frames × 32×32 = 3072px → ×4 = 12288 bytes VRAM.
+        recoverableArea: 3 * CELL * CELL,
+        vramBytesSaved: 3 * CELL * CELL * 4,
+        findings: [{ rule: 'frame-redundancy', severity: 'warn' }],
+        note:
+          'One atlas whose four idle_* frames are TEXTURED (a 2-color checker) and byte-identical 32×32 pixel '
+          + 'regions (a wasted duplicate animation set), plus four distinct textured walk_* frames. The frames '
+          + 'are textured — NOT a single solid color — so they clear the production flat-guard (box-average to '
+          + '9×8 → grayStdDev ≥ 6) and the within-atlas frame-redundancy detector clusters them off the REAL '
+          + 'decoded page (worker hashAtlasFrames / pure extractFrameRegions): 4 idle frames → 3 recoverable '
+          + 'beyond the kept one. Recoverable atlas AREA → VRAM (vramBytesSaved, exact); the disk number is an '
+          + 'area-proportional ESTIMATE, never conflated (invariant 5). The detector MEASURES the duplicate set '
+          + '+ wasted bytes; de-duplicating the frames is the Pro fix\'s job (generation — invariant 3).',
+      },
+    },
+    `# frame-redundant
+
+ONE atlas with **within-atlas duplicate frames** for the **frame-redundancy** detector
+(\`docs/improvements/round18-animation-frame-redundancy-detector-.md\`).
+
+A 256×32 strip of **8 frames** (32×32 each). Every frame is **textured** (a 2-color checker), not a single
+solid fill — solid regions are nulled by the production flat-guard and would never cluster:
+
+- **\`idle_0\`–\`idle_3\`** — the SAME checker pattern → **byte-identical 32×32 pixel regions** → one cluster
+  of 4 (≥ \`minDuplicates\` = 3). **3 frames are recoverable** beyond the one representative kept.
+- **\`walk_0\`–\`walk_3\`** — each a distinct checker → not redundant (but still textured, so each is hashed).
+
+The detector hashes each sprite's **region** off the already-decoded page (worker \`hashAtlasFrames\` →
+pure \`extractFrameRegions\`) and clusters identical regions. It **MEASURES** the duplicate set + wasted bytes:
+
+- **VRAM** — the recoverable distinct-rect area × 4 (here 3 × 32×32 × 4 = **12 288 B**), the atlas space the
+  duplicates pin that a de-duplicated repack reclaims. Exact area arithmetic.
+- **DISK** — an **area-proportional estimate** only (no per-region disk bytes exist), carried separately and
+  **never** conflated with VRAM (invariant 5).
+
+De-duplicating the frames is the **Pro fix's** job (generation — invariant 3). The regression test feeds this
+PNG through the REAL hashing path (decode → pure \`extractFrameRegions\` → SHA) and asserts the cluster fires —
+the duplicate frames are textured-but-identical precisely so the production flat-guard does NOT skip them.
 `,
   );
 }

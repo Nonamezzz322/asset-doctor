@@ -3,11 +3,19 @@
 // pure analysis core): per-image features (SHA-256 content hash + perceptual dHash) for
 // folder-level duplicate detection, and format sizing (OffscreenCanvas → WebP/AVIF).
 
-import type { Asset, ImageFeatures, ImageMime } from '@asset-doctor/core';
+import type { Asset, AtlasFrameHashes, ImageFeatures, ImageMime, Sprite } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
 import { analyze, mergeSharedAtlases, type EncodeSizer, type OpaqueEncodeSizer } from '@asset-doctor/analysis';
 import { groupFiles, keyOf, type RawFile } from '../lib/group';
-import { alphaFullyOpaque, classifyContent, dHashFromGray, isFlat, isSolidColor, luma } from '../lib/perceptual';
+import {
+  alphaFullyOpaque,
+  classifyContent,
+  dHashFromGray,
+  extractFrameRegions,
+  isFlat,
+  isSolidColor,
+  luma,
+} from '../lib/perceptual';
 import type { ContentClass } from '@asset-doctor/core';
 import type { WorkerRequest, WorkerResponse } from './protocol';
 
@@ -102,11 +110,31 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       features.push(feat);
     }
 
-    const report = await analyze(mergeSharedAtlases(assets), undefined, {
+    // Hoisted so the frame-redundancy hashing runs on the POST-MERGE sprite list (mergeSharedAtlases unions
+    // shared-page regions by name into the first atlas; the index alignment + atlasRef keying must match the
+    // list analyze() sees). imageBytes is keyed by atlas.name === merged atlas.name (the shared-page case).
+    const merged = mergeSharedAtlases(assets);
+
+    // Per-atlas sprite-region hashes for the within-atlas frame-redundancy check. ONE full-resolution decode
+    // per atlas page (a NEW decode — owned cost, same magnitude as the main-thread FilmViewer decode), then
+    // each sprite region is read off that single bitmap. Bounded by a size cap (very large pages skipped
+    // honestly). Absent (no OffscreenCanvas / skipped) ⇒ the rule never fires (additive, gated like dHash).
+    const frameHashes: AtlasFrameHashes[] = [];
+    for (const a of merged) {
+      if (cancelled) return; // superseded — stop before the next (heavy) page decode
+      if (a.kind !== 'atlas' || a.atlas.sprites.length === 0) continue;
+      const bytes = imageBytes.get(a.atlas.name);
+      if (!bytes) continue;
+      const hashes = await hashAtlasFrames(bytes, a.atlas.sprites);
+      if (hashes) frameHashes.push({ atlasRef: a.atlas.name, frameHashes: hashes });
+    }
+
+    const report = await analyze(merged, undefined, {
       encodeImage: makeEncoder(imageBytes),
       encodeOpaque: makeOpaqueEncoder(imageBytes),
       features,
       missingImages: grouped.missing,
+      ...(frameHashes.length ? { frameHashes } : {}),
       ...(unparsed.length ? { unparsed } : {}),
     });
     if (cancelled) return; // superseded — suppress a `done` that would race the terminate
@@ -171,6 +199,49 @@ async function decodeFeatures(
     return { dHash, contentClass: classifyContent(gray, data), solid: isSolidColor(gray, data), opaque };
   } catch {
     return { dHash: null, contentClass: 'unknown', solid: false, opaque: false };
+  }
+}
+
+/** Hash each sprite's PIXEL REGION off the atlas page for the within-atlas frame-redundancy check. ONE
+ *  `createImageBitmap` + ONE full-resolution `getImageData` per page (a NEW decode — owned cost, same
+ *  magnitude as the main-thread FilmViewer decode), then the PURE `extractFrameRegions` does the load-bearing
+ *  work canvas-free off that single page buffer: caps (sprite count / px), bounds, region extraction, and the
+ *  box-averaged 9×8 flat-guard (a featureless region → null so it never falsely clusters, mirroring the dHash
+ *  isFlat skip). Each surviving region's tightly-packed RGBA bytes are SHA-256'd here (crypto.subtle is async,
+ *  so the hashing stays in the worker; everything else is the unit-tested pure helper). Index-aligned to
+ *  `sprites`. Returns null (whole page skipped) when OffscreenCanvas is unavailable, the decode fails, the
+ *  2d context is unavailable, or the page exceeds the size/sprite cap. Deterministic: stable SHA over the raw
+ *  region bytes + a deterministic flat threshold. */
+async function hashAtlasFrames(pageBytes: ArrayBuffer, sprites: Sprite[]): Promise<(string | null)[] | null> {
+  if (typeof OffscreenCanvas === 'undefined') return null;
+  try {
+    const bmp = await createImageBitmap(new Blob([pageBytes]));
+    const { width, height } = bmp;
+    if (width <= 0 || height <= 0) {
+      bmp.close();
+      return null;
+    }
+    const canvas = new OffscreenCanvas(width, height);
+    const c2d = canvas.getContext('2d', { willReadFrequently: true });
+    if (!c2d) {
+      bmp.close();
+      return null;
+    }
+    c2d.drawImage(bmp, 0, 0);
+    bmp.close();
+    const page = c2d.getImageData(0, 0, width, height).data; // one full-res read; the pure helper does the rest
+    const regions = extractFrameRegions(
+      page,
+      width,
+      height,
+      sprites.map((sp) => sp.frame),
+    );
+    if (!regions) return null; // whole page skipped (caps) — honest, the rule never fires for it
+    const out: (string | null)[] = [];
+    for (const region of regions) out.push(region === null ? null : await sha256Hex(region.buffer as ArrayBuffer));
+    return out;
+  } catch {
+    return null;
   }
 }
 
