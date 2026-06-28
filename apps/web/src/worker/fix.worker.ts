@@ -1158,6 +1158,13 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     // the pre-round10 loop. Covers loose-transcode/resize, the resize/transcode owner fan-out, AND the
     // format-only standalone pass (all route through here).
     const rp = resolveProfile(ref);
+    // Honesty guard (round17): SOURCE byte length + mime for the same-format opaque size-loss check below.
+    // `opaque` is only ever true on a transcode op (plan.ts sets opaque on transcode ops, never resize), and
+    // the guard fires ONLY when a variant re-encodes to the SAME mime as the source — a real format change
+    // (PNG→WebP/AVIF) is a legitimate downstream-accounted choice (transcode-guard.ts scope comment), never
+    // gated. bytesByRef always holds the parsed source on this loose path (both callers `continue` on !bytes).
+    const srcBytes = bytesByRef.get(ref)?.byteLength ?? 0;
+    const srcMime = mimeOf(srcPath);
     const emittedThis = new Set<string>();
     let ownerImage = srcPath; // falls back to the source if every format fails (caller leaves it un-renamed)
     // Cache-bust (round9 K8): the un-hashed canonical owner image (the renamedTo() name BEFORE the content
@@ -1179,6 +1186,15 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       const variantPath = renamedTo(srcPath, enc.mime);
       if (emittedThis.has(variantPath)) {
         skipped.push({ assetRef: ref, reason: `${f.format} fell back to ${enc.mime} and collides with another variant — skipped` });
+        continue;
+      }
+      // Honesty guard (round17): a SAME-FORMAT opaque re-encode that is not strictly smaller is no
+      // optimization — never ship a larger/equal page under a "fix" banner (invariant 3/5). Mirror the
+      // single-emit transcode path's note and record NOTHING (don't even add to emittedThis — this variant
+      // never existed). A real PNG→WebP/AVIF change is NOT gated (enc.mime !== srcMime) per the guard's
+      // documented scope; it can legitimately grow and is handled by downstream dedup/Phase-C accounting.
+      if (opaque && enc.mime === srcMime && transcodeIsSizeLoss(true, enc.bytes.length, srcBytes)) {
+        skipped.push({ assetRef: ref, reason: `transcode kept original: opaque re-encode was not smaller (${enc.bytes.length} ≥ ${srcBytes} B)` });
         continue;
       }
       emittedThis.add(variantPath);

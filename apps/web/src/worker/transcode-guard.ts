@@ -8,6 +8,10 @@
 // page under a "fix" banner. Scoped to the OPAQUE path: a general transcode CHANGES format (PNG→WebP/AVIF),
 // where a same-or-larger byte count is a legitimate format choice handled by the downstream dedup/Phase-C
 // accounting — guarding it here would risk regressing those flows. This is the alpha-drop size-loss case only.
+//
+// round17: this predicate now backs BOTH worker opaque-transcode emit paths — the single-emit standalone
+// transcode AND the export-profile fan-out (emitLooseProfileFanout), the latter additionally gated on
+// `enc.mime === srcMime` so only the same-format alpha-drop variant is checked (format changes ship freely).
 
 /** True ⇒ the worker KEEPS the original page (no emit, honest skip). An opaque re-encode is only worth
  *  shipping when it is STRICTLY smaller than the source; equal-or-larger is a size loss we decline. A
