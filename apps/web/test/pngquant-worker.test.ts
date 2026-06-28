@@ -270,3 +270,24 @@ describe('pngquant tier/atlas path — honest skip (finding [0]: never a silent 
     expect(skipped.map((s) => s.assetRef)).toEqual(['a.png', 'b.png']);
   });
 });
+
+// ── round13 #8: the backendNative pngquant entry is SUPPRESSED when nothing was produced AND nothing
+// hard-failed (an all-quality-floor run). Without this guard the receipt shows a MISLEADING "0 of N
+// re-compressed — 0 B → 0 B download"; the per-page floor declines are already surfaced honestly in
+// skipped[], so the empty entry is omitted (never a faked no-op success). Mirrors the EXACT worker guard
+// `if (pngquantProduced > 0 || pngquantFailed > 0)`.
+function emitsPngquantEntry(produced: number, failed: number): boolean {
+  return produced > 0 || failed > 0;
+}
+describe('pngquant receipt entry suppression (round13 #8)', () => {
+  it('all candidates declined at the quality floor (produced=0, failed=0) ⇒ NO backendNative entry', () => {
+    // Pair with the post-pass: an all-floor batch yields produced=0/failed=0 + a skipped[] note per page.
+    expect(emitsPngquantEntry(0, 0)).toBe(false);
+  });
+  it('≥1 page produced ⇒ entry emitted (real disk win)', () => {
+    expect(emitsPngquantEntry(1, 0)).toBe(true);
+  });
+  it('≥1 page hard-failed ⇒ entry emitted (so receiptFailed surfaces the honest fallback count)', () => {
+    expect(emitsPngquantEntry(0, 2)).toBe(true);
+  });
+});

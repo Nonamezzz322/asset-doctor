@@ -90,6 +90,23 @@ export interface SelectOpts {
   groupByFolder: boolean;
 }
 
+/** The ONE canonical default ledger view. SINGLE SOURCE OF TRUTH so the App's initial control state, the
+ *  run()-time worst-offender auto-select, and the ledger's opening opts can never drift apart (round11 #3).
+ *  Worst-first, all severities kept, problems-only, no clean rows, ungrouped — the ≤10s instant-wow view.
+ *  `severityFilter` is built per-caller (a fresh mutable Set) so toggling never aliases this constant. */
+export const DEFAULT_SORT: SortKey = 'severity';
+export const DEFAULT_SEVERITIES: readonly Severity[] = ['crit', 'warn', 'info'];
+export function defaultSelectOpts(): SelectOpts {
+  return {
+    sort: DEFAULT_SORT,
+    search: '',
+    severityFilter: new Set<Severity>(DEFAULT_SEVERITIES),
+    problemsOnly: true,
+    includeClean: false,
+    groupByFolder: false,
+  };
+}
+
 const folderOf = (ref: string): string => {
   const i = ref.lastIndexOf('/');
   return i < 0 ? '' : ref.slice(0, i);
@@ -261,4 +278,26 @@ export function selectRows(index: TriageIndex, opts: SelectOpts): LedgerRow[] {
   const out: LedgerRow[] = [];
   for (const k of orderedKeys) out.push(...groups.get(k)!.sort(compare));
   return out;
+}
+
+/** COUNT of rows selectRows would return under `opts` IGNORING search — the stable "of M" denominator for
+ *  the ledger's "showing N of M" (round11 #4). Avoids a SECOND full selectRows sort+group per keystroke:
+ *  neither sort nor grouping changes the row COUNT, so this does the filter-only pass (plus the SAME
+ *  per-asset collapse on asset-axis sorts, via a distinct-assetRef count) and returns the length. Matches
+ *  `selectRows(index, { ...opts, search: '' }).length` exactly, by construction. Pure, deterministic. */
+export function countCandidates(index: TriageIndex, opts: SelectOpts): number {
+  const candidates: LedgerRow[] = opts.includeClean
+    ? [...index.rows, ...index.cleanAssets.map(cleanRow)]
+    : index.rows;
+  // Severity/clean filter only — search is deliberately excluded (it's the numerator N's job to narrow).
+  const filtered = candidates.filter((r) => {
+    if (opts.problemsOnly && r.severity === 'ok') return false;
+    return opts.severityFilter.has(r.severity);
+  });
+  // ASSET-axis sorts collapse to one row per asset (collapsePerAsset keys on assetRef), so the count is the
+  // number of DISTINCT assetRefs, not the raw finding count. Finding-axis keeps every row.
+  if (!isAssetAxis(opts.sort)) return filtered.length;
+  const refs = new Set<string>();
+  for (const r of filtered) refs.add(r.assetRef);
+  return refs.size;
 }

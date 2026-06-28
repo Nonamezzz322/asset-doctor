@@ -12,6 +12,7 @@ package httpapi
 // logs image bytes.
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -212,8 +213,13 @@ func (s *Server) handleEncode(w http.ResponseWriter, r *http.Request) {
 	defer s.encodeQuota.release(lic)
 
 	// Dedicated large-body reader — NOT the 16 KiB decodeJSON used for billing. A MaxBytesReader overflow
-	// surfaces as an *http.MaxBytesError when we read; we map that to 413 below. We read the whole body so
-	// we can re-send it upstream with a clean Content-Length (no chunked-vs-length ambiguity).
+	// surfaces as an *http.MaxBytesError when we read; we map that to 413 below. We read the whole body (under
+	// the cap) so we can re-send it upstream with a clean Content-Length (no chunked-vs-length ambiguity).
+	// NOTE: we deliberately ReadAll-then-replay rather than io.Copy the live r.Body straight upstream, because
+	// the size cap + clean 413/400 error mapping depend on reading here BEFORE the upstream request exists (a
+	// MaxBytesReader overflow mid-stream upstream could not be mapped to a 413 — the status would already be
+	// sent). The replay below uses bytes.NewReader(body) (NOT strings.NewReader(string(body))) so there is NO
+	// second full copy of the (large) image envelope — just one ReadAll buffer reused.
 	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.EncodeMaxBodyBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -235,7 +241,7 @@ func (s *Server) handleEncode(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), s.cfg.EncodeTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.cfg.EncoderURL+"/process", strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.cfg.EncoderURL+"/process", bytes.NewReader(body))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", "could not build upstream request")
 		return

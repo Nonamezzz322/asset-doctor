@@ -2504,7 +2504,13 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   if (ktx2Op && ktx2Uploaded > 0) {
     backendNative.push({ op: ktx2Op, uploaded: ktx2Uploaded, produced: ktx2Produced, failed: ktx2Failed, host: backendHost });
   }
-  if (pngquantUploaded > 0) {
+  // round13 #8: SUPPRESS an all-decline pngquant entry. When every candidate fell back (produced===0 — e.g.
+  // already-optimal PNGs that can't beat the 256-color quality floor) the entry would read a MISLEADING
+  // "0 of N re-compressed — 0 B → 0 B download". The per-page declines are ALREADY surfaced honestly in
+  // skipped[] ("pngquant kept original: could not meet the quality floor"), so we omit the empty receipt
+  // block rather than fake a no-op success. We still emit the entry when ≥1 page was produced (real disk
+  // win) OR when ≥1 page hard-FAILED (so receiptFailed surfaces the unreachable/declined count honestly).
+  if (pngquantProduced > 0 || pngquantFailed > 0) {
     backendNative.push({ op: 'pngquant', uploaded: pngquantUploaded, produced: pngquantProduced, failed: pngquantFailed, host: backendHost, bytesBefore: pngquantBytesBefore, bytesAfter: pngquantBytesAfter });
   }
   const receipt: FixReceipt = {

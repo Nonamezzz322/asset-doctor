@@ -27,7 +27,7 @@ import { Findings } from './components/Findings';
 import { VerdictBar } from './components/VerdictBar';
 import { TriageLedger } from './components/TriageLedger';
 import { useDebounced } from './lib/useDebounced';
-import { buildIndex, selectRows, type LedgerRow, type SelectOpts, type SortKey } from './lib/triage';
+import { buildIndex, countCandidates, defaultSelectOpts, DEFAULT_SEVERITIES, DEFAULT_SORT, selectRows, type LedgerRow, type SelectOpts, type SortKey } from './lib/triage';
 
 type Phase =
   | { t: 'idle' }
@@ -57,10 +57,12 @@ export function App() {
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [selectedAsset, setSelectedAsset] = useState<string | undefined>();
   const [selectedFinding, setSelectedFinding] = useState<string | undefined>();
-  // ── Triage-ledger controls (presentation only — the diagnosis stays byte-accurate). ──
-  const [sort, setSort] = useState<SortKey>('severity');
+  // ── Triage-ledger controls (presentation only — the diagnosis stays byte-accurate). Initial values come
+  //    from the ONE canonical defaultSelectOpts() (round11 #3) so they can never drift from run()'s
+  //    worst-offender auto-select, which uses the SAME source of truth. ──
+  const [sort, setSort] = useState<SortKey>(DEFAULT_SORT);
   const [search, setSearch] = useState(''); // raw input; debounced before it feeds the filter memo.
-  const [severityFilter, setSeverityFilter] = useState<Set<Severity>>(new Set<Severity>(['crit', 'warn', 'info']));
+  const [severityFilter, setSeverityFilter] = useState<Set<Severity>>(() => new Set<Severity>(DEFAULT_SEVERITIES));
   const [problemsOnly, setProblemsOnly] = useState(true);
   const [groupByFolder, setGroupByFolder] = useState(false);
   const [showClean, setShowClean] = useState(false);
@@ -99,17 +101,11 @@ export function App() {
       // The static result lands FIRST (invariant 4: ≤10s instant-wow is never blocked by the probe).
       setReport(rep);
       // Auto-select the WORST offender (not array-order-first) so the ≤10s payoff lands on a glowing
-      // overlay. Computed from the SAME default-severity ordering the ledger opens with; falls back to the
-      // first asset when there are no problems. Runs ONCE per analysis here (before the probe write-back),
-      // and autoSelectedFor is stamped so the probe re-set never re-selects (correction #1).
-      const firstRows = selectRows(buildIndex(rep), {
-        sort: 'severity',
-        search: '',
-        severityFilter: new Set<Severity>(['crit', 'warn', 'info']),
-        problemsOnly: true,
-        includeClean: false,
-        groupByFolder: false,
-      });
+      // overlay. Computed from the SAME defaultSelectOpts() the ledger opens with (round11 #3 — ONE source
+      // of truth, can't drift); falls back to the first asset when there are no problems. Runs ONCE per
+      // analysis here (before the probe write-back), and autoSelectedFor is stamped so the probe re-set
+      // never re-selects (correction #1).
+      const firstRows = selectRows(buildIndex(rep), defaultSelectOpts());
       const worst = firstRows[0];
       setSelectedAsset((worst ?? undefined)?.assetRef ?? rep.assets[0]?.assetRef);
       setSelectedFinding(worst?.scope === 'asset' ? worst.id : undefined);
@@ -168,9 +164,10 @@ export function App() {
   );
   const rows = useMemo(() => (index && selectOpts ? selectRows(index, selectOpts) : []), [index, selectOpts]);
   // Candidate count under the current severity/clean policy but ignoring search (the "of M" in "showing N
-  // of M") — so search visibly narrows N against the stable severity-scoped M. Pure, deterministic.
+  // of M") — so search visibly narrows N against the stable severity-scoped M. countCandidates does a
+  // filter-only pass (no second full sort+group per keystroke — round11 #4); pure, deterministic.
   const totalRows = useMemo(
-    () => (index && selectOpts ? selectRows(index, { ...selectOpts, search: '' }).length : 0),
+    () => (index && selectOpts ? countCandidates(index, selectOpts) : 0),
     [index, selectOpts],
   );
   // id → Finding for the ledger's renderFinding titles (O(1), no scan per row).
@@ -181,8 +178,12 @@ export function App() {
   }, [report]);
 
   // Debounce the FilmViewer's input so arrow-key / scroll scrubbing fires ONE decode after settling
-  // (invariant 4). The decode effect keys on [bytes, findings, highlightId]; only the settled asset moves them.
+  // (invariant 4). The decode effect keys on [bytes, findings, highlightId]; debounce ALL THREE inputs in
+  // lockstep so a row click (which moves selectedAsset AND selectedFinding together) settles into exactly one
+  // decode — passing the raw highlightId here would fire a SECOND decode of the still-stale image before the
+  // settled asset's bytes/findings arrive.
   const debouncedSelected = useDebounced(selectedAsset, 120);
+  const debouncedHighlight = useDebounced(selectedFinding, 120);
   // Memoized so an unrelated re-render keeps a STABLE findings array identity → no needless FilmViewer decode.
   // (folder findings now flow into the ledger rows, not a separate FolderReport.)
   const assetFindings = useMemo(
@@ -290,7 +291,7 @@ export function App() {
 
                 <aside className="space-y-3 lg:sticky lg:top-20">
                   {selectedBytes && debouncedSelected ? (
-                    <FilmViewer bytes={selectedBytes} findings={assetFindings} highlightId={selectedFinding} name={debouncedSelected} metrics={selectedMetrics} frameCount={selectedFrameCount} />
+                    <FilmViewer bytes={selectedBytes} findings={assetFindings} highlightId={debouncedHighlight} name={debouncedSelected} metrics={selectedMetrics} frameCount={selectedFrameCount} />
                   ) : (
                     <p className="rounded-xl border border-line bg-panel p-4 font-mono text-sm text-ink-soft">{t('report.noImage')}</p>
                   )}
@@ -756,6 +757,7 @@ function BackendKtx2Panel({
   setPngquantEnable,
   consent,
   setConsent,
+  uploadPreview,
 }: {
   configured: boolean;
   ready: boolean;
@@ -765,6 +767,9 @@ function BackendKtx2Panel({
   setPngquantEnable: (b: boolean) => void;
   consent: boolean;
   setConsent: (b: boolean) => void;
+  /** HONEST upper-bound of files that would leave the device under the enabled ops (count + short sample),
+   *  surfaced BEFORE consent for transparency (round12). */
+  uploadPreview: { count: number; sample: string[] };
 }) {
   const { t } = useI18n();
   const anyEnable = ktx2Enable || pngquantEnable;
@@ -811,6 +816,25 @@ function BackendKtx2Panel({
                 ) : null}
                 {pngquantEnable ? <li>{t('fix.backend.costPngquant')}</li> : null}
               </ul>
+
+              {/* TRANSPARENCY (round12): the EXACT upper-bound count + a short sample of which files would
+                  leave the device, shown BEFORE consent. The worker may upload fewer (compose/skip), never
+                  more. "up to" keeps it honest (the loaded set is the ceiling). */}
+              <div className="mt-2 rounded border border-line bg-panel/60 p-1.5">
+                <p className="font-mono text-[10px] font-semibold text-ink">{t('fix.backend.uploadCount', { n: uploadPreview.count })}</p>
+                {uploadPreview.sample.length > 0 ? (
+                  <ul className="mt-1 space-y-0.5">
+                    {uploadPreview.sample.map((ref) => (
+                      <li key={ref} className="truncate font-mono text-[9px] text-ink-soft" title={ref}>
+                        {ref}
+                      </li>
+                    ))}
+                    {uploadPreview.count > uploadPreview.sample.length ? (
+                      <li className="font-mono text-[9px] text-ink-soft/70">{t('fix.backend.uploadMore', { n: uploadPreview.count - uploadPreview.sample.length })}</li>
+                    ) : null}
+                  </ul>
+                ) : null}
+              </div>
 
               {/* CONSENT — the explicit "these images are uploaded to the server" acknowledgement. Enabled
                   ONLY when the backend is reachable; unticking it (or losing the backend) cancels the upload
@@ -1280,6 +1304,25 @@ function FixCard({ files }: { files: PickedFile[] }) {
   const backendAnyEnable = ktx2Enable || pngquantEnable;
   const [backendConsent, setBackendConsent] = useState(false);
   const [backendReady, setBackendReady] = useState(false);
+
+  // round12 B-transparency: BEFORE the user consents, surface the EXACT count + a short sample of which
+  // files would leave the device. This is an HONEST UPPER BOUND from the loaded folder (the worker may
+  // compose/skip fewer at execute, never more): KTX2 can transcode any raster page (every image file);
+  // pngquant only re-compresses PNG pages. The union of the enabled ops' candidate sets — deterministic,
+  // dir-aware (the SAME keyOf the worker keys by), pure presentation (no bytes read, no network).
+  const uploadPreview = useMemo(() => {
+    if (!backendAnyEnable) return { count: 0, sample: [] as string[] };
+    const refs: string[] = [];
+    for (const f of files) {
+      const ref = keyOf(f);
+      const isPng = /\.png$/i.test(ref);
+      const isImage = /\.(png|webp|jpe?g|avif)$/i.test(ref);
+      // KTX2 ⇒ any raster page; pngquant ⇒ PNG only. Union when both ops are enabled.
+      if ((ktx2Enable && isImage) || (pngquantEnable && isPng)) refs.push(ref);
+    }
+    refs.sort(cmp);
+    return { count: refs.length, sample: refs.slice(0, 8) };
+  }, [files, backendAnyEnable, ktx2Enable, pngquantEnable]);
   // Derive the ExportProfile the worker consumes. Formats kept in the canonical FORMAT_KEYS order (PNG,
   // WebP, AVIF) — deterministic. Tiers = the implied scale-1 top (validateProfile requires it) + any custom
   // rows. Per-format compression: PNG is native-lossless (no quality field); WebP/AVIF carry quality unless
@@ -1408,9 +1451,10 @@ function FixCard({ files }: { files: PickedFile[] }) {
       // Selective fix — the deselected OpKinds (empty ⇒ undefined ⇒ full fix, byte-identical to today).
       // The worker SKIPS each excluded kind and surfaces an honest skipped[] note (never a silent drop).
       excludeKinds: exclude.size > 0 ? [...exclude] : undefined,
-      // PixiJS-v8 asset manifest (round8-pixi-manifest.md) — forwarded only when enabled; off ⇒ undefined
-      // ⇒ no manifest emitted ⇒ zip byte-identical to today.
-      emitPixiManifest: emitPixiManifest || undefined,
+      // PixiJS-v8 asset manifest (round8-pixi-manifest.md) — forwarded when the user enabled it OR a backend
+      // op will engage (round12 auto-pair: the .ktx2 sibling / re-compressed PNG needs loader wiring, else it
+      // ships orphaned). Off + no consented backend ⇒ undefined ⇒ no manifest ⇒ zip byte-identical to today.
+      emitPixiManifest: effectiveEmitManifest || undefined,
       // Content-hash cache-busting (round9-cache-busting.md) — forwarded only when enabled; off ⇒ undefined
       // ⇒ no hashing branch runs in the worker ⇒ zip byte-identical to today.
       hashFilenames: hashFilenames || undefined,
@@ -1438,6 +1482,15 @@ function FixCard({ files }: { files: PickedFile[] }) {
     if (ops.length === 0) return undefined; // nothing opted in ⇒ dead path
     return { apiBase: API_BASE, token: stored.token, ops, consent: true };
   }
+
+  // round12 orphan-fix: a backend op emits new/changed files (a `.ktx2` sibling; a re-compressed PNG) that a
+  // PixiJS game can only LOAD if the manifest maps them. AUTO-PAIR the Pixi manifest the moment the backend
+  // path will actually engage (consent given + reachable + an op chosen) so no orphan ships. ADDITIVITY: this
+  // can only flip to true on an explicit consented backend run — the default/off/un-consented path leaves
+  // emitPixiManifest exactly as the user set it ⇒ byte-identical to today. Surfaced visibly (forced checkbox
+  // + note) so the auto-enable is never silent.
+  const backendWillUpload = backendAnyEnable && backendConfigured && backendReady && backendConsent && loadStoredEntitlement() != null;
+  const effectiveEmitManifest = emitPixiManifest || backendWillUpload;
 
   // Monotonic preview request id — guards against an out-of-order worker resolve when rapid toggles spawn
   // overlapping plan passes (each toggle starts one planFix; only the LATEST resolve may write the phase).
@@ -1590,11 +1643,22 @@ function FixCard({ files }: { files: PickedFile[] }) {
           />
 
           {/* PixiJS-v8 asset manifest (round8-pixi-manifest.md C6) — additive, DEFAULT OFF. Off ⇒ no extra
-              file ⇒ zip byte-identical to today. */}
+              file ⇒ zip byte-identical to today. round12 auto-pair: when a backend op will upload, the manifest
+              is FORCED ON (the .ktx2/re-compressed page needs loader wiring) — shown as a checked+disabled box
+              with an honest note so the auto-enable is visible, never silent. */}
           <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.pixiManifestHint')}>
-            <input type="checkbox" checked={emitPixiManifest} onChange={(e) => setEmitPixiManifest(e.target.checked)} className="accent-teal" />
+            <input
+              type="checkbox"
+              checked={effectiveEmitManifest}
+              disabled={backendWillUpload}
+              onChange={(e) => setEmitPixiManifest(e.target.checked)}
+              className="accent-teal disabled:opacity-60"
+            />
             {t('fix.pixiManifest')}
           </label>
+          {backendWillUpload && !emitPixiManifest ? (
+            <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.backend.manifestAutoPaired')}</p>
+          ) : null}
 
           {/* Content-hash cache-busting (round9-cache-busting.md K9) — additive, DEFAULT OFF. Pairs with the
               Pixi manifest (the guaranteed referrer for pass-through loose images). Off ⇒ zip byte-identical. */}
@@ -1615,6 +1679,7 @@ function FixCard({ files }: { files: PickedFile[] }) {
             setPngquantEnable={setPngquantEnable}
             consent={backendConsent}
             setConsent={setBackendConsent}
+            uploadPreview={uploadPreview}
           />
 
           {/* Default flow: PREVIEW the plan first (mode:'plan', cheap/pure) — a reference-changing paid

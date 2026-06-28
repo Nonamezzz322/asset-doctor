@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AnalysisReport, AssetMetrics, Finding, Severity } from '@asset-doctor/core';
-import { buildIndex, selectRows, SEV_RANK, isAssetAxis, type SelectOpts } from '../src/lib/triage';
+import { buildIndex, countCandidates, defaultSelectOpts, DEFAULT_SEVERITIES, DEFAULT_SORT, selectRows, SEV_RANK, isAssetAxis, type SelectOpts } from '../src/lib/triage';
 
 // ── builders ──────────────────────────────────────────────────────────────────────────────────────
 const asset = (assetRef: string, extra: Partial<AssetMetrics> = {}): AssetMetrics => ({
@@ -353,6 +353,67 @@ describe('selectRows includeClean — the "show N clean" toggle is REAL, not a d
     // The pre-existing ok finding row ('okf') AND the synthesized clean row ('ok:okonly.png') both appear —
     // distinct ids, both ok. (In production no ok finding exists, so only the synthesized row shows.)
     expect(on.map((r) => r.id).sort()).toEqual(['ok:okonly.png', 'okf']);
+  });
+});
+
+// ── countCandidates: the "of M" denominator without a second full sort (round11 #4) ──────────────────
+describe('countCandidates == selectRows(...,{search:""}).length', () => {
+  const idx = buildIndex(
+    report(
+      [
+        asset('ui/play.png', { vramBytes: 100, occupancy: 0.3 }),
+        asset('ui/pause.png', { vramBytes: 200, occupancy: 0.5 }),
+        asset('clean.png'),
+      ],
+      [
+        finding('c', 'ui/play.png', 'crit'),
+        finding('w', 'ui/pause.png', 'warn'),
+        finding('i', 'ui/play.png', 'info'),
+        finding('folder', 'ui/pause.png', 'crit', { scope: 'folder', relatedRefs: ['ui/play.png', 'ui/pause.png'] }),
+      ],
+    ),
+  );
+
+  // Across every axis / policy combination, the cheap filter-only count must equal the full selectRows
+  // length with search blanked — including the per-asset collapse on asset-axis sorts (vram/occupancy).
+  for (const sort of ['severity', 'wastedDisk', 'vram', 'occupancy'] as const) {
+    for (const problemsOnly of [true, false]) {
+      for (const includeClean of [false, true]) {
+        for (const severityFilter of [
+          new Set<Severity>(['crit', 'warn', 'info', 'ok']),
+          new Set<Severity>(['crit']),
+          new Set<Severity>(['warn', 'info']),
+        ]) {
+          it(`matches for sort=${sort} problemsOnly=${problemsOnly} includeClean=${includeClean} sev=${[...severityFilter].join('+')}`, () => {
+            const o = opts({ sort, problemsOnly, includeClean, severityFilter, search: 'IGNORED-BY-COUNT' });
+            const full = selectRows(idx, { ...o, search: '' }).length;
+            expect(countCandidates(idx, o)).toBe(full);
+          });
+        }
+      }
+    }
+  }
+});
+
+// ── defaultSelectOpts: the ONE canonical opening view (round11 #3 — no drift) ──────────────────────────
+describe('defaultSelectOpts', () => {
+  it('is worst-first, all-severities, problems-only, no-clean, ungrouped', () => {
+    const d = defaultSelectOpts();
+    expect(d.sort).toBe(DEFAULT_SORT);
+    expect(d.sort).toBe('severity');
+    expect([...d.severityFilter].sort()).toEqual([...DEFAULT_SEVERITIES].sort());
+    expect(d.problemsOnly).toBe(true);
+    expect(d.includeClean).toBe(false);
+    expect(d.groupByFolder).toBe(false);
+    expect(d.search).toBe('');
+  });
+
+  it('returns a FRESH severityFilter Set each call (toggling never aliases the shared default)', () => {
+    const a = defaultSelectOpts();
+    const b = defaultSelectOpts();
+    expect(a.severityFilter).not.toBe(b.severityFilter);
+    a.severityFilter.delete('crit');
+    expect(b.severityFilter.has('crit')).toBe(true);
   });
 });
 
