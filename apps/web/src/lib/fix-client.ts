@@ -2,6 +2,7 @@ import type { PickedFile } from './import';
 import type { FixOptions, FixPlanSummary, FixReceipt, FixResponse } from '../worker/fix-protocol';
 import { attachKtx2Probe } from './ktx2-probe-run';
 import { attachSheetProbes } from './sheet-probe-run';
+import { ABORT_ERROR, wireAbort } from './worker-abort';
 
 export interface FixProgress {
   label: string;
@@ -22,14 +23,28 @@ export interface FixOutcome {
  *  transformation. Absent/empty fields reproduce today (empty/absent scaleTiers ⇒ no tiering; extrude
  *  unset/0 ⇒ no gutter; excludeKinds absent/empty ⇒ full fix — all byte-identical). The execute run MUST
  *  carry the SAME `excludeKinds` the plan was previewed with so the committed subset matches the preview. */
-export function runFix(files: PickedFile[], options: FixOptions, onProgress: (p: FixProgress) => void): Promise<FixOutcome> {
+export function runFix(
+  files: PickedFile[],
+  options: FixOptions,
+  onProgress: (p: FixProgress) => void,
+  // round18-abortable-workers: optional abort (a new run()/preview() supersedes the prior fix). ABSENT ⇒
+  // byte-identical to today. Already-aborted ⇒ reject AbortError WITHOUT constructing the worker.
+  signal?: AbortSignal,
+): Promise<FixOutcome> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(ABORT_ERROR());
+      return;
+    }
     const worker = new Worker(new URL('../worker/fix.worker.ts', import.meta.url), { type: 'module' });
+    const wiring = wireAbort(worker, signal, reject);
     worker.onmessage = (e: MessageEvent<FixResponse>): void => {
       const m = e.data;
       if (m.type === 'fix-progress') {
+        if (wiring.aborted()) return; // superseded — drop a late progress
         onProgress({ label: m.label, done: m.done, total: m.total });
       } else if (m.type === 'fix-done') {
+        if (wiring.aborted()) return; // a fix-done racing the terminate must not resolve an abandoned run
         // Round15 seam (CORRECTION-2): after fix-done, before resolve, probe the produced .ktx2 pages on the
         // MAIN thread (the worker has no WebGL) and REPLACE the receipt with the augmented one (measured,
         // device-local GPU VRAM beside the worst-case ceiling). No ktx2 produced / no WebGL ⇒ attachKtx2Probe
@@ -47,16 +62,23 @@ export function runFix(files: PickedFile[], options: FixOptions, onProgress: (p:
         probe
           .catch(() => done.receipt)
           .then((receipt) => {
+            // The probe chain is async; an abort can fire during it. If so the host already rejected +
+            // terminated — drop this resolve (the run was abandoned). v1 limitation: the short, side-
+            // effect-free main-thread probe may still finish (it cannot be aborted mid-chain).
+            if (wiring.aborted()) return;
+            wiring.cleanup();
             resolve({ receipt, zip: done.zip });
             worker.terminate();
           });
       } else if (m.type === 'fix-error') {
+        wiring.cleanup();
         reject(new Error(m.error));
         worker.terminate();
       }
       // 'fix-plan' is never emitted on this path (runFix posts no mode ⇒ 'execute'); ignored if it arrives.
     };
     worker.onerror = (e): void => {
+      wiring.cleanup();
       reject(new Error(e.message || 'fix worker error'));
       worker.terminate();
     };
@@ -73,15 +95,29 @@ export function runFix(files: PickedFile[], options: FixOptions, onProgress: (p:
  *  fix) is forwarded verbatim so a re-previewed masked plan reflects exactly the subset execute will run.
  *  Pass the IDENTICAL `options` object (same `excludeKinds`) to runFix afterward to commit the plan
  *  byte-for-byte. Thin pass-through. */
-export function planFix(files: PickedFile[], options: FixOptions): Promise<FixPlanSummary> {
+export function planFix(
+  files: PickedFile[],
+  options: FixOptions,
+  // round18-abortable-workers: optional abort (a newer preview()/run() supersedes this plan). ABSENT ⇒
+  // byte-identical to today. Already-aborted ⇒ reject AbortError WITHOUT constructing the worker.
+  signal?: AbortSignal,
+): Promise<FixPlanSummary> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(ABORT_ERROR());
+      return;
+    }
     const worker = new Worker(new URL('../worker/fix.worker.ts', import.meta.url), { type: 'module' });
+    const wiring = wireAbort(worker, signal, reject);
     worker.onmessage = (e: MessageEvent<FixResponse>): void => {
       const m = e.data;
       if (m.type === 'fix-plan') {
+        if (wiring.aborted()) return; // a fix-plan racing the terminate must not resolve an abandoned run
+        wiring.cleanup();
         resolve(m.summary);
         worker.terminate();
       } else if (m.type === 'fix-error') {
+        wiring.cleanup();
         reject(new Error(m.error));
         worker.terminate();
       }
@@ -89,6 +125,7 @@ export function planFix(files: PickedFile[], options: FixOptions): Promise<FixPl
       // ignored if one arrives.
     };
     worker.onerror = (e): void => {
+      wiring.cleanup();
       reject(new Error(e.message || 'fix worker error'));
       worker.terminate();
     };

@@ -71,8 +71,10 @@ export function App() {
   // re-set (a NEW report object with the same findings) can never yank the user's selection back to row 0
   // mid-session (round11 correction #1).
   const autoSelectedFor = useRef<AnalysisReport | null>(null);
-  // Aborts a still-running render-probe when a fresh analysis starts, so a stale probe's late results
-  // can't overwrite the new report. Lives in a ref (not state) — it's control flow, not render data.
+  // Aborts a still-running run when a fresh analysis starts (round18-abortable-workers): ONE controller
+  // now governs BOTH the analysis worker AND the render-probe, so a re-drop terminates the prior worker
+  // and drops the stale probe's late results. Lives in a ref (not state) — it's control flow, not render
+  // data.
   const probeAbort = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -84,8 +86,12 @@ export function App() {
       setPhase({ t: 'error', message: t('error.noFiles') });
       return;
     }
-    // Abort any in-flight probe from a previous run before starting a new analysis.
+    // Abort any in-flight run from a previous drop (the analysis worker AND its probe) before starting a
+    // new analysis. The fresh controller is created HERE — before runAnalysis — so the SAME signal aborts
+    // the worker too (round18-abortable-workers); it is reused for the probe below.
     probeAbort.current?.abort();
+    const ctrl = new AbortController();
+    probeAbort.current = ctrl;
     // Build the ONE dir-aware byte map here, from `picked`, keyed by the SAME keyOf the workers/probe use
     // (assetRef === atlas.name === keyOf). This `map` IS the object stored in state AND handed to the probe,
     // so there is exactly one resident copy of the folder's bytes (no second bytesByRef).
@@ -97,7 +103,7 @@ export function App() {
     setSelectedFinding(undefined);
     setPhase({ t: 'analyzing' });
     try {
-      const rep = await runAnalysis(picked, (p) => setPhase({ t: 'analyzing', progress: p }));
+      const rep = await runAnalysis(picked, (p) => setPhase({ t: 'analyzing', progress: p }), ctrl.signal);
       // The static result lands FIRST (invariant 4: ≤10s instant-wow is never blocked by the probe).
       setReport(rep);
       // Auto-select the WORST offender (not array-order-first) so the ≤10s payoff lands on a glowing
@@ -113,15 +119,18 @@ export function App() {
       setPhase({ t: 'done' });
       // THEN, non-blocking, replay each atlas through real offscreen-WebGL (main thread) and fill in
       // the MEASURED draw-calls / decoded-VRAM. Skipped silently when there's no WebGL or no atlas.
-      // The probe looks bytes up by the SAME key this map is built with — the one map, reused.
-      const ctrl = new AbortController();
-      probeAbort.current = ctrl;
+      // The probe looks bytes up by the SAME key this map is built with — the one map, reused. Reuses the
+      // SAME `ctrl` created above (a re-drop aborts it ⇒ the worker rejects AbortError before this even
+      // attaches; if it attaches and is then aborted, the ctrl.signal.aborted guard drops the write-back).
       void attachProbeReadings(rep, (ref) => map.get(ref), ctrl.signal).then((probed) => {
         // Only write back if this probe wasn't superseded AND it actually produced readings (a new
         // object reference signals readings attached; identity ⇒ nothing measured, leave the report).
         if (!ctrl.signal.aborted && probed !== rep) setReport(probed);
       });
     } catch (e) {
+      // A superseded run rejects AbortError — a newer drop now owns the UI, so swallow it (mirrors the
+      // openFolder AbortError contract below). round18-abortable-workers.
+      if (e instanceof DOMException && e.name === 'AbortError') return;
       setPhase({ t: 'error', message: e instanceof Error ? e.message : String(e) });
     }
   }
@@ -1535,6 +1544,10 @@ function FixCard({ files }: { files: PickedFile[] }) {
   // Monotonic preview request id — guards against an out-of-order worker resolve when rapid toggles spawn
   // overlapping plan passes (each toggle starts one planFix; only the LATEST resolve may write the phase).
   const previewSeq = useRef(0);
+  // round18-abortable-workers: aborts the prior fix/plan worker when a new run()/preview() supersedes it,
+  // so a discarded plan/fix stops competing for CPU (complements previewSeq, which only drops a stale
+  // resolve). ONE controller governs whichever worker is in flight (preview OR run — never both at once).
+  const fixAbort = useRef<AbortController | null>(null);
 
   // Dry-run preview: post mode:'plan' (cheap/pure — no compose/encode/zip) and show the Plan card. The
   // user confirms with "Run fix" (re-posts the SAME options with mode:'execute' via run()). `over` lets a
@@ -1545,13 +1558,21 @@ function FixCard({ files }: { files: PickedFile[] }) {
   async function preview(over?: Set<OpKind>) {
     if (!over) setExcludeKinds(new Set());
     const seq = ++previewSeq.current;
+    // Abort the prior fix/plan worker (round18-abortable-workers) and start a fresh controller for THIS
+    // plan so a superseded preview stops its worker's CPU; previewSeq still guards resolve ordering.
+    fixAbort.current?.abort();
+    const ctrl = new AbortController();
+    fixAbort.current = ctrl;
     if (over) setPhase((p) => (p.t === 'plan' ? { ...p, pending: true } : { t: 'planning' }));
     else setPhase({ t: 'planning' });
     try {
-      const summary = await planFix(files, buildOptions(over));
+      const summary = await planFix(files, buildOptions(over), ctrl.signal);
       if (seq !== previewSeq.current) return; // a newer toggle superseded this preview — drop the stale resolve
       setPhase({ t: 'plan', summary });
     } catch (e) {
+      // Swallow a superseded run's AbortError FIRST (before the seq guard, which would otherwise also
+      // return but is unreachable for the aborted promise once a newer preview bumped previewSeq).
+      if (e instanceof DOMException && e.name === 'AbortError') return;
       if (seq !== previewSeq.current) return;
       setPhase({ t: 'error', message: e instanceof Error ? e.message : String(e) });
     }
@@ -1573,12 +1594,19 @@ function FixCard({ files }: { files: PickedFile[] }) {
   }
 
   async function run() {
+    // Abort the prior fix/plan worker (round18-abortable-workers) — e.g. a still-running preview — and
+    // start a fresh controller for this execute run so a superseded run stops its worker's CPU.
+    fixAbort.current?.abort();
+    const ctrl = new AbortController();
+    fixAbort.current = ctrl;
     setPhase({ t: 'running', p: { label: '', done: 0, total: 1 } });
     try {
-      const out = await runFix(files, buildOptions(), (p) => setPhase({ t: 'running', p }));
+      const out = await runFix(files, buildOptions(), (p) => setPhase({ t: 'running', p }), ctrl.signal);
       downloadZip(out.zip);
       setPhase({ t: 'done', out });
     } catch (e) {
+      // A superseded run rejects AbortError — a newer run/preview now owns the card; swallow it.
+      if (e instanceof DOMException && e.name === 'AbortError') return;
       setPhase({ t: 'error', message: e instanceof Error ? e.message : String(e) });
     }
   }

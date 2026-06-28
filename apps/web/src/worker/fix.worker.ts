@@ -132,6 +132,13 @@ const ctx = self as unknown as DedicatedWorkerGlobalScope;
 const post = (m: FixResponse): void => ctx.postMessage(m);
 const basename = (p: string): string => p.split('/').pop() ?? p;
 
+// round18-abortable-workers: cooperative cancel. Set on {type:'cancel'}; checked at the top of each
+// per-op loop (op / ktx2 / pngquant) + before each terminal post (fix-plan / zipping+makeZip / fix-done),
+// so a superseded run stops heavy pixel/encode/zip work in the microtask gap before terminate() lands and
+// never posts a terminal that races the terminate. ADDITIVE: a non-aborted run never sees a cancel ⇒ this
+// stays false ⇒ every guard is a dead `if`.
+let cancelled = false;
+
 /** Pixi manifest (round8-pixi-manifest.md §6.6): pick a NON-colliding zip-entry name for the emitted
  *  manifest. Preferred `manifest.json`; if taken by an input OR an already-emitted output, fall back to
  *  `asset-doctor.manifest.json`, then `asset-doctor.manifest.2.json`, … Never overwrites an existing file.
@@ -175,14 +182,21 @@ const shortHash = async (bytes: Uint8Array): Promise<string> => {
 };
 
 ctx.onmessage = async (e: MessageEvent<FixRequest>): Promise<void> => {
+  if (e.data.type === 'cancel') {
+    cancelled = true;
+    return;
+  }
   if (e.data.type !== 'fix') return;
+  cancelled = false; // defensive reset (clients build a fresh worker per run today, so this is normally moot)
   try {
     // Dry-run preview vs commit (docs/improvements/dry-run-plan-preview.md). Absent/'execute' ⇒
     // byte-identical to today's one-click path; 'plan' ⇒ the worker posts a `fix-plan` summary and STOPS
     // before the pixel loop (no compose/encode/zip).
     await runFix(e.data.files, e.data.options, e.data.mode ?? 'execute');
   } catch (err) {
-    post({ type: 'fix-error', error: err instanceof Error ? err.message : String(err) });
+    // A cancelled run that threw mid-teardown must NOT post a spurious fix-error after the host already
+    // rejected with AbortError + terminated. Non-cancelled ⇒ same fix-error as today.
+    if (!cancelled) post({ type: 'fix-error', error: err instanceof Error ? err.message : String(err) });
   }
 };
 
@@ -626,6 +640,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     for (const s of deselectedSkips(excluded, wouldRunByKind)) planSkips.push(s);
 
     const gate: PlanGateInputs = { ops: countedOps, tierAssets, skipped: planSkips, referencesChanged: predictRefsChanged };
+    if (cancelled) return; // superseded — suppress a fix-plan that would race the terminate
     post({ type: 'fix-plan', summary: summarizePlan(gate) });
     return;
   }
@@ -1236,6 +1251,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   };
 
   for (const op of plan.ops) {
+    if (cancelled) return; // superseded — stop the (heavy) pixel-op loop before the next op
     // Selective fix: this op's KIND was deselected in the Plan card → do NO pixel work for it. The honest
     // skip is surfaced once-per-kind via deselectedSkips after the loop (not per op). `total` already
     // excludes these, so the progress bar stays accurate. excludeKinds empty ⇒ runs() always true ⇒ today.
@@ -2446,6 +2462,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     ktx2Op = 'ktx2';
     let i = 0;
     for (const c of ktx2Candidates) {
+      if (cancelled) return; // superseded — stop before the next (re-encode + upload) ktx2 candidate
       post({ type: 'fix-progress', label: `ktx2 ${basename(c.imagePath)}`, done: i++, total: ktx2Candidates.length });
       // (1) re-decode the emitted page → lossless PNG source for the sidecar.
       let pngBytes: Uint8Array | null = null;
@@ -2531,6 +2548,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     const backend = opts.backend!; // pngquantOn guarantees presence + consent
     let i = 0;
     for (const c of pngquantCandidates) {
+      if (cancelled) return; // superseded — stop before the next (upload) pngquant candidate
       post({ type: 'fix-progress', label: `pngquant ${basename(c.path)}`, done: i++, total: pngquantCandidates.length });
       pngquantUploaded++;
       const res = await encodeRemote(c.bytes, 'pngquant', c.w, c.h, { apiBase: backend.apiBase, token: backend.token });
@@ -2553,6 +2571,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     }
   }
 
+  if (cancelled) return; // superseded — skip the (potentially large) zip build entirely
   post({ type: 'fix-progress', label: 'zipping', done: total - 1, total });
   // `out` path-dedup before zip (design §6 step 9): last-write-wins for a deliberate replace; guards
   // against a duplicate path ever reaching makeZip. Order-preserving on first appearance (determinism).
@@ -2690,6 +2709,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   // sliced), so the live source/emitted buffers already in `out`→zip stay intact. Empty ⇒ empty transfer
   // list + omitted ktx2Probe ⇒ identical to today.
   const transfer = [...sheetDiffs.flatMap((d) => [d.beforeBytes, d.afterBytes]), ...ktx2Probe.flatMap((p) => [p.ktx2Bytes, p.rasterBytes])];
+  if (cancelled) return; // superseded — suppress a fix-done that would race the terminate
   ctx.postMessage(
     { type: 'fix-done', receipt, zip, ...(ktx2Probe.length > 0 ? { ktx2Probe } : {}) } satisfies FixResponse,
     transfer,

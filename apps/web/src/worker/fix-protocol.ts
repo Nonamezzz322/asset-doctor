@@ -204,15 +204,20 @@ export interface FixOverride {
  *  one-click path) is byte-identical to today. Absent ⇒ 'execute'. */
 export type FixMode = 'plan' | 'execute';
 
-export type FixRequest = {
-  type: 'fix';
-  files: FixInputFile[];
-  options: FixOptions;
-  /** Dry-run preview vs commit. Absent/'execute' ⇒ byte-identical to today; 'plan' ⇒ the worker posts a
-   *  `fix-plan` summary and STOPS before the compose/pack/repack/tier PIXEL LOOP + zip (the format-sizing
-   *  encode + aggressive feature pass still run pre-loop, to count transcodes/dedups). */
-  mode?: FixMode;
-};
+export type FixRequest =
+  | {
+      type: 'fix';
+      files: FixInputFile[];
+      options: FixOptions;
+      /** Dry-run preview vs commit. Absent/'execute' ⇒ byte-identical to today; 'plan' ⇒ the worker posts a
+       *  `fix-plan` summary and STOPS before the compose/pack/repack/tier PIXEL LOOP + zip (the format-sizing
+       *  encode + aggressive feature pass still run pre-loop, to count transcodes/dedups). */
+      mode?: FixMode;
+    }
+  /** Cooperative cancel (round18-abortable-workers): the client posts this then terminate()s when an
+   *  in-flight fix/plan run is superseded. The worker sets a `cancelled` flag and stops at the next
+   *  loop/post guard. ADDITIVE: never posted on a non-superseded run ⇒ every path byte-identical to today. */
+  | { type: 'cancel' };
 
 /** ONE loader-CALL change this fix performed (loader-migration guide, docs/improvements/loader-migration.md).
  *  `from` = the path the game's loader called BEFORE; `to` = the path(s) it must call NOW — a SET because a

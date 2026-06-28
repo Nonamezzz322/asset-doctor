@@ -14,9 +14,20 @@ import type { WorkerRequest, WorkerResponse } from './protocol';
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 const post = (m: WorkerResponse): void => ctx.postMessage(m);
 
+// round18-abortable-workers: cooperative cancel. Set on {type:'cancel'}; checked at the top of each
+// per-asset loop + before the terminal `done` post, so a superseded run stops doing heavy work in the
+// microtask gap before terminate() lands and never posts a `done` that races the terminate. ADDITIVE:
+// a non-aborted run never sees a cancel ⇒ this stays false ⇒ every guard is a dead `if`.
+let cancelled = false;
+
 ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
   const msg = e.data;
+  if (msg.type === 'cancel') {
+    cancelled = true;
+    return;
+  }
   if (msg.type !== 'analyze') return;
+  cancelled = false; // defensive reset (clients build a fresh worker per run today, so this is normally moot)
   try {
     const files: RawFile[] = msg.files.map((f) => ({ name: f.name, path: f.path, bytes: f.bytes }));
     const grouped = groupFiles(files);
@@ -33,6 +44,7 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
     const unparsed = [...grouped.unparsed];
 
     for (const a of grouped.atlases) {
+      if (cancelled) return; // superseded — stop before the next parse (terminate() will land shortly)
       const image = { ref: a.name, bytes: new Uint8Array(a.image.bytes) };
       // a.name is the dir-aware key from ingest — pass it as the asset name so two atlases sharing a
       // meta.image basename across folders stay distinct (atlas.name defaults to the bare imageRef).
@@ -55,6 +67,7 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       }
     }
     for (const im of grouped.images) {
+      if (cancelled) return; // superseded — stop before the next parse
       // Key loose images by the dir-aware path (keyOf) so same-basename files in different folders are
       // two distinct assets instead of silently overwriting each other in the bytes map + features.
       const ref = keyOf(im);
@@ -74,6 +87,7 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
     // ONE decode per image yields both the dHash AND the content class (zero extra getImageData).
     const features: ImageFeatures[] = [];
     for (const [assetRef, bytes] of imageBytes) {
+      if (cancelled) return; // superseded — stop before the next (heavy) decode/hash
       const contentHash = await sha256Hex(bytes);
       // Only a LOOSE alpha-bearing image (PNG/WebP) needs the full-frame opaque scan — gate it so atlases
       // and JPEG/AVIF loose images never pay the full-resolution decode (instant-wow: most files skip it).
@@ -95,6 +109,7 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       missingImages: grouped.missing,
       ...(unparsed.length ? { unparsed } : {}),
     });
+    if (cancelled) return; // superseded — suppress a `done` that would race the terminate
     post({ type: 'done', report });
   } catch (err) {
     post({ type: 'error', error: err instanceof Error ? err.message : String(err) });
