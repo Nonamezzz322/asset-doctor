@@ -382,6 +382,84 @@ describe('validateProfile (export profile §4a)', () => {
     const p: ExportProfile = { formats: [{ format: 'image/avif', quality: 70 }], tiers: [...okTiers] };
     expect(validateProfile(p)).toEqual(validateProfile(p));
   });
+
+  // ── round10 profile overrides (§4) ──
+  it('absent/empty overrides ⇒ success carries overrides:[] (additivity)', () => {
+    const absent = validateProfile({ formats: [{ format: 'image/webp' }], tiers: [...okTiers] });
+    expect(absent.ok).toBe(true);
+    if (absent.ok) expect(absent.overrides).toEqual([]);
+    const empty = validateProfile({ formats: [{ format: 'image/webp' }], tiers: [...okTiers], overrides: [] });
+    expect(empty.ok).toBe(true);
+    if (empty.ok) expect(empty.overrides).toEqual([]);
+  });
+
+  it('accepts valid overrides and carries them in given order', () => {
+    const r = validateProfile({
+      formats: [{ format: 'image/webp' }],
+      tiers: [...okTiers],
+      overrides: [
+        { match: 'fonts', formats: [{ format: 'image/avif', quality: 85 }], avifSubsample: 3 },
+        { match: 'ui', quality: 50, effort: 6 },
+      ],
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.overrides.map((o) => o.match)).toEqual(['fonts', 'ui']);
+  });
+
+  it('rejects lossless-AVIF inside an override.formats (prefixed override[i].formats:)', () => {
+    const r = validateProfile({
+      formats: [{ format: 'image/webp' }],
+      tiers: [...okTiers],
+      overrides: [{ match: 'fonts', formats: [{ format: 'image/avif', lossless: true }] }],
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.some((e) => e.startsWith('override[0].formats: losslessAvif'))).toBe(true);
+  });
+
+  it('rejects an empty override.formats (emptyFormats, prefixed)', () => {
+    const r = validateProfile({
+      formats: [{ format: 'image/webp' }],
+      tiers: [...okTiers],
+      overrides: [{ match: 'fonts', formats: [] }],
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.some((e) => e.startsWith('override[0].formats: emptyFormats'))).toBe(true);
+  });
+
+  it('rejects bad override quality / near / effort / subsample', () => {
+    const r = validateProfile({
+      formats: [{ format: 'image/webp' }],
+      tiers: [...okTiers],
+      overrides: [{ match: 'a', quality: 101 }, { match: 'b', near: -1 }, { match: 'c', effort: 9 }, { match: 'd', avifSubsample: 1.5 }],
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errors.some((e) => e.startsWith('override[0]: badQuality'))).toBe(true);
+      expect(r.errors.some((e) => e.startsWith('override[1]: badNear'))).toBe(true);
+      expect(r.errors.some((e) => e.startsWith('override[2]: badEffort'))).toBe(true);
+      expect(r.errors.some((e) => e.startsWith('override[3]: badSubsample'))).toBe(true);
+    }
+  });
+
+  it('rejects an empty/blank override match (must never silently match)', () => {
+    const r = validateProfile({
+      formats: [{ format: 'image/webp' }],
+      tiers: [...okTiers],
+      overrides: [{ match: '   ' }],
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.some((e) => e.startsWith('override[0]: emptyMatch'))).toBe(true);
+  });
+
+  it('rejects a dup target inside override.formats (prefixed)', () => {
+    const r = validateProfile({
+      formats: [{ format: 'image/webp' }],
+      tiers: [...okTiers],
+      overrides: [{ match: 'fonts', formats: [{ format: 'image/webp', quality: 80 }, { format: 'image/webp', quality: 80 }] }],
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.some((e) => e.startsWith('override[0].formats: dupTarget'))).toBe(true);
+  });
 });
 
 describe('formatToken / variantManifestName (export profile §4a)', () => {

@@ -22,10 +22,14 @@ import {
   emitTexturePackerJson,
   formatEncode,
   resolveOptions,
+  resolveProfileForRef,
   scaleAwareQuality,
   SCALE_QUALITY_FLOOR,
   type EffectiveOptions,
+  type FormatEncodeGlobal,
+  type ProfileOverride,
 } from '../src/index';
+import type { FormatTarget } from '@asset-doctor/core';
 
 const globalKnobs = { effort: 0, scaleAwareQuality: false } as const;
 
@@ -186,6 +190,124 @@ describe('formatEncode (export profile §4b)', () => {
   it('is deterministic: same inputs ⇒ deep-equal output', () => {
     const args = [{ format: 'image/webp' as const, quality: 75, near: 30 }, 0.75, { effort: 3, scaleAwareQuality: true }] as const;
     expect(formatEncode(...args)).toEqual(formatEncode(...args));
+  });
+});
+
+// ── resolveProfileForRef (round10-profile-overrides.md §3) ──────────────────────────────────────────
+describe('resolveProfileForRef (round10 profile overrides §3)', () => {
+  const baseFormats: FormatTarget[] = [{ format: 'image/webp', quality: 80 }, { format: 'image/png' }];
+  const baseGlobal: FormatEncodeGlobal = { effort: 2, scaleAwareQuality: false, avifQualityAlpha: 70 };
+
+  it('no overrides ⇒ base returned BY REFERENCE (additivity anchor — byte-identical fan-out)', () => {
+    const rp = resolveProfileForRef('fonts/title.png', 'loose', baseFormats, baseGlobal);
+    expect(rp.formats).toBe(baseFormats); // SAME object, not a copy
+    expect(rp.global).toBe(baseGlobal);
+  });
+
+  it('empty overrides[] ⇒ base by reference (no-op loop)', () => {
+    const rp = resolveProfileForRef('fonts/title.png', 'loose', baseFormats, baseGlobal, []);
+    expect(rp.formats).toBe(baseFormats);
+    expect(rp.global).toBe(baseGlobal);
+  });
+
+  it('no MATCH ⇒ base by reference (identity), even with a non-empty override list', () => {
+    const overrides: ProfileOverride[] = [{ match: 'fx', quality: 40 }];
+    const rp = resolveProfileForRef('ui/btn.png', 'pixi', baseFormats, baseGlobal, overrides);
+    expect(rp.formats).toBe(baseFormats);
+    expect(rp.global).toBe(baseGlobal);
+  });
+
+  it('fonts → AVIF 4:4:4: formats REPLACE + avifSubsample merges onto global (the headline port)', () => {
+    const overrides: ProfileOverride[] = [
+      { match: 'fonts', formats: [{ format: 'image/avif', quality: 85 }], avifSubsample: 3 },
+    ];
+    const rp = resolveProfileForRef('fonts/title.png', 'loose', baseFormats, baseGlobal, overrides);
+    expect(rp.formats).toEqual([{ format: 'image/avif', quality: 85 }]); // REPLACED
+    expect(rp.formats).not.toBe(baseFormats); // a new list, base untouched
+    expect(rp.global.avifSubsample).toBe(3); // merged (the 4:4:4 knob)
+    expect(rp.global.effort).toBe(2); // untouched profile-global
+    expect(rp.global.avifQualityAlpha).toBe(70); // profile-global preserved
+    expect(rp.global).not.toBe(baseGlobal); // a fresh global, base untouched
+    // a sibling ref outside fonts/ still gets the base by reference (override is scoped).
+    expect(resolveProfileForRef('ui/btn.png', 'loose', baseFormats, baseGlobal, overrides).formats).toBe(baseFormats);
+  });
+
+  it('quality/near/lossless overlay per format; png is carved out (native lossless)', () => {
+    const overrides: ProfileOverride[] = [{ match: 'ui', quality: 50, near: 60, lossless: true }];
+    const rp = resolveProfileForRef('ui/btn.png', 'pixi', baseFormats, baseGlobal, overrides);
+    // webp honors all three; png ignores all (carve-out).
+    expect(rp.formats).toEqual([
+      { format: 'image/webp', quality: 50, lossless: true, near: 60 },
+      { format: 'image/png' },
+    ]);
+    expect(rp.formats[1]).toBe(baseFormats[1]); // png target returned by reference (no-op overlay)
+  });
+
+  it('avif carve-out: quality overlays but lossless/near are dropped (no faked-lossless, invariant 3)', () => {
+    const avifBase: FormatTarget[] = [{ format: 'image/avif', quality: 80 }];
+    const overrides: ProfileOverride[] = [{ match: 'fonts', quality: 60, lossless: true, near: 40 }];
+    const rp = resolveProfileForRef('fonts/x.png', 'loose', avifBase, baseGlobal, overrides);
+    expect(rp.formats).toEqual([{ format: 'image/avif', quality: 60 }]); // only quality; no lossless/near
+  });
+
+  it('effort merges onto the running global; scaleAwareQuality/qualityAlpha/png stay profile-global', () => {
+    const g: FormatEncodeGlobal = { effort: 1, scaleAwareQuality: true, avifQualityAlpha: 50, pngRecompressLevel: 4 };
+    const rp = resolveProfileForRef('fonts/x.png', 'loose', baseFormats, g, [{ match: 'fonts', effort: 6 }]);
+    expect(rp.global).toEqual({
+      effort: 6, // merged
+      scaleAwareQuality: true, // profile-global
+      avifQualityAlpha: 50, // profile-global
+      avifSubsample: undefined,
+      pngRecompressLevel: 4, // profile-global
+    });
+  });
+
+  it('multiple matches: later wins on formats AND each scalar, field-by-field', () => {
+    const overrides: ProfileOverride[] = [
+      { match: 'fonts', formats: [{ format: 'image/webp', quality: 90 }], effort: 3, avifSubsample: 1 },
+      { match: 'fonts/title.png', formats: [{ format: 'image/avif', quality: 70 }], avifSubsample: 3 }, // later wins
+    ];
+    const rp = resolveProfileForRef('fonts/title.png', 'loose', baseFormats, baseGlobal, overrides);
+    expect(rp.formats).toEqual([{ format: 'image/avif', quality: 70 }]); // LAST formats wins
+    expect(rp.global.effort).toBe(3); // from the earlier match (later one didn't set effort)
+    expect(rp.global.avifSubsample).toBe(3); // LAST avifSubsample wins
+  });
+
+  it('first-set scalar persists when a later match omits it (only set fields override)', () => {
+    const overrides: ProfileOverride[] = [
+      { match: 'fonts', quality: 40 },
+      { match: 'fonts/title.png', near: 55 }, // later match sets near only — quality stays 40
+    ];
+    const rp = resolveProfileForRef('fonts/title.png', 'pixi', baseFormats, baseGlobal, overrides);
+    expect(rp.formats[0]).toEqual({ format: 'image/webp', quality: 40, near: 55 });
+  });
+
+  it('sibling-prefix: "fonts" never matches "fonts2" (full segment, not a substring)', () => {
+    const overrides: ProfileOverride[] = [{ match: 'fonts', formats: [{ format: 'image/avif' }] }];
+    expect(resolveProfileForRef('fonts2/title.png', 'loose', baseFormats, baseGlobal, overrides).formats).toBe(baseFormats);
+    expect(resolveProfileForRef('fonts/title.png', 'loose', baseFormats, baseGlobal, overrides).formats).not.toBe(baseFormats);
+  });
+
+  it('match is case-SENSITIVE: "Fonts/title.png" is NOT matched by "fonts"', () => {
+    const overrides: ProfileOverride[] = [{ match: 'fonts', quality: 30 }];
+    expect(resolveProfileForRef('Fonts/title.png', 'loose', baseFormats, baseGlobal, overrides).formats).toBe(baseFormats);
+  });
+
+  it('type:* matches the asset kind, not a folder', () => {
+    const overrides: ProfileOverride[] = [{ match: 'type:loose', avifSubsample: 3 }];
+    expect(resolveProfileForRef('any/x.png', 'loose', baseFormats, baseGlobal, overrides).global.avifSubsample).toBe(3);
+    // a pixi/atlas ref of a different kind is untouched (base by reference).
+    expect(resolveProfileForRef('any/x.png', 'pixi', baseFormats, baseGlobal, overrides).global).toBe(baseGlobal);
+  });
+
+  it('is deterministic: same inputs ⇒ deep-equal output (double-call eq)', () => {
+    const overrides: ProfileOverride[] = [
+      { match: 'fonts', formats: [{ format: 'image/avif' }], avifSubsample: 3 },
+      { match: 'type:loose', quality: 55 },
+    ];
+    const a = resolveProfileForRef('fonts/x.png', 'loose', baseFormats, baseGlobal, overrides);
+    const b = resolveProfileForRef('fonts/x.png', 'loose', baseFormats, baseGlobal, overrides);
+    expect(a).toEqual(b);
   });
 });
 

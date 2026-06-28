@@ -98,6 +98,18 @@ export function resolveOptions(
 /** Default lossy quality (0..100) when a FormatTarget omits `quality` (design §2). */
 export const DEFAULT_FORMAT_QUALITY = 85;
 
+/** The global-knob bag formatEncode consumes, named so resolveProfileForRef and formatEncode share ONE
+ *  type (no drift, round10-profile-overrides.md §3). `scaleAwareQuality` + `avifQualityAlpha` +
+ *  `pngRecompressLevel` stay PROFILE-GLOBAL in v1 (not per-override); `effort` + `avifSubsample` are
+ *  override-mergeable (resolveProfileForRef folds them onto a copy of this bag). */
+export interface FormatEncodeGlobal {
+  effort: number;
+  scaleAwareQuality: boolean;
+  avifQualityAlpha?: number;
+  avifSubsample?: number;
+  pngRecompressLevel?: number;
+}
+
 /** The encode parameters one FormatTarget resolves to for a given scale — the EncodeOpts-shaped fields
  *  the worker passes to encodeCanvas. `targetMime`/`quality`/`lossless`/`effort`/`webpNearLossless`
  *  mirror the worker's EncodeOpts; the optional avif / png fields are forwarded only when set. */
@@ -131,13 +143,7 @@ export interface FormatEncode {
 export function formatEncode(
   fmt: FormatTarget,
   scale: number,
-  global: {
-    effort: number;
-    scaleAwareQuality: boolean;
-    avifQualityAlpha?: number;
-    avifSubsample?: number;
-    pngRecompressLevel?: number;
-  },
+  global: FormatEncodeGlobal,
 ): FormatEncode {
   const baseQuality = fmt.quality ?? DEFAULT_FORMAT_QUALITY;
   const quality = scaleAwareQuality(baseQuality, scale, global.scaleAwareQuality);
@@ -175,4 +181,96 @@ export function formatEncode(
     avifQualityAlpha: global.avifQualityAlpha,
     avifSubsample: global.avifSubsample,
   };
+}
+
+/* ── Per-folder/prefix profile overrides (round10-profile-overrides.md §3) ──────────────────────────
+ * ADDITIVE: an absent/empty overrides[] OR a no-match ref ⇒ resolveProfileForRef returns the base
+ * formats/global BY REFERENCE ⇒ the worker calls formatEncode on the SAME objects it does today ⇒
+ * byte-identical fan-out. Reuses overrideMatches (THE one predicate) so the match semantics can't drift
+ * from the legacy resolveOptions path. Pure + deterministic (ordered-array fold, later-wins). */
+
+/** Per-ref ProfileOverride mirror, kept leaf-side (exactly like FixOverride above) so packages/fix never
+ *  imports from the apps/web layer. Structurally identical to core's ProfileOverride. */
+export interface ProfileOverride {
+  /** Dir prefix ("fonts" | "ui/buttons"), exact ref, or 'type:spine'|'type:pixi'|'type:loose'. Case-sensitive. */
+  match: string;
+  /** REPLACE the whole format list for matching refs (atomic). Omit ⇒ keep the running format list. */
+  formats?: FormatTarget[];
+  /** Overlay the lossy quality (0..100) onto every non-png/non-lossless format of matching refs. */
+  quality?: number;
+  /** Overlay webp near-lossless (0..100; 100/omit ⇒ off) onto matching refs' webp targets only. */
+  near?: number;
+  /** Force matching refs to lossless where honest (webp/png); IGNORED for avif (no faked-lossless). */
+  lossless?: boolean;
+  /** Merge encoder effort (0..6) onto the running profile-global for matching refs. */
+  effort?: number;
+  /** The fonts→4:4:4 port: merge AVIF chroma subsample (3 = YUV444) onto the running profile-global. */
+  avifSubsample?: number;
+}
+
+/** The effective profile config for ONE ref: the formats to fan out + the global bag to feed formatEncode.
+ *  `global` is exactly FormatEncodeGlobal so the worker passes it straight into formatEncode. */
+export interface ResolvedProfile {
+  formats: FormatTarget[];
+  global: FormatEncodeGlobal;
+}
+
+/** Apply quality/near/lossless ONLY where the codec honors them — png ignores all (native lossless);
+ *  avif ignores lossless+near (no faked-lossless, invariant 3); webp honors all. Mirrors formatEncode's
+ *  per-format rules so the overlay can't diverge from the encode. Returns the SAME object when nothing
+ *  changes (a no-op overlay), else a fresh FormatTarget. */
+function overlayFormat(f: FormatTarget, o: ProfileOverride): FormatTarget {
+  if (f.format === 'image/png') return f; // native lossless — nothing to overlay
+  if (f.format === 'image/avif') {
+    return o.quality !== undefined ? { ...f, quality: o.quality } : f; // no lossless/near on avif
+  }
+  // webp — honors quality, near, lossless.
+  if (o.quality === undefined && o.near === undefined && o.lossless === undefined) return f;
+  const next: FormatTarget = { ...f };
+  if (o.lossless !== undefined) next.lossless = o.lossless;
+  if (o.quality !== undefined) next.quality = o.quality;
+  if (o.near !== undefined) next.near = o.near;
+  return next;
+}
+
+/**
+ * Resolve the effective profile (formats + global) for ONE ref of ONE kind. Starts from the validated
+ * base, folds EVERY matching override IN ARRAY ORDER (later wins, field-by-field — mirrors resolveOptions'
+ * stable fold, NOT a "most specific" heuristic). No match (and the empty/absent overrides case) ⇒ the base
+ * `baseFormats`/`baseGlobal` are returned BY REFERENCE unchanged, so a no-override / no-match run is
+ * structurally identical ⇒ byte-identical fan-out (additivity anchor). Pure and deterministic — no
+ * Date/Math.random, iteration is over the ordered `overrides` array (no object-key hazard).
+ *
+ * Precedence (exact): for each matching entry, `formats` REPLACE wins outright (LAST matching `formats`
+ * is final), then `quality/near/lossless` overlay per format, then `effort/avifSubsample` merge onto the
+ * running global via `?? running` (LAST matching value of each scalar is final).
+ */
+export function resolveProfileForRef(
+  ref: string,
+  kind: FixAssetKind,
+  baseFormats: FormatTarget[],
+  baseGlobal: FormatEncodeGlobal,
+  overrides?: ProfileOverride[],
+): ResolvedProfile {
+  let formats = baseFormats; // shared until an override touches it — no needless copies (additivity anchor)
+  let global = baseGlobal;
+  if (overrides) {
+    for (const o of overrides) {
+      if (!overrideMatches(o.match, ref, kind)) continue; // REUSED predicate (the one match semantics)
+      if (o.formats) formats = o.formats; // REPLACE (atomic)
+      if (o.quality !== undefined || o.near !== undefined || o.lossless !== undefined) {
+        formats = formats.map((f) => overlayFormat(f, o)); // per-format overlay (fresh objects)
+      }
+      if (o.effort !== undefined || o.avifSubsample !== undefined) {
+        global = {
+          effort: o.effort ?? global.effort,
+          scaleAwareQuality: global.scaleAwareQuality, // profile-global, not override-settable in v1
+          avifQualityAlpha: global.avifQualityAlpha, // profile-global in v1
+          avifSubsample: o.avifSubsample ?? global.avifSubsample, // the fonts→4:4:4 merge
+          pngRecompressLevel: global.pngRecompressLevel, // profile-global in v1
+        };
+      }
+    }
+  }
+  return { formats, global };
 }

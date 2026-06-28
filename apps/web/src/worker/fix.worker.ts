@@ -48,6 +48,13 @@ import {
   formatEncode,
   variantManifestName,
   type FormatEncode,
+  // PURE per-folder/prefix/type profile-override resolver (round10-profile-overrides.md §3). Reuses the
+  // ONE match predicate (overrideMatches) + formatEncode's global bag type so the per-ref fan-out can't
+  // drift from the legacy resolveOptions match semantics. ADDITIVE: absent/empty overrides ⇒ the base
+  // formats/global are returned BY REFERENCE ⇒ formatEncode runs on the SAME objects ⇒ byte-identical.
+  resolveProfileForRef,
+  type ProfileOverride,
+  type FormatEncodeGlobal,
   // PURE owner-aware dedup repoint path math (design §3d) — SINGLE source of truth, Vitest-covered in
   // packages/fix, so the meta.image repoint resolves back through @asset-doctor/parsers and can't drift.
   dirOf,
@@ -291,6 +298,11 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   let profileFormats: FormatTarget[] = [];
   let profileTiers: ScaleTier[] = [];
   let profileMulti = false; // >1 format ⇒ the format token disambiguates manifest names (single ⇒ legacy).
+  // round10-profile-overrides.md §4/§5: the VALIDATED per-folder/prefix/type overrides (given order; [] when
+  // absent/empty). Read from the validation result, NEVER raw opts.exportProfile.overrides, so an invalid
+  // override has already failed the whole profile closed above. Empty ⇒ resolveProfileForRef returns the base
+  // BY REFERENCE ⇒ byte-identical fan-out (additivity anchor).
+  let profileOverrides: ProfileOverride[] = [];
   const profileSkips: { assetRef: string; reason: string }[] = [];
   if (opts.exportProfile) {
     const v = validateProfile(opts.exportProfile);
@@ -300,13 +312,15 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       profileFormats = v.formats;
       profileTiers = v.tiers;
       profileMulti = v.formats.length > 1;
+      profileOverrides = v.overrides;
       profileOn = true;
     }
   }
   // The profile's global encode knobs (effort/scaleAwareQuality/avif*/pngRecompress) — folded into every
   // formatEncode below. Read from the profile (NOT the legacy top-level opts) when profileOn so the panel's
   // knobs govern the fan-out; falls through harmlessly when profile absent (profileFormats is empty).
-  const profileGlobal = {
+  // Typed as FormatEncodeGlobal so resolveProfileForRef and formatEncode consume the SAME bag (no drift).
+  const profileGlobal: FormatEncodeGlobal = {
     effort: opts.exportProfile?.effort ?? 0,
     scaleAwareQuality: opts.exportProfile?.scaleAwareQuality ?? false,
     avifQualityAlpha: opts.exportProfile?.avifQualityAlpha,
@@ -412,6 +426,12 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     lossless: false,
   };
   const kindOf = (ref: string): FixAssetKind => (spineRefs.has(ref) ? 'spine' : atlasByRef.has(ref) ? 'pixi' : 'loose');
+  // round10-profile-overrides.md §5: the ONE per-ref profile resolution every fan-out site calls. Folds the
+  // validated overrides (later-wins) onto the base profileFormats/profileGlobal for THIS ref's kind. No
+  // matching override (incl. the empty-overrides case) ⇒ profileFormats/profileGlobal returned BY REFERENCE
+  // ⇒ formatEncode runs on the SAME objects as a no-override run ⇒ byte-identical fan-out. Pure/deterministic.
+  const resolveProfile = (ref: string) =>
+    resolveProfileForRef(ref, kindOf(ref), profileFormats, profileGlobal, profileOverrides);
   /** Effective encode options for a loose-image op at `ref`, optionally downscaled by `scale` (1 = none). */
   const effectiveFor = (ref: string, scale: number): EffectiveOptions => {
     const e = resolveOptions(ref, kindOf(ref), baseEffective, opts.overrides);
@@ -775,11 +795,22 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     // (renamed) and Phase C would silently degrade an otherwise-running dedup to keep-consumer. Mask with
     // runs(op). When transcode is NOT excluded this is exactly today's `op?.kind === 'transcode'`.
     const transcoded = op?.kind === 'transcode' && runs(op);
+    // round10-profile-overrides.md §5 (M2, load-bearing): when profileOn, a transcoded owner actually fans
+    // out via emitLooseProfileFanout, whose canonical owner image is renamedTo(srcPath, <mime of the FIRST
+    // resolved format>). Predict THAT first-format mime (honoring overrides) so Phase C doesn't see a false
+    // divergence and silently degrade the dedup. This ALSO fixes a pre-existing latent mismatch: profile-on
+    // owners were predicted with the legacy opts.targetMime, not the profile's first format. Profile OFF ⇒
+    // the legacy effectiveFor(ref,1).targetMime, byte-identical to before.
+    const targetMime = transcoded
+      ? profileOn
+        ? resolveProfile(ref).formats[0]!.format
+        : effectiveFor(ref, 1).targetMime
+      : opts.targetMime;
     return {
       imagePath: pathByRef.get(ref),
       manifestPath: manifestPathOf(ref),
       transcoded,
-      targetMime: transcoded ? effectiveFor(ref, 1).targetMime : opts.targetMime,
+      targetMime,
     };
   });
   // Owner ACTUAL emitted name, filled during Phase B. Defaults to the original emitted paths; transform
@@ -1001,6 +1032,11 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   ): Promise<{ ownerImage: string; ownerImageUnhashed: string; referencesChanged: boolean }> => {
     profileOwned.add(ref);
     profileAssets++;
+    // round10-profile-overrides.md §5 Site A: resolve THIS ref's effective formats+global ONCE. No matching
+    // override ⇒ rp.formats===profileFormats / rp.global===profileGlobal (by reference) ⇒ byte-identical to
+    // the pre-round10 loop. Covers loose-transcode/resize, the resize/transcode owner fan-out, AND the
+    // format-only standalone pass (all route through here).
+    const rp = resolveProfile(ref);
     const emittedThis = new Set<string>();
     let ownerImage = srcPath; // falls back to the source if every format fails (caller leaves it un-renamed)
     // Cache-bust (round9 K8): the un-hashed canonical owner image (the renamedTo() name BEFORE the content
@@ -1010,8 +1046,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     let ownerImageUnhashed = srcPath;
     let firstEmitted = false;
     let refsChanged = false;
-    for (const f of profileFormats) {
-      const fe = formatEncode(f, scale, profileGlobal);
+    for (const f of rp.formats) {
+      const fe = formatEncode(f, scale, rp.global);
       const enc = await encodeCanvas(canvas, c2d, fe.targetMime, feToEncodeOpts(fe));
       if (!enc) {
         skipped.push({ assetRef: ref, reason: `variant ${f.format} skipped: encode to ${fe.targetMime} unavailable` });
@@ -1394,7 +1430,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           }
           if (r.referencesChanged) referencesChanged = true;
           vramSaved += Math.max(0, (origPx - op.to.w * op.to.h) * 4);
-          operations.push(`resize ${basename(path)} → ${op.to.w}×${op.to.h} (${profileFormats.length} format${profileFormats.length === 1 ? '' : 's'})`);
+          // Per-ref count (overrides may REPLACE the format list); no override ⇒ === profileFormats.length.
+          const nFmt = resolveProfile(ref).formats.length;
+          operations.push(`resize ${basename(path)} → ${op.to.w}×${op.to.h} (${nFmt} format${nFmt === 1 ? '' : 's'})`);
         } else {
           // Effective per-asset options (folder/type overrides + scale-aware quality on the downscale).
           const eff = effectiveFor(ref, scale);
@@ -1448,7 +1486,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           ownerActualUnhashed.set(ref, r.ownerImageUnhashed);
         }
         if (r.referencesChanged) referencesChanged = true;
-        operations.push(`transcode ${basename(path)} → ${profileFormats.length} format${profileFormats.length === 1 ? '' : 's'}`);
+        // Per-ref count (overrides may REPLACE the format list); no override ⇒ === profileFormats.length.
+        const nFmt = resolveProfile(ref).formats.length;
+        operations.push(`transcode ${basename(path)} → ${nFmt} format${nFmt === 1 ? '' : 's'}`);
         continue;
       }
       // Effective per-asset options (folder/type overrides; no downscale ⇒ scale 1 ⇒ quality unchanged).
@@ -1886,10 +1926,18 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       if (!bytes || !srcSize) continue;
       const isSpine = spineRefs.has(ref);
       const atlas = atlasByRef.get(ref);
+      // round10-profile-overrides.md §5 Site B: resolve THIS ref's effective formats+global ONCE for the whole
+      // tier loop (reused inside every tier iteration). No matching override ⇒ rp.formats===profileFormats /
+      // rp.global===profileGlobal (by reference) ⇒ byte-identical to the pre-round10 tier emit. `refMulti` is
+      // the PER-REF multi flag (an override can change the format COUNT) — it replaces the global profileMulti
+      // at the Spine note + every variantManifestName below so per-ref single/multi naming is correct.
+      const rp = profileOn ? resolveProfile(ref) : undefined;
+      const refMulti = rp ? rp.formats.length > 1 : profileMulti;
       // ROUND7 T9: Spine pages STAY PNG (runtime-safe) — a multi-format profile can't fan a Spine page out
       // across webp/avif, so it degrades to a single PNG per tier. Surface ONE honest note per Spine asset
       // (never a silent single-format result for a multi-format profile request). Single-format ⇒ no note.
-      if (profileOn && profileMulti && isSpine) {
+      // Keys on the PER-REF count (refMulti) so a font/folder override that drops Spine to one format is silent.
+      if (profileOn && refMulti && isSpine) {
         skipped.push({ assetRef: ref, reason: 'export profile: Spine pages stay PNG — emitted PNG only (no webp/avif fan-out)' });
       }
       const srcBmp = await createImageBitmap(new Blob([bytes]));
@@ -1943,9 +1991,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         // validated profile formats (formatEncode → encodeCanvas with lossless THREADED, B1). PROFILE OFF ⇒
         // a SINGLE legacy descriptor reproducing today's `encOptsFor(eff, true)` exactly ⇒ byte-identical.
         // Spine pages STAY PNG regardless (a webp/avif profile target degrades to PNG with one honest note).
-        const tierEncodes: { mime: ImageMime; encOpts: EncodeOpts; fmtLabel: string }[] = profileOn
-          ? profileFormats.map((f) => {
-              const fe = formatEncode(f, tier.scale, profileGlobal);
+        const tierEncodes: { mime: ImageMime; encOpts: EncodeOpts; fmtLabel: string }[] = rp
+          ? rp.formats.map((f) => {
+              const fe = formatEncode(f, tier.scale, rp.global);
               return { mime: isSpine ? 'image/png' : fe.targetMime, encOpts: feToEncodeOpts(fe), fmtLabel: f.format };
             })
           : [{ mime: isSpine ? 'image/png' : eff.targetMime, encOpts: encOptsFor(eff, true), fmtLabel: eff.targetMime }];
@@ -1999,7 +2047,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
             scaled.imageRef = basename(emittedImage);
             if (isSpine && spineInfo) {
               const atlasBytes = te.encode(emitSpineAtlasText(scaled));
-              const emittedSidecar = await hashEmit(variantManifestName(spineInfo.path, tier.suffix, enc.mime, profileMulti), atlasBytes);
+              const emittedSidecar = await hashEmit(variantManifestName(spineInfo.path, tier.suffix, enc.mime, refMulti), atlasBytes);
               out.push({ path: emittedSidecar, bytes: atlasBytes });
               emittedLoadTarget = emittedSidecar;
               // Pixi manifest: a Spine tier loads via its per-tier `.atlas` SIDECAR (one entry per tier suffix).
@@ -2009,13 +2057,13 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
               if (skelBytes && skelPath) {
                 // Skeleton copy is NOT content-hashed (K7): it is referenced by runtime convention, no
                 // AD-owned writable link. Emit one per-tier copy under its suffixed name, unchanged.
-                out.push({ path: variantManifestName(skelPath, tier.suffix, enc.mime, profileMulti), bytes: new Uint8Array(skelBytes) });
+                out.push({ path: variantManifestName(skelPath, tier.suffix, enc.mime, refMulti), bytes: new Uint8Array(skelBytes) });
                 tierFilesEmitted++;
                 if (profileOn) profileFilesEmitted++;
               }
             } else if (manifestPath) {
               const jsonBytes = te.encode(emitTexturePackerJson(scaled));
-              const emittedSidecar = await hashEmit(variantManifestName(manifestPath, tier.suffix, enc.mime, profileMulti), jsonBytes);
+              const emittedSidecar = await hashEmit(variantManifestName(manifestPath, tier.suffix, enc.mime, refMulti), jsonBytes);
               out.push({ path: emittedSidecar, bytes: jsonBytes });
               emittedLoadTarget = emittedSidecar;
               // Pixi manifest: an atlas tier loads via its per-tier `.json` SIDECAR (one entry per tier suffix;
@@ -2111,7 +2159,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         ownerActualUnhashed.set(ref, r.ownerImageUnhashed);
       }
       if (r.referencesChanged) referencesChanged = true;
-      operations.push(`export profile ${basename(imagePath)} → ${profileFormats.length} format${profileFormats.length === 1 ? '' : 's'}`);
+      // Per-ref count (overrides may REPLACE the format list); no override ⇒ === profileFormats.length.
+      const nFmt = resolveProfile(ref).formats.length;
+      operations.push(`export profile ${basename(imagePath)} → ${nFmt} format${nFmt === 1 ? '' : 's'}`);
     }
   }
 

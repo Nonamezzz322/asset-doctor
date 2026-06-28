@@ -167,6 +167,38 @@ export interface ExportProfile {
   avifQualityAlpha?: number;
   /** Scale-aware quality (lower q on downscaled output). Pure deterministic formula. Omit ⇒ off. */
   scaleAwareQuality?: boolean;
+  /** ADDITIVE per-folder/prefix/type overrides (round10-profile-overrides.md). Absent/empty ⇒ identical
+   *  to a no-override profile run (the resolver returns the base BY REFERENCE on no match). Validated
+   *  fail-closed alongside the base (validateProfile). */
+  overrides?: ProfileOverride[];
+}
+
+/** One per-folder/prefix/type override on the export profile (round10-profile-overrides.md). ADDITIVE: an
+ *  absent or empty overrides[] ⇒ the resolver returns the base profile unchanged ⇒ byte-identical to a
+ *  no-override run; the profile itself absent ⇒ byte-identical to pre-round7 (the worker's profile branch
+ *  is profileOn-gated). `match` reuses the EXISTING dir-aware predicate (overrideMatches, settings.ts):
+ *  case-SENSITIVE exact ref, dir-prefix `<m>/...`, or a `type:spine|type:pixi|type:loose` pseudo-key —
+ *  NOT a glob, NOT a bare substring (so `fonts` never matches `fonts2`). Match is on the dir-aware ingest
+ *  key (keyOf), not a basename. Precedence: LATER matching entry wins, field-by-field (mirrors
+ *  resolveOptions' fold — NOT most-specific). Fields are a SUBSET; omitted fields fall through from the
+ *  base profile. */
+export interface ProfileOverride {
+  /** Dir prefix ("fonts" | "ui/buttons"), exact ref, or 'type:spine'|'type:pixi'|'type:loose'. Case-sensitive. */
+  match: string;
+  /** REPLACE the whole format list for matching refs (atomic; e.g. fonts → [{format:'image/avif'}]).
+   *  Omit ⇒ keep base profile.formats. Validated EXACTLY like profile.formats (≥1, valid, no lossless-avif,
+   *  no dup target) via the shared validateFormatList. */
+  formats?: FormatTarget[];
+  /** Overlay the lossy quality (0..100) onto EVERY non-png/non-lossless format of the matching refs. */
+  quality?: number;
+  /** Overlay webp near-lossless (0..100; 100/omit ⇒ off) onto matching refs' webp targets only. */
+  near?: number;
+  /** Force matching refs to lossless where honest (webp/png); IGNORED for avif (no faked-lossless). */
+  lossless?: boolean;
+  /** Merge encoder effort (0..6) onto the running profile-global for matching refs. */
+  effort?: number;
+  /** The fonts→4:4:4 port: merge AVIF chroma subsample (3 = YUV444) onto the running profile-global. */
+  avifSubsample?: number;
 }
 
 /* ── Feature 4: pack loose assets into spritesheets ───────────────────────────────────────────

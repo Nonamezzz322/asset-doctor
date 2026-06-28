@@ -26,8 +26,8 @@ export { scanSkeleton, verifySpineSkeleton } from './spine-verify';
 export type { RequiredRegion, SkeletonScan, SpineVerifyResult } from './spine-verify';
 export { planFix } from './plan';
 export type { PlanOptions } from './plan';
-export { scaleAwareQuality, resolveOptions, SCALE_QUALITY_FLOOR, formatEncode, DEFAULT_FORMAT_QUALITY } from './settings';
-export type { EffectiveOptions, FixOverride, FixAssetKind, FormatEncode } from './settings';
+export { scaleAwareQuality, resolveOptions, SCALE_QUALITY_FLOOR, formatEncode, DEFAULT_FORMAT_QUALITY, resolveProfileForRef } from './settings';
+export type { EffectiveOptions, FixOverride, FixAssetKind, FormatEncode, FormatEncodeGlobal, ProfileOverride, ResolvedProfile } from './settings';
 // PURE scale-tier helpers (design docs/scale-tiers-design.md §1/§2) — the loose-image analogue of
 // scaleAtlas (scaleLoose), tier suffix naming, fail-closed ladder validation, the default ladder, and the
 // resolution-token regex. scaleAtlas stays the atlas primitive; the worker's tier loop owns oversize +

@@ -43,7 +43,11 @@ export interface FixOptions {
   marking?: LazyMarking;
   /** Skin guard pairs (Feature 1): keep declared key/value skins from collapsing during dedup. */
   skinGuard?: SkinGuard;
-  /** Per-folder + per-type overrides (folder-prefix or type:* key). Resolved in worker. */
+  /** Per-folder + per-type overrides (folder-prefix or type:* key) for the LEGACY (profile-OFF) loose/
+   *  transcode + pack-sheet paths. Resolved in worker (resolveOptions). INDEPENDENT of the export profile's
+   *  per-folder overrides (ExportProfile.overrides, round10-profile-overrides.md): when a profile is active
+   *  these stay inert on the fan-out/tier paths — that fan-out is governed by ExportProfile.overrides
+   *  instead. The two never both drive one ref's profile fan-out. */
   overrides?: FixOverride[];
   /** Multi-resolution scale-tier export (own Pro toggle, DEFAULT OFF). Each entry emits one
    *  downscaled copy of every eligible asset `<name><suffix>.<ext>` at `scale` (atlas via scaleAtlas,
@@ -63,7 +67,10 @@ export interface FixOptions {
    *  UNCHANGED. Validated fail-closed (validateProfile): ≥1 format, ≥1 tier with a scale===1 top, no
    *  lossless-AVIF, valid suffix tokens, no duplicate targets; invalid ⇒ NO emit + an honest skipped[]
    *  entry. MUTUALLY EXCLUSIVE with scaleTiers (buildOptions omits scaleTiers when a profile is sent —
-   *  never both). NOT wired in the worker yet (scaffolding only — T6+ wires execution). */
+   *  never both). Per-folder/prefix/type OVERRIDES (round10-profile-overrides.md) ride INSIDE this object as
+   *  ExportProfile.overrides — there is NO separate wire field; buildOptions threads them through this
+   *  exportProfile untouched, the worker validates them in validateProfile and resolves per-ref via
+   *  resolveProfileForRef. Absent/empty overrides ⇒ byte-identical to a no-override profile run. */
   exportProfile?: ExportProfile;
 
   // ── Feature 4 (pack loose assets into spritesheets) — own Pro toggle, DEFAULT OFF (NOT folded under

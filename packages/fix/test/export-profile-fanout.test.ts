@@ -13,7 +13,14 @@
 
 import { describe, expect, it } from 'vitest';
 import type { ExportProfile, ImageMime } from '@asset-doctor/core';
-import { formatEncode, tieredName, validateProfile, variantManifestName } from '../src/index';
+import {
+  formatEncode,
+  resolveProfileForRef,
+  tieredName,
+  validateProfile,
+  variantManifestName,
+  type FixAssetKind,
+} from '../src/index';
 
 const globalKnobs = { effort: 0, scaleAwareQuality: false };
 
@@ -126,6 +133,99 @@ describe('export-profile fan-out decision (T13)', () => {
       tiers: [{ label: 'full', scale: 1, suffix: '_1080p' }, { label: 'half', scale: 0.5, suffix: '_540p' }],
     };
     expect(fanoutDecision(p, 'p.png', 'p.json')).toEqual(fanoutDecision(p, 'p.png', 'p.json'));
+  });
+});
+
+// ── PER-REF OVERRIDE fan-out decision (round10-profile-overrides.md) ──────────────────────────────────────
+// The worker resolves each ref through resolveProfileForRef BEFORE the same tieredName/variantManifestName/
+// formatEncode composition modeled above (fix.worker.ts Site A/B: rp = resolveProfile(ref); refMulti =
+// rp.formats.length>1). So an override flows through the EXACT same naming + encode path — proven here by
+// driving the decision through resolveProfileForRef. Load-bearing: a NO-MATCH ref must reproduce the base
+// fan-out byte-for-byte (additivity).
+
+const baseGlobal = { effort: 0, scaleAwareQuality: false };
+
+/** Model the worker's per-ref fan-out decision: resolve the ref through resolveProfileForRef, then compose
+ *  names/opts exactly as the worker does (refMulti = rp.formats.length > 1). */
+function overrideFanoutDecision(p: ExportProfile, ref: string, kind: FixAssetKind, imagePath: string, manifestPath: string) {
+  const v = validateProfile(p);
+  if (!v.ok) return { ok: false as const, errors: v.errors };
+  const rp = resolveProfileForRef(ref, kind, v.formats, baseGlobal, v.overrides);
+  const refMulti = rp.formats.length > 1;
+  const rows: { image: string; manifest: string; mime: ImageMime; lossless: boolean; quality: number; near: number; subsample?: number }[] = [];
+  for (const tier of v.tiers) {
+    for (const fmt of rp.formats) {
+      const fe = formatEncode(fmt, tier.scale, rp.global);
+      rows.push({
+        image: tieredName(imagePath, tier.suffix, fe.targetMime),
+        manifest: variantManifestName(manifestPath, tier.suffix, fe.targetMime, refMulti),
+        mime: fe.targetMime,
+        lossless: fe.lossless,
+        quality: fe.quality,
+        near: fe.webpNearLossless,
+        subsample: fe.avifSubsample,
+      });
+    }
+  }
+  return { ok: true as const, rows };
+}
+
+describe('per-ref override fan-out decision (round10)', () => {
+  const fonts444: ExportProfile = {
+    formats: [{ format: 'image/webp', quality: 85 }],
+    tiers: [{ label: 'full', scale: 1, suffix: '_1080p' }],
+    overrides: [{ match: 'fonts', formats: [{ format: 'image/avif', quality: 90 }], avifSubsample: 3 }],
+  };
+
+  it('NO-MATCH ref ⇒ byte-identical to the base (no-override) fan-out — additivity', () => {
+    const overridden = overrideFanoutDecision(fonts444, 'ui/btn.png', 'loose', 'ui/btn.png', 'ui/btn.json');
+    const plain = fanoutDecision({ formats: fonts444.formats, tiers: fonts444.tiers }, 'ui/btn.png', 'ui/btn.json');
+    expect(overridden).toEqual(plain);
+  });
+
+  it('fonts→AVIF 4:4:4: matching ref REPLACES formats + merges avifSubsample onto the running global', () => {
+    const d = overrideFanoutDecision(fonts444, 'fonts/title.png', 'loose', 'fonts/title.png', 'fonts/title.json');
+    expect(d.ok).toBe(true);
+    if (!d.ok) return;
+    // Single-format override ⇒ refMulti false ⇒ LEGACY manifest name; image ext-swapped to avif; subsample 3.
+    expect(d.rows).toEqual([
+      { image: 'fonts/title_1080p.avif', manifest: 'fonts/title_1080p.json', mime: 'image/avif', lossless: false, quality: 90, near: 100, subsample: 3 },
+    ]);
+  });
+
+  it('dir-prefix matches nested refs but NOT a sibling prefix (fonts vs fonts2)', () => {
+    const nested = overrideFanoutDecision(fonts444, 'fonts/bold/x.png', 'loose', 'fonts/bold/x.png', 'fonts/bold/x.json');
+    expect(nested.ok && nested.rows[0]!.mime).toBe('image/avif');
+    const sibling = overrideFanoutDecision(fonts444, 'fonts2/x.png', 'loose', 'fonts2/x.png', 'fonts2/x.json');
+    expect(sibling.ok && sibling.rows[0]!.mime).toBe('image/webp'); // base, not the override
+  });
+
+  it('override format COUNT drives per-ref refMulti ⇒ tokened manifests only for the matched ref', () => {
+    const p: ExportProfile = {
+      formats: [{ format: 'image/webp', quality: 80 }], // base: single ⇒ legacy names
+      tiers: [{ label: 'full', scale: 1, suffix: '_1080p' }],
+      overrides: [{ match: 'fx', formats: [{ format: 'image/avif', quality: 70 }, { format: 'image/webp', quality: 80 }] }],
+    };
+    const matched = overrideFanoutDecision(p, 'fx/spark.png', 'loose', 'fx/spark.png', 'fx/spark.json');
+    expect(matched.ok).toBe(true);
+    if (!matched.ok) return;
+    // refMulti true for the matched ref ⇒ format token in the manifest names.
+    expect(matched.rows.map((r) => r.manifest)).toEqual(['fx/spark_1080p.avif.json', 'fx/spark_1080p.webp.json']);
+    // A non-matching ref keeps the single-format LEGACY manifest name (refMulti false).
+    const plain = overrideFanoutDecision(p, 'ui/btn.png', 'loose', 'ui/btn.png', 'ui/btn.json');
+    expect(plain.ok && plain.rows.map((r) => r.manifest)).toEqual(['ui/btn_1080p.json']);
+  });
+
+  it('type:loose override does NOT touch a pixi/atlas ref (kind mismatch)', () => {
+    const p: ExportProfile = {
+      formats: [{ format: 'image/webp', quality: 85 }],
+      tiers: [{ label: 'full', scale: 1, suffix: '_1080p' }],
+      overrides: [{ match: 'type:loose', formats: [{ format: 'image/avif', quality: 70 }] }],
+    };
+    const loose = overrideFanoutDecision(p, 'a.png', 'loose', 'a.png', 'a.json');
+    expect(loose.ok && loose.rows[0]!.mime).toBe('image/avif');
+    const pixi = overrideFanoutDecision(p, 'sheet.png', 'pixi', 'sheet.png', 'sheet.json');
+    expect(pixi.ok && pixi.rows[0]!.mime).toBe('image/webp'); // base, unaffected
   });
 });
 

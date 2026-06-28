@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AnalysisReport, AssetMetrics, BundleAvailability, ExportFormat, ExportProfile, Finding, FormatTarget, LazyMarking, ResolutionTier, ScaleTier, SkinGuard } from '@asset-doctor/core';
+import type { AnalysisReport, AssetMetrics, BundleAvailability, ExportFormat, ExportProfile, Finding, FormatTarget, LazyMarking, ProfileOverride, ResolutionTier, ScaleTier, SkinGuard } from '@asset-doctor/core';
 import type { PackMode, StaticGranularity } from '@asset-doctor/ingest';
 import { bundleOf, cmp } from '@asset-doctor/analysis';
 import { DEFAULT_SCALE_TIERS, RESOLUTION_TOKEN } from '@asset-doctor/fix';
@@ -783,6 +783,25 @@ export const FORMAT_KEYS: { mime: ExportFormat; key: string }[] = [
   { mime: 'image/avif', key: 'fix.profile.format.avif' },
 ];
 
+/** One UI override rule (round10-profile-overrides.md §6). `match` is a dir-aware prefix / exact ref /
+ *  `type:loose|pixi|spine` key; `mode` chooses the headline preset (Fonts→AVIF 4:4:4) or a quality/lossless
+ *  overlay. Mapped to a core ProfileOverride in the exportProfile memo; blank `match` rows are dropped so a
+ *  half-typed row never silently matches. DISTINCT from the legacy SettingsPanel per-folder overrides
+ *  (opts.overrides) — these ride INSIDE the export profile and govern its per-ref fan-out. */
+export type OverrideMode = 'fonts444' | 'quality' | 'lossless';
+export interface UiOverride {
+  match: string;
+  mode: OverrideMode;
+  /** Lossy quality 0..100 for the 'quality' (and 'fonts444' AVIF) modes; ignored for 'lossless'. */
+  quality?: number;
+}
+
+export const OVERRIDE_MODE_KEYS: { mode: OverrideMode; key: string }[] = [
+  { mode: 'quality', key: 'fix.profile.overrideMode.quality' },
+  { mode: 'lossless', key: 'fix.profile.overrideMode.lossless' },
+  { mode: 'fonts444', key: 'fix.profile.overrideMode.fonts444' },
+];
+
 function ExportProfilePanel({
   profileEnable,
   setProfileEnable,
@@ -790,6 +809,8 @@ function ExportProfilePanel({
   setFormats,
   customTiers,
   setCustomTiers,
+  overrides,
+  setOverrides,
 }: {
   profileEnable: boolean;
   setProfileEnable: (b: boolean) => void;
@@ -798,12 +819,21 @@ function ExportProfilePanel({
   /** Extra resolution rows on top of the default ladder (the scale-1 top tier is always implied). */
   customTiers: ResolutionTier[];
   setCustomTiers: (t: ResolutionTier[]) => void;
+  /** Per-folder/prefix override rules (round10). Empty ⇒ no `overrides` ⇒ additive (byte-identical). */
+  overrides: UiOverride[];
+  setOverrides: (o: UiOverride[]) => void;
 }) {
   const { t } = useI18n();
   const patch = (mime: ExportFormat, p: Partial<ProfileFormatState>): void => setFormats({ ...formats, [mime]: { ...formats[mime], ...p } });
   const addTier = (): void => setCustomTiers([...customTiers, { label: '0.5×', scale: 0.5, suffix: '_540p' }]);
   const patchTier = (i: number, p: Partial<ResolutionTier>): void => setCustomTiers(customTiers.map((tt, j) => (j === i ? { ...tt, ...p } : tt)));
   const removeTier = (i: number): void => setCustomTiers(customTiers.filter((_, j) => j !== i));
+  // round10 override-rule editor: the fonts-444 preset + generic add/remove rows. Opt-in only — the default
+  // is [] (a non-empty default would break byte-identity). A fonts-444 preset row is the headline use.
+  const addFonts444 = (): void => setOverrides([...overrides, { match: 'fonts', mode: 'fonts444', quality: 85 }]);
+  const addOverride = (): void => setOverrides([...overrides, { match: '', mode: 'quality', quality: 85 }]);
+  const patchOverride = (i: number, p: Partial<UiOverride>): void => setOverrides(overrides.map((o, j) => (j === i ? { ...o, ...p } : o)));
+  const removeOverride = (i: number): void => setOverrides(overrides.filter((_, j) => j !== i));
 
   return (
     <details className="mt-2 rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
@@ -903,6 +933,56 @@ function ExportProfilePanel({
             </button>
           </div>
 
+          {/* ── Per-folder overrides (round10) — opt-in rules: a fonts→AVIF 4:4:4 preset + generic rows ── */}
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft/70">{t('fix.profile.overrides')}</p>
+            <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.profile.overridesHint')}</p>
+            {overrides.map((o, i) => (
+              <div key={i} className="mt-1 flex flex-wrap items-center gap-1.5">
+                <input
+                  type="text"
+                  value={o.match}
+                  onChange={(e) => patchOverride(i, { match: e.target.value })}
+                  placeholder={t('fix.profile.overrideMatchPlaceholder')}
+                  className="w-28 rounded border border-line bg-panel px-1 font-mono text-[10px] text-ink"
+                />
+                <select
+                  value={o.mode}
+                  onChange={(e) => patchOverride(i, { mode: e.target.value as OverrideMode })}
+                  className="rounded border border-line bg-panel px-1 font-mono text-[10px] text-ink"
+                >
+                  {OVERRIDE_MODE_KEYS.map(({ mode, key }) => (
+                    <option key={mode} value={mode}>
+                      {t(key)}
+                    </option>
+                  ))}
+                </select>
+                {o.mode !== 'lossless' ? (
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={o.quality ?? 85}
+                    onChange={(e) => patchOverride(i, { quality: Number(e.target.value) })}
+                    className="w-14 rounded border border-line bg-panel px-1 font-mono text-[10px] text-ink"
+                  />
+                ) : null}
+                <button type="button" onClick={() => removeOverride(i)} className="font-mono text-[10px] text-crit hover:underline" aria-label="remove">
+                  ✕
+                </button>
+              </div>
+            ))}
+            <div className="mt-1 flex flex-wrap gap-3">
+              <button type="button" onClick={addFonts444} className="font-mono text-[10px] text-teal hover:underline">
+                + {t('fix.profile.overrideFonts444')}
+              </button>
+              <button type="button" onClick={addOverride} className="font-mono text-[10px] text-teal hover:underline">
+                + {t('fix.profile.addOverride')}
+              </button>
+            </div>
+          </div>
+
           {/* Honesty notes — reuse browser-limit disclosures + the profile-specific bundle/disk notes. */}
           <ul className="space-y-1 border-t border-line pt-2 font-mono text-[10px] leading-relaxed text-ink-soft/80">
             <li>{t('fix.profile.noBundleNote')}</li>
@@ -986,6 +1066,10 @@ function FixCard({ files }: { files: PickedFile[] }) {
     'image/avif': { enabled: true, quality: 85, lossless: false, near: false },
   }));
   const [customTiers, setCustomTiers] = useState<ResolutionTier[]>([]);
+  // round10-profile-overrides.md §6: per-folder override RULES (the fonts→AVIF 4:4:4 preset + generic rows).
+  // DEFAULT [] (opt-in only — a non-empty default would break byte-identity). Mapped to ProfileOverride[] in
+  // the exportProfile memo; empty ⇒ no `overrides` field ⇒ additive (byte-identical to a no-override run).
+  const [profileOverrides, setProfileOverrides] = useState<UiOverride[]>([]);
   // PixiJS-v8 asset manifest (round8-pixi-manifest.md C6) — its OWN Pro opt-in, DEFAULT OFF. ON ⇒ the fix
   // output gains an additive `manifest.json` mapping every emitted image/sheet so a PixiJS game can load the
   // whole folder with one Assets.init({ manifest }). OFF ⇒ buildOptions omits it ⇒ zip byte-identical to today.
@@ -1011,8 +1095,21 @@ function FixCard({ files }: { files: PickedFile[] }) {
     });
     if (formats.length === 0) return undefined;
     const tiers: ResolutionTier[] = [{ label: '1080p (full)', scale: 1, suffix: '_1080p' }, ...customTiers];
-    return { formats, tiers };
-  }, [profileEnable, profileFormats, customTiers]);
+    // round10-profile-overrides.md §6: map the UI rules → core ProfileOverride[]. Drop blank-match rows (a
+    // half-typed row must never silently match). fonts444 ⇒ REPLACE formats with one AVIF target + merge
+    // avifSubsample:3 (the headline 4:4:4); lossless ⇒ a lossless overlay; quality ⇒ a quality overlay.
+    // OMIT the `overrides` field entirely when empty ⇒ the worker resolver no-ops ⇒ byte-identical (additive).
+    const overrides: ProfileOverride[] = profileOverrides
+      .filter((o) => o.match.trim() !== '')
+      .map((o) =>
+        o.mode === 'fonts444'
+          ? { match: o.match, formats: [{ format: 'image/avif', quality: o.quality ?? 85 }], avifSubsample: 3 }
+          : o.mode === 'lossless'
+            ? { match: o.match, lossless: true }
+            : { match: o.match, quality: o.quality ?? 85 },
+      );
+    return { formats, tiers, ...(overrides.length > 0 ? { overrides } : {}) };
+  }, [profileEnable, profileFormats, customTiers, profileOverrides]);
 
   // Top-level bundles with REAL folder structure: a ref with no "/" is its own singleton (a flat,
   // root-level loose file), which makes per-bundle marking meaningless noise. We collect only segments
@@ -1159,7 +1256,7 @@ function FixCard({ files }: { files: PickedFile[] }) {
   const sawPlan = useRef(false);
   useEffect(() => {
     if (sawPlan.current) setPhase({ t: 'idle' });
-  }, [aggressive, polygon, marking, effort, scaleAwareQ, webpNearLossless, pngRecompress, overrides, packLoose, packMode, packGranularity, packTrim, extrude, tierEnable, tierSuffixes, profileEnable, profileFormats, customTiers]);
+  }, [aggressive, polygon, marking, effort, scaleAwareQ, webpNearLossless, pngRecompress, overrides, packLoose, packMode, packGranularity, packTrim, extrude, tierEnable, tierSuffixes, profileEnable, profileFormats, customTiers, profileOverrides]);
   useEffect(() => {
     sawPlan.current = phase.t === 'plan';
   }, [phase.t]);
@@ -1240,6 +1337,8 @@ function FixCard({ files }: { files: PickedFile[] }) {
             setFormats={setProfileFormats}
             customTiers={customTiers}
             setCustomTiers={setCustomTiers}
+            overrides={profileOverrides}
+            setOverrides={setProfileOverrides}
           />
 
           {/* PixiJS-v8 asset manifest (round8-pixi-manifest.md C6) — additive, DEFAULT OFF. Off ⇒ no extra

@@ -7,7 +7,7 @@
 // LOOP (apps/web worker) owns oversize clamping and stamps `.scale` on tiered atlases — neither of those
 // belongs here. We NEVER upscale (scale >= 1 ⇒ identity), matching scaleAtlas + the builder ladder.
 
-import type { ExportProfile, FormatTarget, ImageMime, ResolutionTier, ScaleTier, Size } from '@asset-doctor/core';
+import type { ExportProfile, FormatTarget, ImageMime, ProfileOverride, ResolutionTier, ScaleTier, Size } from '@asset-doctor/core';
 import { EXT } from './dedup-exec';
 
 /**
@@ -112,14 +112,55 @@ export function tiersOf(tiers: ResolutionTier[]): ScaleTier[] {
   return tiers.map((t) => ({ scale: t.scale, suffix: t.suffix }));
 }
 
-/** Outcome of validateProfile: the validated formats (given order) + normalized high→low tier ladder,
- *  or the structured list of rejection reasons (the worker turns each into a skipped[] honesty entry). */
+/** Outcome of validateProfile: the validated formats (given order) + normalized high→low tier ladder +
+ *  the validated overrides (given order; [] when absent/empty), or the structured list of rejection
+ *  reasons (the worker turns each into a skipped[] honesty entry). The worker reads `overrides` from
+ *  here, never the raw exportProfile.overrides, so an invalid override fails the whole profile closed. */
 export type ProfileValidation =
-  | { ok: true; formats: FormatTarget[]; tiers: ScaleTier[] }
+  | { ok: true; formats: FormatTarget[]; tiers: ScaleTier[]; overrides: ProfileOverride[] }
   | { ok: false; errors: string[] };
 
 /** The honest browser-encodable format set (mirrors core ExportFormat). */
 const EXPORT_FORMATS = new Set<string>(['image/png', 'image/webp', 'image/avif']);
+
+/**
+ * Validate ONE format list (the profile's own or an override's), pushing every violation into `errors`
+ * with `label` as the source prefix (so e.g. `override[0].formats: losslessAvif` names the failing rule).
+ * Factored out of validateProfile so the format-axis rules — empty / bad-format / lossless-avif /
+ * bad-quality / bad-near / duplicate-target — are applied to BOTH p.formats and each override.formats and
+ * CANNOT drift. Pure; deterministic. (Errors mirror the legacy unprefixed strings when label === '' so the
+ * profile's own rejections keep their exact wire shape.)
+ */
+function validateFormatList(formats: FormatTarget[], label: string, errors: string[]): void {
+  const pre = label === '' ? '' : `${label}: `;
+  if (formats.length === 0) errors.push(`${pre}emptyFormats: no formats given`);
+  const seen = new Set<string>();
+  for (const f of formats) {
+    if (!EXPORT_FORMATS.has(f.format)) {
+      errors.push(`${pre}badFormat: "${f.format}" (must be image/png|image/webp|image/avif)`);
+      continue; // a bad format can't meaningfully dup-check or lossless-check
+    }
+    if (f.lossless && f.format === 'image/avif') {
+      errors.push(`${pre}losslessAvif: AVIF has no honest in-browser lossless path`);
+    }
+    if (f.quality !== undefined && (!Number.isFinite(f.quality) || f.quality < 0 || f.quality > 100)) {
+      errors.push(`${pre}badQuality: ${String(f.quality)} (must be in [0,100])`);
+    }
+    if (f.near !== undefined && (!Number.isFinite(f.near) || f.near < 0 || f.near > 100)) {
+      errors.push(`${pre}badNear: ${String(f.near)} (must be in [0,100])`);
+    }
+    // Duplicate-target key: two targets that resolve to the SAME emitted bytes clobber each other. Key on
+    // the EFFECTIVE encode, not the raw fields, so e.g. {quality:undefined} and {quality:85} (the default,
+    // DEFAULT_FORMAT_QUALITY) are caught as the same emit. PNG is always native-lossless (quality/near/
+    // lossless irrelevant ⇒ any two PNG targets clobber); lossless ignores quality/near; near is WebP-only.
+    let key: string;
+    if (f.format === 'image/png') key = 'image/png';
+    else if (f.lossless) key = `${f.format}|L`;
+    else key = `${f.format}|q${f.quality ?? 85}${f.format === 'image/webp' ? `|n${f.near ?? 'off'}` : ''}`;
+    if (seen.has(key)) errors.push(`${pre}dupTarget: ${f.format}${f.lossless ? ' lossless' : ''}`);
+    else seen.add(key);
+  }
+}
 
 /**
  * Fail-closed validation of an export profile (design §4a). On success returns the formats in GIVEN
@@ -138,42 +179,39 @@ const EXPORT_FORMATS = new Set<string>(['image/png', 'image/webp', 'image/avif']
 export function validateProfile(p: ExportProfile): ProfileValidation {
   const errors: string[] = [];
 
-  // ── Format axis ──
-  if (p.formats.length === 0) errors.push('emptyFormats: no formats given');
-  const seen = new Set<string>();
-  for (const f of p.formats) {
-    if (!EXPORT_FORMATS.has(f.format)) {
-      errors.push(`badFormat: "${f.format}" (must be image/png|image/webp|image/avif)`);
-      continue; // a bad format can't meaningfully dup-check or lossless-check
-    }
-    if (f.lossless && f.format === 'image/avif') {
-      errors.push('losslessAvif: AVIF has no honest in-browser lossless path');
-    }
-    if (f.quality !== undefined && (!Number.isFinite(f.quality) || f.quality < 0 || f.quality > 100)) {
-      errors.push(`badQuality: ${String(f.quality)} (must be in [0,100])`);
-    }
-    if (f.near !== undefined && (!Number.isFinite(f.near) || f.near < 0 || f.near > 100)) {
-      errors.push(`badNear: ${String(f.near)} (must be in [0,100])`);
-    }
-    // Duplicate-target key: two targets that resolve to the SAME emitted bytes clobber each other. Key on
-    // the EFFECTIVE encode, not the raw fields, so e.g. {quality:undefined} and {quality:85} (the default,
-    // DEFAULT_FORMAT_QUALITY) are caught as the same emit. PNG is always native-lossless (quality/near/
-    // lossless irrelevant ⇒ any two PNG targets clobber); lossless ignores quality/near; near is WebP-only.
-    let key: string;
-    if (f.format === 'image/png') key = 'image/png';
-    else if (f.lossless) key = `${f.format}|L`;
-    else key = `${f.format}|q${f.quality ?? 85}${f.format === 'image/webp' ? `|n${f.near ?? 'off'}` : ''}`;
-    if (seen.has(key)) errors.push(`dupTarget: ${f.format}${f.lossless ? ' lossless' : ''}`);
-    else seen.add(key);
-  }
+  // ── Format axis (factored — shared with each override.formats so the rules can't drift) ──
+  validateFormatList(p.formats, '', errors);
 
   // ── Resolution axis (delegated to validateTiers — its errors are reused verbatim) ──
   const tv = validateTiers(tiersOf(p.tiers));
   if (!tv.ok) for (const e of tv.errors) errors.push(`tier ${e}`);
 
+  // ── Override axis (round10-profile-overrides.md §4) — validated in the SAME pass so an invalid
+  // override fails the WHOLE profile closed (the worker turns each reason into a `(profile)` skip). ──
+  const overrides = p.overrides ?? [];
+  overrides.forEach((o, i) => {
+    const label = `override[${i}]`;
+    if (o.match.trim() === '') errors.push(`${label}: emptyMatch (a blank match must never silently match)`);
+    if (o.formats) validateFormatList(o.formats, `${label}.formats`, errors);
+    if (o.quality !== undefined && (!Number.isFinite(o.quality) || o.quality < 0 || o.quality > 100)) {
+      errors.push(`${label}: badQuality: ${String(o.quality)} (must be in [0,100])`);
+    }
+    if (o.near !== undefined && (!Number.isFinite(o.near) || o.near < 0 || o.near > 100)) {
+      errors.push(`${label}: badNear: ${String(o.near)} (must be in [0,100])`);
+    }
+    if (o.effort !== undefined && (!Number.isFinite(o.effort) || o.effort < 0 || o.effort > 6)) {
+      errors.push(`${label}: badEffort: ${String(o.effort)} (must be in [0,6])`);
+    }
+    if (o.avifSubsample !== undefined && !Number.isInteger(o.avifSubsample)) {
+      errors.push(`${label}: badSubsample: ${String(o.avifSubsample)} (must be an integer)`);
+    }
+    // `lossless` needs no extra rule: overlayFormat drops it on avif (honesty preserved structurally) and
+    // validateFormatList above already forbids lossless-avif inside o.formats.
+  });
+
   if (errors.length > 0) return { ok: false, errors };
   // tv.ok is guaranteed here (any failure pushed into errors above).
-  return { ok: true, formats: [...p.formats], tiers: tv.ok ? tv.tiers : [] };
+  return { ok: true, formats: [...p.formats], tiers: tv.ok ? tv.tiers : [], overrides: [...overrides] };
 }
 
 /** Format token for multi-format fan-out naming. Empty when NOT multi (single-format ⇒ byte-identical
