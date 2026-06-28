@@ -374,6 +374,13 @@ export interface FixReceipt {
    *  failed / asset 404'd) ⇒ the measured number is NOT a win here — disclosed so it is never mis-sold.
    *  Absent ⇒ no probe ran (or every probed page got real compression). */
   probedKtx2Fallback?: boolean;
+  /** True iff this run produced ≥1 `.ktx2`/`.ktx2.json` page (round15-emit-the-exact-pixi-v8-ktx2-loader-
+   *  migration). The `.ktx2`/`.ktx2.json` paths live in `out`/the manifest variants (the loader resolves
+   *  them via the entry's `src`), NOT in `changes[]` — so this boolean is the only seam that lets the
+   *  loader-migration snippet lead ONCE with `import 'pixi.js/ktx2'` (which registers loadKTX2; the ktx2-first
+   *  manifest `src` candidate fails to resolve without it). Set ONLY when ktx2Produced > 0 (gated ⇒ non-KTX2
+   *  runs omit it ⇒ receipt byte-identical to today). */
+  ktx2Produced?: boolean;
 }
 
 /* ── Dry-run plan preview (docs/improvements/dry-run-plan-preview.md) ─────────────────────────

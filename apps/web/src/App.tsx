@@ -1808,7 +1808,7 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
       {/* Loader-migration guide (docs/improvements/loader-migration.md): when the fix recorded genuine
           loader-CALL rewrites, surface a concrete repointing list + an engine-aware copy-pasteable snippet
           below the bare ⚠ banner. ADDITIVE — absent/empty changes render exactly as today. */}
-      {(receipt.changes?.length ?? 0) > 0 ? <LoaderMigration changes={receipt.changes ?? []} /> : null}
+      {(receipt.changes?.length ?? 0) > 0 ? <LoaderMigration changes={receipt.changes ?? []} ktx2={receipt.ktx2Produced ?? false} /> : null}
       {/* Feature 4 receipt: groups/sheets/regions packed, Spine path-verification, and a dedicated
           reference-changing banner (NOT a drop-in: the game must load the new sheet/atlas). */}
       {(receipt.packedSheets?.groups ?? 0) > 0 ? (
@@ -2128,12 +2128,13 @@ function OpManifest({ operations }: { operations: string[] }) {
 // CODE via migrationSnippet(changes, engine) — verbatim identifiers, NOT i18n (only the heading/intro/
 // removed/copy chrome translates, design M5). The snippet is hidden when every change is a removal (empty
 // snippet ⇒ nothing to load). Collapsed by default so the instant-wow headline stays first.
-function LoaderMigration({ changes }: { changes: FixChange[] }) {
+function LoaderMigration({ changes, ktx2 }: { changes: FixChange[]; ktx2: boolean }) {
   const { t } = useI18n();
   const [engine, setEngine] = useState<Engine>('pixi');
   const [copied, setCopied] = useState(false);
-  // Code, not t() — verbatim identifiers from loader-migration.ts (design M5). Recompute per engine.
-  const snippet = useMemo(() => migrationSnippet(changes, engine), [changes, engine]);
+  // Code, not t() — verbatim identifiers from loader-migration.ts (design M5). Recompute per engine. When the
+  // fix produced .ktx2 pages (round15), `ktx2` makes the Pixi snippet lead with `import 'pixi.js/ktx2'`.
+  const snippet = useMemo(() => migrationSnippet(changes, engine, { ktx2 }), [changes, engine, ktx2]);
   const copy = (): void => {
     const done = (): void => {
       setCopied(true);

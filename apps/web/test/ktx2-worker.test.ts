@@ -292,6 +292,26 @@ describe('KTX2 post-pass — honest failure (claim c)', () => {
     expect(r.skipped[0]!.reason).toContain('could not re-encode page');
   });
 
+  it('(round15) ktx2Produced > 0 ⇒ receipt.ktx2Produced === true (the loader-migration import seam)', async () => {
+    // Mirrors the worker receipt gate verbatim: `...(ktx2Produced > 0 ? { ktx2Produced: true } : {})`. This is
+    // the ONLY seam that makes the Pixi loader-migration snippet lead with `import 'pixi.js/ktx2'` (the .ktx2
+    // paths live in out/the manifest variants, never in changes[]).
+    const gate = (n: number): { ktx2Produced?: boolean } => (n > 0 ? { ktx2Produced: true } : {});
+    const enc = vi.fn(async () => ok(KTX2_BYTES));
+    const produced = await runKtx2PostPass(rasterBaseline(), [looseCandidate(), atlasCandidate()], true, enc);
+    expect(produced.ktx2Produced).toBe(2);
+    expect(gate(produced.ktx2Produced)).toEqual({ ktx2Produced: true });
+  });
+
+  it('(round15) backend OFF ⇒ ktx2Produced === 0 ⇒ receipt.ktx2Produced ABSENT (byte-identical receipt)', async () => {
+    const gate = (n: number): { ktx2Produced?: boolean } => (n > 0 ? { ktx2Produced: true } : {});
+    const enc = vi.fn(async () => ok(KTX2_BYTES));
+    const off = await runKtx2PostPass(rasterBaseline(), [looseCandidate(), atlasCandidate()], false, enc);
+    expect(off.ktx2Produced).toBe(0);
+    expect(gate(off.ktx2Produced)).toEqual({}); // field omitted ⇒ receipt unchanged
+    expect('ktx2Produced' in gate(off.ktx2Produced)).toBe(false);
+  });
+
   it('mixed batch ⇒ the OK page produces, the failing page falls back; counts + out reflect reality', async () => {
     const enc = vi
       .fn<(...a: unknown[]) => Promise<EncodeRemoteResult>>()

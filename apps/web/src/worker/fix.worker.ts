@@ -2603,6 +2603,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     // "smaller download") and NO VRAM field (invariant 5). Empty ⇒ omitted ⇒ receipt byte-identical to today.
     ...(backendNative.length > 0 ? { backendNative } : {}),
     ...(ktx2VramBytesWorstCase > 0 ? { ktx2VramBytesWorstCase } : {}),
+    // round15: ≥1 `.ktx2` page produced ⇒ flag it so the loader-migration snippet leads ONCE with
+    // `import 'pixi.js/ktx2'` (the manifest lists the ktx2 candidate first; that src fails to resolve without
+    // the loader registered). Gated ⇒ non-KTX2 runs omit it ⇒ receipt byte-identical to today.
+    ...(ktx2Produced > 0 ? { ktx2Produced: true } : {}),
   };
   // Direct postMessage (not the `post` wrapper) so the sheet-diff + ktx2-probe byte buffers transfer
   // zero-copy. The transferred buffers are FRESH COPIES (captureSheetDiff + the ktx2 collection both

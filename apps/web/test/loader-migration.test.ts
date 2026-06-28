@@ -282,3 +282,90 @@ describe('migrationSnippet — key sanitization + determinism', () => {
     expect(migrationSnippet(changes, 'phaser')).toBe(migrationSnippet(changes, 'phaser'));
   });
 });
+
+// ── KTX2 lead-in (round15-emit-the-exact-pixi-v8-ktx2-loader-migration) ───────────────────────────────────
+// When the fix produced ≥1 .ktx2/.ktx2.json page the manifest references it ktx2-first (FORMAT_RANK['.ktx2']
+// = -1); without registering the loader that src candidate fails to resolve. So `{ ktx2: true }` makes the
+// Pixi snippet lead ONCE with the REAL Pixi v8 side-effect import `import 'pixi.js/ktx2'` (registers loadKTX2)
+// + a concise transcoder note. Phaser 3 has no built-in KTX2 loader ⇒ an HONEST absence NOTE, never a
+// fabricated this.load.ktx2(...) call. ADDITIVITY: omitted/false ⇒ byte-identical to today.
+describe('migrationSnippet — KTX2 lead-in (real Pixi v8, honest Phaser)', () => {
+  const mergeFixture = (): ReturnType<typeof mergeChanges> =>
+    mergeChanges(['ui/a.json', 'ui/b.json'], ['ui/atlas-merged.json', 'ui/atlas-merged-1.json']);
+
+  it('Pixi {ktx2:true}: leads with `import \'pixi.js/ktx2\'` + transcoder note, then the normal Assets.load body', () => {
+    expect(migrationSnippet(mergeFixture(), 'pixi', { ktx2: true })).toBe(
+      [
+        'import { Assets } from "pixi.js";',
+        "import 'pixi.js/ktx2'; // registers the KTX2 loader (side-effect import; required for the .ktx2 pages this fix produced)",
+        '// the libktx transcoder ships with Pixi and loads from its CDN by default — call setKTXTranscoderPath() to self-host',
+        '',
+        '// was: ui/a.json',
+        '// was: ui/b.json',
+        'const atlas_merged_1 = await Assets.load("ui/atlas-merged-1.json");',
+        '',
+        '// was: ui/a.json',
+        '// was: ui/b.json',
+        'const atlas_merged = await Assets.load("ui/atlas-merged.json");',
+      ].join('\n'),
+    );
+  });
+
+  it('Pixi {ktx2:false} and OMITTED ⇒ byte-identical to today (additivity)', () => {
+    const baseline = migrationSnippet(mergeFixture(), 'pixi');
+    expect(migrationSnippet(mergeFixture(), 'pixi', { ktx2: false })).toBe(baseline);
+    expect(migrationSnippet(mergeFixture(), 'pixi', {})).toBe(baseline);
+    expect(migrationSnippet(mergeFixture(), 'pixi', undefined)).toBe(baseline);
+    // The KTX2 import never appears when off.
+    expect(baseline).not.toContain('pixi.js/ktx2');
+  });
+
+  it('Pixi {ktx2:true} with empty changes ⇒ empty snippet (no import with nothing to load)', () => {
+    expect(migrationSnippet([], 'pixi', { ktx2: true })).toBe('');
+    // removal-only ⇒ zero targets ⇒ same empty path.
+    expect(migrationSnippet([dropChange('old/dup.png')], 'pixi', { ktx2: true })).toBe('');
+  });
+
+  it('Phaser {ktx2:true}: ONE honest no-loader NOTE after preload() {, no fabricated this.load.ktx2', () => {
+    const out = migrationSnippet(mergeFixture(), 'phaser', { ktx2: true });
+    expect(out).toBe(
+      [
+        'function preload() {',
+        '  // NOTE: this fix also produced .ktx2 GPU-compressed pages, but Phaser 3 has no built-in KTX2 loader.',
+        '  // Load .ktx2 via a compressed-texture plugin / custom loader, or just ship the raster pages loaded below.',
+        '  // was: ui/a.json',
+        '  // was: ui/b.json',
+        '  this.load.atlas("atlas_merged_1", "ui/atlas-merged-1.json", "ui/atlas-merged-1.json");',
+        '  // was: ui/a.json',
+        '  // was: ui/b.json',
+        '  this.load.atlas("atlas_merged", "ui/atlas-merged.json", "ui/atlas-merged.json");',
+        '}',
+      ].join('\n'),
+    );
+    expect(out).not.toMatch(/load\.ktx2/); // no fabricated Phaser KTX2 call
+  });
+
+  it('Phaser {ktx2:false} ⇒ byte-identical to today (additivity)', () => {
+    expect(migrationSnippet(mergeFixture(), 'phaser', { ktx2: false })).toBe(migrationSnippet(mergeFixture(), 'phaser'));
+  });
+
+  it('guard (U1): the import is the ONLY ktx2 token — no `.ktx2` LOAD CALL is emitted', () => {
+    const pixi = migrationSnippet(mergeFixture(), 'pixi', { ktx2: true });
+    expect(pixi).toContain("import 'pixi.js/ktx2'");
+    // No `.ktx2` ever appears inside an Assets.load(...) / this.load.*(...) target (it lives in the manifest,
+    // never in changes[]). Asserting it is absent from any quoted load argument.
+    expect(pixi).not.toContain('.ktx2"');
+    expect(pixi).not.toContain('Assets.load("' + 'x.ktx2');
+    const phaser = migrationSnippet(mergeFixture(), 'phaser', { ktx2: true });
+    expect(phaser).not.toContain('.ktx2"');
+  });
+
+  it('deterministic with {ktx2:true} (both engines) + still no i18n brace tokens', () => {
+    for (const engine of ['pixi', 'phaser'] as const) {
+      const a = migrationSnippet(mergeFixture(), engine, { ktx2: true });
+      const b = migrationSnippet(mergeFixture(), engine, { ktx2: true });
+      expect(a).toBe(b);
+      expect(a).not.toMatch(/\{[a-zA-Z]/); // setKTXTranscoderPath() has parens, no `{letter` placeholder
+    }
+  });
+});
