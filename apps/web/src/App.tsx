@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AnalysisReport, AssetMetrics, BundleAvailability, ExportFormat, ExportProfile, Finding, FormatTarget, LazyMarking, ProfileOverride, ResolutionTier, ScaleTier, SkinGuard } from '@asset-doctor/core';
+import type { AnalysisReport, AssetMetrics, BundleAvailability, ExportFormat, ExportProfile, Finding, FormatTarget, LazyMarking, ProfileOverride, ResolutionTier, ScaleTier, Severity, SkinGuard } from '@asset-doctor/core';
 import type { PackMode, StaticGranularity } from '@asset-doctor/ingest';
 import { bundleOf, cmp } from '@asset-doctor/analysis';
 import { DEFAULT_SCALE_TIERS, RESOLUTION_TOKEN } from '@asset-doctor/fix';
@@ -15,7 +15,7 @@ import { attachProbeReadings } from './lib/probe-run';
 import { runAnalysis, type Progress } from './lib/worker-client';
 import { planFix, runFix, type FixOutcome, type FixProgress } from './lib/fix-client';
 import type { FixChange, FixOptions, FixPlanSummary, FixReceipt, SheetDiff } from './worker/fix-protocol';
-import { fmtBytes, SEVERITY_TEXT } from './lib/format';
+import { fmtBytes } from './lib/format';
 import { groupOps, OP_KIND_ORDER, REFERENCE_CHANGING, type OpKind } from './lib/op-manifest';
 import { migrationSnippet, type Engine } from './lib/loader-migration';
 import { LOCALES, NATIVE_NAME, useI18n } from './lib/i18n';
@@ -23,7 +23,10 @@ import { isProUnlocked, maybeRefresh, PRO_GATE_ENABLED } from './lib/license';
 import { ActivatePanel, ProBadge } from './components/LicensePanel';
 import { FilmViewer } from './components/FilmViewer';
 import { Findings } from './components/Findings';
-import { FolderReport } from './components/FolderReport';
+import { VerdictBar } from './components/VerdictBar';
+import { TriageLedger } from './components/TriageLedger';
+import { useDebounced } from './lib/useDebounced';
+import { buildIndex, selectRows, type LedgerRow, type SelectOpts, type SortKey } from './lib/triage';
 
 type Phase =
   | { t: 'idle' }
@@ -44,10 +47,27 @@ export function App() {
   const { t } = useI18n();
   const [phase, setPhase] = useState<Phase>({ t: 'idle' });
   const [files, setFiles] = useState<PickedFile[]>([]);
+  // ONE shared dir-aware byte map for the picked folder — keyed by the SAME keyOf the workers/probe use
+  // so a basename collision across folders never resolves the wrong bytes. Built once per run() (from
+  // `picked`) and reused for BOTH the FilmViewer selection (selectedBytes) AND the render-probe, collapsing
+  // the former double copy (fileMap useMemo + a per-run bytesByRef) into a single resident map (~½ the
+  // folder's ArrayBuffer memory). State (not useMemo) so `run()` writes the same object the probe gets.
+  const [fileMap, setFileMap] = useState<Map<string, ArrayBuffer>>(new Map());
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [selectedAsset, setSelectedAsset] = useState<string | undefined>();
   const [selectedFinding, setSelectedFinding] = useState<string | undefined>();
+  // ── Triage-ledger controls (presentation only — the diagnosis stays byte-accurate). ──
+  const [sort, setSort] = useState<SortKey>('severity');
+  const [search, setSearch] = useState(''); // raw input; debounced before it feeds the filter memo.
+  const [severityFilter, setSeverityFilter] = useState<Set<Severity>>(new Set<Severity>(['crit', 'warn', 'info']));
+  const [problemsOnly, setProblemsOnly] = useState(true);
+  const [groupByFolder, setGroupByFolder] = useState(false);
+  const [showClean, setShowClean] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Tracks the report identity we have already auto-selected a worst offender for, so the async probe
+  // re-set (a NEW report object with the same findings) can never yank the user's selection back to row 0
+  // mid-session (round11 correction #1).
+  const autoSelectedFor = useRef<AnalysisReport | null>(null);
   // Aborts a still-running render-probe when a fresh analysis starts, so a stale probe's late results
   // can't overwrite the new report. Lives in a ref (not state) — it's control flow, not render data.
   const probeAbort = useRef<AbortController | null>(null);
@@ -56,14 +76,6 @@ export function App() {
     inputRef.current?.setAttribute('webkitdirectory', '');
   }, []);
 
-  // Key by the SAME dir-aware key ingest/the workers use (keyOf) so the FilmViewer selection — which
-  // selects by asset ref — resolves the right bytes even when two files share a basename across folders.
-  const fileMap = useMemo(() => {
-    const m = new Map<string, ArrayBuffer>();
-    for (const f of files) m.set(keyOf(f), f.bytes);
-    return m;
-  }, [files]);
-
   async function run(picked: PickedFile[]) {
     if (picked.length === 0) {
       setPhase({ t: 'error', message: t('error.noFiles') });
@@ -71,7 +83,13 @@ export function App() {
     }
     // Abort any in-flight probe from a previous run before starting a new analysis.
     probeAbort.current?.abort();
+    // Build the ONE dir-aware byte map here, from `picked`, keyed by the SAME keyOf the workers/probe use
+    // (assetRef === atlas.name === keyOf). This `map` IS the object stored in state AND handed to the probe,
+    // so there is exactly one resident copy of the folder's bytes (no second bytesByRef).
+    const map = new Map<string, ArrayBuffer>();
+    for (const f of picked) map.set(keyOf(f), f.bytes);
     setFiles(picked);
+    setFileMap(map);
     setReport(null);
     setSelectedFinding(undefined);
     setPhase({ t: 'analyzing' });
@@ -79,17 +97,29 @@ export function App() {
       const rep = await runAnalysis(picked, (p) => setPhase({ t: 'analyzing', progress: p }));
       // The static result lands FIRST (invariant 4: ≤10s instant-wow is never blocked by the probe).
       setReport(rep);
-      setSelectedAsset(rep.assets[0]?.assetRef);
+      // Auto-select the WORST offender (not array-order-first) so the ≤10s payoff lands on a glowing
+      // overlay. Computed from the SAME default-severity ordering the ledger opens with; falls back to the
+      // first asset when there are no problems. Runs ONCE per analysis here (before the probe write-back),
+      // and autoSelectedFor is stamped so the probe re-set never re-selects (correction #1).
+      const firstRows = selectRows(buildIndex(rep), {
+        sort: 'severity',
+        search: '',
+        severityFilter: new Set<Severity>(['crit', 'warn', 'info']),
+        problemsOnly: true,
+        includeClean: false,
+        groupByFolder: false,
+      });
+      const worst = firstRows[0];
+      setSelectedAsset((worst ?? undefined)?.assetRef ?? rep.assets[0]?.assetRef);
+      setSelectedFinding(worst?.scope === 'asset' ? worst.id : undefined);
+      autoSelectedFor.current = rep;
       setPhase({ t: 'done' });
       // THEN, non-blocking, replay each atlas through real offscreen-WebGL (main thread) and fill in
       // the MEASURED draw-calls / decoded-VRAM. Skipped silently when there's no WebGL or no atlas.
-      // MAJOR2 invariant: the probe looks bytes up by AssetMetrics.assetRef === atlas.name === keyOf —
-      // the SAME key this map is built with, the same one fileMap uses.
-      const bytesByRef = new Map<string, ArrayBuffer>();
-      for (const f of picked) bytesByRef.set(keyOf(f), f.bytes);
+      // The probe looks bytes up by the SAME key this map is built with — the one map, reused.
       const ctrl = new AbortController();
       probeAbort.current = ctrl;
-      void attachProbeReadings(rep, (ref) => bytesByRef.get(ref), ctrl.signal).then((probed) => {
+      void attachProbeReadings(rep, (ref) => map.get(ref), ctrl.signal).then((probed) => {
         // Only write back if this probe wasn't superseded AND it actually produced readings (a new
         // object reference signals readings attached; identity ⇒ nothing measured, leave the report).
         if (!ctrl.signal.aborted && probed !== rep) setReport(probed);
@@ -111,13 +141,83 @@ export function App() {
 
   const totals = report?.totals;
   const savedPct = totals && totals.diskBytes > 0 ? Math.round((totals.potentialDiskSaved / totals.diskBytes) * 100) : 0;
-  const folderFindings = report?.findings.filter((f) => f.scope === 'folder') ?? [];
-  const assetFindings = report?.findings.filter((f) => f.scope !== 'folder' && f.assetRef === selectedAsset) ?? [];
-  const selectedBytes = selectedAsset ? fileMap.get(selectedAsset) : undefined;
-  const selectedMetrics = report?.assets.find((a) => a.assetRef === selectedAsset);
+
+  // ── Triage index + ordered rows. buildIndex is ONE O(assets+findings) pass per report identity (it
+  // re-runs on the probe re-set — cheap, and the order is stable because the probe feeds no sort key).
+  // selectRows is one pure sort per control change. Search is debounced so keystrokes don't re-sort. ──
+  const debouncedSearch = useDebounced(search, 150);
+  const index = useMemo(() => (report ? buildIndex(report) : null), [report]);
+  // problemsOnly is forced off whenever "show clean" is on, so the synthesized `ok` rows can surface
+  // (honest hiding). showClean also drives includeClean — analysis emits no ok finding, so clean assets
+  // only become rows when selectRows synthesizes them. Toggling now changes the row set by exactly N clean.
+  const effectiveProblemsOnly = problemsOnly && !showClean;
+  const selectOpts = useMemo<SelectOpts | null>(
+    () =>
+      index
+        ? {
+            sort,
+            search: debouncedSearch,
+            severityFilter,
+            problemsOnly: effectiveProblemsOnly,
+            includeClean: showClean,
+            groupByFolder,
+          }
+        : null,
+    [index, sort, debouncedSearch, severityFilter, effectiveProblemsOnly, showClean, groupByFolder],
+  );
+  const rows = useMemo(() => (index && selectOpts ? selectRows(index, selectOpts) : []), [index, selectOpts]);
+  // Candidate count under the current severity/clean policy but ignoring search (the "of M" in "showing N
+  // of M") — so search visibly narrows N against the stable severity-scoped M. Pure, deterministic.
+  const totalRows = useMemo(
+    () => (index && selectOpts ? selectRows(index, { ...selectOpts, search: '' }).length : 0),
+    [index, selectOpts],
+  );
+  // id → Finding for the ledger's renderFinding titles (O(1), no scan per row).
+  const findingById = useMemo(() => {
+    const m = new Map<string, Finding>();
+    for (const f of report?.findings ?? []) m.set(f.id, f);
+    return m;
+  }, [report]);
+
+  // Debounce the FilmViewer's input so arrow-key / scroll scrubbing fires ONE decode after settling
+  // (invariant 4). The decode effect keys on [bytes, findings, highlightId]; only the settled asset moves them.
+  const debouncedSelected = useDebounced(selectedAsset, 120);
+  // Memoized so an unrelated re-render keeps a STABLE findings array identity → no needless FilmViewer decode.
+  // (folder findings now flow into the ledger rows, not a separate FolderReport.)
+  const assetFindings = useMemo(
+    () => report?.findings.filter((f) => f.scope !== 'folder' && f.assetRef === debouncedSelected) ?? [],
+    [report, debouncedSelected],
+  );
+  const selectedBytes = debouncedSelected ? fileMap.get(debouncedSelected) : undefined;
+  const selectedMetrics = report?.assets.find((a) => a.assetRef === debouncedSelected);
+
+  // Orphan-reselect: when a filter/sort/search change leaves the current selection out of the visible rows,
+  // fall back to the new worst row so the film never goes blank. Gated on autoSelectedFor so it cannot fire
+  // from the probe re-set (the probe changes only metric NUMBERS, never which rows are visible — correction #1).
+  useEffect(() => {
+    if (!report || rows.length === 0) return;
+    if (selectedAsset !== undefined && rows.some((r) => r.assetRef === selectedAsset)) return;
+    const top = rows[0]!;
+    setSelectedAsset(top.assetRef);
+    setSelectedFinding(top.scope === 'asset' ? top.id : undefined);
+  }, [rows, report, selectedAsset]);
+
+  const onRowClick = (row: LedgerRow) => {
+    setSelectedAsset(row.assetRef);
+    // A folder finding spans many assets ⇒ no single-asset overlay to highlight.
+    setSelectedFinding(row.scope === 'asset' ? row.id : undefined);
+  };
+  const toggleSeverity = (sev: Severity) =>
+    setSeverityFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(sev)) next.delete(sev);
+      else next.add(sev);
+      return next;
+    });
   // Sprite count for the MEASURED draw-calls readout ("N sprites batched"). Same keying invariant as
-  // the probe (assetRef === atlas.name === atlasFrames key). 0 for loose / un-probed assets.
-  const selectedFrameCount = selectedAsset ? report?.atlasFrames?.[selectedAsset]?.length ?? 0 : 0;
+  // the probe (assetRef === atlas.name === atlasFrames key). 0 for loose / un-probed assets. Keyed on the
+  // debounced asset so it moves in lockstep with the film it annotates.
+  const selectedFrameCount = debouncedSelected ? report?.atlasFrames?.[debouncedSelected]?.length ?? 0 : 0;
 
   return (
     <div className="min-h-full bg-bg text-ink">
@@ -160,39 +260,39 @@ export function App() {
           />
         )}
 
-        {report && phase.t === 'done' && (
-          <div className="space-y-6">
-            <FolderReport
-              findings={folderFindings}
-              onPick={(ref) => {
-                if (report.assets.some((a) => a.assetRef === ref)) {
-                  setSelectedAsset(ref);
-                  setSelectedFinding(undefined);
-                }
-              }}
-            />
-            {report.unparsed?.length ? <UnparsedNotice items={report.unparsed} /> : null}
-            {report.assets.length === 0 ? (
+        {report && phase.t === 'done' && index && selectOpts && (
+          <div className="space-y-5">
+            <VerdictBar tally={index.tally} severityFilter={severityFilter} onToggle={toggleSeverity} />
+            {report.assets.length === 0 && index.rows.length === 0 ? (
               <p className="font-mono text-sm text-ink-soft">{t('report.noAssets')}</p>
             ) : (
-              <section className="grid gap-6 lg:grid-cols-[1fr_minmax(320px,420px)]">
-                <div className="space-y-3">
-                  <AssetSelector
-                    report={report}
-                    selected={selectedAsset}
-                    onSelect={(a) => {
-                      setSelectedAsset(a);
-                      setSelectedFinding(undefined);
-                    }}
-                  />
-                  {selectedBytes && selectedAsset ? (
-                    <FilmViewer bytes={selectedBytes} findings={assetFindings} highlightId={selectedFinding} name={selectedAsset} metrics={selectedMetrics} frameCount={selectedFrameCount} />
-                  ) : (
-                    <p className="font-mono text-sm text-ink-soft">{t('report.noImage')}</p>
-                  )}
-                </div>
+              // Two-column x-ray triage board: the virtualized ledger (left, 1fr) drives the sticky film
+              // detail (right, minmax(320px,420px) — the existing token). On <lg it stacks; the ledger's
+              // own scroll container is the only long scroller.
+              <section className="grid items-start gap-6 lg:grid-cols-[1fr_minmax(320px,420px)]">
+                <TriageLedger
+                  index={index}
+                  rows={rows}
+                  findingById={findingById}
+                  selectedAsset={selectedAsset}
+                  opts={selectOpts}
+                  setSort={setSort}
+                  search={search}
+                  setSearch={setSearch}
+                  setProblemsOnly={setProblemsOnly}
+                  setGroupByFolder={setGroupByFolder}
+                  showClean={showClean}
+                  setShowClean={setShowClean}
+                  totalRows={totalRows}
+                  onRowClick={onRowClick}
+                />
 
-                <aside className="space-y-3">
+                <aside className="space-y-3 lg:sticky lg:top-20">
+                  {selectedBytes && debouncedSelected ? (
+                    <FilmViewer bytes={selectedBytes} findings={assetFindings} highlightId={selectedFinding} name={debouncedSelected} metrics={selectedMetrics} frameCount={selectedFrameCount} />
+                  ) : (
+                    <p className="rounded-xl border border-line bg-panel p-4 font-mono text-sm text-ink-soft">{t('report.noImage')}</p>
+                  )}
                   <h2 className="font-mono text-xs uppercase tracking-[0.06em] text-teal">{t('findings.title')}</h2>
                   <Findings findings={assetFindings} selectedId={selectedFinding} onSelect={setSelectedFinding} />
                   <FixCard files={files} />
@@ -206,6 +306,7 @@ export function App() {
                 </aside>
               </section>
             )}
+            {report.unparsed?.length ? <UnparsedNotice items={report.unparsed} /> : null}
           </div>
         )}
       </main>
@@ -328,38 +429,6 @@ function Dropzone({
       {phase.t === 'error' && <p className="mt-3 text-center font-mono text-xs text-crit">{phase.message}</p>}
       <p className="mt-5 text-center font-mono text-[11px] text-ink-soft">{t('dropzone.footnote')}</p>
     </section>
-  );
-}
-
-function AssetSelector({
-  report,
-  selected,
-  onSelect,
-}: {
-  report: AnalysisReport;
-  selected: string | undefined;
-  onSelect: (assetRef: string) => void;
-}) {
-  if (report.assets.length <= 1) return null;
-  const worst = (ref: string) => {
-    const sevs = report.findings.filter((f) => f.assetRef === ref).map((f) => f.severity);
-    return sevs.includes('crit') ? 'crit' : sevs.includes('warn') ? 'warn' : sevs.includes('info') ? 'info' : 'ok';
-  };
-  return (
-    <div className="flex flex-wrap gap-2">
-      {report.assets.map((a) => (
-        <button
-          key={a.assetRef}
-          type="button"
-          onClick={() => onSelect(a.assetRef)}
-          className={`rounded-lg border px-2.5 py-1 font-mono text-xs transition ${
-            a.assetRef === selected ? 'border-teal text-ink' : 'border-line text-ink-soft hover:border-ink-soft'
-          }`}
-        >
-          <span className={SEVERITY_TEXT[worst(a.assetRef)]}>●</span> {a.assetRef}
-        </button>
-      ))}
-    </div>
   );
 }
 
