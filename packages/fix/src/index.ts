@@ -66,3 +66,20 @@ export type { IntPoint } from './geom';
 export { ACC_CELL, DILATE_CELLS, EPSILON, HULL_AREA_RATIO_MAX, MESH_MAX_CELLS, POLY_ALPHA_THRESHOLD, POLY_MAX_VERTS, POLY_TOLERANCE2 } from './polygon-config';
 // Re-export of the core mesh contract for convenience (repackAtlasesPolygon emits Sprite.mesh: SpriteMesh).
 export type { SpriteMesh } from '@asset-doctor/core';
+
+// ── PixiJS-v8 AssetsManifest (round8-pixi-manifest.md) ─────────────────────────────────────────
+// PURE deterministic builder for the additive, opt-in `manifest.json` the fix output can emit so a PixiJS v8
+// game loads the whole output with Assets.init({ manifest }). Emits a REAL { bundles:[{name,assets:[{alias,src}]}] }
+// and NOTHING else (no version/meta, no `data.resolution` — Pixi #10108; tiers = one alias-suffixed entry each).
+// hashedName ships as a tested-but-unused helper (cache-busting deferred). Imported by the fix worker so its
+// manifest can't drift from the tested source.
+export { buildPixiManifest, countPixiManifestEntries, hashedName } from './pixi-manifest';
+export type {
+  PixiAssetsManifest,
+  PixiAssetsBundle,
+  PixiUnresolvedAsset,
+  ManifestAsset,
+  EmittedVariant,
+  ManifestAssetKind,
+  BuildPixiManifestOptions,
+} from './pixi-manifest';

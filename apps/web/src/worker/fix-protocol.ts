@@ -99,6 +99,20 @@ export interface FixOptions {
    *  absent/empty ⇒ full fix, byte-identical to today (no behavior change). Deterministic (a set of OpKind;
    *  skip notes ordered by OP_KIND_ORDER). */
   excludeKinds?: OpKind[];
+
+  // ── PixiJS-v8 asset manifest (docs/improvements/round8-pixi-manifest.md) ──
+  /** Emit an additive PixiJS-v8 `manifest.json` describing every emitted variant so the game can load the
+   *  whole output with one `Assets.init({ manifest })`. OPT-IN: absent/false ⇒ NO entry ⇒ zip BYTE-IDENTICAL
+   *  to today (the worker's collector stays unallocated; the emit is gated on ≥1 recorded entry). Pure string
+   *  work in the worker (no native libs, no network — invariant 1). Deterministic (a total re-sort, no
+   *  Date.now/Math.random). A real `{ bundles:[{name,assets:[{alias,src}]}] }` and NOTHING else (no
+   *  version/meta/data.resolution — Pixi #10108); multi-resolution tiers = one alias-suffixed entry per tier;
+   *  sheets list the `.json`/`.atlas` sidecar; Spine still needs `pixi-spine`. Implies no saving (invariant 5
+   *  — the manifest sums nothing). */
+  emitPixiManifest?: boolean;
+  /** RESERVED for a follow-up (content-hash cache-busting). Accepted + IGNORED in v1 (no UI, no worker
+   *  wiring) so the wire type is forward-stable. Absent/false ⇒ today. */
+  hashFilenames?: boolean;
 }
 
 export interface FixOverride {
@@ -252,6 +266,11 @@ export interface FixReceipt {
    *  receipt byte-identical to today. */
   sheetDiffs?: SheetDiff[];
   sheetDiffsTotal?: number;
+  /** Additive PixiJS-v8 manifest summary (round8-pixi-manifest.md): emitted ONLY when the opt-in ran with
+   *  ≥1 logical entry. `assets` = logical entries listed (one per resolution tier); `path` = the manifest's
+   *  zip-entry name (`manifest.json`, or a collision-avoiding fallback). Absent ⇒ no manifest emitted ⇒
+   *  receipt byte-identical to today. Names/structure only — sums no saving (invariant 5). */
+  pixiManifest?: { assets: number; path: string };
 }
 
 /* ── Dry-run plan preview (docs/improvements/dry-run-plan-preview.md) ─────────────────────────

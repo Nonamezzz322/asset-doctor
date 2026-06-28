@@ -78,6 +78,15 @@ import {
   alphaBBox,
   packLoose,
   verifySpineSkeleton,
+  // PURE PixiJS-v8 AssetsManifest builder (round8-pixi-manifest.md). Deterministic string work — the worker
+  // feeds it the variants it RECORDED at each verified out.push site (post-fallback enc.mime paths), so the
+  // emitted manifest.json can only reference files that exist. Off ⇒ the collector is never allocated ⇒ no
+  // entry ⇒ zip byte-identical. countPixiManifestEntries gives the receipt count without re-parsing the JSON.
+  buildPixiManifest,
+  countPixiManifestEntries,
+  type ManifestAsset,
+  type EmittedVariant,
+  type ManifestAssetKind,
 } from '@asset-doctor/fix';
 import { dHashFromGray, isFlat, luma } from '../lib/perceptual';
 import { makeZip, type ZipEntry } from './zip';
@@ -96,6 +105,20 @@ import type { FixChange, FixInputFile, FixMode, FixOptions, FixReceipt, FixReque
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 const post = (m: FixResponse): void => ctx.postMessage(m);
 const basename = (p: string): string => p.split('/').pop() ?? p;
+
+/** Pixi manifest (round8-pixi-manifest.md §6.6): pick a NON-colliding zip-entry name for the emitted
+ *  manifest. Preferred `manifest.json`; if taken by an input OR an already-emitted output, fall back to
+ *  `asset-doctor.manifest.json`, then `asset-doctor.manifest.2.json`, … Never overwrites an existing file.
+ *  Deterministic (fixed candidate order). `taken` is the set of paths already in play. */
+const pickManifestPath = (inputs: Set<string>, emitted: { path: string }[]): string => {
+  const taken = new Set<string>([...inputs, ...emitted.map((e) => e.path)]);
+  if (!taken.has('manifest.json')) return 'manifest.json';
+  if (!taken.has('asset-doctor.manifest.json')) return 'asset-doctor.manifest.json';
+  for (let i = 2; ; i++) {
+    const cand = `asset-doctor.manifest.${i}.json`;
+    if (!taken.has(cand)) return cand;
+  }
+};
 
 // Sheet-diff caps + the emitted-sheet geometry proof + the cap decision (docs/improvements/round6-f1-
 // sheet-diff.md) live in the PURE, Node-testable ./sheet-diff module — the worker imports them verbatim so
@@ -584,6 +607,23 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   const inputPaths = new Set(files.map((f) => f.path));
   const replaced = new Set<string>();
   const dropped = new Set<string>();
+  // ── PixiJS-v8 asset manifest (round8-pixi-manifest.md) — GATED collector ──────────────────────────
+  // Opt-in (default OFF). When OFF the map is NEVER allocated and recordVariant is a no-op ⇒ no behavior
+  // change ⇒ dedupedOut unchanged ⇒ zip byte-identical. When ON, recordVariant is called at the VERIFIED
+  // out.push sites with the POST-FALLBACK enc.mime path so the manifest can only reference files that exist.
+  // The builder groups one ManifestAsset's variants by suffix (one entry per resolution tier — Pixi #10108);
+  // ref is the map key so all of an asset's tiers/formats accumulate into a single ManifestAsset.
+  const manifestOn = opts.emitPixiManifest === true;
+  const manifestAssets = manifestOn ? new Map<string, ManifestAsset>() : undefined;
+  const recordVariant = (ref: string, kind: ManifestAssetKind, source: string, v: EmittedVariant): void => {
+    if (!manifestAssets) return;
+    let a = manifestAssets.get(ref);
+    if (!a) {
+      a = { ref, kind, source, variants: [] };
+      manifestAssets.set(ref, a);
+    }
+    a.variants.push(v);
+  };
   const skipped: { assetRef: string; reason: string }[] = [];
   // ROUND7 T6: an invalid export profile rejected above ⇒ no emit + honest `(profile)` reasons. Seed
   // `skipped` with them so the receipt is honest (never a silent drop). Valid/absent profile ⇒ empty.
@@ -877,6 +917,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       }
       emittedThis.add(variantPath);
       out.push({ path: variantPath, bytes: enc.bytes });
+      // Pixi manifest: each fanned-out format is a `src` candidate of the SAME (loose, suffix:'') entry.
+      recordVariant(ref, 'loose', srcPath, { scale, suffix: '', src: variantPath });
       profileFilesEmitted++;
       if (!firstEmitted) {
         // The FIRST emitted variant is the canonical rename (today's single-transcode behavior) — replaced
@@ -937,6 +979,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         const imagePath = pathByRef.get(ref)!;
         out.push({ path: imagePath, bytes: enc.bytes });
         out.push({ path: info.path, bytes: te.encode(emitSpineAtlasText(na)) });
+        // Pixi manifest: a Spine sheet loads via its `.atlas` SIDECAR (Pixi/pixi-spine reads the page from it).
+        recordVariant(ref, 'spine', imagePath, { scale: 1, suffix: '', src: info.path });
         captureSheetDiff(ref, atlas.size, na, enc.bytes, basename(imagePath), atlas);
         replaced.add(imagePath);
         replaced.add(info.path);
@@ -1043,6 +1087,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           na.imageRef = `${stem}${ext}`;
           out.push({ path: `${baseDir}${stem}${ext}`, bytes: sheet!.bytes });
           out.push({ path: `${baseDir}${stem}.json`, bytes: te.encode(emitTexturePackerJson(na)) });
+          // Pixi manifest: one entry per merged page `.json` (distinct ref per page so aliases never collide).
+          recordVariant(`${baseDir}${stem}.json`, 'atlas', `${baseDir}${stem}${ext}`, { scale: 1, suffix: '', src: `${baseDir}${stem}.json` });
           mergedManifestPaths.push(`${baseDir}${stem}.json`); // loader-migration: a NEW manifest to load
           mergedPageImages.push(`${baseDir}${stem}${ext}`); // ...and its REAL page image (na.imageRef on disk)
           // Sheet-diff: group[0] is the representative source page ("1 of N" — merge folds many into few).
@@ -1060,6 +1106,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           if (mPath) {
             out.push({ path: mPath, bytes: te.encode(emitTexturePackerJson(na)) });
             replaced.add(mPath);
+            // Pixi manifest: a repacked sheet loads via its `.json` SIDECAR (Pixi reads meta.image), NOT the image.
+            recordVariant(ref, 'atlas', imagePath, { scale: 1, suffix: '', src: mPath });
           }
           operations.push(`repack ${basename(ref)}${polySelected ? ' (polygon)' : ''} → ${na.size.w}×${na.size.h} ${sheet!.mime.replace('image/', '')}`);
         }
@@ -1167,6 +1215,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           const enc = await encodeCanvas(canvas, c2d, eff.targetMime, encOptsFor(eff, true));
           const newPath = renamedTo(path, enc!.mime); // same rename the owner-final-name prediction uses
           out.push({ path: newPath, bytes: enc!.bytes });
+          // Pixi manifest: a resized loose image loads directly (single format, single tier).
+          recordVariant(ref, 'loose', path, { scale: 1, suffix: '', src: newPath });
           replaced.add(path);
           if (newPath !== path) {
             referencesChanged = true; // a loose-image rename is NOT drop-in
@@ -1219,6 +1269,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       }
       const newPath = renamedTo(path, enc.mime); // same rename the owner-final-name prediction uses
       out.push({ path: newPath, bytes: enc.bytes });
+      // Pixi manifest: a transcoded loose image loads directly (single format, single tier).
+      recordVariant(ref, 'loose', path, { scale: 1, suffix: '', src: newPath });
       replaced.add(path);
       // Phase B bookkeeping: if this transcoded image is a retained dedup OWNER, record its ACTUAL final
       // image path so Phase C points consumers at the real (possibly PNG-fallback) name, not the guess.
@@ -1384,6 +1436,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           spineBlocks.push(emitSpineAtlasText(na));
         } else {
           emitted.push({ path: join(group.outDir, `${pageBase}.json`), bytes: te.encode(emitTexturePackerJson(na)) });
+          // Pixi manifest: one entry per packed static page `.json` (distinct ref per page; Pixi reads meta.image).
+          recordVariant(join(group.outDir, `${pageBase}.json`), 'atlas', join(group.outDir, `${pageBase}${ext}`), { scale: 1, suffix: '', src: join(group.outDir, `${pageBase}.json`) });
           packManifestPaths.push(join(group.outDir, `${pageBase}.json`)); // loader-migration: a NEW sheet manifest
           packPageImages.push(join(group.outDir, `${pageBase}${ext}`)); // ...and its REAL page image (na.imageRef on disk)
           // Sheet-diff (STATIC pages only): loose has no source atlas ⇒ occBefore=0 (honest "0% packed").
@@ -1400,6 +1454,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         // ONE `.atlas` = the per-page blocks concatenated (blank line between), each region already under
         // ITS page header (per-bin atlases). The skeleton .json/.skel is passed through untouched below.
         emitted.push({ path: join(group.outDir, `${stem}.atlas`), bytes: te.encode(spineBlocks.join('\n')) });
+        // Pixi manifest: a packed Spine group loads via its single multi-page `.atlas` SIDECAR (needs pixi-spine).
+        recordVariant(join(group.outDir, `${stem}.atlas`), 'spine', join(group.outDir, `${stem}.atlas`), { scale: 1, suffix: '', src: join(group.outDir, `${stem}.atlas`) });
         packManifestPaths.push(join(group.outDir, `${stem}.atlas`)); // loader-migration: the NEW Spine .atlas
         packPageImages.push(''); // Spine .atlas has no static-JSON page image (setChanges skips non-.json entries)
       }
@@ -1704,6 +1760,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           out.push({ path: tierImagePath, bytes: enc.bytes });
           tierFilesEmitted++;
           if (profileOn) profileFilesEmitted++;
+          // Pixi manifest: a LOOSE tier loads the IMAGE directly; record here (the atlas/Spine sidecar push
+          // below records those tiers). Variants sharing tier.suffix (e.g. avif+webp) merge into one entry.
+          if (!scaled) recordVariant(ref, 'loose', imagePath, { scale: tier.scale, suffix: tier.suffix, src: tierImagePath });
 
           if (scaled) {
             // Repoint imageRef at THIS tier+format's own image + stamp the exact ladder scale, so the
@@ -1714,6 +1773,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
             scaled.imageRef = basename(tierImagePath);
             if (isSpine && spineInfo) {
               out.push({ path: variantManifestName(spineInfo.path, tier.suffix, enc.mime, profileMulti), bytes: te.encode(emitSpineAtlasText(scaled)) });
+              // Pixi manifest: a Spine tier loads via its per-tier `.atlas` SIDECAR (one entry per tier suffix).
+              recordVariant(ref, 'spine', imagePath, { scale: tier.scale, suffix: tier.suffix, src: variantManifestName(spineInfo.path, tier.suffix, enc.mime, profileMulti) });
               tierFilesEmitted++;
               if (profileOn) profileFilesEmitted++;
               if (skelBytes && skelPath) {
@@ -1723,6 +1784,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
               }
             } else if (manifestPath) {
               out.push({ path: variantManifestName(manifestPath, tier.suffix, enc.mime, profileMulti), bytes: te.encode(emitTexturePackerJson(scaled)) });
+              // Pixi manifest: an atlas tier loads via its per-tier `.json` SIDECAR (one entry per tier suffix;
+              // avif+webp at the same tier merge into one entry's `src`). Pixi reads meta.image from the sidecar.
+              recordVariant(ref, 'atlas', imagePath, { scale: tier.scale, suffix: tier.suffix, src: variantManifestName(manifestPath, tier.suffix, enc.mime, profileMulti) });
               tierFilesEmitted++;
               if (profileOn) profileFilesEmitted++;
             }
@@ -1835,9 +1899,19 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   for (const s of deselectedSkips(excluded, wouldRunByKind)) skipped.push(s);
 
   // ── pass-through untouched files → drop-in optimized folder ──
+  // Pixi manifest: a pass-through that is a PARSED LOOSE IMAGE still belongs in the asset map (a complete
+  // load map). Reverse-index the loose-image refs by path so we record ONLY those — a non-image / non-asset
+  // pass-through (README, hand-authored .json, font, audio) is never an entry. Built only when the toggle is on.
+  const looseRefByPath = manifestAssets
+    ? new Map<string, string>(
+        [...pathByRef.entries()].filter(([ref]) => kindOf(ref) === 'loose').map(([ref, p]) => [p, ref]),
+      )
+    : undefined;
   for (const f of files) {
     if (replaced.has(f.path) || dropped.has(f.path)) continue;
     out.push({ path: f.path, bytes: new Uint8Array(f.bytes) });
+    const looseRef = looseRefByPath?.get(f.path);
+    if (looseRef) recordVariant(looseRef, 'loose', f.path, { scale: 1, suffix: '', src: f.path });
   }
 
   post({ type: 'fix-progress', label: 'zipping', done: total - 1, total });
@@ -1851,6 +1925,19 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     if (seen.has(e.path)) continue;
     seen.add(e.path);
     dedupedOut.push({ path: e.path, bytes: byPath.get(e.path)! });
+  }
+  // ── PixiJS-v8 asset manifest (round8-pixi-manifest.md C5) — emit ONE entry, AFTER dedup, LAST ────────
+  // ADDITIVITY (load-bearing): OFF ⇒ manifestAssets is undefined ⇒ this block is skipped ⇒ dedupedOut is
+  // unchanged ⇒ makeZip input byte-identical ⇒ zip byte-identical to today. ON-but-empty (a do-nothing fix)
+  // ⇒ size===0 ⇒ also skipped ⇒ byte-identical. ON-with-entries ⇒ ONE deterministic manifest.json appended.
+  // Pure string work (no native libs, no network — invariant 1); sums no saving (invariant 5).
+  let pixiManifest: { assets: number; path: string } | undefined;
+  if (manifestAssets && manifestAssets.size > 0) {
+    const assets = [...manifestAssets.values()];
+    const json = buildPixiManifest(assets);
+    const path = pickManifestPath(inputPaths, dedupedOut);
+    dedupedOut.push({ path, bytes: te.encode(json) });
+    pixiManifest = { assets: countPixiManifestEntries(assets), path };
   }
   const entries: ZipEntry[] = dedupedOut.map((e) => ({ name: e.path, bytes: e.bytes }));
   const zip = makeZip(entries);
@@ -1927,6 +2014,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     // first SHEET_DIFF_MAX composed sheets; sheetDiffsTotal counts ALL composed ("showing N of M"). Empty
     // ⇒ both omitted ⇒ receipt byte-identical to today.
     ...(sheetDiffs.length > 0 ? { sheetDiffs, sheetDiffsTotal } : {}),
+    // PixiJS-v8 asset manifest (round8-pixi-manifest.md, additive/optional): present ONLY when the opt-in
+    // ran with ≥1 recorded entry. Absent ⇒ no manifest emitted ⇒ receipt byte-identical to today.
+    ...(pixiManifest ? { pixiManifest } : {}),
   };
   // Direct postMessage (not the `post` wrapper) so the sheet-diff byte buffers transfer zero-copy. The
   // transferred buffers are FRESH COPIES (captureSheetDiff sliced both), so the live source/emitted buffers

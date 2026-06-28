@@ -986,6 +986,10 @@ function FixCard({ files }: { files: PickedFile[] }) {
     'image/avif': { enabled: true, quality: 85, lossless: false, near: false },
   }));
   const [customTiers, setCustomTiers] = useState<ResolutionTier[]>([]);
+  // PixiJS-v8 asset manifest (round8-pixi-manifest.md C6) — its OWN Pro opt-in, DEFAULT OFF. ON ⇒ the fix
+  // output gains an additive `manifest.json` mapping every emitted image/sheet so a PixiJS game can load the
+  // whole folder with one Assets.init({ manifest }). OFF ⇒ buildOptions omits it ⇒ zip byte-identical to today.
+  const [emitPixiManifest, setEmitPixiManifest] = useState(false);
   // Derive the ExportProfile the worker consumes. Formats kept in the canonical FORMAT_KEYS order (PNG,
   // WebP, AVIF) — deterministic. Tiers = the implied scale-1 top (validateProfile requires it) + any custom
   // rows. Per-format compression: PNG is native-lossless (no quality field); WebP/AVIF carry quality unless
@@ -1081,6 +1085,9 @@ function FixCard({ files }: { files: PickedFile[] }) {
       // Selective fix — the deselected OpKinds (empty ⇒ undefined ⇒ full fix, byte-identical to today).
       // The worker SKIPS each excluded kind and surfaces an honest skipped[] note (never a silent drop).
       excludeKinds: exclude.size > 0 ? [...exclude] : undefined,
+      // PixiJS-v8 asset manifest (round8-pixi-manifest.md) — forwarded only when enabled; off ⇒ undefined
+      // ⇒ no manifest emitted ⇒ zip byte-identical to today.
+      emitPixiManifest: emitPixiManifest || undefined,
     };
   }
 
@@ -1226,6 +1233,13 @@ function FixCard({ files }: { files: PickedFile[] }) {
             setCustomTiers={setCustomTiers}
           />
 
+          {/* PixiJS-v8 asset manifest (round8-pixi-manifest.md C6) — additive, DEFAULT OFF. Off ⇒ no extra
+              file ⇒ zip byte-identical to today. */}
+          <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.pixiManifestHint')}>
+            <input type="checkbox" checked={emitPixiManifest} onChange={(e) => setEmitPixiManifest(e.target.checked)} className="accent-teal" />
+            {t('fix.pixiManifest')}
+          </label>
+
           {/* Default flow: PREVIEW the plan first (mode:'plan', cheap/pure) — a reference-changing paid
               fix shouldn't run blind. "Run fix" in the Plan card then commits the IDENTICAL options. */}
           <button
@@ -1292,6 +1306,11 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
           {receipt.exportProfile.tiers} · {receipt.exportProfile.assets} assets
           <span className="mt-0.5 block text-ink-soft/80">{t('fix.profile.diskNote')}</span>
         </p>
+      ) : null}
+      {/* PixiJS-v8 asset manifest (round8-pixi-manifest.md C8): present ONLY when the opt-in emitted a
+          manifest. Names/structure only — no saving claimed (the manifest sums nothing, invariant 5). */}
+      {receipt.pixiManifest ? (
+        <p className="font-mono text-[10px] text-ink-soft">{t('fix.pixiManifestReceipt', { path: receipt.pixiManifest.path, n: receipt.pixiManifest.assets })}</p>
       ) : null}
       {receipt.referencesChanged ? <p className="font-mono text-[10px] text-warn">⚠ {t('fix.mergeWarn')}</p> : null}
       {/* Loader-migration guide (docs/improvements/loader-migration.md): when the fix recorded genuine
