@@ -98,12 +98,21 @@ export async function analyze(
   const opaqueByRef = new Set<string>();
   for (const f of deps.features ?? []) if (f.opaque) opaqueByRef.add(f.assetRef);
 
+  // Per-loose-ref disk saving already counted by the FORMAT finding (transcode to AVIF/WebP). The
+  // wasted-alpha finding for the SAME ref overlaps it (re-encoding the format ALSO drops the dead alpha
+  // plane — most of the alpha saving is already inside the transcode estimate), so summing both would
+  // OVERSTATE the aggregate. We de-overlap below by contributing the MAX of the two per-ref savings, not
+  // their sum. Keyed by ref; cleared implicitly per-folder (one report = one map).
+  const formatSavedByRef = new Map<string, number>();
+
   const addFormat = async (ref: string, image: ImageAsset, contentClass: ContentClass = 'unknown') => {
     const fmt = await formatFinding(ref, image, cfg, deps.encodeImage, contentClass);
     if (fmt) {
       findings.push(fmt);
       formatFindings.push(fmt);
-      potentialDiskSaved += fmt.estimate?.diskBytesSaved ?? 0;
+      const saved = fmt.estimate?.diskBytesSaved ?? 0;
+      formatSavedByRef.set(ref, saved);
+      potentialDiskSaved += saved;
     }
   };
 
@@ -157,7 +166,13 @@ export async function analyze(
         const wa = await wastedAlphaFinding(image.name, image, cfg, deps.encodeOpaque);
         if (wa) {
           findings.push(wa);
-          potentialDiskSaved += wa.estimate?.diskBytesSaved ?? 0;
+          // De-overlap: the format finding (if any) for this ref already counted a transcode disk
+          // saving that SUBSUMES most of the dead-alpha drop (re-encoding the format also drops the
+          // alpha plane). Contribute only the EXCESS of the larger estimate so the aggregate never
+          // double-counts the same ref's overlapping savings — take MAX, not SUM.
+          const alphaSaved = wa.estimate?.diskBytesSaved ?? 0;
+          const fmtSaved = formatSavedByRef.get(image.name) ?? 0;
+          if (alphaSaved > fmtSaved) potentialDiskSaved += alphaSaved - fmtSaved;
         }
       }
     }

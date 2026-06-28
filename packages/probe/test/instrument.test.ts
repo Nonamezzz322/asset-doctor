@@ -205,4 +205,31 @@ describe('GL instrument', () => {
     expect(compressedDataByteLength('compressedTexImage2D', [0, 0, 0, 64, 64, 0])).toBe(0);
     expect(compressedDataByteLength('compressedTexImage2D', [0, 0, 0, 64, 64, 0, null])).toBe(0);
   });
+
+  it('compressedDataByteLength honors the WebGL2 srcOffset / srcLengthOverride view forms (exact bytes)', () => {
+    // WebGL2 9-arg view form: (…, srcData, srcOffset, srcLengthOverride). The OVERRIDE (>0) is the EXACT
+    // uploaded byte count and wins over the view's full byteLength.
+    expect(
+      compressedDataByteLength('compressedTexImage2D', [0, 0, 0, 64, 64, 0, new Uint8Array(4096), 0, 1024]),
+    ).toBe(1024);
+    // srcOffset only (no override / override 0): uploaded = byteLength − srcOffset.
+    expect(
+      compressedDataByteLength('compressedTexImage2D', [0, 0, 0, 64, 64, 0, new Uint8Array(4096), 1024]),
+    ).toBe(4096 - 1024);
+    // An override 0 falls through to the srcOffset rule (here also 0) ⇒ full view byteLength.
+    expect(
+      compressedDataByteLength('compressedTexImage2D', [0, 0, 0, 64, 64, 0, new Uint8Array(4096), 0, 0]),
+    ).toBe(4096);
+    // compressedTexSubImage2D 10-arg view form: srcData @7, srcOffset @8, srcLengthOverride @9.
+    expect(
+      compressedDataByteLength('compressedTexSubImage2D', [0, 0, 0, 0, 64, 64, 0, new Uint8Array(2048), 0, 512]),
+    ).toBe(512);
+    expect(
+      compressedDataByteLength('compressedTexSubImage2D', [0, 0, 0, 0, 64, 64, 0, new Uint8Array(2048), 256]),
+    ).toBe(2048 - 256);
+    // An override that exceeds the view is clamped to the view (defensive; never over-reports residency).
+    expect(
+      compressedDataByteLength('compressedTexImage2D', [0, 0, 0, 64, 64, 0, new Uint8Array(1000), 0, 999999]),
+    ).toBe(1000);
+  });
 });

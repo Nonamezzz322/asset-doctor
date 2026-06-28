@@ -116,6 +116,12 @@ import { dedupKeepConsumerSkip, deselectedSkips, fixOpKind, summarizePlan, type 
 // SAME constructors the unit test drives directly (the worker can't run in Node — createImageBitmap).
 import { dropChange, finalizeChanges, looseRenameChange, mergeChanges, packChanges, repackChanges, tierChanges } from '../lib/loader-migration';
 import { canKeepSheetDiff, sheetGeometryProof } from './sheet-diff';
+// PURE keep-original-on-size-LOSS guard for the opaque transcode path (round15 #2) — never ship a larger
+// page from an alpha-drop "optimization". Imported verbatim so the predicate is unit-tested in Node.
+import { transcodeIsSizeLoss } from './transcode-guard';
+// GPU-VRAM probe COLLECTION gate + fresh-slice build (round15 #0) — extracted PURE so the cap +
+// copy-not-alias guarantee are unit-testable in Node (the worker can't run headless). Single source of truth.
+import { collectKtx2Probe, KTX2_PROBE_MAX } from '../lib/ktx2-probe-collect';
 import type { FixChange, FixInputFile, FixMode, FixOptions, FixReceipt, FixRequest, FixResponse, Ktx2ProbeInput, NativeOpKind, SheetDiff } from './fix-protocol';
 // OPT-IN backend native KTX2 (round12-backend-processing.md, Phase 3). encodeRemote is the ONLY network
 // call in the fix path and it fires ONLY behind opts.backend + per-run consent (backendOn). KTX2_PROFILE_
@@ -1613,6 +1619,18 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         if (ownerActualName.has(ref)) ownerActualName.get(ref)!.image = path;
         continue;
       }
+      // Keep-original-on-size-LOSS (round15 #2): an "opaque" re-encode that does NOT shrink the file is no
+      // optimization — never ship a LARGER (or equal) page from a drop-the-dead-alpha pass. Scoped to the
+      // OPAQUE path (transcodeIsSizeLoss gates on op.opaque): the general transcode CHANGES format
+      // (PNG→WebP/AVIF) where a same-or-larger result is a legitimate format choice already handled by the
+      // downstream dedup/Phase-C accounting; narrowing the guard avoids regressing those flows. On loss we
+      // KEEP the original: no out.push, no rename, an HONEST skip, and (owner) the actual name stays the
+      // ORIGINAL so Phase C keeps the consumer pointed at it (same bookkeeping as the !enc skip above).
+      if (transcodeIsSizeLoss(op.opaque, enc.bytes.length, bytes.byteLength)) {
+        skipped.push({ assetRef: ref, reason: `transcode kept original: opaque re-encode was not smaller (${enc.bytes.length} ≥ ${bytes.byteLength} B)` });
+        if (ownerActualName.has(ref)) ownerActualName.get(ref)!.image = path;
+        continue;
+      }
       const newPath = renamedTo(path, enc.mime); // same rename the owner-final-name prediction uses
       // Cache-bust (round9 K4): hash the FINAL bytes; the hashed name is the dedup owner image (consumers
       // repoint to it) AND the loader-migration `to`. The un-hashed newPath is the Phase-C divergence basis.
@@ -2372,9 +2390,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
   let ktx2VramBytesWorstCase = 0;
   // GPU-VRAM probe side-channel (round15): collect the produced `.ktx2` + its raster page (FRESH slices, so
   // the zip/`out` buffers stay intact — same discipline as captureSheetDiff) for the MAIN-thread probe (the
-  // worker has no WebGL). Capped (mirror SHEET_DIFF_MAX) to bound the zero-copy transfer; the rest still
-  // contribute ktx2VramBytesWorstCase only ("measured N of M"). Empty ⇒ no probe ⇒ byte-identical to today.
-  const KTX2_PROBE_MAX = 6;
+  // worker has no WebGL). Capped (KTX2_PROBE_MAX, mirror SHEET_DIFF_MAX) to bound the zero-copy transfer; the
+  // rest still contribute ktx2VramBytesWorstCase only ("measured N of M"). Empty ⇒ no probe ⇒ byte-identical.
+  // The gate + fresh-slice build live in the pure ktx2-probe-collect helper (unit-tested in Node).
   const ktx2Probe: Ktx2ProbeInput[] = [];
   if (backendOn && ktx2Candidates.length > 0) {
     const backend = opts.backend!; // backendOn guarantees presence + consent
@@ -2417,14 +2435,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       ktx2Produced++;
       // GPU-VRAM probe (round15): retain the produced `.ktx2` + its raster page as FRESH slices (the `out`/zip
       // copies stay intact) so the host can measure real compressed residency on its GPU. Capped (the rest
-      // keep only the worst-case ceiling). Detached ArrayBuffers transfer zero-copy on fix-done.
-      if (ktx2Probe.length < KTX2_PROBE_MAX) {
-        ktx2Probe.push({
-          ktx2Bytes: res.bytes.slice().buffer,
-          rasterBytes: c.pageBytes.slice().buffer,
-          rasterMime: c.pageMime,
-        });
-      }
+      // keep only the worst-case ceiling). Detached ArrayBuffers transfer zero-copy on fix-done. The cap gate +
+      // the fresh-slice build are the PURE collectKtx2Probe helper (unit-tested in Node).
+      collectKtx2Probe(ktx2Probe, res.bytes, c.pageBytes, c.pageMime, KTX2_PROBE_MAX);
       referencesChanged = true; // the game must add a KTX2 transcoder bundle + loader (not a drop-in)
       if (c.atlasSidecar) {
         // ATLAS: emit a SECOND sidecar `<page>.ktx2.json` (round8 two-sidecar rule) whose meta.image → the

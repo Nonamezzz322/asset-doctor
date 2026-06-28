@@ -55,18 +55,34 @@ interface TexRecord {
 /** Real resident byte length of a compressed upload's data argument. PURE — a deterministic arg reader,
  *  headless-verifiable independent of GL (mirrors `recordTexImage`). The data arg is an ArrayBufferView
  *  whose `.byteLength` IS the resident size of that mip level; the PBO form passes the size as a number.
- *    compressedTexImage2D(target, level, internalformat, w, h, border, data)           ⇒ view at index 6
- *    compressedTexImage2D(target, level, internalformat, w, h, border, imageSize, off) ⇒ number at index 6 (PBO)
- *    compressedTexSubImage2D(target, level, x, y, w, h, format, data)                  ⇒ view at index 7
- *    compressedTexSubImage2D(target, level, x, y, w, h, format, imageSize, off)        ⇒ number at index 7 (PBO)
- *  Returns the view's byteLength (or the explicit imageSize for the PBO form), else 0. */
+ *  WebGL2 adds a 9/10-arg view form with `srcOffset` (+ optional `srcLengthOverride`) — when the override is
+ *  present (>0) it is the EXACT uploaded byte count; otherwise the upload is `byteLength − srcOffset`.
+ *    WebGL1 view form:
+ *      compressedTexImage2D(target, level, internalformat, w, h, border, data)                          ⇒ view @6
+ *      compressedTexSubImage2D(target, level, x, y, w, h, format, data)                                 ⇒ view @7
+ *    WebGL2 PBO form (data passed as a number = imageSize):
+ *      compressedTexImage2D(target, level, internalformat, w, h, border, imageSize, offset)             ⇒ num  @6
+ *      compressedTexSubImage2D(target, level, x, y, w, h, format, imageSize, offset)                    ⇒ num  @7
+ *    WebGL2 view form with srcOffset (+ optional srcLengthOverride):
+ *      compressedTexImage2D(target, level, internalformat, w, h, border, srcData, srcOffset, srcLenOverride)   ⇒ view @6, off @7, len @8
+ *      compressedTexSubImage2D(target, level, x, y, w, h, format, srcData, srcOffset, srcLenOverride)          ⇒ view @7, off @8, len @9
+ *  Returns the EXACT uploaded byte count (override when present, else view.byteLength − srcOffset, clamped
+ *  to the view), or the explicit imageSize for the PBO form, else 0. */
 export function compressedDataByteLength(name: string, a: unknown[]): number {
   const idx = name === 'compressedTexSubImage2D' ? 7 : 6;
   const data = a[idx];
   if (typeof data === 'number') return data >= 0 ? data : 0; // PBO form: explicit imageSize
   const view = data as { byteLength?: unknown } | null | undefined;
-  if (view && typeof view.byteLength === 'number') return view.byteLength;
-  return 0;
+  if (!view || typeof view.byteLength !== 'number' || view.byteLength < 0) return 0;
+  const byteLength = view.byteLength;
+  // WebGL2 view form: srcOffset @idx+1, optional srcLengthOverride @idx+2. The override (when >0) is the
+  // EXACT uploaded byte count and takes precedence; element units are 1 for the BYTE views the codecs hand
+  // to compressed uploads (Uint8Array), so no BYTES_PER_ELEMENT scaling is applied.
+  const lenOverride = a[idx + 2];
+  if (typeof lenOverride === 'number' && lenOverride > 0) return Math.min(lenOverride, byteLength);
+  const srcOffset = a[idx + 1];
+  if (typeof srcOffset === 'number' && srcOffset > 0) return Math.max(0, byteLength - srcOffset);
+  return byteLength;
 }
 
 export function instrument(gl: GlLike): InstrumentHandle {

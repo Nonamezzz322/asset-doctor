@@ -358,6 +358,33 @@ describe('wasted-alpha (fully-opaque image carrying a dead alpha channel)', () =
     expect(report.totals.potentialDiskSaved).toBe(3000);
   });
 
+  it('a ref with BOTH a format AND a wasted-alpha finding contributes its disk saving ONCE (no double-count)', async () => {
+    // 10000-byte PNG: format → AVIF estimate 6000 (saved 4000); opaque re-encode → 7000 (saved 3000).
+    // The two overlap (transcode already drops the dead alpha plane). The aggregate must take the MAX
+    // per-ref (4000), NOT the sum (7000).
+    const report = await analyze([looseImg('flat.png', 512, 512)], undefined, {
+      encodeImage: async () => 6000, // AVIF/WebP transcode estimate → saved 4000
+      encodeOpaque: async () => 7000, // opaque same-format re-encode → saved 3000
+      features: [{ assetRef: 'flat.png', contentHash: 'h', contentClass: 'photographic', opaque: true }],
+    });
+    expect(report.findings.find((f) => f.rule === 'format')?.estimate?.diskBytesSaved).toBe(4000);
+    expect(report.findings.find((f) => f.rule === 'wasted-alpha')?.estimate?.diskBytesSaved).toBe(3000);
+    // MAX(4000, 3000) = 4000 — NOT 7000. The per-finding estimates are still honest individually.
+    expect(report.totals.potentialDiskSaved).toBe(4000);
+  });
+
+  it('wasted-alpha saving LARGER than format saving ⇒ aggregate = the larger (max), still counted once', async () => {
+    // format → 6000 (saved 4000, 40% > 25% gate); opaque → 3500 (saved 6500). MAX = 6500, not 10500.
+    const report = await analyze([looseImg('flat.png', 512, 512)], undefined, {
+      encodeImage: async () => 6000,
+      encodeOpaque: async () => 3500,
+      features: [{ assetRef: 'flat.png', contentHash: 'h', contentClass: 'photographic', opaque: true }],
+    });
+    expect(report.findings.find((f) => f.rule === 'format')?.estimate?.diskBytesSaved).toBe(4000);
+    expect(report.findings.find((f) => f.rule === 'wasted-alpha')?.estimate?.diskBytesSaved).toBe(6500);
+    expect(report.totals.potentialDiskSaved).toBe(6500);
+  });
+
   it('analyze NEVER fires wasted-alpha for an ATLAS, even if a feature marks it opaque (loose-only)', async () => {
     const atlasAsset: Asset = {
       kind: 'atlas',
