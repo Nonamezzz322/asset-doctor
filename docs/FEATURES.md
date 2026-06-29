@@ -66,6 +66,7 @@ the Pro fix generates optimized output; native-only ops run on an opt-in backend
 - **Content-hash cache-busting** — append a content hash to emitted filenames, chained through atlas `meta.image`, the Spine `.atlas` line, the Pixi manifest, dedup consumer images, and loader-migration rows.
 - **Pack loose assets into spritesheets** — from scratch: static TexturePacker JSON + correct Spine `.atlas` composition, multi-page spill.
 - **Multipack round-trip safety** — TexturePacker `meta.related_multi_packs` (the sibling-`.json` linkage Pixi v8 auto-loads) is carried verbatim through the byte-stable passthrough/resize re-emit, and honestly stripped (with a skip note) on every path that renames siblings (tier suffixes, KTX2, content-hashed filenames) — so a multipack page-0 keeps loading pages 1+ instead of silently dropping them.
+- **Animation-map round-trip** — the spritesheet top-level `animations` map (group → ordered frame-name list = play order, what `AnimatedSprite` is built from) is carried verbatim (never sorted) through every Pro re-emit; because it references frame KEYS (not file names) it survives cache-bust/KTX2 renames intact, and it is absent by construction on repack/merge (no synthesis). Stops the fix from silently breaking animations.
 
 ## 5. UI — the x-ray cabinet
 
@@ -104,4 +105,4 @@ the Pro fix generates optimized output; native-only ops run on an opt-in backend
 
 ---
 
-*Updated 2026-06-29 (through round 28). Branch `feat/asset-pipeline` (= local `main`), ~61 commits over `origin/main`, all green. Deploy (GH Pages) awaits the user's `git push origin main`; live backend ops need the toktx/pngquant/vips binaries in the deployed sidecar.*
+*Updated 2026-06-29 (through round 29). Branch `feat/asset-pipeline` (= local `main`), ~63 commits over `origin/main`, all green. Deploy (GH Pages) awaits the user's `git push origin main`; live backend ops need the toktx/pngquant/vips binaries in the deployed sidecar.*
