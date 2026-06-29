@@ -1,0 +1,22 @@
+{
+  "kind": "per-frame-recovery",
+  "feature": "atlas-per-frame-recovery",
+  "note": "One bad frame no longer nukes the whole sheet (round21 #1). Each manifest keeps its good sprites and surfaces the single corrupt frame through the worker's unparsed[] channel as `<atlas>#<frame>` — symmetric with the Spine per-region recovery. Before R21#1, parseAtlasManifest returned {ok:false} on the first bad frame, losing every good frame for one corrupt one.",
+  "hash": {
+    "manifest": "hash.json",
+    "image": "sheet.png",
+    "survivingSprites": ["a.png", "b.png"],
+    "malformedFrames": [
+      { "name": "bad.png", "reason": "invalid frame \"bad.png\"" }
+    ]
+  },
+  "array": {
+    "manifest": "array.json",
+    "image": "sheet.png",
+    "survivingSprites": ["c.png", "d.png"],
+    "malformedFrames": [
+      { "name": "over.png", "reason": "frame \"over.png\" extends past atlas 128×128" }
+    ]
+  },
+  "workerUnparsedRefs": ["sheet.png#bad.png", "sheet.png#over.png"]
+}

@@ -34,6 +34,27 @@ even when no occupancy/frame-redundancy/merge repack is already scheduled.
   occupancy also fires; additive (off ⇒ byte-identical). ADDITIVE — default-on but absent-field ⇒ no plan/byte
   change when nothing qualifies.
 
+- **#1 Per-frame recovery for TexturePacker/Pixi atlases** (`docs/improvements/round21-per-frame-recovery-for-texturepack.md`)
+  — `parseAtlasManifest` used to WHOLE-REJECT a sheet on the first unusable frame (`{ok:false}`), losing 499
+  good frames for 1 corrupt one. Now it RECOVERS the good sprites and collects each dropped frame into
+  `malformedFrames[] {name, reason}` — symmetric with the Spine per-region recovery already shipped. The
+  array/hash frame loops and the out-of-bounds pass became per-frame partitions (skip + surface) instead of
+  whole-manifest bails; the analyze worker fans `res.malformedFrames` into the existing `unparsed[]` channel
+  as `<atlas>#<frame>` (deterministic, sorted). HONESTY (invariant 3): every dropped frame is reported with a
+  reason — nothing silently dropped or clamped. ADDITIVITY: a fully-valid atlas parses byte-identically (same
+  sprites, same order, no `malformedFrames` field); an EMPTY `frames` object still returns `{ok:true,
+  sprites:[]}` (zero-survivor guard gated on `malformedFrames.length>0`); an ALL-bad manifest still
+  wholesale-fails with today's first-failure error (preserves the F3 single-frame-sheet tests). STRUCTURAL
+  failures (bad JSON / no frames object / no `meta.image`) still wholesale-fail at ingest/parse as before.
+  Contract is additive only: optional `malformedFrames` on `AtlasParseResult`'s ok-branch + a local return
+  widen on `parseAtlas` (no `@asset-doctor/core` / `ParseResult` change; all other callers destructure
+  `{ok,asset}` and ignore the extra prop). New fixture `fixtures/sample-projects/atlas-frame-recovery/`
+  (Hash with a degenerate `w:0` frame + Array with an OOB frame, reproduced through the REAL parse path) +
+  golden `expected.json`. Tests: 5 parser units (Hash/Array recovery, zero-survivor still `{ok:false}`,
+  empty-frames byte-identity, clean-sheet has no field) + 1 e2e worker-path `it` (group→parse→fan-out→analyze
+  surfaces `sheet.png#bad.png` + `sheet.png#over.png` while the good frames stay diagnosed).
+  **Gate:** `pnpm typecheck` + `pnpm test` (parsers 17→22, apps/web 407→408; all packages green) + `pnpm lint` clean.
+
 ## Round 20 — selection (#0 shipped) — 2026-06-29
 Pick: **(#0) trim-on-repack FIX** (shipped below) — turns the r19 trim-margin DETECTOR into a Pro fix.
 

@@ -278,3 +278,56 @@ rgn
     expect(p.malformedRegions).toBeUndefined(); // offset is tolerant, not a required field
   });
 });
+
+describe('per-frame recovery — one bad frame no longer nukes the sheet (R21 #1)', () => {
+  const sheet = () => ({ ref: 'sheet.png', bytes: bytes('atlas-frame-recovery/sheet.png') });
+
+  it('Hash: keeps the good sprites + surfaces the 1 degenerate frame', () => {
+    const res = parseAtlas(json('atlas-frame-recovery/hash.json'), sheet());
+    expect(res.ok).toBe(true);
+    if (!res.ok || res.asset.kind !== 'atlas') throw new Error('expected atlas');
+    expect(res.asset.atlas.sprites.map((s) => s.name)).toEqual(['a.png', 'b.png']); // source order preserved
+    expect(res.malformedFrames).toEqual([{ name: 'bad.png', reason: 'invalid frame "bad.png"' }]);
+  });
+
+  it('Array: keeps the good sprites + surfaces the 1 out-of-bounds frame', () => {
+    const res = parseAtlas(json('atlas-frame-recovery/array.json'), sheet());
+    expect(res.ok).toBe(true);
+    if (!res.ok || res.asset.kind !== 'atlas') throw new Error('expected atlas');
+    expect(res.asset.atlas.sprites.map((s) => s.name)).toEqual(['c.png', 'd.png']);
+    expect(res.malformedFrames).toEqual([
+      { name: 'over.png', reason: 'frame "over.png" extends past atlas 128×128' },
+    ]);
+  });
+
+  it('zero survivors still returns {ok:false} with the first failure reason (preserves F3)', () => {
+    const manifest = {
+      frames: { 'bad.png': { frame: { x: 0, y: 0, w: 0, h: 32 }, sourceSize: { w: 0, h: 32 } } },
+      meta: { image: 'sheet.png', size: { w: 128, h: 128 } },
+    };
+    const res = parseAtlas(manifest, sheet());
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toBe('invalid frame "bad.png"');
+  });
+
+  it('empty frames stays {ok:true} with zero sprites and no malformedFrames (E6 byte-identity)', () => {
+    const res = parseAtlas(
+      { frames: {}, meta: { image: 'sheet.png', size: { w: 128, h: 128 } } },
+      sheet(),
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok || res.asset.kind !== 'atlas') throw new Error('expected atlas');
+    expect(res.asset.atlas.sprites).toHaveLength(0);
+    expect(res.malformedFrames).toBeUndefined();
+  });
+
+  it('a fully-valid atlas carries no malformedFrames field (byte-identical to before)', () => {
+    const res = parseAtlas(json('tp-hash-symbols/symbols.json'), {
+      ref: 'symbols.png',
+      bytes: bytes('tp-hash-symbols/symbols.png'),
+    });
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error('expected atlas');
+    expect(res.malformedFrames).toBeUndefined();
+  });
+});

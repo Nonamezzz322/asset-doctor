@@ -53,4 +53,36 @@ describe('end-to-end pipeline over the real fixtures folder', () => {
     expect(report.totals.vramBytes).toBeGreaterThan(0);
     expect(report.assets).toHaveLength(5);
   });
+
+  // R21 #1 per-frame recovery, through the real group→parse→fan-out→analyze path. Separate `it` (the case
+  // above has exact-count assertions). Replicates the worker's malformedFrames fan-out (this file does not
+  // thread `unparsed` in the case above). On pre-R21 code parseAtlas would whole-reject sheet.png → zero
+  // atlas assets + an atlas-level unparsed entry → this `it` fails; after the change it passes.
+  it('per-frame recovery: a bad frame surfaces via unparsed[] while the good frames are still diagnosed', async () => {
+    const files: RawFile[] = [];
+    walk(join(ROOT, 'atlas-frame-recovery'), 'atlas-frame-recovery', files);
+    const grouped = groupFiles(files);
+    const assets: Asset[] = [];
+    const unparsed = [...grouped.unparsed];
+    for (const a of grouped.atlases) {
+      const r = parseAtlas(a.manifest, { ref: a.name, bytes: new Uint8Array(a.image.bytes) });
+      if (r.ok && r.asset.kind === 'atlas') {
+        assets.push(r.asset);
+        for (const mf of r.malformedFrames ?? []) unparsed.push({ ref: `${a.name}#${mf.name}`, reason: mf.reason });
+      } else if (!r.ok) {
+        unparsed.push({ ref: a.name, reason: r.error });
+      }
+    }
+    unparsed.sort((x, y) => x.ref.localeCompare(y.ref));
+
+    const report = await analyze(assets, undefined, { unparsed });
+    // The good frames survived as a real atlas asset (the sheet was NOT whole-rejected).
+    expect(assets.some((a) => a.kind === 'atlas' && a.atlas.sprites.length > 0)).toBe(true);
+    // Each bad frame is surfaced honestly via the `<atlas>#<frame>` ref — never silently dropped.
+    expect(report.unparsed).toContainEqual({ ref: 'sheet.png#bad.png', reason: 'invalid frame "bad.png"' });
+    expect(report.unparsed).toContainEqual({
+      ref: 'sheet.png#over.png',
+      reason: 'frame "over.png" extends past atlas 128×128',
+    });
+  });
 });

@@ -4,7 +4,7 @@
 // folder-level duplicate detection, and format sizing (OffscreenCanvas → WebP/AVIF).
 
 import type { Asset, AtlasFrameHashes, AtlasFrameTrims, ImageFeatures, ImageMime, Sprite, TrimRect } from '@asset-doctor/core';
-import { parseAtlas, parseImage, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
+import { parseAtlas, parseImage, parseSpinePage, type MalformedFrame, type ParseResult, type SpinePage } from '@asset-doctor/parsers';
 import { analyze, mergeSharedAtlases, type EncodeSizer, type OpaqueEncodeSizer } from '@asset-doctor/analysis';
 import { alphaBBox } from '@asset-doctor/fix';
 import { groupFiles, keyOf, type RawFile } from '../lib/group';
@@ -57,7 +57,9 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       const image = { ref: a.name, bytes: new Uint8Array(a.image.bytes) };
       // a.name is the dir-aware key from ingest — pass it as the asset name so two atlases sharing a
       // meta.image basename across folders stay distinct (atlas.name defaults to the bare imageRef).
-      const res =
+      // Annotated with the parseAtlas intersection so the optional malformedFrames slot survives the union
+      // collapse (parseSpinePage's plain ParseResult is assignable; it never sets the field ⇒ `?? []` empty).
+      const res: ParseResult & { malformedFrames?: MalformedFrame[] } =
         a.kind === 'spine'
           ? parseSpinePage(a.manifest as SpinePage, image, { name: a.name })
           : parseAtlas(a.manifest, image, { name: a.name });
@@ -65,6 +67,12 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       if (res.ok && res.asset.kind === 'atlas') {
         assets.push(res.asset);
         imageBytes.set(res.asset.atlas.name, a.image.bytes);
+        // Per-frame TexturePacker/Pixi recovery (round21 #1): the sheet kept its good sprites; surface each
+        // dropped frame individually via the same `<atlas>#<frame>` ref the Spine recovery uses. Only the
+        // non-spine parseAtlas result carries malformedFrames; parseSpinePage's result never does (?? []).
+        for (const mf of res.malformedFrames ?? []) {
+          unparsed.push({ ref: `${a.name}#${mf.name}`, reason: mf.reason });
+        }
       } else if (!res.ok) {
         unparsed.push({ ref: a.name, reason: res.error });
       }
