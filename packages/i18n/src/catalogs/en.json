@@ -124,6 +124,17 @@
     "other": "{sprites} untrimmed sprites carry transparent margins around their opaque art. That padding pins {vram:bytes} of VRAM ({area}px × 4) that a trimmed repack reclaims up to, plus ~{disk:bytes} of atlas disk (area estimate)."
   },
   "find.trim-margin.fix": "Repack with trim enabled so each frame is tightened to its opaque bounds.",
+  "find.bleeding.title": {
+    "$count": "pairs",
+    "one": "1 zero-gutter frame pair — bleeding risk",
+    "other": "{pairs} zero-gutter frame pairs — bleeding risk"
+  },
+  "find.bleeding.detail": {
+    "$count": "pairs",
+    "one": "1 frame pair in this atlas touches with no gutter between them. IF your sprites use linear/trilinear filtering or mipmaps, the sampler can pull a neighbor's edge texels in and show 1px seams; nearest-neighbor pixel art is unaffected.",
+    "other": "{pairs} frame pairs in this atlas touch with no gutter between them. IF your sprites use linear/trilinear filtering or mipmaps, the sampler can pull a neighbor's edge texels in and show 1px seams; nearest-neighbor pixel art is unaffected."
+  },
+  "find.bleeding.fix": "Repack with a 1–2px gutter and edge-extrude (bleed) so touching frames don't sample across the boundary — the Pro fix's extrude option does this.",
   "find.cross-atlas-redundancy.title": {
     "$count": "dupes",
     "one": "{dupes} duplicate frame across {sheets} atlases — identical pixels on separate sheets",

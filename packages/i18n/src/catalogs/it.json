@@ -146,6 +146,17 @@
     "other": "{sprites} sprite non ritagliati portano margini trasparenti attorno alla loro grafica opaca. Quel margine fissa {vram:bytes} di VRAM ({area}px × 4) che una ricompattazione con ritaglio recupera fino a, più ~{disk:bytes} di disco dell'atlas (stima per area)."
   },
   "find.trim-margin.fix": "Ricompatta con il ritaglio abilitato così ogni fotogramma è ridotto ai suoi limiti opachi.",
+  "find.bleeding.title": {
+    "$count": "pairs",
+    "one": "1 coppia di fotogrammi senza spaziatura — rischio di sbavatura",
+    "other": "{pairs} coppie di fotogrammi senza spaziatura — rischio di sbavatura"
+  },
+  "find.bleeding.detail": {
+    "$count": "pairs",
+    "one": "1 coppia di fotogrammi in questo atlas si tocca senza spaziatura tra di loro. SE i tuoi sprite usano filtraggio lineare/trilineare o mipmap, il campionatore può tirare dentro i texel di bordo del vicino e mostrare cuciture da 1px; la pixel art con vicino più prossimo non è interessata.",
+    "other": "{pairs} coppie di fotogrammi in questo atlas si toccano senza spaziatura tra di loro. SE i tuoi sprite usano filtraggio lineare/trilineare o mipmap, il campionatore può tirare dentro i texel di bordo del vicino e mostrare cuciture da 1px; la pixel art con vicino più prossimo non è interessata."
+  },
+  "find.bleeding.fix": "Ricompatta con una spaziatura di 1–2px ed estrusione dei bordi (bleed) così i fotogrammi a contatto non campionano oltre il confine — l'opzione di estrusione del fix Pro lo fa.",
   "find.cross-atlas-redundancy.title": {
     "$count": "dupes",
     "one": "{dupes} fotogramma duplicato su {sheets} atlas — pixel identici su fogli separati",

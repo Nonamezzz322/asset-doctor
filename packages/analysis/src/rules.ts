@@ -488,6 +488,146 @@ export function strippableMetadataFinding(
   };
 }
 
+/** Texture-bleeding detector. Scans `atlas.sprites[].frame` (integer rects AS PLACED, NO decode) for PAIRS
+ *  that (a) share a vertical OR horizontal edge with EXACTLY 0px gap AND (b) overlap on the perpendicular
+ *  axis by >0px (strict — a bare corner touch does not bleed). Under linear/trilinear filtering or mipmaps a
+ *  GPU's sampler reaches across a 0-gutter boundary and pulls a neighbor's outermost texels in, showing 1px
+ *  seams; nearest-neighbor pixel art is bleed-IMMUNE, so the copy hedges honestly (we cannot read the filter
+ *  mode from static geometry). HONESTY (invariant 5): this is a CORRECTNESS finding, NOT a savings finding —
+ *  the edge-extrude FIX can GROW the sheet (it consumes gutter), so it carries NO diskBytesSaved and NO
+ *  vramBytesSaved; the estimate field is omitted entirely. We MEASURE a rect-adjacency fact and generate
+ *  nothing (invariant 3 — the extrude fix is a separate, already-shipped piece). DE-ALIAS: two manifest names
+ *  on the IDENTICAL packed rect are ONE region (they cannot bleed against themselves) and collapse to one
+ *  distinct rect (mirrors the frame-redundancy distinct-rect guard). Rotated frames are skipped (the seam
+ *  direction is ambiguous after rotation and the extrude fix is rectangle-only). O(n·k) via edge-coordinate
+ *  buckets, integer-only, deterministic. Returns null with no config or below `minPairs`. */
+export function bleedingFinding(atlas: Atlas, cfg: ThresholdConfig): Finding | null {
+  if (!cfg.bleeding) return null;
+
+  const rectKey = (r: Rect): string => `${r.x},${r.y},${r.w},${r.h}`;
+
+  // De-alias by distinct packed rect, ascending by first sprite index (determinism). The same rect under
+  // multiple manifest names is ONE GPU region — it cannot bleed against itself, so it counts once. Skip
+  // rotated frames (out of scope) and degenerate zero-area frames (no meaningful seam). `names` keeps every
+  // sprite name on a distinct rect so the proof attributes aliases too.
+  const rects: Rect[] = [];
+  const names: string[][] = [];
+  const byRect = new Map<string, number>(); // rectKey → distinct-rect index (for alias attribution)
+  for (const sp of atlas.sprites) {
+    if (sp.rotated === true) continue;
+    const f = sp.frame;
+    if (f.w <= 0 || f.h <= 0) continue;
+    const key = rectKey(f);
+    let idx = byRect.get(key);
+    if (idx === undefined) {
+      idx = rects.length;
+      byRect.set(key, idx);
+      rects.push(f);
+      names.push([sp.name]);
+    } else {
+      names[idx]!.push(sp.name); // alias on an already-counted rect — joins the proof, never a new region
+    }
+  }
+  if (rects.length < 2) return null;
+
+  // Bucket distinct rects by RIGHT edge x (r.x+r.w) and by BOTTOM edge y (r.y+r.h). A rect B whose right
+  // edge == A's left edge (A.x) touches A horizontally; B whose bottom edge == A's top edge (A.y) touches A
+  // vertically. Edge-coordinate buckets keep adjacency O(n·k) instead of O(n²).
+  const rightEdge = new Map<number, number[]>(); // (r.x+r.w) → distinct-rect indices
+  const bottomEdge = new Map<number, number[]>(); // (r.y+r.h) → distinct-rect indices
+  const bucket = (m: Map<number, number[]>, edge: number, i: number): void => {
+    const g = m.get(edge);
+    if (g) g.push(i);
+    else m.set(edge, [i]);
+  };
+  for (let i = 0; i < rects.length; i++) {
+    const r = rects[i]!;
+    bucket(rightEdge, r.x + r.w, i);
+    bucket(bottomEdge, r.y + r.h, i);
+  }
+
+  // Each unordered touching pair recorded once (canonical key over the LOWER/HIGHER distinct-rect index).
+  // Strips are emitted in pair-discovery order, then sorted (y,x,h,w) for a deterministic overlay.
+  const pairKeys = new Set<string>();
+  const touchingIdx = new Set<number>(); // distinct-rect indices participating in any pair (for refs)
+  const strips: Rect[] = [];
+  const stripSeen = new Set<string>();
+  const pushStrip = (s: Rect): void => {
+    const k = `${s.x},${s.y},${s.w},${s.h}`;
+    if (!stripSeen.has(k)) {
+      stripSeen.add(k);
+      strips.push(s);
+    }
+  };
+  const record = (a: number, b: number): void => {
+    const lo = Math.min(a, b);
+    const hi = Math.max(a, b);
+    pairKeys.add(`${lo},${hi}`);
+    touchingIdx.add(a);
+    touchingIdx.add(b);
+  };
+
+  for (let i = 0; i < rects.length; i++) {
+    const A = rects[i]!;
+    // LEFT edge of A (x === A.x): a B whose RIGHT edge equals A.x touches A on its left. Require >0px
+    // vertical overlap (strict — a corner touch has 0 overlap and does NOT bleed).
+    for (const j of rightEdge.get(A.x) ?? []) {
+      if (j === i) continue;
+      const B = rects[j]!;
+      const top = Math.max(A.y, B.y);
+      const bottom = Math.min(A.y + A.h, B.y + B.h);
+      if (top < bottom) {
+        record(i, j);
+        pushStrip({ x: A.x, y: top, w: 1, h: bottom - top }); // 1px-wide vertical seam strip
+      }
+    }
+    // TOP edge of A (y === A.y): a B whose BOTTOM edge equals A.y touches A on its top. Require >0px
+    // horizontal overlap (strict).
+    for (const j of bottomEdge.get(A.y) ?? []) {
+      if (j === i) continue;
+      const B = rects[j]!;
+      const left = Math.max(A.x, B.x);
+      const right = Math.min(A.x + A.w, B.x + B.w);
+      if (left < right) {
+        record(i, j);
+        pushStrip({ x: left, y: A.y, w: right - left, h: 1 }); // 1px-tall horizontal seam strip
+      }
+    }
+  }
+
+  const pairs = pairKeys.size;
+  if (pairs < cfg.bleeding.minPairs) return null;
+
+  const severity: Severity = pairs >= cfg.bleeding.warnPairs ? 'warn' : 'info';
+  // Proof: every sprite name on a touching distinct rect (incl. aliases), sorted unique.
+  const refs = [...new Set([...touchingIdx].flatMap((i) => names[i]!))].sort();
+  strips.sort((a, b) => a.y - b.y || a.x - b.x || a.h - b.h || a.w - b.w);
+
+  const one = pairs === 1;
+  const pairWord = one ? 'pair' : 'pairs';
+  const touchWord = one ? 'touches' : 'touch';
+  return {
+    id: `${atlas.name}:bleeding`,
+    rule: 'bleeding',
+    severity,
+    assetRef: atlas.name,
+    relatedRefs: refs,
+    title: `${pairs} zero-gutter frame ${pairWord} — bleeding risk`,
+    detail:
+      `${pairs} frame ${pairWord} in this atlas ${touchWord} with no gutter between them. ` +
+      `IF your sprites use linear/trilinear filtering or mipmaps, the sampler can pull a neighbor's edge ` +
+      `texels in and show 1px seams; nearest-neighbor pixel art is unaffected.`,
+    fix:
+      `Repack with a 1–2px gutter and edge-extrude (bleed) so touching frames don't sample across the ` +
+      `boundary — the Pro fix's extrude option does this.`,
+    // NO estimate field — a CORRECTNESS finding, not a saving (edge-extrude can GROW the sheet; any
+    // diskBytesSaved/vramBytesSaved would be a lie, invariant 5).
+    overlay: [{ kind: 'bleeding', rects: strips }],
+    messageKey: 'bleeding',
+    params: { pairs, frames: refs.length, refs: refs.join(', ') },
+  };
+}
+
 export function wastedRegions(
   atlas: Atlas,
   cfg: ThresholdConfig,

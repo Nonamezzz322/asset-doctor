@@ -144,6 +144,17 @@
     "other": "{sprites} ungetrimmte Sprites tragen transparente Ränder um ihre deckende Grafik. Dieser Rand bindet {vram:bytes} VRAM ({area}px × 4), die ein getrimmtes Neupacken bis zu freigibt, plus ~{disk:bytes} Atlas-Speicher (Flächenschätzung)."
   },
   "find.trim-margin.fix": "Mit aktiviertem Trimmen neu packen, damit jeder Frame auf seine deckenden Grenzen verkleinert wird.",
+  "find.bleeding.title": {
+    "$count": "pairs",
+    "one": "1 Frame-Paar ohne Abstand — Bleeding-Risiko",
+    "other": "{pairs} Frame-Paare ohne Abstand — Bleeding-Risiko"
+  },
+  "find.bleeding.detail": {
+    "$count": "pairs",
+    "one": "1 Frame-Paar in diesem Atlas berührt sich ohne Abstand dazwischen. WENN deine Sprites lineare/trilineare Filterung oder Mipmaps verwenden, kann der Sampler die Randtexel des Nachbarn hereinziehen und 1px-Nähte zeigen; Nearest-Neighbor-Pixelart ist nicht betroffen.",
+    "other": "{pairs} Frame-Paare in diesem Atlas berühren sich ohne Abstand dazwischen. WENN deine Sprites lineare/trilineare Filterung oder Mipmaps verwenden, kann der Sampler die Randtexel des Nachbarn hereinziehen und 1px-Nähte zeigen; Nearest-Neighbor-Pixelart ist nicht betroffen."
+  },
+  "find.bleeding.fix": "Mit 1–2px Abstand neu packen und Kanten extrudieren (Bleed), damit sich berührende Frames nicht über die Grenze samplen — die Extrude-Option des Pro-Fix erledigt das.",
   "find.cross-atlas-redundancy.title": {
     "$count": "dupes",
     "one": "{dupes} doppelter Frame über {sheets} Atlanten — identische Pixel auf getrennten Sheets",

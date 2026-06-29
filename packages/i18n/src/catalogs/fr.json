@@ -146,6 +146,17 @@
     "other": "{sprites} sprites non rognés portent des marges transparentes autour de leur art opaque. Cette marge fixe {vram:bytes} de VRAM ({area}px × 4) qu'un réempaquetage avec rognage récupère jusqu'à, plus ~{disk:bytes} de disque d'atlas (estimation par surface)."
   },
   "find.trim-margin.fix": "Réempaquetez avec le rognage activé pour que chaque image soit ajustée à ses limites opaques.",
+  "find.bleeding.title": {
+    "$count": "pairs",
+    "one": "1 paire d'images sans marge — risque de bavure",
+    "other": "{pairs} paires d'images sans marge — risque de bavure"
+  },
+  "find.bleeding.detail": {
+    "$count": "pairs",
+    "one": "1 paire d'images dans cet atlas se touche sans marge entre elles. SI vos sprites utilisent un filtrage linéaire/trilinéaire ou des mipmaps, l'échantillonneur peut attirer les texels de bord du voisin et afficher des coutures de 1px ; le pixel art au plus proche voisin n'est pas affecté.",
+    "other": "{pairs} paires d'images dans cet atlas se touchent sans marge entre elles. SI vos sprites utilisent un filtrage linéaire/trilinéaire ou des mipmaps, l'échantillonneur peut attirer les texels de bord du voisin et afficher des coutures de 1px ; le pixel art au plus proche voisin n'est pas affecté."
+  },
+  "find.bleeding.fix": "Réempaquetez avec une marge de 1–2px et une extrusion des bords (bleed) pour que les images en contact n'échantillonnent pas à travers la limite — l'option d'extrusion du fix Pro le fait.",
   "find.cross-atlas-redundancy.title": {
     "$count": "dupes",
     "one": "{dupes} image dupliquée sur {sheets} atlas — pixels identiques sur des feuilles distinctes",

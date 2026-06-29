@@ -22,6 +22,7 @@ import type {
 import { MIP_OVERHEAD } from '@asset-doctor/core';
 import { DEFAULT_THRESHOLDS } from './config';
 import {
+  bleedingFinding,
   dimensionFindings,
   formatFinding,
   frameRedundancyFinding,
@@ -208,6 +209,12 @@ export async function analyze(
       if (occ) findings.push(occ);
       if (waste) findings.push(waste);
       findings.push(...dimensionFindings(atlas.name, atlas.size, cfg));
+      // Texture bleeding: frame pairs touching with 0px gutter (pure rect math off the placed frames — NO
+      // decode, NO host data). A CORRECTNESS finding: it carries no saving (edge-extrude can grow the sheet,
+      // invariant 5), so NOTHING flows into potentialDiskSaved/totals. Absent cfg.bleeding (CLI/headless) ⇒
+      // no finding ⇒ byte-identical.
+      const bleed = bleedingFinding(atlas, cfg);
+      if (bleed) findings.push(bleed);
       await addFormat(atlas.name, image, 'unknown'); // M1: atlases keep today's lossy verdict
       // Strippable ancillary metadata on the atlas PAGE image (the manifest JSON is never scanned). De-overlapped
       // with the page's format saving via bumpBest (one re-encode transcodes AND strips the metadata).

@@ -16,6 +16,7 @@ export {
   solidFillFinding,
   frameRedundancyFinding,
   trimMarginFinding,
+  bleedingFinding,
   wastedAlphaFinding,
   strippableMetadataFinding,
   wastedRegions,

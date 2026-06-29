@@ -142,6 +142,17 @@
     "other": "{sprites} 个未裁剪精灵在其不透明图像周围带有透明边距。该留白占用 {vram:bytes} 显存（{area}px × 4），启用裁剪的重排最多可回收这些空间，另加约 {disk:bytes} 的图集磁盘（按面积估算）。"
   },
   "find.trim-margin.fix": "启用裁剪后重排，使每帧收紧到其不透明边界。",
+  "find.bleeding.title": {
+    "$count": "pairs",
+    "one": "1 对零间距帧 — 渗色风险",
+    "other": "{pairs} 对零间距帧 — 渗色风险"
+  },
+  "find.bleeding.detail": {
+    "$count": "pairs",
+    "one": "此图集中有 1 对帧彼此相接、之间没有间距。如果你的精灵使用线性/三线性过滤或 mipmap，采样器可能拉入相邻帧的边缘纹素并显示 1px 接缝；最近邻像素美术不受影响。",
+    "other": "此图集中有 {pairs} 对帧彼此相接、之间没有间距。如果你的精灵使用线性/三线性过滤或 mipmap，采样器可能拉入相邻帧的边缘纹素并显示 1px 接缝；最近邻像素美术不受影响。"
+  },
+  "find.bleeding.fix": "以 1–2px 间距重排并对边缘进行扩边（bleed），使相接的帧不会跨越边界采样 — Pro 修复的扩边选项可做到这一点。",
   "find.cross-atlas-redundancy.title": {
     "$count": "dupes",
     "one": "{dupes} 个重复帧跨 {sheets} 个图集 — 不同图集上像素完全相同",

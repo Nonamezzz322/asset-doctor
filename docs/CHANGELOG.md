@@ -10,13 +10,40 @@ GitHub creds — user pushes); commit hashes below are over that base.
 
 ---
 
-## Round 26 — selection (2 picks; #6 shipped) — 2026-06-29
+## Round 26 — selection (2 picks; all shipped) — 2026-06-29
 Selection (strict bar, thin space): 4-lens brainstorm → 11 candidates → a skeptical judge that VERIFIED each
 premise against code and picked only 2 honesty/correctness wins, dropping 9 (folder-keyed bundles = speculative
 new capability; minify-JSON = self-marginal; PNG bit-depth = unmeasurable estimate; MAX_TEXTURE_SIZE probe =
 rarely fires; wasted-alpha WebP confound = narrow + presentation-only; loose-transcode size guard = uncertain;
 correlateRuntimeDelta = the moat direction but too broad for a contained round; runtime regression tests + R1
 estimate labeling = no user-facing capability). Designs in `docs/improvements/round26-*.md`.
+
+- **#3 texture-bleeding detector — lights the dead teal `bleeding` overlay via pure frame-adjacency**
+  (`docs/improvements/round26-bleeding-detector.md`)
+  — `OverlayZone.kind` already included `'bleeding'` and FilmViewer already styled it teal, but **nothing ever
+  emitted it** — texture bleeding (1px color seams when the GPU's linear/mipmap sampler reaches across a 0-gutter
+  frame boundary, a classic PixiJS/Phaser pitfall) was never diagnosed, and we already ship the FIX (edge-extrude).
+  **New pure rule** `bleedingFinding(atlas, cfg)` (`packages/analysis/src/rules.ts`) scans `Atlas.sprites[].frame`
+  (integer rects, ZERO decode) for PAIRS sharing an edge with EXACTLY 0px gap AND strict `>0` perpendicular overlap
+  (corner-only touches excluded), skipping rotated + de-aliasing same-rect frames (one GPU region can't bleed
+  against itself), bucketed by edge coordinate for O(n·k). Gated by `minPairs` (default 4) / `warnPairs` (16);
+  emits ONE Finding with ONE `{kind:'bleeding', rects: thin 1px seam strips}` overlay (FilmViewer renders it
+  generically — **no UI change**). **Invariant 5/3 honesty (the load-bearing constraint):** it carries **NO
+  `estimate` at all** — this is a CORRECTNESS finding, not a saving (edge-extrude can GROW the sheet, so any
+  disk/VRAM claim would be a lie); nothing flows into `potentialDiskSaved`/totals. Copy is the **conditional honest
+  hedge** ("IF your sprites use linear/trilinear filtering or mipmaps … nearest-neighbor pixel art is unaffected").
+  Fires in-browser by default (in `DEFAULT_THRESHOLDS`); **CLI byte-identical** (not in `resolveThresholds` + the
+  `if (!cfg.bleeding) return null` guard). Deterministic (integer-only, stable ordering). **No worker/UI/backend
+  change.**
+  — **Golden reconciliation (honest):** all three existing `ATLAS_CASES` goldens were inspected by frame
+  coordinates — each has ≥10px padding (no touching pairs) so each stays silent and its `expected.json` is
+  UNCHANGED (no blanket update). **Tests** (`analysis.test.ts`, 13 inline cases): touching pair counted + 1px
+  strip + `estimate` undefined (the invariant-5 assertion); 1px-gap padded → null; corner-only → null;
+  below-minPairs → null; warn boundary; rotated excluded; aliased-same-rect not counted; no-config → null;
+  `analyze()` emits bleeding with NOTHING in `totals.potentialDiskSaved`; padded atlas silent. i18n:
+  `find.bleeding.{title,detail,fix}` ×9 (plural on `{pairs}`, identical placeholders; render-drift + catalogs
+  parity green). Review verdict: **SHIP** (zero blockers/majors; honestyOk). Gate: typecheck + analysis (148) +
+  i18n (25) + budget (31) + full vitest + lint green.
 
 - **#6 de-overlap exact-duplicate dropped copies vs their own format/alpha/strippable savings — removes a
   headline disk over-claim** (`docs/improvements/round26-dedup-overclaim.md`)

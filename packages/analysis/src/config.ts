@@ -52,6 +52,13 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   // glyph-page occupancy at/below which the readout is `warn`, else `info`. The estimate carries ONLY
   // occupancyPct — the generic occupancy/oversize findings own the VRAM (w·h·4) on the SAME page; this rule
   // never double-counts (invariant 5). Browser-only — NOT in resolveThresholds (the CLI never opts in).
+  bleeding: { minPairs: 4, warnPairs: 16 }, // CALIBRATE — texture-bleeding gate. Atlas frame PAIRS sharing
+  // an edge with 0px gutter (pure rect math, no decode). `minPairs` (4): adjacent pairs before the info
+  // finding fires (a few touching frames is common/harmless under nearest-neighbor). `warnPairs` (16): at/above
+  // ⇒ warn (a sheet broadly packed without gutters). CORRECTNESS finding — NO disk/VRAM saving (edge-extrude
+  // can GROW the sheet, invariant 5); info/warn only. Browser-only — NOT in resolveThresholds (the CLI never
+  // opts in). Provisional defaults; calibrate against real exports (a TexturePacker sheet packed with
+  // padding>=1 produces ZERO pairs and must stay silent — the key calibration check).
   strippableMetadata: { minBytes: 4096, warnBytes: 65536 }, // CALIBRATE — strippable ancillary-metadata gate.
   // A loose/atlas-page image carrying ICC/EXIF/XMP + non-essential chunks the GPU never uses. `minBytes`: the
   // metadata must reach ≥ this (4 KB) before flagging (a tiny tIME chunk is noise). `warnBytes`: at/above this

@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import type { Asset, Atlas, ImageAsset, ImageMime, Rect } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseFntText, parseFntPage, type FntPage } from '@asset-doctor/parsers';
 import { groupFiles, type RawFile } from '@asset-doctor/ingest';
-import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, frameRedundancyFinding, trimMarginFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, crossAtlasRedundancyFinding, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, crossAtlasRedundancyFinding, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -706,6 +706,147 @@ describe('frame-redundancy (within-atlas duplicate frames)', () => {
       frameHashes: [{ atlasRef: 'x.png', frameHashes: ['aa', 'aa', 'aa'] }],
     });
     expect(report.findings.some((f) => f.rule === 'frame-redundancy')).toBe(false);
+  });
+});
+
+describe('bleeding (frame pairs touching with 0px gutter)', () => {
+  // A pure atlas with frames at the given placed rects. No decode — the rule reads frame rects only.
+  const blAtlas = (
+    name: string,
+    frames: { x: number; y: number; w: number; h: number; rotated?: boolean; sameName?: string }[],
+  ): Atlas => ({
+    name,
+    imageRef: name,
+    size: { w: 256, h: 256 },
+    sprites: frames.map((f, i) => ({
+      name: f.sameName ?? `b${i}`,
+      frame: { x: f.x, y: f.y, w: f.w, h: f.h },
+      rotated: f.rotated ?? false,
+      trimmed: false,
+      sourceSize: { w: f.w, h: f.h },
+    })),
+    source: { kind: 'pixi' },
+  });
+  // Opt-in config with a low gate so a single pair fires (DEFAULT minPairs is 4).
+  const cfg1 = { ...DEFAULT_THRESHOLDS, bleeding: { minPairs: 1, warnPairs: 16 } };
+
+  const blAsset = (atlas: Atlas, byteSize = 8000): Asset => ({
+    kind: 'atlas',
+    atlas,
+    image: { name: atlas.name, imageRef: atlas.imageRef, size: atlas.size, mime: 'image/png', byteSize },
+  });
+
+  it('two frames touching with 0 gutter + vertical overlap ⇒ pair counted, 1px strip, NO estimate', () => {
+    // A={0,0,32,32}, B={32,0,32,32}: B's right edge (64) ≠ A.x, but A's right edge (32) === B.x — so from
+    // B's perspective A touches B's left. The rule finds the pair either way (symmetric record).
+    const f = bleedingFinding(blAtlas('tight.png', [{ x: 0, y: 0, w: 32, h: 32 }, { x: 32, y: 0, w: 32, h: 32 }]), cfg1)!;
+    expect(f).not.toBeNull();
+    expect(f.rule).toBe('bleeding');
+    expect(f.severity).toBe('info'); // 1 pair < warnPairs(16)
+    expect(f.messageKey).toBe('bleeding');
+    expect(f.params?.pairs).toBe(1);
+    // One overlay zone, kind 'bleeding', with a thin 1px-wide vertical seam strip at the shared edge x=32.
+    expect(f.overlay).toHaveLength(1);
+    expect(f.overlay?.[0]?.kind).toBe('bleeding');
+    expect(f.overlay?.[0]?.rects).toHaveLength(1);
+    const strip = f.overlay![0]!.rects[0]!;
+    expect(strip.w).toBe(1); // a SEAM line, not a region fill
+    expect(strip).toEqual({ x: 32, y: 0, w: 1, h: 32 });
+    // INVARIANT 5: a correctness finding carries NO estimate at all — edge-extrude can GROW the sheet.
+    expect(f.estimate).toBeUndefined();
+    expect(f.relatedRefs).toEqual(['b0', 'b1']);
+  });
+
+  it('a horizontal touch yields a 1px-tall strip', () => {
+    // A={0,0,32,32}, B={0,32,32,32}: A's bottom edge (32) === B.y → B touches A's top. 1px-tall strip.
+    const f = bleedingFinding(blAtlas('h.png', [{ x: 0, y: 0, w: 32, h: 32 }, { x: 0, y: 32, w: 32, h: 32 }]), cfg1)!;
+    expect(f.params?.pairs).toBe(1);
+    const strip = f.overlay![0]!.rects[0]!;
+    expect(strip.h).toBe(1);
+    expect(strip).toEqual({ x: 0, y: 32, w: 32, h: 1 });
+  });
+
+  it('padded frames (1px gap) ⇒ null (the silence calibration case)', () => {
+    // A={0,0,32,32}, B={33,0,32,32}: A's right edge 32 ≠ B.x 33 — a 1px gutter, no bleed.
+    expect(bleedingFinding(blAtlas('pad.png', [{ x: 0, y: 0, w: 32, h: 32 }, { x: 33, y: 0, w: 32, h: 32 }]), cfg1)).toBeNull();
+  });
+
+  it('corner-only touch ⇒ null (0 perpendicular overlap, strict <)', () => {
+    // A={0,0,32,32}, B={32,32,32,32}: they meet at the single point (32,32) — edge coords match but the
+    // perpendicular overlap is exactly 0 (top===bottom), so NOT a bleeding pair.
+    expect(bleedingFinding(blAtlas('corner.png', [{ x: 0, y: 0, w: 32, h: 32 }, { x: 32, y: 32, w: 32, h: 32 }]), cfg1)).toBeNull();
+  });
+
+  it('below minPairs ⇒ null', () => {
+    // One touching pair, but DEFAULT minPairs is 4 ⇒ suppressed.
+    expect(bleedingFinding(blAtlas('one.png', [{ x: 0, y: 0, w: 32, h: 32 }, { x: 32, y: 0, w: 32, h: 32 }]), DEFAULT_THRESHOLDS)).toBeNull();
+  });
+
+  it('at/above warnPairs ⇒ warn, else info', () => {
+    // A 4×4 grid of 32×32 cells, 0 gutter → 24 touching pairs (12 horizontal + 12 vertical). With a config
+    // whose warnPairs=24 ⇒ warn; with warnPairs=25 ⇒ info (24 < 25). Proves the boundary is inclusive.
+    const grid: { x: number; y: number; w: number; h: number }[] = [];
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) grid.push({ x: c * 32, y: r * 32, w: 32, h: 32 });
+    const warnAt24 = bleedingFinding(blAtlas('grid.png', grid), { ...DEFAULT_THRESHOLDS, bleeding: { minPairs: 1, warnPairs: 24 } })!;
+    expect(warnAt24.params?.pairs).toBe(24);
+    expect(warnAt24.severity).toBe('warn'); // pairs >= warnPairs ⇒ warn (inclusive)
+    const infoAt25 = bleedingFinding(blAtlas('grid.png', grid), { ...DEFAULT_THRESHOLDS, bleeding: { minPairs: 1, warnPairs: 25 } })!;
+    expect(infoAt25.severity).toBe('info'); // 24 < 25 ⇒ info
+  });
+
+  it('rotated frames excluded (extrude fix is rect-only, seam direction ambiguous)', () => {
+    // A touching pair where one frame is rotated ⇒ the rotated frame is filtered out ⇒ no pair ⇒ null.
+    expect(bleedingFinding(blAtlas('rot.png', [{ x: 0, y: 0, w: 32, h: 32 }, { x: 32, y: 0, w: 32, h: 32, rotated: true }]), cfg1)).toBeNull();
+  });
+
+  it('aliased frames (identical rect, 2 names) ⇒ not a bleeding pair (cannot bleed against itself)', () => {
+    // Two manifest names on the IDENTICAL packed rect collapse to one distinct rect — one GPU region, no pair.
+    expect(bleedingFinding(blAtlas('alias.png', [
+      { x: 0, y: 0, w: 32, h: 32, sameName: 'shared' },
+      { x: 0, y: 0, w: 32, h: 32, sameName: 'shared' },
+    ]), cfg1)).toBeNull();
+  });
+
+  it('aliases on a touching distinct rect still join the proof (relatedRefs)', () => {
+    // A and B touch; A is referenced by two names (same rect) — both alias names appear in refs, B too.
+    const f = bleedingFinding(blAtlas('attr.png', [
+      { x: 0, y: 0, w: 32, h: 32, sameName: 'left' },
+      { x: 0, y: 0, w: 32, h: 32, sameName: 'left_alias' },
+      { x: 32, y: 0, w: 32, h: 32, sameName: 'right' },
+    ]), cfg1)!;
+    expect(f.params?.pairs).toBe(1);
+    expect(f.relatedRefs).toEqual(['left', 'left_alias', 'right']);
+  });
+
+  it('no bleeding config ⇒ null (CLI/budget configs that don\'t opt in)', () => {
+    const cfg = { ...DEFAULT_THRESHOLDS };
+    delete cfg.bleeding;
+    expect(bleedingFinding(blAtlas('t.png', [{ x: 0, y: 0, w: 32, h: 32 }, { x: 32, y: 0, w: 32, h: 32 }]), cfg)).toBeNull();
+  });
+
+  it('a single-frame / empty atlas ⇒ null (no pairs possible)', () => {
+    expect(bleedingFinding(blAtlas('solo.png', [{ x: 0, y: 0, w: 32, h: 32 }]), cfg1)).toBeNull();
+    expect(bleedingFinding(blAtlas('void.png', []), cfg1)).toBeNull();
+  });
+
+  it('analyze() emits bleeding for a zero-gutter atlas and NOTHING flows into totals.potentialDiskSaved', async () => {
+    // A 4×4 0-gutter grid trips the DEFAULT gate (24 pairs ≥ minPairs 4). The finding is unconditional —
+    // it fires in-browser by default (no host dep). Its estimate is absent, so potentialDiskSaved is untouched.
+    const grid: { x: number; y: number; w: number; h: number }[] = [];
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) grid.push({ x: c * 32, y: r * 32, w: 32, h: 32 });
+    const report = await analyze([blAsset(blAtlas('grid.png', grid))]);
+    const bl = report.findings.find((f) => f.rule === 'bleeding');
+    expect(bl).toBeDefined();
+    expect(bl?.severity).toBe('warn'); // 24 ≥ DEFAULT warnPairs(16)
+    expect(bl?.estimate).toBeUndefined();
+    // Invariant 5 aggregate honesty: the bleeding finding contributes nothing to the disk savings headline.
+    expect(report.totals.potentialDiskSaved).toBe(0);
+  });
+
+  it('analyze() stays silent for a padded atlas (no 0-gutter pair) — DEFAULT byte-identical', async () => {
+    // 2 frames with a 1px gutter ⇒ no pair ⇒ no bleeding finding, even with the DEFAULT gate live.
+    const report = await analyze([blAsset(blAtlas('pad2.png', [{ x: 0, y: 0, w: 32, h: 32 }, { x: 33, y: 0, w: 32, h: 32 }]))]);
+    expect(report.findings.some((f) => f.rule === 'bleeding')).toBe(false);
   });
 });
 

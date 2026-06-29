@@ -279,6 +279,8 @@ export type Rule =
   | 'frame-redundancy'
   // per-atlas group: untrimmed sprites whose transparent margin (frame − opaque bbox) wastes atlas space
   | 'trim-margin'
+  // per-atlas group: frame PAIRS sharing an edge with 0px gutter (texture-bleeding risk under linear/mipmaps)
+  | 'bleeding'
   // whole-folder (scope: 'folder'): frames whose pixel REGIONS are byte-identical ACROSS ≥2 atlases
   | 'cross-atlas-redundancy'
   // per-bmfont-page glyph-sheet readout (informational; a parsed .fnt page IS an atlas)
@@ -593,6 +595,14 @@ export interface ThresholdConfig {
    *  that don't opt in). Browser-only — NOT enumerated by resolveThresholds (mirrors frameRedundancy: the
    *  worker computes the opaque bboxes off the already-decoded page; the CLI never opts in). */
   trimMargin?: { minMarginPx: number; minRecoverablePct: number };
+  /** Texture-bleeding gate (browser + headless). Atlas frame PAIRS sharing an edge with 0px gutter
+   *  (host-free, pure rect math). `minPairs` — adjacent pairs before the info finding fires (a couple of
+   *  touching frames is common and harmless under nearest-neighbor). `warnPairs` — at/above this the
+   *  finding is `warn` (many zero-gutter edges = a sheet packed without bleed-safety). CORRECTNESS finding —
+   *  carries NO diskBytesSaved/vramBytesSaved (edge-extrude can GROW the sheet; any saving claim would be a
+   *  lie, invariant 5). Severity info/warn only. Optional/additive: absent ⇒ suppressed. Browser-only — NOT
+   *  enumerated by resolveThresholds (CLI never opts in). */
+  bleeding?: { minPairs: number; warnPairs: number };
   /** Cross-atlas-redundancy (frames whose pixel REGIONS are byte-identical ACROSS ≥2 atlases) gate.
    *  `minDuplicates` — the number of CROSS-SHEET duplicate copies a cluster must reach before firing
    *  (≥2 ⇒ the frame recurs on ≥2 sheets; counted by DISTINCT packed rect per atlas so a pre-aliased
