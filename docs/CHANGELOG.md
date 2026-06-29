@@ -10,12 +10,41 @@ GitHub creds — user pushes); commit hashes below are over that base.
 
 ---
 
-## Round 25 — selection (3 picks; #2 shipped) — 2026-06-29
+## Round 25 — selection (3 picks; #1 + #2 shipped) — 2026-06-29
 Selection (strict bar): from 10 candidates, picked 3 genuinely valuable + non-overlapping —
 **(#0)** strippable-metadata detector, **(#1)** BMFont XML+binary parsers, **(#2)** resample the
 oversize-clamped TOP tier — and dropped the rest (NPOT-fix net-negative on the default pipeline,
 lowercaseOutputNames footgun, two latent-only/no-round cleanups, two duplicates). Designs each
 went design→skeptic→adversarial-review before impl. Designs live in `docs/improvements/round25-*.md`.
+
+- **#1 BMFont XML + binary `.fnt` parsers — TEXT-format parity completion**
+  (`docs/improvements/round25-bmfont-xml-binary-parsers.md`)
+  — `packages/ingest` detected XML (`<`-led) and binary (`BMF`+0x03) `.fnt` by magic and dumped BOTH to
+  `unparsed[]` as "not in TEXT format" — even though binary is the **default** BMFont.exe/libGDX output and
+  carries the identical font + glyph data. **Fix:** `parseFntXml(text)` + `parseFntBinary(bytes)` in
+  `packages/parsers/src/fnt.ts`, both producing **byte-identical `FntPage[]`** to `parseFntText`. First a
+  behavior-preserving refactor lifts the shared page-assembly + glyph-routing + recovery into
+  `buildFntPages(raw: RawFnt)` so all three front-ends share ONE recovery implementation (byte-identity by
+  construction; all pre-existing TEXT tests + the `bmfont-sparse` fixture pass unchanged). `parseFntXml` is a
+  dep-free, DOM-free, worker-safe attribute scanner with the same `num/fin` NaN-preserving discipline + minimal
+  entity decode. `parseFntBinary` is a bounds-checked AngelCode **BMF v3** block walker (info `fontName`@14;
+  common `lineHeight` u16@0/`scaleW`@4/`scaleH`@6; pages uniform-stride NUL-terminated; char 20B `id` u32@0,
+  `x/y/w/h` u16@4-10, `page` u8@18; kerning 10B) that **never throws** — every multi-byte read bounds-checked,
+  the walk stops on any short/OOB read and builds on what was collected; wrong-magic / v1-v2 / truncated all
+  degrade to `[]` ⇒ honest `unparsed` (never silent-dropped). Ingest now dispatches by bounds-safe magic with a
+  try/catch backstop. **No core/worker/UI/backend change** (downstream `parseFntPage` → worker → `font-glyph-page`
+  readout → per-glyph `malformedGlyphs` recovery is reused verbatim); pure, deterministic.
+  — **Fixtures/tests**: extended the EXISTING generator (`fixtures/_generator/generate.mjs` Case 12, the single
+  source of truth) with an `encodeBmfBinary` helper + two sibling `bmfont-sparse-xml/` and `bmfont-sparse-bin/`
+  emitted from the SAME glyph data + SAME `font.png` + SAME `expected.json` (all three byte-identical, md5
+  `8714885c…`; reproducible by `node fixtures/_generator/generate.mjs`). Parser unit tests assert
+  `toEqual(parseFntText(...))` byte-identity for XML + binary, binary OOB-glyph recovery, XML quote/entity, and
+  binary/XML defensive cases; the two `group-fnt.test.ts` XML/binary cases were rewritten to assert a bmfont
+  atlas (+ binary-no-page → missing, junk-`BMF\x03` → unparsed); the single-fixture analysis bmfont test became
+  an `it.each` 3-dir loop asserting the identical `expected.json` through the REAL `groupFiles → parseFntPage →
+  analyze` path. Review verdict: **SHIP** (zero blockers/majors; reviewer re-ran the gate + re-verified every
+  binary offset against the AngelCode spec). Gate: typecheck + parsers (37) + ingest (28) + analysis (119) +
+  full vitest + lint green.
 
 - **#2 resample the oversize-clamped TOP tier (effectiveScale<1) — close the r24#0 gap**
   (`docs/improvements/round25-resample-oversize-clamped-top-tier.md`)

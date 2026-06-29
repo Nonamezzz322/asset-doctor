@@ -4,7 +4,14 @@
 // lets Spine `.atlas` sheets reference page images across directories (../). Falls back to global
 // basename for flat uploads. Supports TexturePacker/Pixi JSON manifests and Spine/libGDX `.atlas`.
 
-import { parseSpineAtlasText, parseFntText, type SpinePage, type FntPage } from '@asset-doctor/parsers';
+import {
+  parseSpineAtlasText,
+  parseFntText,
+  parseFntXml,
+  parseFntBinary,
+  type SpinePage,
+  type FntPage,
+} from '@asset-doctor/parsers';
 import type { LooseRegion, PackGroup, Size, ThresholdConfig } from '@asset-doctor/core';
 
 export interface RawFile {
@@ -16,7 +23,7 @@ export interface RawFile {
 
 export interface GroupedAtlas {
   /** 'manifest' = TexturePacker/Pixi JSON; 'spine' = a parsed Spine page; 'bmfont' = a parsed BMFont
-   *  (.fnt TEXT) glyph page. */
+   *  (.fnt — TEXT, XML, or binary; all three normalize to the same FntPage) glyph page. */
   kind: 'manifest' | 'spine' | 'bmfont';
   manifest: unknown;
   image: RawFile;
@@ -31,8 +38,8 @@ export interface Grouped {
   /** Files that LOOK like an asset manifest but could not be used — surfaced honestly (symmetric with
    *  the fix engine's skipped[]), NEVER benign non-asset files. The "looks like a manifest but unusable"
    *  cases: a `.atlas` that threw, a `.json` that failed JSON.parse, a manifest with frames but no
-   *  meta.image, or a `.fnt` that is XML/binary (not TEXT BMFont) / parsed empty. `ref` = basename.
-   *  Sorted by ref; additive (absent/empty ⇒ byte-identical). */
+   *  meta.image, or a `.fnt` (TEXT/XML/binary) that THREW or parsed empty (no usable page/char). `ref` =
+   *  basename. Sorted by ref; additive (absent/empty ⇒ byte-identical). */
   unparsed: { ref: string; reason: string }[];
 }
 
@@ -118,21 +125,23 @@ export function groupFiles(files: RawFile[]): Grouped {
       continue;
     }
 
-    // AngelCode BMFont .fnt glyph sheets (TEXT format; one or more page images). XML (leading `<`) and
-    // binary (`BMF\x03`) .fnt are a different serialization we don't parse in v1 — surfaced honestly in
-    // unparsed[], NEVER silently dropped (same honesty contract as the `.atlas` / `.json` skip-points).
+    // AngelCode BMFont .fnt glyph sheets — all three serializations are dispatched by magic to the right
+    // parser, each producing the SAME FntPage[]: binary (`BMF\x03`) → parseFntBinary; XML (leading `<`) →
+    // parseFntXml; otherwise TEXT → parseFntText. A `.fnt` that THREW or parsed empty is surfaced honestly
+    // in unparsed[], NEVER silently dropped (same honesty contract as the `.atlas` / `.json` skip-points).
     if (/\.fnt$/i.test(f.name)) {
-      const text = new TextDecoder().decode(f.bytes);
-      // Binary BMFont starts with the magic `BMF` + version byte 3 (0x03); XML BMFont starts with `<`.
-      // Both are a different serialization we don't parse in v1 — surface honestly, never silent-drop.
-      const isBinaryBmf = text.startsWith('BMF') && text.charCodeAt(3) === 3;
-      if (text.trimStart().startsWith('<') || isBinaryBmf) {
-        unparsed.push({ ref: baseName(f.name), reason: 'BMFont .fnt not in TEXT format (XML/binary unsupported in v1)' });
-        continue;
-      }
+      const u8 = new Uint8Array(f.bytes);
+      // Binary BMFont starts with the magic `BMF` + version byte 3 (0x03). Bounds-safe (length >= 4).
+      const isBinaryBmf =
+        u8.length >= 4 && u8[0] === 0x42 && u8[1] === 0x4d && u8[2] === 0x46 && u8[3] === 3;
       let pages: FntPage[];
       try {
-        pages = parseFntText(text);
+        if (isBinaryBmf) {
+          pages = parseFntBinary(u8);
+        } else {
+          const text = new TextDecoder().decode(f.bytes);
+          pages = text.trimStart().startsWith('<') ? parseFntXml(text) : parseFntText(text);
+        }
       } catch (e) {
         unparsed.push({ ref: baseName(f.name), reason: `BMFont .fnt parse failed: ${msg(e)}` });
         continue;

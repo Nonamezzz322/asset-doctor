@@ -1342,48 +1342,54 @@ describe('bmfont-sparse — BMFont .fnt glyph-page readout through the REAL path
     return ab;
   };
 
-  it('groupFiles → parseFntPage → analyze fires font-glyph-page (warn) + the generic atlas findings', async () => {
-    const expected = readJson('bmfont-sparse/expected.json') as BmExpected;
-    // REAL path: ingest groups the .fnt + its page PNG as a bmfont atlas …
-    const files: RawFile[] = [
-      { name: 'font.fnt', path: 'font.fnt', bytes: readArrayBuffer('bmfont-sparse/font.fnt') },
-      { name: 'font.png', path: 'font.png', bytes: readArrayBuffer('bmfont-sparse/font.png') },
-    ];
-    const grouped = groupFiles(files);
-    expect(grouped.atlases).toHaveLength(1);
-    const a = grouped.atlases[0]!;
-    expect(a.kind).toBe('bmfont');
-    const fp = a.manifest as FntPage;
-    // per-glyph recovery: the OOB glyph (id=255) is surfaced, the page kept its 16 usable glyphs.
-    expect(fp.sprites).toHaveLength(expected.glyphCount);
-    expect(fp.kerningCount).toBe(expected.kerningCount);
-    expect(fp.face).toBe(expected.face);
-    expect(fp.malformedGlyphs).toEqual([expected.malformedGlyph]);
+  // The SAME font in all THREE serializations (TEXT/XML/binary): each .fnt is dispatched by magic to its
+  // parser, and ALL three must yield the IDENTICAL expected.json verdicts through the REAL pipeline. This
+  // proves the original defect (XML/binary → unsupported) is gone and font-glyph-page fires for each form.
+  it.each(['bmfont-sparse', 'bmfont-sparse-xml', 'bmfont-sparse-bin'])(
+    '%s: groupFiles → parseFntPage → analyze fires font-glyph-page (warn) + the generic atlas findings',
+    async (dir) => {
+      const expected = readJson(`${dir}/expected.json`) as BmExpected;
+      // REAL path: ingest groups the .fnt + its page PNG as a bmfont atlas …
+      const files: RawFile[] = [
+        { name: 'font.fnt', path: 'font.fnt', bytes: readArrayBuffer(`${dir}/font.fnt`) },
+        { name: 'font.png', path: 'font.png', bytes: readArrayBuffer(`${dir}/font.png`) },
+      ];
+      const grouped = groupFiles(files);
+      expect(grouped.atlases).toHaveLength(1);
+      const a = grouped.atlases[0]!;
+      expect(a.kind).toBe('bmfont');
+      const fp = a.manifest as FntPage;
+      // per-glyph recovery: the OOB glyph (id=255) is surfaced, the page kept its 16 usable glyphs.
+      expect(fp.sprites).toHaveLength(expected.glyphCount);
+      expect(fp.kerningCount).toBe(expected.kerningCount);
+      expect(fp.face).toBe(expected.face);
+      expect(fp.malformedGlyphs).toEqual([expected.malformedGlyph]);
 
-    // … parseFntPage builds the Atlas off the page-image bytes …
-    const res = parseFntPage(fp, { ref: a.name, bytes: new Uint8Array(a.image.bytes) }, { name: a.name });
-    expect(res.ok).toBe(true);
-    if (!res.ok || res.asset.kind !== 'atlas') throw new Error('expected atlas');
+      // … parseFntPage builds the Atlas off the page-image bytes …
+      const res = parseFntPage(fp, { ref: a.name, bytes: new Uint8Array(a.image.bytes) }, { name: a.name });
+      expect(res.ok).toBe(true);
+      if (!res.ok || res.asset.kind !== 'atlas') throw new Error('expected atlas');
 
-    // … and analyze fires the font readout BESIDE the generic findings (fontPages dep mirrors the worker).
-    const report = await analyze([res.asset], DEFAULT_THRESHOLDS, {
-      fontPages: [{ atlasRef: a.name, faceName: fp.face, kerningCount: fp.kerningCount }],
-    });
-    const f = report.findings.find((x) => x.rule === 'font-glyph-page');
-    expect(f).toBeTruthy();
-    expect(f!.severity).toBe('warn');
-    expect(f!.params!.glyphs).toBe(expected.glyphCount);
-    expect(f!.params!.kerning).toBe(expected.kerningCount);
-    expect(f!.params!.face).toBe(expected.face);
-    // the estimate carries ONLY occupancyPct (invariant 5 — no fabricated disk/VRAM saved)
-    expect(f!.estimate?.occupancyPct).toBeCloseTo(expected.occupancy, 4);
-    expect(f!.estimate?.vramBytesSaved).toBeUndefined();
-    expect(f!.estimate?.diskBytesSaved).toBeUndefined();
+      // … and analyze fires the font readout BESIDE the generic findings (fontPages dep mirrors the worker).
+      const report = await analyze([res.asset], DEFAULT_THRESHOLDS, {
+        fontPages: [{ atlasRef: a.name, faceName: fp.face, kerningCount: fp.kerningCount }],
+      });
+      const f = report.findings.find((x) => x.rule === 'font-glyph-page');
+      expect(f).toBeTruthy();
+      expect(f!.severity).toBe('warn');
+      expect(f!.params!.glyphs).toBe(expected.glyphCount);
+      expect(f!.params!.kerning).toBe(expected.kerningCount);
+      expect(f!.params!.face).toBe(expected.face);
+      // the estimate carries ONLY occupancyPct (invariant 5 — no fabricated disk/VRAM saved)
+      expect(f!.estimate?.occupancyPct).toBeCloseTo(expected.occupancy, 4);
+      expect(f!.estimate?.vramBytesSaved).toBeUndefined();
+      expect(f!.estimate?.diskBytesSaved).toBeUndefined();
 
-    // the generic occupancy + wasted-regions findings fire for free (the .fnt page IS an atlas).
-    expect(sig(report.findings)).toEqual(sig(expected.findings));
-    expect(report.assets[0]?.vramBytes).toBe(expected.atlas.w * expected.atlas.h * 4);
-  });
+      // the generic occupancy + wasted-regions findings fire for free (the .fnt page IS an atlas).
+      expect(sig(report.findings)).toEqual(sig(expected.findings));
+      expect(report.assets[0]?.vramBytes).toBe(expected.atlas.w * expected.atlas.h * 4);
+    },
+  );
 
   it('with fontGlyphPage OMITTED from cfg the font finding does NOT fire (gate proof + byte-identity)', async () => {
     const fnt = parseFntText(new TextDecoder().decode(readBytes('bmfont-sparse/font.fnt')));

@@ -2,7 +2,16 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { parseAtlas, parseImage, readImageInfo, parseSpineAtlasText, parseFntText, parseFntPage } from '../src/index';
+import {
+  parseAtlas,
+  parseImage,
+  readImageInfo,
+  parseSpineAtlasText,
+  parseFntText,
+  parseFntXml,
+  parseFntBinary,
+  parseFntPage,
+} from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const json = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -289,6 +298,198 @@ char id=66 x=0 y=0 width=10 height=10 page=9
     expect(res.ok).toBe(true);
     if (!res.ok || res.asset.kind !== 'atlas') throw new Error('expected atlas');
     expect(res.asset.atlas.size).toEqual({ w: 1024, h: 1024 }); // from the PNG header
+  });
+});
+
+// Minimal AngelCode BMF v3 encoder — the SAME block layout parseFntBinary walks (header `BMF`+3; blocks
+// 1B type + 4B LE size; info fontName NUL-terminated @14; common lineHeight@0/base@2/scaleW@4/scaleH@6;
+// pages uniform-stride NUL-terminated; char 20B id u32@0,x/y/w/h u16@4-10,page u8@18; kerning 10B). Used to
+// prove binary parity (encode the SAME font the TEXT const declares → parseFntBinary === parseFntText).
+function encodeBmfBinary(opts: {
+  face: string;
+  lineHeight: number;
+  base: number;
+  scaleW: number;
+  scaleH: number;
+  pages: string[];
+  chars: { id: number; x: number; y: number; w: number; h: number; page: number }[];
+  kerningCount: number;
+}): Uint8Array {
+  const enc = new TextEncoder();
+  const block = (type: number, body: Uint8Array): Uint8Array => {
+    const out = new Uint8Array(5 + body.length);
+    out[0] = type;
+    new DataView(out.buffer).setUint32(1, body.length, true);
+    out.set(body, 5);
+    return out;
+  };
+  // info: 14 fixed bytes + fontName + NUL (only fontName@14 is read back).
+  const faceBytes = enc.encode(opts.face);
+  const infoBody = new Uint8Array(14 + faceBytes.length + 1);
+  infoBody.set(faceBytes, 14);
+  // common: 15-byte block (lineHeight/base/scaleW/scaleH).
+  const commonBody = new Uint8Array(15);
+  const cv = new DataView(commonBody.buffer);
+  cv.setUint16(0, opts.lineHeight, true);
+  cv.setUint16(2, opts.base, true);
+  cv.setUint16(4, opts.scaleW, true);
+  cv.setUint16(6, opts.scaleH, true);
+  // pages: uniform-stride NUL-terminated names.
+  const maxLen = opts.pages.reduce((m, n) => Math.max(m, enc.encode(n).length), 0);
+  const stride = maxLen + 1;
+  const pagesBody = new Uint8Array(stride * opts.pages.length);
+  opts.pages.forEach((n, i) => pagesBody.set(enc.encode(n), i * stride));
+  // chars: 20-byte records.
+  const charsBody = new Uint8Array(20 * opts.chars.length);
+  const chv = new DataView(charsBody.buffer);
+  opts.chars.forEach((c, i) => {
+    const o = i * 20;
+    chv.setUint32(o, c.id, true);
+    chv.setUint16(o + 4, c.x, true);
+    chv.setUint16(o + 6, c.y, true);
+    chv.setUint16(o + 8, c.w, true);
+    chv.setUint16(o + 10, c.h, true);
+    charsBody[o + 18] = c.page & 0xff;
+  });
+  const kerningBody = new Uint8Array(10 * opts.kerningCount);
+  const blocks = [
+    new Uint8Array([0x42, 0x4d, 0x46, 0x03]),
+    block(1, infoBody),
+    block(2, commonBody),
+    block(3, pagesBody),
+    block(4, charsBody),
+    block(5, kerningBody),
+  ];
+  const total = blocks.reduce((s, b) => s + b.length, 0);
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const b of blocks) {
+    out.set(b, off);
+    off += b.length;
+  }
+  return out;
+}
+
+describe('parseFntXml / parseFntBinary — XML + binary parity with TEXT', () => {
+  // The reference TEXT font: info/common/page then real glyphs + a whitespace glyph (id=32, 0×0, skipped)
+  // + 2 kerning lines. Parity is asserted byte-for-byte on the full FntPage[] (cheap + exact).
+  const FNT = `info face="TestFont" size=32 bold=0 padding=2,2,2,2
+common lineHeight=38 base=30 scaleW=256 scaleH=256 pages=1
+page id=0 file="font.png"
+chars count=3
+char id=65 x=2 y=2 width=28 height=30 xoffset=0 yoffset=4 xadvance=30 page=0 chnl=15
+char id=66 x=40 y=2 width=24 height=30 xoffset=1 yoffset=4 xadvance=26 page=0 chnl=15
+char id=32 x=0 y=0 width=0 height=0 xoffset=0 yoffset=0 xadvance=10 page=0 chnl=15
+kerning first=65 second=86 amount=-2
+kerning first=65 second=87 amount=-1
+`;
+
+  it('XML parity — the XML form parses byte-identical to the TEXT form', () => {
+    const XML = `<?xml version="1.0"?>
+<font>
+  <info face="TestFont" size="32" bold="0" padding="2,2,2,2"/>
+  <common lineHeight="38" base="30" scaleW="256" scaleH="256" pages="1"/>
+  <pages><page id="0" file="font.png"/></pages>
+  <chars count="3">
+    <char id="65" x="2" y="2" width="28" height="30" xoffset="0" yoffset="4" xadvance="30" page="0" chnl="15"/>
+    <char id="66" x="40" y="2" width="24" height="30" xoffset="1" yoffset="4" xadvance="26" page="0" chnl="15"/>
+    <char id="32" x="0" y="0" width="0" height="0" xoffset="0" yoffset="0" xadvance="10" page="0" chnl="15"/>
+  </chars>
+  <kerning first="65" second="86" amount="-2"/>
+  <kerning first="65" second="87" amount="-1"/>
+</font>
+`;
+    expect(parseFntXml(XML)).toEqual(parseFntText(FNT));
+  });
+
+  it('binary parity — encodeBmfBinary of the same font parses byte-identical to TEXT (whitespace skip, kerning)', () => {
+    const bin = encodeBmfBinary({
+      face: 'TestFont',
+      lineHeight: 38,
+      base: 30,
+      scaleW: 256,
+      scaleH: 256,
+      pages: ['font.png'],
+      chars: [
+        { id: 65, x: 2, y: 2, w: 28, h: 30, page: 0 },
+        { id: 66, x: 40, y: 2, w: 24, h: 30, page: 0 },
+        { id: 32, x: 0, y: 0, w: 0, h: 0, page: 0 }, // whitespace → skipped
+      ],
+      kerningCount: 2,
+    });
+    const pages = parseFntBinary(bin);
+    expect(pages).toEqual(parseFntText(FNT));
+    expect(pages[0]!.sprites.map((s) => s.name)).toEqual(['glyph_65', 'glyph_66']); // space skipped
+    expect(pages[0]!.kerningCount).toBe(2);
+  });
+
+  it('binary recovery fires — an OOB glyph lands in malformedGlyphs with the SAME reason TEXT produces', () => {
+    const bin = encodeBmfBinary({
+      face: 'F',
+      lineHeight: 10,
+      base: 8,
+      scaleW: 64,
+      scaleH: 64,
+      pages: ['p.png'],
+      chars: [
+        { id: 65, x: 0, y: 0, w: 32, h: 32, page: 0 },
+        { id: 66, x: 40, y: 0, w: 40, h: 10, page: 0 }, // x+w=80 > 64 → OOB
+      ],
+      kerningCount: 0,
+    });
+    const p = parseFntBinary(bin)[0]!;
+    expect(p.sprites.map((s) => s.name)).toEqual(['glyph_65']);
+    expect(p.malformedGlyphs).toEqual([{ id: '66', reason: 'glyph id=66 extends past page 64×64' }]);
+  });
+
+  it('XML quote/entity — single-quoted face with an &amp; entity decodes to the literal &', () => {
+    const xml = `<font><info face='My &amp; Co'/><common scaleW="64" scaleH="64" pages="1"/><page id="0" file="f.png"/><char id="65" x="0" y="0" width="10" height="10" page="0"/></font>`;
+    expect(parseFntXml(xml)[0]!.face).toBe('My & Co');
+  });
+
+  it('binary defensive — non-/20 chars body + a truncated tail: glyphs read so far, never throws; BMF\\x02 ⇒ []', () => {
+    // Hand-build: header + a pages block + a chars block whose declared size is NOT a multiple of 20 (one
+    // whole record + a 10-byte tail) AND the file is then cut so the declared chars size runs past EOF on a
+    // SECOND block — the walk must read the first whole char, then STOP on the short read, never OOB-throw.
+    const le32 = (n: number): number[] => [n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >> 24) & 0xff];
+    const pagesBody = [...new TextEncoder().encode('p.png'), 0]; // stride 6, one page
+    const char = (id: number, x: number, y: number, w: number, h: number, page: number): number[] => {
+      const b = new Uint8Array(20);
+      const dv = new DataView(b.buffer);
+      dv.setUint32(0, id, true);
+      dv.setUint16(4, x, true);
+      dv.setUint16(6, y, true);
+      dv.setUint16(8, w, true);
+      dv.setUint16(10, h, true);
+      b[18] = page;
+      return [...b];
+    };
+    // common block so the page size (64×64) is known.
+    const commonBody = new Uint8Array(15);
+    new DataView(commonBody.buffer).setUint16(0, 10, true); // lineHeight
+    new DataView(commonBody.buffer).setUint16(4, 64, true); // scaleW
+    new DataView(commonBody.buffer).setUint16(6, 64, true); // scaleH
+    const charsBody = [...char(65, 0, 0, 10, 10, 0), 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]; // 30 bytes → floor=1
+    const bytes = new Uint8Array([
+      0x42, 0x4d, 0x46, 0x03, // BMF v3
+      2, ...le32(15), ...commonBody, // common
+      3, ...le32(pagesBody.length), ...pagesBody, // pages
+      4, ...le32(charsBody.length), ...charsBody, // chars (30B → 1 whole record + 10B tail)
+      5, ...le32(40), // kerning header CLAIMS 40 bytes of body that aren't there → short read → STOP
+    ]);
+    expect(() => parseFntBinary(bytes)).not.toThrow();
+    const p = parseFntBinary(bytes)[0]!;
+    expect(p.sprites.map((s) => s.name)).toEqual(['glyph_65']); // the one whole char survived; tail ignored
+    expect(p.kerningCount).toBe(0); // the truncated kerning block was never counted
+
+    // Wrong version byte (v2) is honestly unsupported; too short for the magic ⇒ [].
+    expect(parseFntBinary(new Uint8Array([0x42, 0x4d, 0x46, 0x02, 0, 0, 0, 0]))).toEqual([]);
+    expect(parseFntBinary(new Uint8Array([0x42, 0x4d]))).toEqual([]);
+  });
+
+  it('XML defensive — a font with no page/char tags ⇒ []', () => {
+    expect(parseFntXml('<font><info face="x"/></font>')).toEqual([]);
+    expect(parseFntXml('not xml at all')).toEqual([]);
   });
 });
 

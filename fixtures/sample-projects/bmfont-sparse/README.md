@@ -18,4 +18,5 @@ generic findings own the VRAM on the same page — invariant 5, no double-count)
 
 The regression test feeds this through the **REAL path** (`groupFiles → parseFntPage → analyze` with the
 `fontPages` dep) and asserts the `font-glyph-page` finding **fires** with the documented glyph/kerning
-counts. XML and binary `.fnt` are a follow-up (surfaced honestly as `unparsed` today).
+counts. The sibling `bmfont-sparse-xml/` and `bmfont-sparse-bin/` carry the SAME glyphs in the XML +
+binary serializations (same `font.png`, same `expected.json`) — each parser yields a byte-identical page.

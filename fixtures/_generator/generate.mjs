@@ -163,6 +163,63 @@ function arrayManifest(image, size, frames) {
   };
 }
 
+/** Encode an AngelCode BMFont BINARY (BMF v3) font from font/glyph/kerning data — the SAME layout
+ *  parseFntBinary walks. Header `BMF`+3, then blocks (1B type + 4B LE size): 1 info (fontName NUL-terminated
+ *  at body+14), 2 common (lineHeight u16@0, base u16@2, scaleW u16@4, scaleH u16@6, … 15B), 3 pages
+ *  (uniform-stride NUL-terminated names), 4 chars (20B: id u32@0, x/y/width/height u16@4-10, page u8@18),
+ *  5 kerning (10B each — only the count matters here). Deterministic; returns a Buffer. */
+function encodeBmfBinary({ face, lineHeight, base, scaleW, scaleH, pages, chars, kerningCount }) {
+  const block = (type, body) => {
+    const head = Buffer.alloc(5);
+    head[0] = type;
+    head.writeUInt32LE(body.length, 1);
+    return Buffer.concat([head, body]);
+  };
+
+  // info (type 1): 14 fixed bytes (we only populate what parseFntBinary reads — fontName@14), then face+NUL.
+  const faceBytes = Buffer.from(face, 'utf-8');
+  const infoBody = Buffer.concat([Buffer.alloc(14), faceBytes, Buffer.from([0])]);
+
+  // common (type 2): the 15-byte block; only lineHeight/scaleW/scaleH are read back.
+  const commonBody = Buffer.alloc(15);
+  commonBody.writeUInt16LE(lineHeight, 0);
+  commonBody.writeUInt16LE(base, 2);
+  commonBody.writeUInt16LE(scaleW, 4);
+  commonBody.writeUInt16LE(scaleH, 6);
+  commonBody[8] = 0; // pages hi
+  commonBody[9] = pages.length & 0xff; // pages lo (informational; parser derives count from stride)
+
+  // pages (type 3): uniform-stride NUL-terminated names. Stride = longest name + 1 (the NUL).
+  const maxLen = pages.reduce((m, n) => Math.max(m, Buffer.byteLength(n, 'utf-8')), 0);
+  const stride = maxLen + 1;
+  const pagesBody = Buffer.alloc(stride * pages.length, 0);
+  pages.forEach((name, i) => Buffer.from(name, 'utf-8').copy(pagesBody, i * stride));
+
+  // chars (type 4): 20-byte records.
+  const charsBody = Buffer.alloc(20 * chars.length, 0);
+  chars.forEach((c, i) => {
+    const o = i * 20;
+    charsBody.writeUInt32LE(c.id, o);
+    charsBody.writeUInt16LE(c.x, o + 4);
+    charsBody.writeUInt16LE(c.y, o + 6);
+    charsBody.writeUInt16LE(c.w, o + 8);
+    charsBody.writeUInt16LE(c.h, o + 10);
+    charsBody[o + 18] = c.page & 0xff;
+  });
+
+  // kerning (type 5): 10-byte records (content is irrelevant — parser counts size/10).
+  const kerningBody = Buffer.alloc(10 * kerningCount, 0);
+
+  return Buffer.concat([
+    Buffer.from([0x42, 0x4d, 0x46, 0x03]), // 'BMF' + version 3
+    block(1, infoBody),
+    block(2, commonBody),
+    block(3, pagesBody),
+    block(4, charsBody),
+    block(5, kerningBody),
+  ]);
+}
+
 function writeCase(name, files, readme) {
   const dir = join(OUT, name);
   mkdirSync(dir, { recursive: true });
@@ -2053,34 +2110,77 @@ fires with the documented recoverable area.
     `kerning first=65 second=86 amount=-2\n` +
     `kerning first=65 second=87 amount=-1\n`;
 
+  // The FULL ordered char list the three serializations share (16 real glyphs + 1 whitespace + 1 OOB),
+  // so the XML + binary fonts carry IDENTICAL glyph data → byte-identical FntPage[] through every parser.
+  const FACE = 'SparseFont';
+  const KERNING = 2;
+  const allChars = [
+    ...glyphs.map((g) => ({ id: g.id, x: g.x, y: g.y, w: g.w, h: g.h, page: 0 })),
+    { id: 32, x: 0, y: 0, w: 0, h: 0, page: 0 }, // whitespace → skipped
+    { id: 255, x: 250, y: 250, w: 40, h: 40, page: 0 }, // OOB → per-glyph recovery
+  ];
+
+  // XML serialization (BMFont XML form): info/common/page/char/kerning tags carrying the SAME attributes
+  // the TEXT form does → parseFntXml(fntXml) is byte-identical to parseFntText(fntText).
+  const charTag = (g) =>
+    `  <char id="${g.id}" x="${g.x}" y="${g.y}" width="${g.w}" height="${g.h}" xoffset="0" yoffset="4" xadvance="${g.w + 2}" page="0" chnl="15"/>`;
+  const fntXml =
+    `<?xml version="1.0"?>\n` +
+    `<font>\n` +
+    `  <info face="${FACE}" size="20" bold="0" italic="0" padding="2,2,2,2" spacing="1,1"/>\n` +
+    `  <common lineHeight="24" base="18" scaleW="${size.w}" scaleH="${size.h}" pages="1" packed="0"/>\n` +
+    `  <pages>\n    <page id="0" file="font.png"/>\n  </pages>\n` +
+    `  <chars count="${allChars.length}">\n` +
+    allChars.map(charTag).join('\n') + '\n' +
+    `  </chars>\n` +
+    `  <kerning first="65" second="86" amount="-2"/>\n` +
+    `  <kerning first="65" second="87" amount="-1"/>\n` +
+    `</font>\n`;
+
+  // Binary serialization (AngelCode BMF v3): the SAME font/glyph/kerning data via encodeBmfBinary →
+  // parseFntBinary(fntBin) is byte-identical to parseFntText(fntText). Committed AND reproducible.
+  const fntBin = encodeBmfBinary({
+    face: FACE,
+    lineHeight: 24,
+    base: 18,
+    scaleW: size.w,
+    scaleH: size.h,
+    pages: ['font.png'],
+    chars: allChars,
+    kerningCount: KERNING,
+  });
+
+  const expected = {
+    kind: 'bmfont',
+    face: FACE,
+    atlas: size,
+    glyphCount: 16, // usable glyphs (space skipped, OOB glyph recovered out)
+    kerningCount: KERNING,
+    occupancy, // ≈ 0.0977 (sparse → the documented defect)
+    malformedGlyph: { id: '255', reason: 'glyph id=255 extends past page 256×256' },
+    findings: [
+      { rule: 'font-glyph-page', severity: 'warn' },
+      { rule: 'occupancy', severity: 'crit' }, // sparse page also trips the generic occupancy finding (free)
+      { rule: 'wasted-regions', severity: 'info' },
+    ],
+    note:
+      'Single-page BMFont (.fnt) on a 256×256 POT page with 16 small opaque glyphs → a SPARSE glyph '
+      + 'sheet (~9.8% packed) pinning w×h×4 VRAM for mostly-empty space. 16 usable glyphs clears minChars '
+      + '(16); occupancy ≤ occupancyWarn (0.5) ⇒ the font-glyph-page readout is WARN. A whitespace glyph '
+      + '(id=32, 0×0) is skipped (not an error); one out-of-page glyph (id=255) is dropped + surfaced via '
+      + 'per-glyph recovery. The page IS an atlas, so the generic occupancy/wasted-regions findings fire '
+      + 'for free. The font readout estimate carries ONLY occupancyPct — the generic findings own the VRAM '
+      + 'on the same page (invariant 5; no double-count). Emitted in all THREE serializations (TEXT/XML/'
+      + 'binary) from the SAME glyph data + the SAME font.png + this SAME expected.json; each parser '
+      + 'produces a byte-identical FntPage[]. Exercised through the REAL path (groupFiles → parseFntPage → analyze).',
+  };
+
   writeCase(
     'bmfont-sparse',
     {
       'font.png': fontPng,
       'font.fnt': fntText,
-      'expected.json': {
-        kind: 'bmfont',
-        face: 'SparseFont',
-        atlas: size,
-        glyphCount: 16, // usable glyphs (space skipped, OOB glyph recovered out)
-        kerningCount: 2,
-        occupancy, // ≈ 0.0977 (sparse → the documented defect)
-        malformedGlyph: { id: '255', reason: 'glyph id=255 extends past page 256×256' },
-        findings: [
-          { rule: 'font-glyph-page', severity: 'warn' },
-          { rule: 'occupancy', severity: 'crit' }, // sparse page also trips the generic occupancy finding (free)
-          { rule: 'wasted-regions', severity: 'info' },
-        ],
-        note:
-          'Single-page TEXT BMFont (.fnt) on a 256×256 POT page with 16 small opaque glyphs → a SPARSE glyph '
-          + 'sheet (~9.8% packed) pinning w×h×4 VRAM for mostly-empty space. 16 usable glyphs clears minChars '
-          + '(16); occupancy ≤ occupancyWarn (0.5) ⇒ the font-glyph-page readout is WARN. A whitespace glyph '
-          + '(id=32, 0×0) is skipped (not an error); one out-of-page glyph (id=255) is dropped + surfaced via '
-          + 'per-glyph recovery. The page IS an atlas, so the generic occupancy/wasted-regions findings fire '
-          + 'for free. The font readout estimate carries ONLY occupancyPct — the generic findings own the VRAM '
-          + 'on the same page (invariant 5; no double-count). Exercised through the REAL path '
-          + '(groupFiles → parseFntPage → analyze).',
-      },
+      'expected.json': expected,
     },
     `# bmfont-sparse
 
@@ -2102,7 +2202,44 @@ generic findings own the VRAM on the same page — invariant 5, no double-count)
 
 The regression test feeds this through the **REAL path** (\`groupFiles → parseFntPage → analyze\` with the
 \`fontPages\` dep) and asserts the \`font-glyph-page\` finding **fires** with the documented glyph/kerning
-counts. XML and binary \`.fnt\` are a follow-up (surfaced honestly as \`unparsed\` today).
+counts. The sibling \`bmfont-sparse-xml/\` and \`bmfont-sparse-bin/\` carry the SAME glyphs in the XML +
+binary serializations (same \`font.png\`, same \`expected.json\`) — each parser yields a byte-identical page.
+`,
+  );
+
+  // Sibling fixtures: the SAME font/glyph data in the XML + binary serializations, reusing the SAME page
+  // image + the SAME expected.json. Each parser (parseFntXml / parseFntBinary) yields a byte-identical
+  // FntPage[] to parseFntText — proven through the REAL groupFiles → parseFntPage → analyze path.
+  writeCase(
+    'bmfont-sparse-xml',
+    {
+      'font.png': fontPng,
+      'font.fnt': fntXml,
+      'expected.json': expected,
+    },
+    `# bmfont-sparse-xml
+
+The **XML serialization** of \`bmfont-sparse\` — same 16 glyphs + whitespace + out-of-page glyph + 2 kerning
+records, same \`font.png\`, same \`expected.json\`. \`parseFntXml\` produces a **byte-identical** \`FntPage[]\`
+to \`parseFntText\` on \`bmfont-sparse/font.fnt\`. Ingest dispatches the leading \`<\` to the XML parser; the
+font-glyph-page readout fires identically.
+`,
+  );
+
+  writeCase(
+    'bmfont-sparse-bin',
+    {
+      'font.png': fontPng,
+      'font.fnt': fntBin,
+      'expected.json': expected,
+    },
+    `# bmfont-sparse-bin
+
+The **binary serialization** (AngelCode BMF v3) of \`bmfont-sparse\` — same 16 glyphs + whitespace +
+out-of-page glyph + 2 kerning records, same \`font.png\`, same \`expected.json\`. \`parseFntBinary\` produces a
+**byte-identical** \`FntPage[]\` to \`parseFntText\`. Ingest dispatches the \`BMF\\x03\` magic to the binary
+parser; the font-glyph-page readout fires identically. The blob is committed AND reproducible via
+\`node fixtures/_generator/generate.mjs\` (\`encodeBmfBinary\`).
 `,
   );
 }
