@@ -10,6 +10,38 @@ GitHub creds — user pushes); commit hashes below are over that base.
 
 ---
 
+## Round 25 — selection (3 picks; #2 shipped) — 2026-06-29
+Selection (strict bar): from 10 candidates, picked 3 genuinely valuable + non-overlapping —
+**(#0)** strippable-metadata detector, **(#1)** BMFont XML+binary parsers, **(#2)** resample the
+oversize-clamped TOP tier — and dropped the rest (NPOT-fix net-negative on the default pipeline,
+lowercaseOutputNames footgun, two latent-only/no-round cleanups, two duplicates). Designs each
+went design→skeptic→adversarial-review before impl. Designs live in `docs/improvements/round25-*.md`.
+
+- **#2 resample the oversize-clamped TOP tier (effectiveScale<1) — close the r24#0 gap**
+  (`docs/improvements/round25-resample-oversize-clamped-top-tier.md`)
+  — The r24#0 lanczos3 resample post-pass gated its candidate-push and its honest hash-skip note on
+  `tier.scale < 1`. But an OVERSIZE source is clamped by `clampToMaxEdge` so the TOP tier (`tier.scale === 1`)
+  still downscales: `effectiveScale < 1`, `dst < src`, and `c2d.drawImage` runs the browser kernel — yet the
+  better lanczos3 candidate was skipped (and under `hashFilenames` no skip note emitted) precisely on the
+  largest, highest-download page. **Fix:** one per-tier local `tierIsDownscale = dst.w < srcW || dst.h < srcH`
+  (the DECODED-source-rect truth condition, robust to a malformed manifest whose `srcSize` diverges from the
+  real PNG) computed right after `dst`, replacing the `tier.scale < 1` guard at BOTH data-flow sites (the
+  candidate push + the hash-skip note). The `recordResampleCandidate` site (gated on
+  `resampleTierTargets.length > 0`) is left textually unchanged and inherits the fix transitively (that array
+  is populated only at the now-fixed push); a comment records this so no one edits it redundantly. Two
+  now-false comments (claiming the top tier is always skipped) corrected. **Default path byte-identical**:
+  resample stays fully opt-in (backend + per-run consent + `op` + token + `hashFilenames` OFF); `vramSaved`
+  untouched (invariant 5 — same dims, no VRAM/disk claim, only the MEASURED HF-energy delta). No
+  contract/wire/backend/i18n change.
+  — **Tests** (`apps/web/test/tier-worker.test.ts`): `runTierLoop` now models `resampleCandidates` with
+  `srcW=srcSize.w` and a parameterized `maxEdge` (self-calibrated `floor(max(banner.w,banner.h)*0.6)=60` from
+  the real 100×50 `banner.png`), reproducing the defect through the REAL `clampToMaxEdge` path. **T14** —
+  clamped top tier produces a top-tier candidate (banner count===3; FAILS under the old `tier.scale<1` model);
+  **T15** — no top-tier candidate when not oversized (count===2, over-fire guard); **T16** — gate off ⇒ 0
+  candidates; plus an `effectiveScale<1 ⇔ dst<src` equivalence assertion. Review verdict: **SHIP** (zero
+  blockers/majors; reviewer re-ran the gate). Gate: typecheck + `tier-worker` (7) + full vitest green
+  (web 476 +1 skipped, fix 429, analysis 117, …).
+
 ## Round 24 — selection (#0 shipped) — 2026-06-29
 Pick: **(#0) libvips lanczos3 resample sidecar op + honest measured-quality receipt** — the scale-tier
 DOWNSCALE path uses the browser canvas resampler, which can't be steered to a specific kernel. This adds an

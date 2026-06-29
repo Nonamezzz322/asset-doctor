@@ -133,10 +133,17 @@ interface TierResult {
   tierFilesEmitted: number;
   tierVramBytes: number[];
   vramSaved: number; // tiering NEVER accrues vramSaved (invariant 5 / T13)
+  // round24 r24#0 follow-up: one candidate per tier the browser drawImage actually DOWNSCALES (dst<src). This
+  // models the worker's tierIsDownscale guard (fix.worker.ts) — including the OVERSIZE-CLAMPED top tier
+  // (tier.scale===1 yet dst<src from clampToMaxEdge). srcW/srcH are the honest Node stand-in for the srcBmp
+  // dims a well-formed source carries (= srcSize.w/h). Empty when resample is off (default path byte-identical).
+  resampleCandidates: { ref: string; targetW: number; targetH: number }[];
 }
-function runTierLoop(b: Built, tiers: ScaleTier[], tierForce = false): TierResult {
-  const res: TierResult = { out: [], dropped: new Set(), skipped: [], tieredAssets: 0, tierFilesEmitted: 0, tierVramBytes: tiers.map(() => 0), vramSaved: 0 };
-  const maxEdge = 1 << 20;
+// maxEdge defaults to 1<<20 (no clamp — un-oversized fixtures); the resample tests parameterize it to drive
+// the REAL clampToMaxEdge so the oversize-clamped top tier (the r24#0 gap) is reproduced. resampleEnabled
+// defaults false so the off-path is provably empty (T16).
+function runTierLoop(b: Built, tiers: ScaleTier[], tierForce = false, resampleEnabled = false, maxEdge = 1 << 20): TierResult {
+  const res: TierResult = { out: [], dropped: new Set(), skipped: [], tieredAssets: 0, tierFilesEmitted: 0, tierVramBytes: tiers.map(() => 0), vramSaved: 0, resampleCandidates: [] };
   const basename = (p: string): string => p.split('/').pop() ?? p;
 
   const tierRefusal = (ref: string): string | null => {
@@ -172,6 +179,9 @@ function runTierLoop(b: Built, tiers: ScaleTier[], tierForce = false): TierResul
     const isSpine = b.spineRefs.has(ref);
     const atlas = b.atlasByRef.get(ref);
     const top = clampToMaxEdge(srcSize);
+    // srcW/srcH = the honest Node stand-in for the decoded srcBmp dims (= srcSize) — the drawImage source rect.
+    const srcW = srcSize.w;
+    const srcH = srcSize.h;
     const manifestPath = !isSpine ? b.manifestPathOf(ref) : undefined;
     const spineInfo = isSpine ? b.spineInfoOf(ref) : undefined;
 
@@ -181,6 +191,11 @@ function runTierLoop(b: Built, tiers: ScaleTier[], tierForce = false): TierResul
       const effectiveScale = (top.w / srcSize.w) * tier.scale;
       const scaled = atlas ? scaleAtlas(atlas, effectiveScale) : undefined;
       const dst: Size = scaled ? { w: scaled.size.w, h: scaled.size.h } : scaleLoose(top, tier.scale);
+      // round24 r24#0 follow-up: model the worker's per-tier tierIsDownscale guard. dst<src is the EXACT truth
+      // condition that the browser drawImage ran a downscale on this tier — fires on the oversize-clamped top
+      // tier (tier.scale===1 yet dst<src) too, the gap the old tier.scale<1 model silently missed.
+      const tierIsDownscale = dst.w < srcW || dst.h < srcH;
+      if (resampleEnabled && tierIsDownscale) res.resampleCandidates.push({ ref, targetW: dst.w, targetH: dst.h });
       // mime: the test uses the source ext (no transcode) — tieredName(path, suffix) keeps the ext.
       const tierImagePath = tieredName(imagePath, tier.suffix);
       res.out.push({ path: tierImagePath, isManifest: false });
@@ -298,5 +313,55 @@ describe('scale-tier worker loop (geometry + gates + VRAM honesty, design §5/§
     expect(low! / top!).toBeLessThan(0.28); // ≈0.25 with per-asset 1px floor
     // never summed: the ladder is alternatives, not additive.
     expect(top! + mid! + low!).toBeGreaterThan(top!);
+  });
+
+  // ── round24 r24#0 follow-up: resample the OVERSIZE-CLAMPED top tier (effectiveScale<1) ────────────────
+  // The clamp is driven through the REAL clampToMaxEdge by parameterizing maxEdge. banner.png is 100×50;
+  // maxEdge = floor(max(100,50)*0.6) = 60 is self-calibrating from sizeByRef (no magic number) and clamps the
+  // banner top tier to {60,30} — reproducing the r24#0 gap: tier.scale===1, dst={60,30} < src={100,50}.
+  // maxEdge=60 also clamps the other (larger) assets, so every assertion filters candidates to BANNER only.
+  it('T14 — oversize-clamped top tier produces a top-tier resample candidate (CONFIRM the op FIRES)', () => {
+    const b = buildWorkerState(loadRawFiles());
+    const banner = b.sizeByRef.get('banner.png')!;
+    expect(banner).toEqual({ w: 100, h: 50 }); // fixture sanity (the subject of the clamp)
+    const maxEdge = Math.floor(Math.max(banner.w, banner.h) * 0.6); // = 60, self-calibrating from sizeByRef
+    expect(maxEdge).toBe(60);
+
+    const res = runTierLoop(b, tiers.tiers, false, true, maxEdge);
+    const bannerCands = res.resampleCandidates.filter((c) => c.ref === 'banner.png');
+
+    // The clamped TOP tier (tier.scale===1) → clampToMaxEdge(banner) = {60,30}. The old tier.scale<1 model
+    // NEVER recorded this; the dst<src fix does. This is THE load-bearing assertion (the op FIRES on top tier).
+    const clampedTop = { w: Math.max(1, Math.round(banner.w * (maxEdge / Math.max(banner.w, banner.h)))), h: Math.max(1, Math.round(banner.h * (maxEdge / Math.max(banner.w, banner.h)))) };
+    expect(clampedTop).toEqual({ w: 60, h: 30 });
+    expect(bannerCands.some((c) => c.targetW === clampedTop.w && c.targetH === clampedTop.h)).toBe(true);
+
+    // banner candidate count === 3: top (clamped) + two lower tiers (all real downscales of the clamped top).
+    expect(bannerCands.length).toBe(3);
+
+    // Equivalence assertion (documents the WHY): for the clamped top tier BOTH the effectiveScale<1 alias and
+    // the dst<src signal are true — effectiveScale = (clampedTop.w/banner.w)*1 < 1, AND dst<src on ≥1 axis.
+    expect((clampedTop.w / banner.w) * 1).toBeLessThan(1);
+    expect(clampedTop.w < banner.w || clampedTop.h < banner.h).toBe(true);
+  });
+
+  it('T15 — NO top-tier candidate when the source is NOT oversized (over-fire guard, edge case 2)', () => {
+    const b = buildWorkerState(loadRawFiles());
+    const banner = b.sizeByRef.get('banner.png')!;
+    // maxEdge huge ⇒ no clamp ⇒ top tier dst === src ⇒ tierIsDownscale=false on the top tier.
+    const res = runTierLoop(b, tiers.tiers, false, true, 1 << 20);
+    const bannerCands = res.resampleCandidates.filter((c) => c.ref === 'banner.png');
+
+    // No candidate matches the UN-clamped top tier dims — no spurious upload for a same-size top tier.
+    expect(bannerCands.some((c) => c.targetW === banner.w && c.targetH === banner.h)).toBe(false);
+    // The two LOWER tiers (real downscales) DO produce candidates ⇒ count === 2 for banner.
+    expect(bannerCands.length).toBe(2);
+  });
+
+  it('T16 — resample gate OFF ⇒ zero candidates (default path byte-identical)', () => {
+    const b = buildWorkerState(loadRawFiles());
+    // resampleEnabled=false, for ANY maxEdge (clamped or not) ⇒ no candidates collected at all.
+    expect(runTierLoop(b, tiers.tiers, false, false, 60).resampleCandidates.length).toBe(0);
+    expect(runTierLoop(b, tiers.tiers, false, false, 1 << 20).resampleCandidates.length).toBe(0);
   });
 });

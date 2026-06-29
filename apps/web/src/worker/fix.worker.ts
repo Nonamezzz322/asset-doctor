@@ -3197,6 +3197,11 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           const dst: Size = scaled
             ? { w: scaled.size.w, h: scaled.size.h }
             : scaleLoose(top, tier.scale);
+          // round24 r24#0 follow-up: the browser drawImage at the c2d.drawImage below downscales whenever dst <
+          // the DECODED source rect (srcW/srcH = srcBmp dims). This fires on the OVERSIZE-CLAMPED top tier too —
+          // tier.scale===1 yet effectiveScale<1 from clampToMaxEdge => dst<src — exactly where high-quality
+          // downscale matters MOST and the old tier.scale<1 guard silently fell back to the browser kernel.
+          const tierIsDownscale = dst.w < srcW || dst.h < srcH;
           const canvas = new OffscreenCanvas(dst.w, dst.h);
           const c2d = canvas.getContext('2d');
           if (!c2d) {
@@ -3248,8 +3253,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           const emittedThisTier = new Set<string>();
           // round24 resample: collect the (path, mime, encOpts) variants emitted at THIS tier so the post-pass
           // can re-encode the vips tile to each + replace `out` in place. A no-op shell when resample is off
-          // (resampleTierTargets stays empty ⇒ no candidate recorded ⇒ byte-identical). The tile.scale<1 guard
-          // below ensures the top tier (scale 1, no downscale ⇒ nothing for lanczos3 to improve) is skipped.
+          // (resampleTierTargets stays empty ⇒ no candidate recorded ⇒ byte-identical). The tierIsDownscale
+          // guard below (dst<src) admits the OVERSIZE-CLAMPED top tier (tier.scale===1 yet dst<src from
+          // clampToMaxEdge) and only skips a genuine identity tier (dst==src ⇒ nothing for lanczos3 to improve).
           const resampleTierTargets: ResampleTarget[] = [];
           for (const te0 of tierEncodes) {
             const enc = await encodeCanvas(canvas, c2d, te0.mime, te0.encOpts);
@@ -3287,9 +3293,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
             out.push({ path: emittedImage, bytes: enc.bytes });
             // round24 resample: record this variant's emitted path + format so the post-pass can replace its
             // bytes in place with the lanczos3 tile (only collected when resampleEnabled, and only for a real
-            // downscale — tier.scale<1; the candidate is pushed after the format loop). hashOff is guaranteed by
-            // the gate (B1) ⇒ emittedImage===tierImagePath is byte-stable, so the in-place replace is sound.
-            if (resampleEnabled && tier.scale < 1)
+            // downscale — dst<src; the candidate is pushed after the format loop). tierIsDownscale fires on the
+            // OVERSIZE-CLAMPED top tier too (tier.scale===1 yet dst<src). hashOff is guaranteed by the gate (B1)
+            // ⇒ emittedImage===tierImagePath is byte-stable, so the in-place replace is sound.
+            if (resampleEnabled && tierIsDownscale)
               resampleTierTargets.push({ path: emittedImage, mime: enc.mime, encOpts: te0.encOpts });
             tierFilesEmitted++;
             if (profileOn) profileFilesEmitted++;
@@ -3392,6 +3399,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           // No-op when resample is off (resampleTierTargets is empty). The post-pass uploads the full-res source
           // (PNG-re-encoded) ONCE per tier, gets the lanczos3 tile, measures the delta, and replaces each
           // target's bytes in place. cancelled is re-checked per candidate in the post-pass.
+          // The resampleTierTargets.length>0 gate now ADMITS the oversize-clamped top tier — it inherits the fix
+          // transitively from the tierIsDownscale guard above (no edit needed here); this is the recordResampleCandidate.
           if (resampleEnabled && resampleTierTargets.length > 0) {
             const browserTile = c2d.getImageData(0, 0, dst.w, dst.h);
             recordResampleCandidate({
@@ -3406,7 +3415,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           // round24 B1: resample is opted-in but SUPPRESSED by hashFilenames (v1 gates it off rather than
           // re-threading the cache-bust chain). Surface ONE honest note per downscaled-tier ref so it is never
           // a silent no-op (invariant 3); emittedThisTier>0 means this ref actually got a downscaled tier.
-          if (resampleHashSkipPending && tier.scale < 1 && emittedThisTier.size > 0 && !resampleHashSkipNoted.has(ref)) {
+          if (resampleHashSkipPending && tierIsDownscale && emittedThisTier.size > 0 && !resampleHashSkipNoted.has(ref)) {
             resampleHashSkipNoted.add(ref);
             skipped.push({
               assetRef: ref,
