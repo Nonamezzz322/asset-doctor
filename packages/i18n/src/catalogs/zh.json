@@ -60,6 +60,10 @@
     "$count": "n",
     "other": "诊断完成。发现 {n} 个问题。"
   },
+  "a11y.resultsHeading": {
+    "$count": "n",
+    "other": "资源审计结果 — 发现 {n} 个问题"
+  },
   "triage.verdict": "诊断",
   "triage.allClear": "未发现问题",
   "triage.filter.crit": {

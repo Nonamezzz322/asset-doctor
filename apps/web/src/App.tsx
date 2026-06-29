@@ -36,6 +36,7 @@ import { TriageLedger } from './components/TriageLedger';
 import { useDebounced } from './lib/useDebounced';
 import { buildIndex, countCandidates, defaultSelectOpts, DEFAULT_SEVERITIES, DEFAULT_SORT, selectRows, type LedgerRow, type SelectOpts, type SortKey } from './lib/triage';
 import { analysisReadyMessage, resultCountMessage } from './lib/announce';
+import { resultsHeading } from './lib/results-heading';
 import { buildTotalsRows } from './lib/totals-rows';
 
 type Phase =
@@ -366,6 +367,13 @@ export function App() {
 
         {report && phase.t === 'done' && index && selectOpts && (
           <div className="space-y-5">
+            {/* Document-level results <h1> — the Dropzone's <h1> unmounts at phase==='done', so this is the
+                top of the heading outline in the results state (fixes the WCAG 1.3.1 heading-order defect:
+                VerdictBar's <h2> below would otherwise open the outline). .ad-sr-only is position:absolute ⇒
+                removed from flow ⇒ adds NO space-y-5 gap/box ⇒ zero visual diff, while staying first in
+                DOM/AOM order so the SR rotor reads h1→h2→h2→h3 (monotonic). Same honest crit+warn+info count
+                as VerdictBar/announce.ts; never VRAM/disk. */}
+            <h1 className="ad-sr-only">{resultsHeading(index.tally, t)}</h1>
             <VerdictBar tally={index.tally} severityFilter={severityFilter} onToggle={toggleSeverity} />
             {/* Sub-md totals strip — the EXACT inverse breakpoint of the desktop header block (md:flex):
                 below md the header totals are display:none, so without this the disk≠VRAM honesty pin

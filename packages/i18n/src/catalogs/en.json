@@ -77,6 +77,11 @@
     "one": "Diagnosis ready. {n} problem found.",
     "other": "Diagnosis ready. {n} problems found."
   },
+  "a11y.resultsHeading": {
+    "$count": "n",
+    "one": "Asset audit results — {n} problem found",
+    "other": "Asset audit results — {n} problems found"
+  },
   "triage.verdict": "Diagnosis",
   "triage.allClear": "no issues found",
   "triage.filter.crit": { "$count": "n", "one": "{n} crit", "other": "{n} crit" },

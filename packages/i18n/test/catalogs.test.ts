@@ -41,6 +41,9 @@ describe('catalog completeness (all 9 locales)', () => {
       // The aria-live diagnosis-ready plural — both forms carry {n}, no leftover braces (singular n=1, plural n=5).
       expect(translate(loc, 'a11y.diagnosisReady', { n: 1 })).not.toContain('{');
       expect(translate(loc, 'a11y.diagnosisReady', { n: 5 })).not.toContain('{');
+      // The document-level results <h1> outline plural — both forms carry {n}, no leftover braces (n=1, n=5).
+      expect(translate(loc, 'a11y.resultsHeading', { n: 1 })).not.toContain('{');
+      expect(translate(loc, 'a11y.resultsHeading', { n: 5 })).not.toContain('{');
       // Texture-bleeding plural — both forms carry {pairs}, no leftover braces in any locale.
       expect(translate(loc, 'find.bleeding.title', { pairs: 1 })).not.toContain('{');
       expect(translate(loc, 'find.bleeding.title', { pairs: 5 })).not.toContain('{');

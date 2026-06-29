@@ -63,6 +63,11 @@
     "one": "Diagnóstico listo. {n} problema encontrado.",
     "other": "Diagnóstico listo. {n} problemas encontrados."
   },
+  "a11y.resultsHeading": {
+    "$count": "n",
+    "one": "Resultados de la auditoría de recursos — {n} problema encontrado",
+    "other": "Resultados de la auditoría de recursos — {n} problemas encontrados"
+  },
   "triage.verdict": "Diagnóstico",
   "triage.allClear": "no se encontraron problemas",
   "triage.filter.crit": {
