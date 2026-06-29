@@ -330,14 +330,22 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
     }
   }
 
-  // pass 2: transcode format-improvable images not already resized, dropped, packed, or tiered. The
-  // `packed` guard (Feature 4) ensures a loose image folded into a sheet is encoded once (in the pack
-  // step), never also transcoded here. The `tiered` guard (design §7 transcode × tiering) does the same
-  // for a tier-eligible ref: the worker's tier loop encodes it once per tier at the target mime, so a
-  // standalone transcode op would be an orphan duplicate. Result: format+tiered ⇒ N tier encodes, 0
-  // transcode ops; a ref with both should-atlas and format yields one pack, zero transcode.
+  // pass 2: transcode format-improvable images not already repacked, resized, dropped, packed, or tiered.
+  // The `repacked` guard (round20 #0) is the atlas analogue of `packed`/`tiered`: analyze.ts runs addFormat
+  // on EVERY atlas page (analyze.ts:168) AND occupancyFinding/wastedRegions/frameRedundancy on the same atlas
+  // (:164-177), so an under-filled / frame-redundant sheet whose page also transcodes smaller earns BOTH a
+  // repack-driving finding (pass 0/1 → `repacked`) AND a `format` finding. The repack already re-encodes the
+  // page to targetMime, so without this guard the same atlasRef would ALSO get a standalone transcode op that
+  // the worker re-emits from the PRE-repack geometry — silently clobbering the repack (the prebuilt-atlas
+  // passthrough now re-emits the sidecar too, so the stale page+sidecar would win last-write dedup). The
+  // `packed` guard (Feature 4) ensures a loose image folded into a sheet is encoded once (in the pack step),
+  // never also transcoded here. The `tiered` guard (design §7 transcode × tiering) does the same for a
+  // tier-eligible ref: the worker's tier loop encodes it once per tier at the target mime, so a standalone
+  // transcode op would be an orphan duplicate. Result: format+tiered ⇒ N tier encodes, 0 transcode ops; a ref
+  // with both should-atlas and format yields one pack, zero transcode; a ref with both a repack-finding and a
+  // format finding yields one repack, zero transcode.
   for (const f of report.findings) {
-    if (f.rule === 'format' && f.scope !== 'folder' && !resized.has(f.assetRef) && !dropped.has(f.assetRef) && !packed.has(f.assetRef) && !tiered.has(f.assetRef)) {
+    if (f.rule === 'format' && f.scope !== 'folder' && !repacked.has(f.assetRef) && !resized.has(f.assetRef) && !dropped.has(f.assetRef) && !packed.has(f.assetRef) && !tiered.has(f.assetRef)) {
       // Flat / alpha-art findings (messageKey:'format-lossless', rule still 'format') carry
       // params.contentClass — encode THEM lossless even when the global opts.lossless is off, because
       // lossy q0.9 frays hard edges + flat fills. This is where the honest lossless byte delta the

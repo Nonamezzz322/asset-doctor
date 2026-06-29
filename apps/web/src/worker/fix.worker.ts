@@ -101,6 +101,10 @@ import {
   dirOf,
   resolveImageRef,
   relativeImageRef,
+  // PURE atlas-sidecar repoint for the prebuilt-atlas passthrough transcode (round20 #1) — re-encoding an
+  // atlas PAGE renames it, so the sidecar meta.image / Spine texture line is repointed (relativeImageRef
+  // inverse) or it dangles. Single Vitest-covered source so the worker's repoint can't drift.
+  repointAtlasImage,
   // PURE owner-aware dedup EXECUTION helpers (design §3d / §10.8): the rename rule (EXT/renamedTo) + the
   // Phase-A owner final-name prediction. SINGLE source of truth — the worker and its Node round-trip test
   // both import these, so the two-phase dangling-reference guard can't drift between them.
@@ -722,6 +726,13 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           if (!atlasByRef.has(op.assetRef)) {
             const path = pathByRef.get(op.assetRef);
             if (path && renamedTo(path, effectiveFor(op.assetRef, 1).targetMime) !== path)
+              predictRefsChanged = true;
+          } else if (op.kind === 'transcode') {
+            // round20 #1: a prebuilt-ATLAS passthrough transcode renames the page by extension and repoints its
+            // sidecar ⇒ NOT a stable-name drop-in (the execute block sets referencesChanged unconditionally).
+            // Conservative: an encode-unavailable / size-loss skip can still drop in, disclosed via deferred-checks.
+            const path = pathByRef.get(op.assetRef);
+            if (path && renamedTo(path, effectiveForTranscode(op.assetRef, op.targetMime).targetMime) !== path)
               predictRefsChanged = true;
           }
         }
@@ -2219,6 +2230,133 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           // Per-ref count (overrides may REPLACE the format list); no override ⇒ === profileFormats.length.
           const nFmt = resolveProfile(ref).formats.length;
           operations.push(`transcode ${basename(path)} → ${nFmt} format${nFmt === 1 ? '' : 's'}`);
+          continue;
+        }
+        // ── Prebuilt-atlas PASSTHROUGH transcode (round20 #1) ─────────────────────────────────────────────
+        // A prebuilt sheet that is NOT being repacked can still earn a `format` finding on its PAGE IMAGE
+        // (analyze.ts sizes atlas pages too) → a standalone transcode op reaching HERE. Re-encoding the page
+        // VERBATIM (no recompose — frame geometry/trim/pivot/mesh untouched) swaps its extension
+        // (sheet.png → sheet.webp), so the sidecar's meta.image (TP) / Spine texture line MUST be repointed at
+        // the new page AND the old page dropped — else the loader resolves a file that no longer exists
+        // (dangling-reference bug). DROP-IN: the sidecar still resolves every frame; manifest round-trips.
+        // HONESTY (invariant 5): identical pixel dims ⇒ identical RGBA8888 VRAM ⇒ NO VRAM claim (disk-only).
+        // The loose single-format path below is now reached ONLY for non-atlas refs (this block `continue`s).
+        const atlasOfRef = atlasByRef.get(ref);
+        if (atlasOfRef) {
+          const isSpinePage = spineRefs.has(ref);
+          const sidecar = isSpinePage ? spineInfoOf(ref)?.path : manifestPathOf(ref);
+          if (!sidecar) {
+            // No sidecar to repoint ⇒ re-encoding the page would dangle the (untouched) manifest. Keep original.
+            skipped.push({
+              assetRef: ref,
+              reason: 'transcode skipped: atlas sidecar unavailable — kept original page',
+            });
+            continue;
+          }
+          // BELT-AND-SUSPENDERS (round20 #0): if a prior pass-1 repack/merge already emitted this atlas page
+          // OR its sidecar (replaced.add at :1715-1716 / :1952-1959), re-encoding here from the ORIGINAL
+          // bytesByRef + PRE-repack atlasOfRef geometry would silently CLOBBER the repack (last-write-wins
+          // pre-zip dedup) — undoing the repack while operations[]/vramSaved already credited it. The plan's
+          // `!repacked.has` guard (plan.ts:340) makes this unreachable today; this is a fail-safe so a future
+          // op-ordering change can never reintroduce the double-emit. Skip honestly, keep the repacked output.
+          if (replaced.has(path) || replaced.has(sidecar)) {
+            skipped.push({
+              assetRef: ref,
+              reason: 'transcode skipped: atlas already repacked/re-emitted — kept the repacked page',
+            });
+            continue;
+          }
+          if (isSpinePage && (spineInfoOf(ref)?.pages ?? 1) > 1) {
+            // emitSpineAtlasText writes ONE page; a multi-page `.atlas` would drop its sibling pages. Keep original.
+            skipped.push({
+              assetRef: ref,
+              reason: 'transcode skipped: multi-page Spine atlas — kept original page',
+            });
+            continue;
+          }
+          // An active multi-format export profile can't safely fan one atlas page across N sidecar entries —
+          // we emit ONE page in the op's target format (same scope as the loose-only fan-out gate at :2190).
+          if (profileOn && resolveProfile(ref).formats.length > 1)
+            skipped.push({
+              assetRef: ref,
+              reason: 'export profile: atlas pages stay single-format — emitted one page only',
+            });
+          const effA = effectiveForTranscode(ref, op.targetMime);
+          const encA = await transcode(bytes, effA.targetMime, {
+            ...encOptsFor(effA, false),
+            opaque: op.opaque,
+          });
+          if (!encA) {
+            skipped.push({ assetRef: ref, reason: `transcode to ${effA.targetMime} unavailable` });
+            continue;
+          }
+          // Never ship a WORSE page from the fix that fixes dangling refs. The opaque guard (parity with the
+          // loose path) PLUS a general size-loss guard for the atlas path: a larger atlas page has no
+          // downstream dedup/Phase-C accounting to absorb it, so on size loss we KEEP the original page AND
+          // the original sidecar (no out.push, no rename) ⇒ no dangling ref created. Honest skip.
+          if (
+            transcodeIsSizeLoss(op.opaque, encA.bytes.length, bytes.byteLength) ||
+            encA.bytes.length >= bytes.byteLength
+          ) {
+            skipped.push({
+              assetRef: ref,
+              reason: `transcode kept original: re-encode was not smaller (${encA.bytes.length} ≥ ${bytes.byteLength} B)`,
+            });
+            continue;
+          }
+          const newPageA = renamedTo(path, encA.mime);
+          // Cache-bust (round9): hash the FINAL page bytes → patch the sidecar's imageRef to the hashed page →
+          // emit the sidecar → hash it. hashOff ⇒ emittedPage===newPageA, emittedSidecar===sidecar (no rename),
+          // but the page name STILL changed by extension ⇒ this is reference-changing (see below).
+          const emittedPageA = await hashEmit(newPageA, encA.bytes);
+          out.push({ path: emittedPageA, bytes: encA.bytes });
+          replaced.add(path);
+          // Repoint the sidecar at the new page (relative to the SIDECAR's own dir → resolves back through
+          // parseAtlas) and re-serialize it deterministically (frames/trim/pivot/mesh carried verbatim).
+          const repointedA = repointAtlasImage(atlasOfRef, sidecar, emittedPageA);
+          const sidecarBytesA = te.encode(
+            isSpinePage ? emitSpineAtlasText(repointedA) : emitTexturePackerJson(repointedA),
+          );
+          const emittedSidecarA = await hashEmit(sidecar, sidecarBytesA);
+          out.push({ path: emittedSidecarA, bytes: sidecarBytesA });
+          replaced.add(sidecar);
+          // A page-format change ALWAYS renames the page ⇒ NOT a stable-name drop-in ⇒ fire these
+          // UNCONDITIONALLY (do NOT copy resize-atlas's `if (hashOn)` gate — resize keeps the source extension,
+          // transcode does not). Pixi manifest: the page loads via its sidecar (meta.image / .atlas line).
+          referencesChanged = true;
+          recordVariant(ref, isSpinePage ? 'spine' : 'atlas', emittedPageA, {
+            scale: 1,
+            suffix: '',
+            src: emittedSidecarA,
+          });
+          changeRows.push(
+            ...(isSpinePage
+              ? repackChanges(sidecar, emittedSidecarA) // Spine .atlas carries no static page-image map
+              : repackChanges(sidecar, emittedSidecarA, emittedPageA)),
+          );
+          // Phase B bookkeeping: if this atlas page is a retained dedup OWNER, record its ACTUAL emitted image
+          // so Phase C repoints CONSUMERS at the real page (no-op when not an owner). Mirrors the loose path.
+          if (ownerActualName.has(ref)) {
+            ownerActualName.get(ref)!.image = emittedPageA;
+            ownerActualUnhashed.set(ref, newPageA);
+          }
+          // OPT-IN KTX2 (round12): offer the re-encoded page for a sibling .ktx2 + its own .ktx2.json sidecar —
+          // TexturePacker ONLY. The post-pass hardcodes `.json`→`.ktx2.json` + emitTexturePackerJson, so a Spine
+          // `.atlas` sidecar would ship malformed; the Spine repack path likewise records no KTX2 candidate.
+          if (!isSpinePage)
+            recordKtx2Candidate({
+              ref,
+              imagePath: emittedPageA,
+              pageBytes: encA.bytes,
+              pageMime: encA.mime,
+              w: atlasOfRef.size.w,
+              h: atlasOfRef.size.h,
+              atlasSidecar: { path: emittedSidecarA, atlas: repointedA },
+            });
+          // DISK-only: identical pixel dims ⇒ identical RGBA8888 VRAM (invariant 5). No vramSaved increment.
+          operations.push(
+            `transcode atlas ${basename(ref)} → ${encA.mime.replace('image/', '')}${op.opaque ? ' (opaque)' : ''}`,
+          );
           continue;
         }
         // Effective per-asset options (folder/type overrides; no downscale ⇒ scale 1 ⇒ quality unchanged).

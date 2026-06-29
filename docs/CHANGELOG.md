@@ -37,6 +37,38 @@ Pick: **(#0) trim-on-repack FIX** (shipped below) — turns the r19 trim-margin 
   control-flow `trim-on-repack-worker.test.ts`; fixture `untrimmed-padding/expected.json` extended with the
   additive `repack` golden. Gate: typecheck + test + lint green.
 
+- **#1 Prebuilt-atlas passthrough transcode — closes a DANGLING-REFERENCE bug**
+  (`docs/improvements/round20-prebuilt-atlas-passthrough-transco.md`) — `analyze.ts` sizes ATLAS PAGES too
+  (`addFormat(atlas.name, image)`), so a WELL-PACKED (high-occupancy) + correctly-sized (POT, not oversize)
+  prebuilt sheet whose page transcodes smaller earns a `format` finding on its PAGE → a standalone `transcode`
+  op with NO repack/resize. The old worker treated that op as a LOOSE image: it renamed `sheet.png` →
+  `sheet.webp` but NEVER repointed the sidecar — `sheet.json` `meta.image` / the Spine `.atlas` texture line
+  still said `sheet.png` ⇒ the loader resolved a file that no longer exists (**dangling reference / broken
+  drop-in**). NEW atlas-aware branch in `fix.worker.ts` (after the profile-fanout block; the loose path is now
+  reached ONLY for non-atlas refs): re-encode the existing page VERBATIM (no recompose — frame/trim/pivot/mesh
+  untouched), repoint the sidecar's `meta.image` (TP) / Spine texture line at the new page via the new PURE
+  `repointAtlasImage` (`packages/fix/src/atlas-transcode.ts`, the proven `relativeImageRef` inverse → resolves
+  back through `@asset-doctor/parsers`), re-emit the sidecar deterministically, and DROP the old page
+  (`replaced.add`). Skeptic blockers folded in: **B1** the KTX2 candidate is recorded for TexturePacker ONLY
+  (the post-pass hardcodes `.json`→`.ktx2.json` + `emitTexturePackerJson`, so a Spine `.atlas` would ship a
+  malformed `.ktx2.json`); **B2** a general size-loss guard (`enc >= src` PLUS the opaque `transcodeIsSizeLoss`
+  parity) KEEPS the original page + original sidecar when the re-encode isn't smaller — the fix that fixes
+  dangling refs never CREATES one by shipping a worse page; **M1** `recordVariant`/`repackChanges`/
+  `referencesChanged` fire UNCONDITIONALLY (a transcode ALWAYS renames the page by extension — NOT the
+  `hashOn`-gated stable-name drop-in resize-atlas uses); **M3** a transcoded atlas page that is a retained dedup
+  OWNER updates `ownerActualName`/`ownerActualUnhashed` so Phase-C repoints CONSUMERS at the real page. Fail-safe
+  honest skips: missing sidecar, multi-page Spine (`emitSpineAtlasText` writes ONE page), encode-unavailable.
+  HONESTY (invariant 5): identical pixel dims ⇒ identical RGBA8888 VRAM ⇒ NO `vramSaved` increment (disk-only).
+  Dry-run preview updated to predict `referencesChanged` for an atlas transcode (matches execute). ADDITIVITY:
+  off / no-atlas-target ⇒ byte-identical (the loose path is untouched; a non-atlas ref never enters the block).
+  Tests: pure `packages/fix/test/atlas-transcode.test.ts` (TP/Spine repoint round-trip through `parseAtlasManifest`
+  / `parseSpineAtlasText` + `resolveImageRef` incl. same-dir / cross-dir / cache-busted; no-dangling-ref
+  membership; frame-verbatim) + worker-seam `apps/web/test/atlas-transcode-worker.test.ts` (Harness A: the real
+  analyze→plan path yields exactly one transcode op on the atlas page with no repack/resize; Harness B: emit→
+  parse→resolve leaves no dangling ref; Harness C: B2 size-loss / multi-page Spine / sidecar-unavailable / B1
+  Spine-no-KTX2 / M3 dedup-owner decision predicates; additivity: a loose transcode emits no sidecar). Gate:
+  typecheck + test + lint green.
+
 ---
 
 ## Round 19 — selection (3 picks; #0 shipped) — 2026-06-29

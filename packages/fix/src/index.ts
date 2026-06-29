@@ -16,6 +16,10 @@ export type { RepackOptions, PolygonRepackOptions } from './repack';
 export { buildAtlasAliasMap, buildAtlasAliasMaps } from './alias';
 export type { AtlasAliasMap } from './alias';
 export { emitTexturePackerJson, emitSpineAtlasText } from './manifest';
+// PURE atlas-sidecar repoint for the prebuilt-atlas passthrough transcode (round20 #1) — re-encoding an atlas
+// PAGE renames it (sheet.png → sheet.webp), so the sidecar meta.image / Spine texture line is repointed at the
+// new page (relativeImageRef inverse) or it dangles. Imported by the fix worker so its repoint can't drift.
+export { repointAtlasImage } from './atlas-transcode';
 // Feature 4 (pack loose assets) — PURE alpha-bbox → trim metadata; the SINGLE home of the Spine Y-flip
 // (spineOffsetFrom). See docs/spritesheet-packing-design.md § 3a.
 export { alphaBBox, spriteSourceSizeFrom, spineOffsetFrom } from './trim';
