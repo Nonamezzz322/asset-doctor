@@ -18,12 +18,25 @@
 //
 // This package must not depend on `pixi.js`; the Pixi wire types below are a local mirror of its public shape.
 
+/** AssetPack `includeFileSizes` parity (round23 #2). One `src` candidate carrying its `progressSize` (the
+ *  field AssetPack 1.7.0 emits — pixiManifest.js:139-142). `progressSize` is the file's size in KB to 2
+ *  decimal places (AssetPack's getFileSizeInKB divides the byte length by 1024 in BOTH branches, utils.js:24-42):
+ *  `'raw'` ⇒ uncompressed KB (statBytes/1024); `'gzip'` ⇒ gzipped KB (gzipBytes/1024). PixiJS reads this to
+ *  drive accurate Assets.load progress over the transport. NO other field — Pixi consumes exactly { src, progressSize }. */
+export interface PixiSizedSrc {
+  src: string;
+  /** Size in KB, 2dp (AssetPack parity). raw ⇒ statBytes/1024; gzip ⇒ gzipBytes/1024. REAL measured bytes. */
+  progressSize: number;
+}
+
 /** LOCAL mirror of PixiJS v8's UnresolvedAsset wire shape. `alias` = lookup name(s); `src` = one logical
  *  asset → MANY candidate URLs (pre-expanded format alternatives, never a brace template). Each candidate is
- *  a real emitted zip-entry path; for a sheet it is the `.json`/`.atlas` sidecar. NO `data` field (Pixi #10108). */
+ *  a real emitted zip-entry path; for a sheet it is the `.json`/`.atlas` sidecar. NO `data` field (Pixi #10108).
+ *  When `includeFileSizes` is on, each candidate is a `{ src, progressSize }` object instead of a bare string
+ *  (AssetPack parity — pixiManifest.js:136-142); off ⇒ bare strings (byte-identical to today). */
 export interface PixiUnresolvedAsset {
   alias: string[];
-  src: string[];
+  src: string[] | PixiSizedSrc[];
 }
 export interface PixiAssetsBundle {
   name: string;
@@ -66,6 +79,16 @@ export interface ManifestAsset {
 
 export interface BuildPixiManifestOptions {
   bundleName?: string;
+  /** AssetPack `includeFileSizes` parity (round23 #2). Absent/false ⇒ bare-string `src` (BYTE-IDENTICAL to
+   *  today — no `progressSize` field anywhere). `'raw'` ⇒ each `src` becomes `{ src, progressSize }` with
+   *  progressSize = uncompressed KB (statBytes/1024, 2dp). `'gzip'` ⇒ gzipped KB (gzipBytes/1024, 2dp).
+   *  BOTH are KB (AssetPack's getFileSizeInKB divides by 1024 in both branches, utils.js:24-42). */
+  includeFileSizes?: false | 'raw' | 'gzip';
+  /** FINAL emitted byte length per `src` path: the RAW stat length for `'raw'`, the pre-gzipped length for
+   *  `'gzip'`. Supplied by the worker from the POST-replace `byPath` map so pngquant/KTX2 in-place swaps are
+   *  reflected honestly (never a stale lossless size). Required when `includeFileSizes` is set; ignored
+   *  otherwise. A `src` missing from the map ⇒ progressSize 0 (no throw — all real entries are present). */
+  srcBytes?: ReadonlyMap<string, number>;
 }
 
 /** Format rank for `src` candidate ordering within one entry. KTX2 ranks FIRST (-1) so a GPU-compressed
@@ -153,9 +176,14 @@ export function buildPixiManifest(assets: ManifestAsset[], opts?: BuildPixiManif
   interface RawEntry {
     fullAlias: string;
     baseAlias: string;
-    src: string[];
+    src: string[] | PixiSizedSrc[];
   }
   const raw: RawEntry[] = [];
+
+  // AssetPack getFileSizeInKB parity (utils.js:24-42): BOTH 'raw' and 'gzip' divide the byte length by 1024
+  // and round to 2dp. Pure math (no Date.now/Math.random) ⇒ determinism preserved. 'raw' is uncompressed KB,
+  // 'gzip' is gzipped KB — the byte source per mode is the worker-supplied `srcBytes` (final shipped bytes).
+  const kbOf = (b: number): number => Number((b / 1024).toFixed(2));
 
   for (const asset of assets) {
     // Group this asset's variants by suffix (the tier key).
@@ -177,7 +205,12 @@ export function buildPixiManifest(assets: ManifestAsset[], opts?: BuildPixiManif
       const fullAlias = `${fullStem}${tierTag}`;
       const baseAlias = `${baseStem}${tierTag}`;
       // src = this tier's format candidates, sorted + de-duped (defensive against same-mime fallback dupes).
-      const src = [...new Set(variants.map((v) => v.src))].sort(compareSrc);
+      const sortedSrcs = [...new Set(variants.map((v) => v.src))].sort(compareSrc);
+      // includeFileSizes off/absent ⇒ bare strings (today's exact code path ⇒ byte-identical). On ⇒ each
+      // candidate carries its REAL measured progressSize (KB) from the worker-supplied final byte map.
+      const src: string[] | PixiSizedSrc[] = opts?.includeFileSizes
+        ? sortedSrcs.map((s) => ({ src: s, progressSize: kbOf(opts.srcBytes?.get(s) ?? 0) }))
+        : sortedSrcs;
       raw.push({ fullAlias, baseAlias, src });
     }
   }

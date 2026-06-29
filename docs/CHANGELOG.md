@@ -78,6 +78,43 @@ atlas findings it already trips.
   - Gate: `pnpm typecheck && pnpm test && pnpm lint` green; `node fixtures/_generator/generate.mjs &&
     git status --short` → no fixture diff.
 
+- **#2 `includeFileSizes` → `progressSize` in the PixiJS manifest (AssetPack parity)**
+  (`docs/improvements/round23-includefilesizes-progresssize-in-t.md`)
+  — OPT-IN, DEFAULT OFF. When enabled, every `src` candidate in the emitted PixiJS-v8 `manifest.json` becomes
+  `{ src, progressSize }` instead of a bare string — the **REAL field AssetPack 1.7.0 emits**
+  (`pixiManifest.js:139-142`, verified on disk by the design), so PixiJS shows accurate `Assets.load`
+  progress over the transport. `progressSize` is the size in **KB to 2 decimal places**: AssetPack's
+  `getFileSizeInKB` divides the byte length by 1024 in **both** branches (`utils.js:24-42`), so `'raw'` =
+  uncompressed KB (`statBytes/1024`) and `'gzip'` = gzipped KB (`gzipBytes/1024`) — **both are KB**, never
+  bytes-out.
+  — PURE builder (`packages/fix/src/pixi-manifest.ts`): new `PixiSizedSrc { src; progressSize }`,
+  `PixiUnresolvedAsset.src` widened to `string[] | PixiSizedSrc[]`, `BuildPixiManifestOptions.includeFileSizes?:
+  false | 'raw' | 'gzip'` + `srcBytes?: ReadonlyMap<string, number>` (the FINAL emitted byte length per `src`,
+  supplied by the worker). One branch in the per-tier loop maps each sorted `src` to `{ src, progressSize:
+  kbOf(srcBytes.get(s) ?? 0) }`. **`EmittedVariant` unchanged** (no per-variant `bytes` — the size comes from
+  the worker's post-replace byte map, not the push site). Re-exported `PixiSizedSrc` from `index.ts`.
+  — Worker (`apps/web/src/worker/fix.worker.ts`): SINGLE edit at the manifest build site — builds
+  `srcBytes` over **`dedupedOut`** (the FINAL shipped bytes, keyed by the exact paths the manifest `src`
+  uses), so pngquant/KTX2 **in-place page replacement is reflected honestly** (no stale lossless size). New
+  top-level `gzipLen()` via the standard Worker `CompressionStream('gzip')` (no network, no native lib —
+  invariant 1) supplies the `'gzip'` byte source. The builder call is **spread-gated** so OFF ⇒ neither option
+  reaches the builder.
+  — `FixOptions.includeFileSizes?: 'raw' | 'gzip'` (`fix-protocol.ts`); App.tsx `includeFileSizes`
+  state + a `<select>` (Off / Uncompressed KB / Gzip KB) **disabled unless the Pixi manifest is emitted**
+  (`effectiveEmitManifest`), wired through `buildOptions` (UI values ARE the contract values — no remap).
+  i18n: 5 new keys (`fix.includeFileSizes`, `…Hint`, `.off/.raw/.gzip`) across all 9 catalogs (drift-guarded).
+  — **HONESTY (invariant 3):** both modes are MEASURED from the actually-shipped bytes; nothing estimated or
+  fabricated. **ADDITIVITY:** absent/`'off'` ⇒ bare-string `src` ⇒ the manifest is **BYTE-IDENTICAL** to today
+  (no `progressSize` field anywhere). **Invariant 5:** `progressSize` is disk/download size, never summed into
+  VRAM or any saving. **DETERMINISM:** pure math for `'raw'`; gzip length is platform-stable (golden tests
+  assert `'raw'` exactly, gzip only as a bound).
+  — Tests (`packages/fix/test/pixi-manifest.test.ts`, T17-T24): off-path byte-identity (srcBytes ignored when
+  the flag is absent), `'raw'` shape + KB values + format order, KB rounding parity (1536→1.5, 300→0.29,
+  0→0), sheet ⇒ sidecar size (image not in src), determinism under shuffled input, missing-src ⇒ 0,
+  field-name lock (`progressSize` present, `fileSize`/`size` absent), and a real-path multi-tier+atlas fixture
+  proving it fires end-to-end.
+  - Gate: `pnpm typecheck && pnpm test && pnpm lint` green.
+
 ---
 
 ## Round 22 — selection (#0 shipped) — 2026-06-29

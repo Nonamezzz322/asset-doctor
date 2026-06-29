@@ -1380,6 +1380,11 @@ function FixCard({ files }: { files: PickedFile[] }) {
   // output gains an additive `manifest.json` mapping every emitted image/sheet so a PixiJS game can load the
   // whole folder with one Assets.init({ manifest }). OFF ⇒ buildOptions omits it ⇒ zip byte-identical to today.
   const [emitPixiManifest, setEmitPixiManifest] = useState(false);
+  // AssetPack includeFileSizes parity (round23 #2) — adds `progressSize` (KB, 2dp) to each manifest src so
+  // PixiJS shows accurate load progress. DEFAULT OFF ('off' ⇒ buildOptions omits it ⇒ bare-string src ⇒
+  // manifest byte-identical to today). 'raw' = uncompressed KB; 'gzip' = REAL gzipped KB. Gated on the Pixi
+  // manifest being emitted (a bare-string manifest has no src objects to carry a size).
+  const [includeFileSizes, setIncludeFileSizes] = useState<'off' | 'raw' | 'gzip'>('off');
   // Content-hash cache-busting (round9-cache-busting.md K9) — its OWN Pro opt-in, DEFAULT OFF. ON ⇒ every
   // emitted image/sheet AD references is renamed name.<hash>.ext (hash = sha256 of the final bytes) and every
   // referrer is repointed (atlas meta.image / Spine .atlas line 0 / the Pixi manifest src[] / dedup consumer
@@ -1577,6 +1582,10 @@ function FixCard({ files }: { files: PickedFile[] }) {
       // op will engage (round12 auto-pair: the .ktx2 sibling / re-compressed PNG needs loader wiring, else it
       // ships orphaned). Off + no consented backend ⇒ undefined ⇒ no manifest ⇒ zip byte-identical to today.
       emitPixiManifest: effectiveEmitManifest || undefined,
+      // AssetPack includeFileSizes parity (round23 #2) — forwarded only when the manifest is actually emitted
+      // AND the user picked a real mode. UI values ARE the contract values ('raw'/'gzip') — no remap. 'off' or
+      // no manifest ⇒ undefined ⇒ bare-string src ⇒ manifest byte-identical to today.
+      includeFileSizes: effectiveEmitManifest && includeFileSizes !== 'off' ? includeFileSizes : undefined,
       // Content-hash cache-busting (round9-cache-busting.md) — forwarded only when enabled; off ⇒ undefined
       // ⇒ no hashing branch runs in the worker ⇒ zip byte-identical to today.
       hashFilenames: hashFilenames || undefined,
@@ -1844,6 +1853,24 @@ function FixCard({ files }: { files: PickedFile[] }) {
           {backendWillUpload && !emitPixiManifest ? (
             <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.backend.manifestAutoPaired')}</p>
           ) : null}
+
+          {/* AssetPack includeFileSizes parity (round23 #2) — adds `progressSize` (KB) to each manifest src so
+              PixiJS shows accurate load progress. DEFAULT 'off' ⇒ buildOptions omits it ⇒ bare-string src ⇒
+              manifest byte-identical to today. DISABLED unless the Pixi manifest is actually emitted (a
+              bare-string manifest has no src objects to carry a size). */}
+          <label className="mt-1 ml-5 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.includeFileSizesHint')}>
+            {t('fix.includeFileSizes')}
+            <select
+              value={includeFileSizes}
+              disabled={!effectiveEmitManifest}
+              onChange={(e) => setIncludeFileSizes(e.target.value as 'off' | 'raw' | 'gzip')}
+              className="rounded border border-line bg-panel px-1 py-0.5 font-mono text-[10px] text-ink disabled:opacity-60"
+            >
+              <option value="off">{t('fix.includeFileSizes.off')}</option>
+              <option value="raw">{t('fix.includeFileSizes.raw')}</option>
+              <option value="gzip">{t('fix.includeFileSizes.gzip')}</option>
+            </select>
+          </label>
 
           {/* Content-hash cache-busting (round9-cache-busting.md K9) — additive, DEFAULT OFF. Pairs with the
               Pixi manifest (the guaranteed referrer for pass-through loose images). Off ⇒ zip byte-identical. */}

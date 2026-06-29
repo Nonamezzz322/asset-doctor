@@ -93,6 +93,7 @@ export type {
   PixiAssetsManifest,
   PixiAssetsBundle,
   PixiUnresolvedAsset,
+  PixiSizedSrc,
   ManifestAsset,
   EmittedVariant,
   ManifestAssetKind,

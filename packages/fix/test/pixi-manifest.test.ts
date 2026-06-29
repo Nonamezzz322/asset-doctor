@@ -370,6 +370,153 @@ describe('buildPixiManifest — pure PixiJS-v8 manifest builder', () => {
     expect(countPixiManifestEntries(assets)).toBe(3);
   });
 
+  // ── includeFileSizes → progressSize (round23 #2, AssetPack parity) ─────────────────────────────────
+  // AssetPack 1.7.0 emits `{ src, progressSize }` per candidate (pixiManifest.js:139-142); progressSize is KB
+  // to 2dp (getFileSizeInKB divides the byte length by 1024 in BOTH branches, utils.js:24-42). The builder
+  // takes a Map<src, finalByteLength> from the worker (the FINAL shipped bytes, post pngquant/KTX2) and emits
+  // progressSize = bytes/1024 rounded to 2dp. Off/absent ⇒ bare-string src (byte-identical to today).
+
+  it('T17 (round23): includeFileSizes ABSENT + srcBytes provided ⇒ src is still string[] (off-path byte-identity)', () => {
+    const assets: ManifestAsset[] = [
+      {
+        ref: 'ui/btn.png',
+        kind: 'loose',
+        source: 'ui/btn.png',
+        variants: [v('ui/btn.png'), v('ui/btn.avif'), v('ui/btn.webp')],
+      },
+    ];
+    // srcBytes is supplied but includeFileSizes is absent ⇒ it must be ignored (off ⇒ no progressSize at all).
+    const srcBytes = new Map([['ui/btn.avif', 1536], ['ui/btn.webp', 2048], ['ui/btn.png', 4096]]);
+    const off = buildPixiManifest(assets, { srcBytes });
+    // Byte-identical to T2's output (the canonical off-path) — proves additivity.
+    expect(off).toBe(buildPixiManifest(assets));
+    const e = entriesOf(off);
+    expect(e[0]!.src).toEqual(['ui/btn.avif', 'ui/btn.webp', 'ui/btn.png']); // bare strings, no objects
+    for (const s of e[0]!.src) expect(typeof s).toBe('string');
+    // No "progressSize" / "fileSize"/"size" token anywhere in the off-path JSON.
+    expect(off).not.toContain('progressSize');
+  });
+
+  it('T18 (round23): includeFileSizes "raw" ⇒ each src is { src, progressSize } in KB, ordered avif<webp<png', () => {
+    const assets: ManifestAsset[] = [
+      {
+        ref: 'ui/btn.png',
+        kind: 'loose',
+        source: 'ui/btn.png',
+        variants: [v('ui/btn.png'), v('ui/btn.avif'), v('ui/btn.webp')],
+      },
+    ];
+    const srcBytes = new Map([['ui/btn.avif', 1536], ['ui/btn.webp', 3072], ['ui/btn.png', 8192]]);
+    const json = buildPixiManifest(assets, { includeFileSizes: 'raw', srcBytes });
+    const e = entriesOf(json) as unknown as { alias: string[]; src: { src: string; progressSize: number }[] }[];
+    expect(e).toHaveLength(1);
+    expect(e[0]!.alias).toEqual(['ui/btn', 'btn']);
+    // Format order preserved (sort key is still the src STRING); each carries its REAL KB.
+    expect(e[0]!.src).toEqual([
+      { src: 'ui/btn.avif', progressSize: 1.5 }, // 1536/1024
+      { src: 'ui/btn.webp', progressSize: 3 }, // 3072/1024
+      { src: 'ui/btn.png', progressSize: 8 }, // 8192/1024
+    ]);
+  });
+
+  it('T19 (round23): KB rounding parity — 1536→1.5, 300→0.29, 0→0 ((b/1024).toFixed(2))', () => {
+    const assets: ManifestAsset[] = [
+      { ref: 'a.png', kind: 'loose', source: 'a.png', variants: [v('a.avif'), v('a.webp'), v('a.png')] },
+    ];
+    const srcBytes = new Map([['a.avif', 1536], ['a.webp', 300], ['a.png', 0]]);
+    const json = buildPixiManifest(assets, { includeFileSizes: 'raw', srcBytes });
+    const e = entriesOf(json) as unknown as { src: { src: string; progressSize: number }[] }[];
+    expect(e[0]!.src).toEqual([
+      { src: 'a.avif', progressSize: 1.5 },
+      { src: 'a.webp', progressSize: 0.29 }, // (300/1024).toFixed(2) === '0.29'
+      { src: 'a.png', progressSize: 0 },
+    ]);
+  });
+
+  it('T20 (round23): sheet ⇒ progressSize is the SIDECAR .json size, image NOT in src', () => {
+    const assets: ManifestAsset[] = [
+      { ref: 'ui/hud.json', kind: 'atlas', source: 'ui/hud.json', variants: [v('ui/hud.json')] },
+    ];
+    // srcBytes carries the SIDECAR length (the worker keys on the .json path the manifest references).
+    const srcBytes = new Map([['ui/hud.json', 2560]]);
+    const json = buildPixiManifest(assets, { includeFileSizes: 'gzip', srcBytes });
+    const e = entriesOf(json) as unknown as { src: { src: string; progressSize: number }[] }[];
+    expect(e[0]!.src).toEqual([{ src: 'ui/hud.json', progressSize: 2.5 }]); // 2560/1024, the sidecar
+    expect(e[0]!.src.some((c) => c.src.endsWith('.webp') || c.src.endsWith('.png'))).toBe(false);
+  });
+
+  it('T21 (round23): determinism — shuffled input + "raw" ⇒ byte-identical string', () => {
+    const variants = [v('ui/btn.png'), v('ui/btn.avif'), v('ui/btn.webp')];
+    const srcBytes = new Map([['ui/btn.avif', 1536], ['ui/btn.webp', 3072], ['ui/btn.png', 8192]]);
+    const a = buildPixiManifest(
+      [{ ref: 'ui/btn.png', kind: 'loose', source: 'ui/btn.png', variants }],
+      { includeFileSizes: 'raw', srcBytes },
+    );
+    const b = buildPixiManifest(
+      [{ ref: 'ui/btn.png', kind: 'loose', source: 'ui/btn.png', variants: [...variants].reverse() }],
+      { includeFileSizes: 'raw', srcBytes },
+    );
+    expect(b).toBe(a);
+  });
+
+  it('T22 (round23): a src missing from srcBytes ⇒ progressSize 0, no throw', () => {
+    const assets: ManifestAsset[] = [
+      { ref: 'ui/btn.png', kind: 'loose', source: 'ui/btn.png', variants: [v('ui/btn.webp')] },
+    ];
+    const json = buildPixiManifest(assets, { includeFileSizes: 'raw', srcBytes: new Map() });
+    const e = entriesOf(json) as unknown as { src: { src: string; progressSize: number }[] }[];
+    expect(e[0]!.src).toEqual([{ src: 'ui/btn.webp', progressSize: 0 }]);
+  });
+
+  it('T23 (round23): field-name lock — emits "progressSize", NEVER "fileSize"/"size"', () => {
+    const assets: ManifestAsset[] = [
+      { ref: 'ui/btn.png', kind: 'loose', source: 'ui/btn.png', variants: [v('ui/btn.webp')] },
+    ];
+    const json = buildPixiManifest(assets, { includeFileSizes: 'raw', srcBytes: new Map([['ui/btn.webp', 1024]]) });
+    expect(json).toContain('"progressSize"'); // the verified AssetPack 1.7.0 field
+    expect(json).not.toContain('"fileSize"');
+    expect(json).not.toContain('"size"');
+  });
+
+  it('T24 (round23): real-path fixture — multi-tier loose + atlas, srcBytes mirrors emitted lengths, fires end-to-end', () => {
+    // Mirrors the shape a real fix records: a multi-tier loose image (two suffixes × two formats) + an atlas
+    // sidecar. srcBytes carries the exact emitted byte lengths the worker would read off `dedupedOut`.
+    const assets: ManifestAsset[] = [
+      {
+        ref: 'ui/btn.png',
+        kind: 'loose',
+        source: 'ui/btn.png',
+        variants: [
+          { scale: 1, suffix: '_1080p', src: 'ui/btn_1080p.avif' },
+          { scale: 1, suffix: '_1080p', src: 'ui/btn_1080p.webp' },
+          { scale: 0.5, suffix: '_540p', src: 'ui/btn_540p.avif' },
+          { scale: 0.5, suffix: '_540p', src: 'ui/btn_540p.webp' },
+        ],
+      },
+      { ref: 'ui/hud.json', kind: 'atlas', source: 'ui/hud.json', variants: [v('ui/hud.json')] },
+    ];
+    const srcBytes = new Map([
+      ['ui/btn_1080p.avif', 4096],
+      ['ui/btn_1080p.webp', 6144],
+      ['ui/btn_540p.avif', 1024],
+      ['ui/btn_540p.webp', 1536],
+      ['ui/hud.json', 5120],
+    ]);
+    const json = buildPixiManifest(assets, { includeFileSizes: 'raw', srcBytes });
+    const e = entriesOf(json) as unknown as { alias: string[]; src: { src: string; progressSize: number }[] }[];
+    // 2 tiers for btn + 1 for hud (sorted by alias[0]): btn_1080p, btn_540p, ui/hud.
+    expect(e.map((x) => x.alias[0])).toEqual(['ui/btn_1080p', 'ui/btn_540p', 'ui/hud']);
+    expect(e[0]!.src).toEqual([
+      { src: 'ui/btn_1080p.avif', progressSize: 4 },
+      { src: 'ui/btn_1080p.webp', progressSize: 6 },
+    ]);
+    expect(e[1]!.src).toEqual([
+      { src: 'ui/btn_540p.avif', progressSize: 1 },
+      { src: 'ui/btn_540p.webp', progressSize: 1.5 },
+    ]);
+    expect(e[2]!.src).toEqual([{ src: 'ui/hud.json', progressSize: 5 }]);
+  });
+
   it('extra: mixed loose+atlas+spine — each ref classified independently, all loadable, sorted by alias', () => {
     const assets: ManifestAsset[] = [
       { ref: 'fx/spark.png', kind: 'loose', source: 'fx/spark.png', variants: [v('fx/spark.avif'), v('fx/spark.webp')] },

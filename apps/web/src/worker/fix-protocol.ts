@@ -169,6 +169,14 @@ export interface FixOptions {
    *  sheets list the `.json`/`.atlas` sidecar; Spine still needs `pixi-spine`. Implies no saving (invariant 5
    *  — the manifest sums nothing). */
   emitPixiManifest?: boolean;
+  /** AssetPack `includeFileSizes` parity (docs/improvements/round23-includefilesizes-progresssize-in-t.md).
+   *  When set, every `src` in the emitted PixiJS manifest becomes `{ src, progressSize }` (KB, 2dp — the REAL
+   *  field AssetPack 1.7.0 emits) so PixiJS shows accurate Assets.load progress. `'raw'` ⇒ uncompressed KB
+   *  (final byte length /1024); `'gzip'` ⇒ REAL gzipped KB (CompressionStream over the SAME final bytes /1024).
+   *  Both numbers are MEASURED from the actually-shipped bytes (post pngquant/KTX2 in-place swaps) — never
+   *  estimated (invariant 3). Requires `emitPixiManifest` (a bare-string manifest has no src objects to size).
+   *  Absent ⇒ bare-string `src` ⇒ the manifest is BYTE-IDENTICAL to today (no new field). OPT-IN, default OFF. */
+  includeFileSizes?: 'raw' | 'gzip';
   // ── OPT-IN backend native ops (docs/improvements/round12-backend-processing.md, Phase 3) ──────────
   /** OPT-IN, DEFAULT OFF carve-out of invariants 1 & 2 (user-directed amendment): native-only encodes
    *  (today only KTX2/UASTC, which is impossible in-browser) move to a backend the user explicitly enables
