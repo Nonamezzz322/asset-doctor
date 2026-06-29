@@ -662,9 +662,9 @@ function BundlesPanel({
             </select>
           </div>
         ))}
-        {rootLoose > 0 ? <p className="truncate font-mono text-[10px] text-ink-soft/80">{t('fix.bundles.root')} · {rootLoose}</p> : null}
+        {rootLoose > 0 ? <p className="truncate font-mono text-[10px] text-ink-soft">{t('fix.bundles.root')} · {rootLoose}</p> : null}
       </div>
-      <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.lazy.note')}</p>
+      <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.lazy.note')}</p>
     </details>
   );
 }
@@ -806,7 +806,7 @@ function SettingsPanel({
 
       {/* "Why no X?" — honest browser-limit notes for the controls we deliberately omit (NOT
           "coming soon"): resampling kernel, pre-blur, pngquant, AVIF chroma. */}
-      <ul className="mt-3 space-y-1 border-t border-line pt-2 font-mono text-[10px] leading-relaxed text-ink-soft/80">
+      <ul className="mt-3 space-y-1 border-t border-line pt-2 font-mono text-[10px] leading-relaxed text-ink-soft">
         <li>{t('fix.skipped.whyNoKernel')}</li>
         <li>{t('fix.skipped.whyNoPreBlur')}</li>
         <li>{t('fix.skipped.whyNoPngquant')}</li>
@@ -903,7 +903,7 @@ function PackPanel({
 
           {/* Sheet format reuses the shared SettingsPanel target/quality/effort controls; Spine sheets
               stay PNG by default for runtime safety regardless of that target. */}
-          <p className="font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.pack.spinePng')}</p>
+          <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.pack.spinePng')}</p>
         </div>
       ) : null}
     </details>
@@ -942,7 +942,7 @@ function ExtrudePanel({ extrude, setExtrude }: { extrude: number; setExtrude: (n
       </label>
 
       {/* Honest disclosure (invariant 5): bleed can grow a sheet to the next POT ⇒ more VRAM. */}
-      <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.extrudeHint', { px: extrude || 1 })}</p>
+      <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.extrudeHint', { px: extrude || 1 })}</p>
     </details>
   );
 }
@@ -988,11 +988,11 @@ function BackendKtx2Panel({
     <details className="mt-2 rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
       <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">{t('fix.backend.title')}</summary>
 
-      <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.backend.hint')}</p>
+      <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.backend.hint')}</p>
 
       {!configured ? (
         // No API base / no entitlement token ⇒ the whole path is unavailable. Stay honest, don't offer it.
-        <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft/70">{t('fix.backend.unconfigured')}</p>
+        <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.backend.unconfigured')}</p>
       ) : (
         <>
           <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.backend.ktx2Hint')}>
@@ -1025,7 +1025,7 @@ function BackendKtx2Panel({
               {/* Honest costs. KTX2 (round12 B3/B4): bigger zip, conditional VRAM, transcoder dependency.
                   pngquant (round13): a SMALLER DOWNLOAD on disk, but ZERO GPU/VRAM change (it decodes to full
                   RGBA8888). Each op's costs shown only when that op is on. */}
-              <ul className="mt-2 list-disc space-y-1 pl-4 font-mono text-[10px] leading-relaxed text-ink-soft/80">
+              <ul className="mt-2 list-disc space-y-1 pl-4 font-mono text-[10px] leading-relaxed text-ink-soft">
                 {ktx2Enable ? (
                   <>
                     <li>{t('fix.backend.costZip')}</li>
@@ -1050,7 +1050,7 @@ function BackendKtx2Panel({
                       </li>
                     ))}
                     {uploadPreview.count > uploadPreview.sample.length ? (
-                      <li className="font-mono text-[9px] text-ink-soft/70">{t('fix.backend.uploadMore', { n: uploadPreview.count - uploadPreview.sample.length })}</li>
+                      <li className="font-mono text-[9px] text-ink-soft">{t('fix.backend.uploadMore', { n: uploadPreview.count - uploadPreview.sample.length })}</li>
                     ) : null}
                   </ul>
                 ) : null}
@@ -1117,7 +1117,7 @@ function TierPanel({
     <details className="mt-2 rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
       <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">{t('fix.tier.title')}</summary>
 
-      <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.tier.hint')}</p>
+      <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.tier.hint')}</p>
 
       <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
         <input type="checkbox" checked={tierEnable} onChange={(e) => setTierEnable(e.target.checked)} className="accent-teal" />
@@ -1153,19 +1153,19 @@ function TierPanel({
 
           {/* Disk-grows note: tiering ships every tier ⇒ total disk increases by design; the win is
               per-device download + per-device VRAM, never total disk (invariant 5). */}
-          <p className="font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.tier.diskNote')}</p>
+          <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.tier.diskNote')}</p>
 
           {/* v1 scope: an asset that gets repacked/merged/packed is NOT also tiered (its emitted sheet is
               not re-fed into tiering yet) — surfaced as a skip in the receipt. State it up front so the
               under-filled-atlas case isn't a confusing silent single-resolution result. */}
-          <p className="font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.tier.repackNote')}</p>
+          <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.tier.repackNote')}</p>
 
           {/* Downscale honesty — REUSE the existing browser-limit notes (no kernel / no pre-blur control).
               round24: when the OPT-IN lanczos3 resample backend op is live this run, the tier DOWNSCALE will
               actually use the vips kernel — surface a SEPARATE tier-only hint (NEVER retarget whyNoKernel,
               which stays true on the non-tier paths where resample is not routed). The whyNoKernel note still
               applies to the in-browser fallback (resample off / declined / hashFilenames on), so both show. */}
-          <ul className="space-y-1 border-t border-line pt-2 font-mono text-[10px] leading-relaxed text-ink-soft/80">
+          <ul className="space-y-1 border-t border-line pt-2 font-mono text-[10px] leading-relaxed text-ink-soft">
             <li>{t('fix.skipped.whyNoKernel')}</li>
             <li>{t('fix.skipped.whyNoPreBlur')}</li>
             {resampleAvailable ? <li className="text-teal">{t('fix.backend.resampleTierHint')}</li> : null}
@@ -1269,7 +1269,7 @@ function ExportProfilePanel({
     >
       <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">{t('fix.profile.title')}</summary>
 
-      <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.profile.hint')}</p>
+      <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.profile.hint')}</p>
 
       {/* AB-R5: save/load the granular UI state as a versioned build-config JSON. Browser-only (zero asset
           bytes, no network — invariant 1). Token-driven like the receipt download button (border-line →
@@ -1302,7 +1302,7 @@ function ExportProfilePanel({
           }}
         />
       </div>
-      <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-soft/70">{t('fix.config.hint')}</p>
+      <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.config.hint')}</p>
       {/* Polite live region: success ("loaded") OR a fail-closed parse-error reason. NO alert, NO crash. */}
       {cfgStatus ? (
         <p role="status" aria-live="polite" className="mt-1 font-mono text-[10px] leading-relaxed text-ink">
@@ -1321,7 +1321,7 @@ function ExportProfilePanel({
         <div className="mt-2 space-y-3">
           {/* ── Formats ── */}
           <div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft/70">{t('fix.profile.formats')}</p>
+            <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">{t('fix.profile.formats')}</p>
             <div className="mt-1 space-y-2">
               {FORMAT_KEYS.map(({ mime, key }) => {
                 const f = formats[mime];
@@ -1365,7 +1365,7 @@ function ExportProfilePanel({
                             {t('fix.profile.nearLossless')}
                           </label>
                         ) : null}
-                        {isAvif ? <p className="font-mono text-[9px] leading-relaxed text-ink-soft/70">{t('fix.profile.avifNoLossless')}</p> : null}
+                        {isAvif ? <p className="font-mono text-[9px] leading-relaxed text-ink-soft">{t('fix.profile.avifNoLossless')}</p> : null}
                       </div>
                     ) : null}
                   </div>
@@ -1379,7 +1379,7 @@ function ExportProfilePanel({
               decodes RGBA8888 — NO VRAM claim). 4:4:0(=2) deferred (only 0/1/3 verified). ── */}
           {formats['image/avif'].enabled ? (
             <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft/70">{t('fix.profile.avifSubsample')}</p>
+              <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">{t('fix.profile.avifSubsample')}</p>
               <select
                 value={avifSubsample === undefined ? 'default' : String(avifSubsample)}
                 onChange={(e) => setAvifSubsample(e.target.value === 'default' ? undefined : Number(e.target.value))}
@@ -1395,8 +1395,8 @@ function ExportProfilePanel({
 
           {/* ── Resolutions: the default ladder is always available; custom rows add to it ── */}
           <div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft/70">{t('fix.profile.resolutions')}</p>
-            <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-soft/80">
+            <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">{t('fix.profile.resolutions')}</p>
+            <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-soft">
               {DEFAULT_SCALE_TIERS.map((tt) => tt.suffix).join('  ')}
             </p>
             {customTiers.map((tt, i) => {
@@ -1434,8 +1434,8 @@ function ExportProfilePanel({
 
           {/* ── Per-folder overrides (round10) — opt-in rules: a fonts→AVIF 4:4:4 preset + generic rows ── */}
           <div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft/70">{t('fix.profile.overrides')}</p>
-            <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.profile.overridesHint')}</p>
+            <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">{t('fix.profile.overrides')}</p>
+            <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.profile.overridesHint')}</p>
             {overrides.map((o, i) => (
               <div key={i} className="mt-1 flex flex-wrap items-center gap-1.5">
                 <input
@@ -1483,7 +1483,7 @@ function ExportProfilePanel({
           </div>
 
           {/* Honesty notes — reuse browser-limit disclosures + the profile-specific bundle/disk notes. */}
-          <ul className="space-y-1 border-t border-line pt-2 font-mono text-[10px] leading-relaxed text-ink-soft/80">
+          <ul className="space-y-1 border-t border-line pt-2 font-mono text-[10px] leading-relaxed text-ink-soft">
             <li>{t('fix.profile.noBundleNote')}</li>
             <li>{t('fix.profile.diskNote')}</li>
             <li>{t('fix.skipped.whyNoKernel')}</li>
@@ -2026,7 +2026,7 @@ function FixCard({ files, profilePanelOpen, setProfilePanelOpen }: { files: Pick
           text-ink / text-ink-soft / teal — no new tokens). */}
       <h3 className="font-display text-base font-semibold text-ink">{t(OPTIMIZE_ENTRY.titleKey)}</h3>
       <p className="mx-auto mt-1 max-w-sm font-mono text-[11px] leading-relaxed text-ink-soft">{t(OPTIMIZE_ENTRY.subKey)}</p>
-      <p className="mt-1 font-mono text-[10px] text-ink-soft/70">{t('pro.note')}</p>
+      <p className="mt-1 font-mono text-[10px] text-ink-soft">{t('pro.note')}</p>
       {phase.t === 'planning' ? (
         <p className="mt-2.5 font-mono text-xs text-teal">{t('dropzone.analyzing')}</p>
       ) : phase.t === 'running' ? (
@@ -2125,7 +2125,7 @@ function FixCard({ files, profilePanelOpen, setProfilePanelOpen }: { files: Pick
             {t('fix.pixiManifest')}
           </label>
           {backendWillUpload && !emitPixiManifest ? (
-            <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.backend.manifestAutoPaired')}</p>
+            <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.backend.manifestAutoPaired')}</p>
           ) : null}
 
           {/* AssetPack includeFileSizes parity (round23 #2) — adds `progressSize` (KB) to each manifest src so
@@ -2234,7 +2234,7 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
         <p className="font-mono text-[10px] text-ink-soft">
           {t('fix.meshedCount', { n: receipt.meshSprites ?? 0 })} ·{' '}
           {receipt.polygonAreaSavedPct ? t('fix.tighter', { pct: Math.round(receipt.polygonAreaSavedPct * 100) }) : t('fix.tighterPlain')}
-          <span className="mt-0.5 block text-ink-soft/80">{t('fix.meshNote')}</span>
+          <span className="mt-0.5 block text-ink-soft">{t('fix.meshNote')}</span>
         </p>
       ) : null}
       {/* Frame-redundancy aliasing (round19): byte-identical animation frames aliased onto a shared region. The
@@ -2271,7 +2271,7 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
         <p className="font-mono text-[10px] text-ink-soft">
           {t('fix.profile.title')} — {receipt.exportProfile.filesEmitted} files · {receipt.exportProfile.formats}×
           {receipt.exportProfile.tiers} · {receipt.exportProfile.assets} assets
-          <span className="mt-0.5 block text-ink-soft/80">{t('fix.profile.diskNote')}</span>
+          <span className="mt-0.5 block text-ink-soft">{t('fix.profile.diskNote')}</span>
         </p>
       ) : null}
       {/* PixiJS-v8 asset manifest (round8-pixi-manifest.md C8): present ONLY when the opt-in emitted a
@@ -2339,7 +2339,7 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
             <p className="font-mono text-[10px] text-warn">{t('fix.backend.receiptVramFallback')}</p>
           ) : null}
           {bn.op === 'ktx2' ? (
-            <p className="font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.backend.receiptLoader')}</p>
+            <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.backend.receiptLoader')}</p>
           ) : null}
         </div>
       )) ?? null}
@@ -2361,7 +2361,7 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
             })}
           </p>
           {receipt.packVerification ? (
-            <p className="font-mono text-[10px] text-ink-soft/80">
+            <p className="font-mono text-[10px] text-ink-soft">
               {t('fix.pack.verified', {
                 verified: receipt.packVerification.verified,
                 unmatched: receipt.packVerification.unmatched,
@@ -2385,7 +2385,7 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
         <p className="font-mono text-[10px] text-ink-soft">{t('fix.extrude.receipt', { blits: receipt.extrudedBlits ?? 0, px: receipt.extrudePx ?? 0 })}</p>
       ) : null}
       {(receipt.extrudeSkipped ?? 0) > 0 ? (
-        <p className="font-mono text-[10px] text-ink-soft/80">{t('fix.extrudeSkipped', { n: receipt.extrudeSkipped ?? 0 })}</p>
+        <p className="font-mono text-[10px] text-ink-soft">{t('fix.extrudeSkipped', { n: receipt.extrudeSkipped ?? 0 })}</p>
       ) : null}
       {(receipt.extrudeVramDelta ?? 0) > 0 ? (
         <p className="font-mono text-[10px] text-warn">{t('fix.extrudeVramDelta', { bytes: receipt.extrudeVramDelta ?? 0 })}</p>
@@ -2413,7 +2413,7 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
               })}
             </p>
           ) : null}
-          <p className="font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.tier.diskNote')}</p>
+          <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.tier.diskNote')}</p>
         </>
       ) : null}
       {/* Owner-aware dedup honesty (design §5a / Task 7): surface how many references were repointed, how
@@ -2472,7 +2472,7 @@ function FixVerdicts({ receipt }: { receipt: FixReceipt }) {
           <div key={f.id} className={`rounded-md border-l-2 ${sev} bg-bg p-2 pl-2.5`}>
             <p className="font-mono text-[11px] font-semibold">[{t(`severity.${f.severity}`)}] {r.title}</p>
             <p className="mt-0.5 font-mono text-[10px] text-ink-soft">{r.runtimeEvidence}</p>
-            <p className="mt-0.5 font-mono text-[10px] leading-relaxed text-ink-soft/80">{r.diagnosis}</p>
+            <p className="mt-0.5 font-mono text-[10px] leading-relaxed text-ink-soft">{r.diagnosis}</p>
             <p className="mt-0.5 font-mono text-[10px] text-teal">→ {r.fix}</p>
           </div>
         );
@@ -2493,7 +2493,7 @@ function SheetDiffs({ sheetDiffs, total }: { sheetDiffs: SheetDiff[]; total: num
       <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">
         {t('fix.sheetDiff.title', { n: sheetDiffs.length })}
       </summary>
-      <p className="mt-1.5 font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.sheetDiff.proofNote')}</p>
+      <p className="mt-1.5 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.sheetDiff.proofNote')}</p>
       {/* The cap kept the first N composed; surface the honest "showing N of M" when more were composed. */}
       {total > sheetDiffs.length ? (
         <p className="mt-1 font-mono text-[10px] text-ink-soft">{t('fix.sheetDiff.showing', { shown: sheetDiffs.length, total })}</p>
@@ -2616,7 +2616,7 @@ function PlanCard({ summary, excluded, pending, onToggle, onRun, onBack, disable
         <span className="h-2 w-2 rounded-full bg-teal" /> {t('fix.plan.title', { n: summary.totalOps })}
         {/* Re-preview in flight after a checkbox toggle: subtle hint, card stays mounted (no flicker). Reuses
             the existing dropzone.analyzing string so no new 9-catalog key is needed (design N3). */}
-        {pending ? <span className="font-mono text-[10px] text-ink-soft/70">· {t('dropzone.analyzing')}</span> : null}
+        {pending ? <span className="font-mono text-[10px] text-ink-soft">· {t('dropzone.analyzing')}</span> : null}
       </div>
       {summary.totalOps === 0 ? (
         <p className="font-mono text-[11px] leading-relaxed text-ink-soft">{t('fix.plan.empty')}</p>
@@ -2689,7 +2689,7 @@ function PlanCard({ summary, excluded, pending, onToggle, onRun, onBack, disable
       ) : null}
       {/* Honesty note (invariant 5): counts only — byte/VRAM savings appear after Run; refs flag is a
           prediction; tiers are an upper bound; some checks run only at execute. */}
-      <p className="font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.plan.deferredNote')}</p>
+      <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.plan.deferredNote')}</p>
       {/* All kinds deselected ⇒ nothing to run; honest note + disabled Run (no no-op commit, no faked work). */}
       {allDeselected ? <p className="font-mono text-[10px] text-warn">{t('fix.plan.noneSelected')}</p> : null}
       {/* Primary commit: re-post the IDENTICAL options (incl. the selected excludeKinds mask) with
@@ -2773,7 +2773,7 @@ function LoaderMigration({ changes, ktx2 }: { changes: FixChange[]; ktx2: boolea
       <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-warn">
         {t('fix.migrate.title')} · {changes.length}
       </summary>
-      <p className="mt-1.5 font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.migrate.note')}</p>
+      <p className="mt-1.5 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.migrate.note')}</p>
       {/* Engine toggle — product names are CODE (untranslated, design M5), not catalog entries. */}
       <div className="mt-1.5 flex gap-1">
         {(['pixi', 'phaser'] as const).map((e) => (
