@@ -10,7 +10,7 @@ GitHub creds — user pushes); commit hashes below are over that base.
 
 ---
 
-## Round 27 — selection (2 picks; Spine shipped) — 2026-06-29
+## Round 27 — selection (2 picks; all shipped) — 2026-06-29
 Selection (high bar, thin space): 4-lens brainstorm → 5 candidates → strict judge verified each premise and
 picked 2 contained correctness/honesty wins; dropped 3 (declared-vs-real atlas-dimension detector — real +
 relevant but needs a calibrated false-positive tolerance + 9-locale catalog, a capability not a contained fix,
@@ -18,6 +18,31 @@ reconsider as its own round; RGBA4444/RGB565 format note — speculative about l
 move VRAM, invariant-3 risk; preserve `meta.related_multi_packs` on multipack passthrough — verified real
 PAID-path break but spans 3 packages with sibling-list-regen scope creep, deserves its own scoped round).
 Designs in `docs/improvements/round27-*.md`.
+
+- **cross-atlas-redundancy: collapse each atlas to ONE representative unit — stop double-counting an atlas's own
+  intra-atlas dupes as cross-sheet freed copies** (`docs/improvements/round27-crossatlas-deoverlap.md`)
+  — `crossAtlasRedundancyFinding` (`folder.ts`) keyed its per-cluster distinct-unit guard by `${atlas}|${rect}`,
+  so an atlas packing the same frame at N distinct rects that ALSO recurs on another sheet contributed N units
+  → `freed` re-counted the N−1 intra-atlas dupes that `frameRedundancyFinding` already reclaims per-rect. The two
+  findings double-counted the same pixels in their `dupes`/`recoverableArea`/`vram`/`diskEstimate` readouts
+  (shown side-by-side as if additive), violating the code's own orthogonality + HONESTY-PIN comments (invariant
+  3+5: the reported count must equal what a fix delivers). **Fix:** key the guard by **atlas name alone** (one
+  lowest-index representative per atlas), so `distinctUnits` = one per atlas and `freed` = (distinct atlases − 1)
+  = the honest cross-sheet reclaim (B's single copy aliases A's shared copy; A's internal dupes stay
+  frame-redundancy's). The two findings now **partition** the duplicate set with zero overlap; the HONESTY-PIN
+  (`dupes` == what a cross-atlas alias fix delivers) is now TRUE. The unused `rectKey` helper was removed; the
+  cluster-wide sort / `freed=slice(1)` / disk loop / full-cluster `relatedRefs` kept verbatim. Corrected numbers
+  are ≤ old for the overlap case and byte-identical for the common case (≤1 distinct rect per atlas). VRAM stays
+  `recoverableArea*4` (honest), disk stays finding-local (never folded into `potentialDiskSaved`). Stale comments
+  (folder.ts docstring/HONESTY-PIN/orthogonality, config.ts, core/src/index.ts) corrected to per-sheet semantics.
+  **No new config/core type, no worker/UI/backend change, no i18n catalog edit** (the drift fixture uses one
+  shared frame per atlas ⇒ the collapse is a no-op ⇒ baked-English byte-match unchanged).
+  — **Tests** (`analysis.test.ts`, TDD): the overlap regression (A with 3 distinct `z` rects + B with 1 ⇒
+  cross-atlas `dupes===1`, sheets 2, area one cell — confirmed to FAIL at 3 under the old keying) + a
+  partition-proof (frame-redundancy reports A's intra `dupes=2`/`2×cell`, cross-atlas `dupes=1`/`1×cell`,
+  disjoint, summing to `3×cell`); all 11 pre-existing cross-atlas tests stay green. Review verdict: **SHIP**
+  (zero blockers/majors; over-claim removed, partition clean). Gate: typecheck + analysis (150) + i18n (25) +
+  full vitest + lint green.
 
 - **(Spine) multi-page `.atlas` page-boundary lookahead — trim before the regex so an indented page `size:`
   header on page 2+ is not swallowed** (`docs/improvements/round27-spine-pageheader.md`)

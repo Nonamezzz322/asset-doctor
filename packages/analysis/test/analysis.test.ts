@@ -951,6 +951,49 @@ describe('cross-atlas-redundancy (frames byte-identical ACROSS ≥2 atlases)', (
     expect(f.params?.area).toBe(cell.w * cell.h);
   });
 
+  it('atlas with intra-atlas dupes of a cross-sheet frame ⇒ counts ONE unit per atlas, NOT one per rect', () => {
+    // REGRESSION (r27): Atlas A packs the SAME 'z' frame at THREE DISTINCT rects (an intra-atlas redundancy)
+    // and the frame ALSO appears on Atlas B once. The honest CROSS-SHEET reclaim is 1 (B's single copy can
+    // reference A's shared copy). A's 2 internal dupes are within-atlas reclaim owned by frameRedundancyFinding;
+    // counting them here double-claims the same pixels (invariant 3/5). Pre-fix this asserts dupes=3 (keyed by
+    // atlas|rect → 4 distinct units → 3 freed); post-fix each atlas collapses to ONE unit → 2 units → 1 freed.
+    const A = sheetAtlas('A.png', row(3)); // A_0,A_1,A_2 at distinct rects (x 0,32,64), all hash 'z'
+    const B = sheetAtlas('B.png', row(1)); // B_0 at x:0, hash 'z'
+    const hashes = new Map([
+      ['A.png', ['z', 'z', 'z']],
+      ['B.png', ['z']],
+    ]);
+    const bytes = new Map([['A.png', 8000], ['B.png', 8000]]);
+    const f = crossAtlasRedundancyFinding([A, B], hashes, bytes, DEFAULT_THRESHOLDS)!;
+    expect(f).not.toBeNull();
+    expect(f.params?.dupes).toBe(1); // ONE honest cross-sheet copy freed (NOT 3)
+    expect(f.params?.sheets).toBe(2);
+    expect(f.params?.area).toBe(cell.w * cell.h); // one freed 32×32 cell, not three
+    expect(f.estimate?.vramBytesSaved).toBe(cell.w * cell.h * 4);
+  });
+
+  it('partition proof: frame-redundancy owns A intra-atlas dupes (2); cross-atlas owns the cross-sheet copy (1) — disjoint', () => {
+    // The SAME atlases as the regression above. frameRedundancy (within-atlas, gate minDuplicates:3) sees A's
+    // 3 distinct 'z' rects → fires with dupes=2 (2 intra-atlas copies beyond the kept one). cross-atlas sees
+    // 2 sheets → fires with dupes=1 (B's cross-sheet copy). The two reclaim DISJOINT pixel sets: within=2×cell
+    // (A's two internal dupes), cross=1×cell (one shared copy across sheets) — no overlap, the duplicate set
+    // is PARTITIONED (the docstring orthogonality claim now holds for real).
+    const A = sheetAtlas('A.png', row(3));
+    const B = sheetAtlas('B.png', row(1));
+    const within = frameRedundancyFinding(A, DEFAULT_THRESHOLDS, ['z', 'z', 'z'], 8000)!;
+    expect(within).not.toBeNull();
+    expect(within.params?.dupes).toBe(2); // 3 distinct rects → 2 recoverable WITHIN A
+    expect(within.params?.area).toBe(2 * cell.w * cell.h); // 2×cell within-atlas reclaim
+
+    const hashes = new Map([['A.png', ['z', 'z', 'z']], ['B.png', ['z']]]);
+    const cross = crossAtlasRedundancyFinding([A, B], hashes, new Map([['A.png', 8000], ['B.png', 8000]]), DEFAULT_THRESHOLDS)!;
+    expect(cross.params?.dupes).toBe(1); // 1 cross-sheet copy
+    expect(cross.params?.area).toBe(cell.w * cell.h); // 1×cell cross-atlas reclaim
+    // Disjoint reclaim: the two areas address different pixels (within = A's internal dupes; cross = one shared
+    // copy across the 2 sheets), so they are additive with ZERO overlap — the partition the docstrings assert.
+    expect((within.params?.area as number) + (cross.params?.area as number)).toBe(3 * cell.w * cell.h);
+  });
+
   it('<2 atlases with hashes ⇒ null', () => {
     const A = sheetAtlas('A.png', row(2));
     const f = crossAtlasRedundancyFinding([A], new Map([['A.png', ['x', 'x']]]), new Map([['A.png', 8000]]), DEFAULT_THRESHOLDS);

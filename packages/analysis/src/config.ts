@@ -38,10 +38,10 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   // area-proportional ESTIMATE (invariant 5). Browser-only — NOT in resolveThresholds (the worker computes
   // opaque bboxes off the already-decoded page, the SAME pass as frameRedundancy; the CLI never opts in).
   crossAtlasRedundancy: { minDuplicates: 2 }, // CALIBRATE — cross-atlas duplicate-frame gate. The number of
-  // CROSS-SHEET duplicate copies a cluster must reach before firing, counted by DISTINCT packed rect per
-  // atlas (a pre-aliased rect = one unit). Lower than the within-atlas frameRedundancy gate (3): a frame
-  // recurring across SEPARATE sheets has no in-sheet-aliasing excuse — 2 copies on 2 sheets is already a
-  // genuine cross-atlas redundancy. Recoverable duplicate-region AREA → VRAM (exact, ×4); the disk number is
+  // DISTINCT SHEETS a frame must recur on before firing (each atlas contributes one unit; an atlas's own
+  // intra-atlas dupes are frameRedundancy's reclaim, not counted here). Lower than the within-atlas
+  // frameRedundancy gate (3): a frame recurring across SEPARATE sheets has no in-sheet-aliasing excuse —
+  // 2 copies on 2 sheets is already a genuine cross-atlas redundancy. Recoverable duplicate-region AREA → VRAM (exact, ×4); the disk number is
   // an area-proportional ESTIMATE never folded into totals (invariant 5). ORTHOGONAL to atlasMerge (empty px
   // vs duplicate-frame px). Browser-only — NOT in resolveThresholds (clusters the SAME region hashes the
   // worker already computes off the decoded page; the CLI never opts in).

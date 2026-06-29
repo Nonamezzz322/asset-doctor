@@ -299,14 +299,17 @@ export function mipmapCostFinding(metrics: AssetMetrics[], cfg: ThresholdConfig)
  *      copy's OWN atlas: byteSize[member.atlas] × memberRectArea / Σ(that atlas's frame areas). Guarded per
  *      atlas (Σ > 0 + byteSize present, else that copy's disk is skipped). Carried in the finding only, NEVER
  *      folded into the aggregate potentialDiskSaved (invariant 5: VRAM and disk are distinct quantities).
- *  GATE: `cfg.crossAtlasRedundancy.minDuplicates` counts CROSS-SHEET DUPLICATE COPIES (≥2 ⇒ the frame recurs
- *  on ≥2 sheets), NOT clusters. DISTINCT-RECT GUARD (invariant 3, honesty): two manifest names pointing at the
- *  IDENTICAL packed rect within ONE atlas (a pre-aliased Spine/TP sheet) are ALREADY one region — they cluster
- *  by hash but contribute ONE unit, never an inflated count (same guard as the within-atlas rule, applied
- *  per-atlas). ORTHOGONAL to `atlasMergeFinding`: atlas-merge reclaims EMPTY sheet space; this reclaims
- *  DUPLICATE-FRAME px — different pixels, additive reclaimable areas, NOT the same win (documented so the two
- *  findings never read as double-counting). HONESTY PIN: `dupes` = Σ(distinctUnits − 1) per cluster = exactly
- *  the `framesAliased` a future cross-atlas FIX would report (this is DIAGNOSIS-ONLY — we generate nothing,
+ *  GATE: `cfg.crossAtlasRedundancy.minDuplicates` counts the DISTINCT SHEETS the frame recurs on (≥2 ⇒ on ≥2
+ *  sheets), NOT clusters and NOT packed rects. DISTINCT-UNIT GUARD (invariant 3, honesty): each atlas
+ *  contributes EXACTLY ONE representative unit per cluster — an atlas's OWN intra-atlas dupes of the frame
+ *  (whether pre-aliased onto one rect or packed at several distinct rects) are frameRedundancy's per-rect
+ *  reclaim (rules.ts), so counting them here would double-claim the same pixels. ORTHOGONAL to
+ *  `atlasMergeFinding`: atlas-merge reclaims EMPTY sheet space; this reclaims DUPLICATE-FRAME px — different
+ *  pixels, additive reclaimable areas, NOT the same win. And ORTHOGONAL to `frameRedundancyFinding`: that
+ *  rule owns intra-atlas dupes (per-rect, within one sheet), this one owns the cross-sheet copies (one per
+ *  distinct atlas) — the two findings PARTITION the duplicate set with zero overlap. HONESTY PIN: `dupes` =
+ *  Σ(distinct-atlases − 1) per cluster = exactly the `framesAliased` a future cross-atlas FIX would report
+ *  (aliasing one shared copy across the distinct sheets; this is DIAGNOSIS-ONLY — we generate nothing,
  *  invariant 3). Returns null with no config, with <2 atlases carrying hashes, when no cluster spans ≥2
  *  atlases, or when no cluster reaches the gate. Deterministic: clusters processed by lowest
  *  (atlasName, spriteIndex); all output ref/atlas lists sorted; pure integer math (no Date/random). */
@@ -317,8 +320,6 @@ export function crossAtlasRedundancyFinding(
   cfg: ThresholdConfig,
 ): Finding | null {
   if (!cfg.crossAtlasRedundancy) return null;
-
-  const rectKey = (r: Rect): string => `${r.x},${r.y},${r.w},${r.h}`;
 
   // Per-atlas Σ(frame area) for the area-proportional disk estimate. Built only for atlases whose hash entry
   // length matches the sprite count (a length mismatch ⇒ stale/desynced dep for THAT atlas — exclude it only,
@@ -384,17 +385,17 @@ export function crossAtlasRedundancyFinding(
     const atlasesInCluster = new Set(cluster.map((u) => u.atlas));
     if (atlasesInCluster.size < 2) continue;
 
-    // DISTINCT-RECT GUARD, applied PER ATLAS: collapse manifest names that alias the SAME packed rect within
-    // one atlas to a single unit (a pre-aliased Spine/TP rect is one GPU region). Key by atlas + rect.
-    const byAtlasRect = new Map<string, Unit>();
+    // DISTINCT-UNIT GUARD, per atlas: each atlas contributes ONE representative unit per cluster (the lowest-
+    // (atlas,index) member). An atlas's OWN intra-atlas dupes of this frame are frameRedundancy's reclaim
+    // (rules.ts, per-rect); counting them here would double-claim the same pixels (invariant 3/5). Cross-sheet
+    // reclaim = aliasing one shared copy across the DISTINCT sheets = (distinct atlases − 1) copies.
+    const byAtlas = new Map<string, Unit>();
     for (const u of cluster) {
-      const k = `${u.atlas}|${rectKey(u.rect)}`;
-      const prev = byAtlasRect.get(k);
-      // Keep the lowest-index member as the representative for this distinct rect (determinism).
-      if (!prev || u.index < prev.index) byAtlasRect.set(k, u);
+      const prev = byAtlas.get(u.atlas);
+      if (!prev || u.index < prev.index) byAtlas.set(u.atlas, u); // lowest-index rep per atlas (determinism)
     }
-    const distinctUnits = [...byAtlasRect.values()];
-    if (distinctUnits.length < cfg.crossAtlasRedundancy.minDuplicates) continue; // not enough cross-sheet copies
+    const distinctUnits = [...byAtlas.values()];
+    if (distinctUnits.length < cfg.crossAtlasRedundancy.minDuplicates) continue; // frame on too few DISTINCT sheets
 
     // Keep ONE representative cluster-wide (lowest (atlasName, spriteIndex)); every OTHER distinct unit is a
     // freed copy. Area is uniform within a hash cluster (identical region pixels ⇒ identical w×h).

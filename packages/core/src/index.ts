@@ -604,9 +604,9 @@ export interface ThresholdConfig {
    *  enumerated by resolveThresholds (CLI never opts in). */
   bleeding?: { minPairs: number; warnPairs: number };
   /** Cross-atlas-redundancy (frames whose pixel REGIONS are byte-identical ACROSS ≥2 atlases) gate.
-   *  `minDuplicates` — the number of CROSS-SHEET duplicate copies a cluster must reach before firing
-   *  (≥2 ⇒ the frame recurs on ≥2 sheets; counted by DISTINCT packed rect per atlas so a pre-aliased
-   *  Spine/TP rect contributes ONE unit, never inflating the count). This is the folder-scope sibling of
+   *  `minDuplicates` — the number of DISTINCT SHEETS a frame must recur on before firing (≥2 ⇒ on ≥2
+   *  sheets; each atlas contributes ONE unit, so an atlas's own intra-atlas dupes are frameRedundancy's
+   *  reclaim — counted there per-rect, never here). This is the folder-scope sibling of
    *  `frameRedundancy`: that rule owns single-atlas clusters; THIS one fires ONLY when a cluster spans ≥2
    *  distinct atlases, off the SAME already-computed region hashes (zero new decode). VRAM = the exact
    *  duplicate-region area × 4 (the atlas px the cross-sheet copies pin; identical-precedent to
