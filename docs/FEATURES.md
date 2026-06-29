@@ -24,6 +24,7 @@ the Pro fix generates optimized output; native-only ops run on an opt-in backend
 - **Wasted-alpha detector** — fully-opaque images carrying an alpha channel (full-frame opaque pass, short-circuit, instant-wow safe); disk-only saving.
 - **Frame-redundancy detector** — byte-identical duplicate frames *within* an atlas (per-region SHA, flat-guarded, instant-wow caps); exact wasted atlas-area/VRAM.
 - **Strippable-metadata detector** — pure header-only byte-walk (no decode) summing EXACT strippable ancillary bytes (PNG `iCCP/eXIf/tEXt/iTXt/zTXt/tIME`, JPEG `APP1..15`+`COM`, WebP `EXIF/XMP/ICCP`; render-affecting chunks excluded); **disk-only** saving (the GPU decodes to RGBA8888 regardless), MAX-de-overlapped vs the format/wasted-alpha findings, names the existing oxipng/re-encode fix. Conservative true lower bound (never over-claims).
+- **Texture-bleeding detector** — pure integer frame-adjacency (no decode): flags atlas frame pairs packed with a 0px gutter (shared edge + perpendicular overlap; corner-touches & rotated/aliased frames excluded) that can bleed 1px seams under linear/mipmap sampling. A **correctness** finding carrying NO saving (edge-extrude can grow the sheet — invariant 5), with a conditional honest hedge; lights the teal `bleeding` film overlay and points at the existing edge-extrude fix.
 - **Unparsed-file surfacing** — files that look like a manifest but can't be parsed are shown honestly (never silently dropped) + hardened frame/Spine parsers (reject neg/zero/OOB rects; Spine `numsRaw` per-region recovery).
 
 ## 2. Render-probe & runtime profiler (the moat)
@@ -95,7 +96,8 @@ the Pro fix generates optimized output; native-only ops run on an opt-in backend
 
 - **Abortable workers** — an `AbortSignal` seam through the analyze + fix workers so a superseded drop stops competing (additive, default-off).
 - **Honest skips everywhere** — unparseable inputs, encode failures, quality-floor declines, GPU-format unavailability all surfaced (never silent), never shipping a larger "optimized" file.
+- **De-overlapped headline savings** — the `potentialDiskSaved` headline never double-counts: format ∩ wasted-alpha ∩ strippable-metadata collapse to a per-ref MAX, and exact-duplicate dropped copies don't also charge their own format/alpha/strippable saving (phantom bytes for files that vanish on dedup). Always ≤ the achievable total — the product under-promises rather than over-claims.
 
 ---
 
-*Updated 2026-06-29 (through round 25). Branch `feat/asset-pipeline` (= local `main`), ~52 commits over `origin/main`, all green. Deploy (GH Pages) awaits the user's `git push origin main`; live backend ops need the toktx/pngquant/vips binaries in the deployed sidecar.*
+*Updated 2026-06-29 (through round 26). Branch `feat/asset-pipeline` (= local `main`), ~55 commits over `origin/main`, all green. Deploy (GH Pages) awaits the user's `git push origin main`; live backend ops need the toktx/pngquant/vips binaries in the deployed sidecar.*
