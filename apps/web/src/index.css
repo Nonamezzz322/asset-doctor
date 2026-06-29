@@ -158,6 +158,49 @@ body {
   animation: ad-scan 2.1s ease-in-out 0.2s both;
 }
 
+/* a11y: determinate progress bar for the analyzing state. Token-driven (reuses teal→cta + film-border),
+   honest (the fill width reflects the worker's REAL done/total via progressView() → role=progressbar).
+   Reduced-motion safe BY CONSTRUCTION: the fill is a STATIC width and the indeterminate fallback is a
+   STATIC dashed track; the width transition + any indeterminate sweep are disabled under reduce below. */
+.ad-progress-track {
+  position: relative;
+  height: 4px;
+  width: 100%;
+  max-width: 220px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--color-film-border) 70%, transparent);
+}
+.ad-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-teal), var(--color-cta));
+  border-radius: 999px;
+  transition: width 180ms ease;
+}
+/* Indeterminate fallback: a STATIC dashed track (a real, motion-free cue) when total is unknown. */
+.ad-progress-indet {
+  background: repeating-linear-gradient(90deg, var(--color-film-border) 0 6px, transparent 6px 12px);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ad-progress-indet::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    width: 40%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, transparent, var(--color-teal), transparent);
+    animation: ad-progress-sweep 1.4s linear infinite;
+  }
+  @keyframes ad-progress-sweep {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(250%);
+    }
+  }
+}
+
 /* a11y: the canonical screen-reader-only clip pattern. Visually removes content (clipped to 1px) while
    keeping it in the accessibility tree — used by the persistent aria-live region that speaks analysis
    state transitions. Token-free by design: sets no color/font/spacing/brand surface, only the standard
@@ -183,5 +226,11 @@ body {
   }
   .ad-scanline {
     display: none !important;
+  }
+  .ad-progress-fill {
+    transition: none !important;
+  }
+  .ad-progress-indet::after {
+    animation: none !important;
   }
 }

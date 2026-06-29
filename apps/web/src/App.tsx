@@ -37,6 +37,7 @@ import { useDebounced } from './lib/useDebounced';
 import { buildIndex, countCandidates, defaultSelectOpts, DEFAULT_SEVERITIES, DEFAULT_SORT, selectRows, type LedgerRow, type SelectOpts, type SortKey } from './lib/triage';
 import { analysisReadyMessage, resultCountMessage } from './lib/announce';
 import { resultsHeading } from './lib/results-heading';
+import { progressView } from './lib/progress-view';
 import { buildTotalsRows } from './lib/totals-rows';
 
 type Phase =
@@ -533,6 +534,8 @@ function Dropzone({
   const { t } = useI18n();
   const [dragging, setDragging] = useState(false);
   const analyzing = phase.t === 'analyzing';
+  // a11y: honest progress bar spec from the worker's REAL done/total (indeterminate when total unknown).
+  const view = progressView(phase.t === 'analyzing' ? phase.progress : undefined);
   return (
     <section className="mx-auto max-w-3xl">
       <div className="text-center">
@@ -571,10 +574,24 @@ function Dropzone({
             // a11y: the otherwise-silent progress text becomes a polite live region so a SR user who clicked
             // "open folder" hears "analyzing… N/M · label". aria-atomic reads the whole phrase, not just the
             // changed number. No copy/visual change — the existing localized strings are spoken verbatim.
-            <p role="status" aria-live="polite" aria-atomic="true" className="font-mono text-sm text-[#9be7e7]">
-              {t('dropzone.analyzing')}{' '}
-              {phase.progress ? t('dropzone.progress', { done: phase.progress.done, total: phase.progress.total, label: phase.progress.label }) : ''}
-            </p>
+            <>
+              <p role="status" aria-live="polite" aria-atomic="true" className="font-mono text-sm text-[#9be7e7]">
+                {t('dropzone.analyzing')}{' '}
+                {phase.progress ? t('dropzone.progress', { done: phase.progress.done, total: phase.progress.total, label: phase.progress.label }) : ''}
+              </p>
+              {/* a11y: machine-readable determinate progress (role=progressbar). The fill width is the worker's
+                  REAL done/total (progressView); indeterminate ⇒ static dashed track + omitted valuenow/valuemax
+                  (canonical AT busy signal). Color is NOT the sole signal — the {done}/{total} text above remains. */}
+              <div
+                className={`ad-progress-track${view.determinate ? '' : ' ad-progress-indet'}`}
+                role="progressbar"
+                aria-valuemin={0}
+                aria-label={t('dropzone.analyzing')}
+                {...(view.determinate ? { 'aria-valuenow': view.valueNow, 'aria-valuemax': view.valueMax } : {})}
+              >
+                {view.determinate && <div className="ad-progress-fill" style={{ width: view.pct + '%' }} aria-hidden="true" />}
+              </div>
+            </>
           ) : (
             <button
               type="button"
