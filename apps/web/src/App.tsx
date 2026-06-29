@@ -372,7 +372,7 @@ function LanguageSwitcher() {
       aria-label={t('ui.language')}
       value={locale}
       onChange={(e) => setLocale(e.target.value as typeof locale)}
-      className="rounded-lg border border-line bg-panel px-2 py-1.5 font-mono text-xs text-ink-soft transition hover:border-teal hover:text-teal focus:border-teal focus:outline-none"
+      className="rounded-lg border border-line bg-panel px-2 py-1.5 font-mono text-xs text-ink-soft transition hover:border-teal hover:text-teal focus:border-teal"
     >
       {LOCALES.map((l) => (
         <option key={l} value={l}>
@@ -531,7 +531,7 @@ function BundlesPanel({
               aria-label={b}
               value={marking[b] ?? 'isolated'}
               onChange={(e) => set(b, e.target.value as BundleAvailability)}
-              className="rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink-soft transition hover:border-teal focus:border-teal focus:outline-none"
+              className="rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink-soft transition hover:border-teal focus:border-teal"
             >
               {states.map((s) => (
                 <option key={s} value={s}>
@@ -657,7 +657,7 @@ function SettingsPanel({
                 next[i] = { ...o, match: e.target.value };
                 setOverrides(next);
               }}
-              className="min-w-0 flex-1 rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink focus:border-teal focus:outline-none"
+              className="min-w-0 flex-1 rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink focus:border-teal"
             />
             <input
               type="number"
@@ -671,7 +671,7 @@ function SettingsPanel({
                 next[i] = { ...o, quality: Math.max(0, Math.min(100, Number(e.target.value))) / 100 };
                 setOverrides(next);
               }}
-              className="w-14 rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink focus:border-teal focus:outline-none"
+              className="w-14 rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink focus:border-teal"
             />
             <button type="button" onClick={() => setOverrides(overrides.filter((_, j) => j !== i))} className="font-mono text-[11px] text-ink-soft hover:text-crit" aria-label="remove">
               ✕
@@ -749,7 +749,7 @@ function PackPanel({
               aria-label={t('fix.pack.mode.label')}
               value={packMode}
               onChange={(e) => setPackMode(e.target.value as PackMode)}
-              className="rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink-soft transition hover:border-teal focus:border-teal focus:outline-none"
+              className="rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink-soft transition hover:border-teal focus:border-teal"
             >
               {modes.map((m) => (
                 <option key={m} value={m}>
@@ -765,7 +765,7 @@ function PackPanel({
               aria-label={t('fix.pack.grouping.label')}
               value={packGranularity}
               onChange={(e) => setPackGranularity(e.target.value as StaticGranularity)}
-              className="rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink-soft transition hover:border-teal focus:border-teal focus:outline-none"
+              className="rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink-soft transition hover:border-teal focus:border-teal"
             >
               {grans.map((g) => (
                 <option key={g} value={g}>
@@ -810,7 +810,7 @@ function ExtrudePanel({ extrude, setExtrude }: { extrude: number; setExtrude: (n
           title={t('fix.extrudeHint', { px: extrude || 1 })}
           value={extrude}
           onChange={(e) => setExtrude(Number(e.target.value))}
-          className="rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink-soft transition hover:border-teal focus:border-teal focus:outline-none"
+          className="rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink-soft transition hover:border-teal focus:border-teal"
         >
           {opts.map((n) => (
             <option key={n} value={n}>

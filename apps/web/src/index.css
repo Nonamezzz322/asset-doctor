@@ -41,6 +41,19 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* a11y: one token-driven keyboard-focus ring (WCAG 2.4.7 / 1.4.11). :focus-visible so mouse
+   clicks stay ring-free; teal on light chrome, film-soft on the dark x-ray card for contrast +
+   to avoid teal-vs-green ambiguity next to the CTA. No animation ⇒ reduced-motion safe. */
+:focus-visible {
+  outline: 2px solid var(--color-teal);
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+.ad-grid :focus-visible,
+.bg-film :focus-visible {
+  outline-color: var(--color-film-soft);
+}
+
 ::selection {
   background: #0e8c8c;
   color: #fff;

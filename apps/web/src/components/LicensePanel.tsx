@@ -41,7 +41,7 @@ export function ActivatePanel({ onUnlocked }: { onUnlocked: () => void }) {
         placeholder={t('license.keyPlaceholder')}
         spellCheck={false}
         autoCapitalize="characters"
-        className="w-full rounded-lg border border-line bg-bg px-2.5 py-1.5 font-mono text-[11px] tracking-wide text-ink outline-none focus:border-teal"
+        className="w-full rounded-lg border border-line bg-bg px-2.5 py-1.5 font-mono text-[11px] tracking-wide text-ink focus:border-teal"
       />
       <button
         type="submit"
