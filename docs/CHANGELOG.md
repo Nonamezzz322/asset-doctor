@@ -69,6 +69,20 @@ Pick: **(#0) trim-on-repack FIX** (shipped below) — turns the r19 trim-margin 
   Spine-no-KTX2 / M3 dedup-owner decision predicates; additivity: a loose transcode emits no sidecar). Gate:
   typecheck + test + lint green.
 
+- **#2 Close the i18n-app-keys guard's dynamic-key blind spots** (test-only hardening,
+  `docs/improvements/round20-close-the-i18n-app-keys-guard-s-dy.md`) — the `apps/web/test/i18n-app-keys.test.ts`
+  guard scanned only `App.tsx + FilmViewer + VerdictBar + TriageLedger` and expanded only the
+  `fix.pack.{mode,grouping}.*` + `triage.{filter,sort,scope}.*` dynamic templates, so **four** other
+  `t(`prefix.${…}`)` classes rendered raw dotted keys on a future rename, undetected by the catalog drift test:
+  `severity.${f.severity}` (App.tsx + the previously-unscanned Findings.tsx), `license.err.${…}` (the unscanned
+  LicensePanel.tsx), and `fix.lazy.${s}` + `fix.op.${…}` (both ALREADY inside the scanned App.tsx but with no
+  expansion branch). NOW: Findings.tsx + LicensePanel.tsx added to `appSrc`; four new `expandedDynamicKeys`
+  branches — `fix.op.*` import-backed by the live `OP_KIND_ORDER` verb set (+`'other'` UI bucket) so it
+  self-maintains, `severity.*`/`license.err.*`/`fix.lazy.*` mirror a type-only union / private `KNOWN_CODES` Set,
+  each pinned by a per-class drift-guard `it()` block asserting every suffix resolves in `CATALOGS.en`. All
+  referenced keys already exist in en (and all 9 locales) ⇒ pure regression-hardening, NO catalog change, NO app
+  behavior change; the guard is now red on any future rename of these keys. Gate: typecheck + test + lint green.
+
 ---
 
 ## Round 19 — selection (3 picks; #0 shipped) — 2026-06-29

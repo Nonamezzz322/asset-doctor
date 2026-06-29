@@ -5,12 +5,23 @@
 // rendering raw dotted keys in all 9 languages). This statically scans App.tsx for t('…') / t(`…`) calls
 // and asserts each resolved key is present in CATALOGS.en. Dynamic `fix.pack.{mode,grouping}.${k}` keys are
 // expanded against the same suffix maps App.tsx uses so the per-option labels are covered too.
+//
+// DYNAMIC-KEY BLIND SPOTS (Round 20 #2): a `t(`prefix.${…}`)` template only renders raw dotted keys on a
+// future rename if (a) the component holding it is in `appSrc` AND (b) its prefix has an expansion branch
+// below. Four dynamic classes were silently dropped before this round: `severity.${f.severity}` (App.tsx +
+// Findings.tsx), `license.err.${…}` (LicensePanel.tsx), `fix.lazy.${s}` and `fix.op.${…}` (both already in
+// App.tsx). Findings.tsx + LicensePanel.tsx are now scanned; all four prefixes are expanded; `fix.op.*` is
+// import-backed by the live `OP_KIND_ORDER` verb set (self-maintaining), the other three mirror a type-only
+// union / private Set and are pinned by per-class drift-guard `it()` blocks below. MAINTENANCE CONTRACT: any
+// new `t(`prefix.${…}`)` site must have its component in `appSrc` AND register a branch in
+// `expandedDynamicKeys`; mirrored suffix lists must track their underlying union/Set or the drift guards fail.
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CATALOGS } from '@asset-doctor/i18n';
+import { OP_KIND_ORDER } from '../src/lib/op-manifest';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const comp = (name: string): string => readFileSync(join(here, '..', 'src', 'components', name), 'utf8');
@@ -26,6 +37,15 @@ const appSrc =
   // these, so without scanning them a renamed triage.* key would silently render a raw dotted key.
   comp('VerdictBar.tsx') +
   '\n' +
+  // Findings.tsx owns findings.none + t(`severity.${f.severity}`). App.tsx:2055 ALSO references severity.*;
+  // both are covered by the `severity.` branch below, but Findings must still be scanned for findings.none,
+  // which nothing else references.
+  comp('Findings.tsx') +
+  '\n' +
+  // LicensePanel.tsx owns the license.* static keys + t(`license.err.${…}`) (Pro activation UI), referenced
+  // nowhere else; without scanning it a renamed license.* key would silently render a raw dotted key.
+  comp('LicensePanel.tsx') +
+  '\n' +
   comp('TriageLedger.tsx');
 
 // Suffix maps mirrored from App.tsx (modeKey / granKey) so dynamic option keys resolve to concrete keys.
@@ -37,6 +57,18 @@ const GRAN_SUFFIXES = ['folder', 'one', 'bundle'];
 const TRIAGE_FILTER_SUFFIXES = ['crit', 'warn', 'info'];
 const TRIAGE_SORT_SUFFIXES = ['severity', 'wastedDisk', 'vram', 'occupancy'];
 const TRIAGE_SCOPE_SUFFIXES = ['asset', 'folder'];
+// fix.op.${kind} (App.tsx:2210,2287) — OP_KIND_ORDER is the live verb set (op-manifest.ts); the UI adds an
+// 'other' bucket for the null/unknown group (App.tsx:2287 `g.kind ?? 'other'`). Imported ⇒ cannot drift.
+const FIX_OP_SUFFIXES = [...OP_KIND_ORDER, 'other'];
+// severity.${f.severity} (Findings.tsx:40, App.tsx:2055) — mirrors core's TYPE-ONLY Severity union; no
+// runtime values array exists, so mirror + assert-all-exist (drift-guard block below).
+const SEVERITY_SUFFIXES = ['crit', 'warn', 'ok', 'info'];
+// license.err.${…} (LicensePanel.tsx:29) — mirrors LicensePanel KNOWN_CODES (private Set) + the 'generic'
+// fallback (the ternary's else branch). Mirror + assert-all-exist (drift-guard block below).
+const LICENSE_ERR_SUFFIXES = ['unknown_key', 'inactive', 'seats_exceeded', 'reactivate', 'network', 'rate_limited', 'generic'];
+// fix.lazy.${s} (App.tsx:505) — mirrors core's TYPE-ONLY BundleAvailability ('eager'|'lazy'|'isolated').
+// (fix.lazy.note is a STATIC t('fix.lazy.note') call → caught by staticKeys, not emitted here.)
+const LAZY_SUFFIXES = ['eager', 'lazy', 'isolated'];
 
 /** Static literal keys: t('a.b.c') or t(`a.b.c`) with NO interpolation. */
 function staticKeys(src: string): Set<string> {
@@ -55,6 +87,12 @@ function expandedDynamicKeys(src: string): Set<string> {
     else if (tmpl.startsWith('triage.filter.')) TRIAGE_FILTER_SUFFIXES.forEach((s) => keys.add(`triage.filter.${s}`));
     else if (tmpl.startsWith('triage.sort.')) TRIAGE_SORT_SUFFIXES.forEach((s) => keys.add(`triage.sort.${s}`));
     else if (tmpl.startsWith('triage.scope.')) TRIAGE_SCOPE_SUFFIXES.forEach((s) => keys.add(`triage.scope.${s}`));
+    else if (tmpl.startsWith('severity.')) SEVERITY_SUFFIXES.forEach((s) => keys.add(`severity.${s}`));
+    else if (tmpl.startsWith('license.err.')) LICENSE_ERR_SUFFIXES.forEach((s) => keys.add(`license.err.${s}`));
+    // fix.lazy. / fix.op. are branched AFTER the more-specific fix.pack.mode./fix.pack.grouping. above; none
+    // of these prefix-collide, so order is incidental, but kept specific-first for clarity.
+    else if (tmpl.startsWith('fix.lazy.')) LAZY_SUFFIXES.forEach((s) => keys.add(`fix.lazy.${s}`));
+    else if (tmpl.startsWith('fix.op.')) FIX_OP_SUFFIXES.forEach((s) => keys.add(`fix.op.${s}`));
   }
   return keys;
 }
@@ -105,6 +143,27 @@ describe('app i18n keys exist in the en catalog', () => {
       'fix.packWarn',
     ]) {
       expect(CATALOGS.en[k], `${k} must exist in en.json`).toBeDefined();
+    }
+  });
+
+  it('severity.* dynamic keys all exist in en — drift guard for the mirrored type-only union', () => {
+    for (const s of SEVERITY_SUFFIXES) {
+      expect(CATALOGS.en[`severity.${s}`], `severity.${s} must exist in en.json`).toBeDefined();
+    }
+  });
+
+  it('license.err.* dynamic keys (LicensePanel KNOWN_CODES + generic) all exist in en', () => {
+    for (const s of LICENSE_ERR_SUFFIXES) {
+      expect(CATALOGS.en[`license.err.${s}`], `license.err.${s} must exist in en.json`).toBeDefined();
+    }
+  });
+
+  it('fix.lazy.* + fix.op.* dynamic keys all exist in en (fix.op.* mirrors imported OP_KIND_ORDER)', () => {
+    for (const s of LAZY_SUFFIXES) {
+      expect(CATALOGS.en[`fix.lazy.${s}`], `fix.lazy.${s} must exist in en.json`).toBeDefined();
+    }
+    for (const s of FIX_OP_SUFFIXES) {
+      expect(CATALOGS.en[`fix.op.${s}`], `fix.op.${s} must exist in en.json`).toBeDefined();
     }
   });
 });
