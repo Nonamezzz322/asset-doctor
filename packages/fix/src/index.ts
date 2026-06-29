@@ -41,7 +41,7 @@ export type { EffectiveOptions, FixOverride, FixAssetKind, FormatEncode, FormatE
 // scaleAtlas (scaleLoose), tier suffix naming, fail-closed ladder validation, the default ladder, and the
 // resolution-token regex. scaleAtlas stays the atlas primitive; the worker's tier loop owns oversize +
 // `.scale`. Imported by the worker so its tier geometry/names can't drift from the tested pure source.
-export { scaleLoose, tieredName, validateTiers, DEFAULT_SCALE_TIERS, RESOLUTION_TOKEN } from './scale';
+export { scaleLoose, tieredName, validateTiers, DEFAULT_SCALE_TIERS, RESOLUTION_TOKEN, SUFFIX_TOKEN, isSafeSuffix } from './scale';
 export type { TierValidation } from './scale';
 // PURE config-driven export-profile helpers (round7-export-profile.md §4a) — ResolutionTier→ScaleTier
 // strip, fail-closed profile validation (delegates the tier axis to validateTiers), and the format-token

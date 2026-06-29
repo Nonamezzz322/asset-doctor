@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AnalysisReport, AssetMetrics, BundleAvailability, ExportFormat, ExportProfile, Finding, FormatTarget, LazyMarking, ProfileOverride, ResolutionTier, ScaleTier, Severity, SkinGuard } from '@asset-doctor/core';
 import type { PackMode, StaticGranularity } from '@asset-doctor/ingest';
 import { bundleOf, cmp } from '@asset-doctor/analysis';
-import { DEFAULT_SCALE_TIERS, RESOLUTION_TOKEN } from '@asset-doctor/fix';
+import { DEFAULT_SCALE_TIERS, isSafeSuffix } from '@asset-doctor/fix';
 import {
   filesFromDataTransfer,
   filesFromInput,
@@ -1146,8 +1146,11 @@ function TierPanel({
 // compression }. OFF ⇒ exportProfile is undefined ⇒ byte-identical to today; the TierPanel above governs
 // tiers. ON ⇒ MUTUALLY EXCLUSIVE with the tier ladder (buildOptions omits scaleTiers + webpNearLossless).
 // AVIF lossless is DISABLED in the UI (no honest in-browser path — avifNoLossless note). Custom tiers add
-// rows on top of the default ladder; the suffix is validated client-side against RESOLUTION_TOKEN so a
-// non-clustering suffix is caught before the run (the worker also validates fail-closed). The shared
+// rows on top of the default ladder; the suffix is validated client-side via isSafeSuffix (safe charset
+// [A-Za-z0-9_-], no dot/slash/@, never a format name) so an unsafe suffix is caught before the run (the
+// worker also validates fail-closed). Custom NON-resolution suffixes (e.g. _mobile) build fine but are NOT
+// recognized as tier-variants on re-analysis — a conservative over-count of the advisory variants WARN,
+// never affecting the hard VRAM gate (see docs/improvements/ab-r4-suffix-policy.md). The shared
 // effort/scaleAwareQuality knobs live in SettingsPanel and are folded into the profile's global knobs.
 
 /** Per-format UI settings (the format checkbox state lives in `enabled`). Honest browser subset only. */
@@ -1323,7 +1326,7 @@ function ExportProfilePanel({
               {DEFAULT_SCALE_TIERS.map((tt) => tt.suffix).join('  ')}
             </p>
             {customTiers.map((tt, i) => {
-              const validSuffix = RESOLUTION_TOKEN.test(tt.suffix);
+              const validSuffix = isSafeSuffix(tt.suffix);
               return (
                 <div key={i} className="mt-1 flex items-center gap-1.5">
                   <span className="font-mono text-[10px] text-ink-soft">{t('fix.profile.tierScale')}</span>

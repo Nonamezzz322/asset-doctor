@@ -22,8 +22,10 @@ import { groupVariants } from '@asset-doctor/analysis';
 import {
   DEFAULT_SCALE_TIERS,
   RESOLUTION_TOKEN,
+  SUFFIX_TOKEN,
   emitTexturePackerJson,
   formatToken,
+  isSafeSuffix,
   scaleAtlas,
   scaleLoose,
   tieredName,
@@ -115,10 +117,10 @@ describe('validateTiers (T4)', () => {
     if (!r.ok) expect(r.errors.some((e) => e.startsWith('badSuffix'))).toBe(true);
   });
 
-  it('rejects a non-resolution (format) suffix so tiers always round-trip into one cluster', () => {
+  it('rejects a format-name suffix (would collide with multi-format naming / stemOf format-peel)', () => {
     const r = validateTiers([{ scale: 1, suffix: '_1080p' }, { scale: 0.5, suffix: '_webp' }]);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors.some((e) => e.includes('not a resolution token'))).toBe(true);
+    if (!r.ok) expect(r.errors.some((e) => e.startsWith('badSuffix') && e.includes('not a format name'))).toBe(true);
   });
 
   it('rejects duplicate suffixes (case-insensitive — they would clobber emitted names)', () => {
@@ -141,6 +143,91 @@ describe('validateTiers (T4)', () => {
 
   it('every default suffix matches RESOLUTION_TOKEN (generation always clusters)', () => {
     for (const t of DEFAULT_SCALE_TIERS) expect(RESOLUTION_TOKEN.test(t.suffix)).toBe(true);
+  });
+});
+
+// ── AB-R4: user-chosen safe tier suffixes (isSafeSuffix is a SUPERSET of RESOLUTION_TOKEN) ─────────
+// Build-side relax ONLY: validateTiers now accepts a safe free-form suffix as WELL as every legacy
+// resolution suffix (zero regression). Clustering (packages/analysis) is intentionally NOT widened — a
+// custom non-resolution suffix is documented to over-count the advisory variants WARN on re-ingest, never
+// to fabricate a cluster. See docs/improvements/ab-r4-suffix-policy.md.
+describe('isSafeSuffix + validateTiers free-form suffixes (AB-R4)', () => {
+  it('isSafeSuffix is a SUPERSET — every RESOLUTION_TOKEN suffix stays valid (zero regression)', () => {
+    // RESOLUTION_TOKEN requires a leading [_-]; `@2x` (no separator) was never a valid standalone suffix —
+    // it is preserved via the legacy alternation only WITH a separator (`_2x`/`-2x`). See ab-r4 doc.
+    for (const s of ['_1080p', '_720p', '_540p', '_2x', '_hd', '_sd', '-2x', '_4x']) {
+      expect(RESOLUTION_TOKEN.test(s), `${s} legacy`).toBe(true);
+      expect(isSafeSuffix(s), `${s} isSafeSuffix`).toBe(true);
+    }
+    // and every DEFAULT_SCALE_TIERS suffix
+    for (const t of DEFAULT_SCALE_TIERS) expect(isSafeSuffix(t.suffix)).toBe(true);
+  });
+
+  it('isSafeSuffix ACCEPTS safe free-form suffixes (_mobile / _lq / _hidpi / _x2 / -hi-dpi)', () => {
+    for (const s of ['_mobile', '_lq', '_hidpi', '_x2', '-hi-dpi', '_HD2', '_a']) {
+      expect(isSafeSuffix(s), s).toBe(true);
+    }
+  });
+
+  it('isSafeSuffix REJECTS format-name bodies (case-insensitive) — collision with multi-format naming', () => {
+    for (const s of ['_png', '_webp', '_avif', '_jpg', '_jpeg', '_JPG', '_WebP', '-avif']) {
+      expect(isSafeSuffix(s), s).toBe(false);
+    }
+  });
+
+  it('isSafeSuffix REJECTS unsafe charset / shape — dot, slash, @-free-form, no-separator, empty body, overlong', () => {
+    for (const s of [
+      '_a.b',      // dot would fake an extension in variantManifestName
+      '_a/b',      // slash would inject a directory
+      '@mobile',   // @ only allowed via the legacy density token, not the free-form branch
+      'mobile',    // no leading separator
+      '_',         // empty body
+      '__',        // body must start with [A-Za-z0-9]
+      '-_x',       // body must start with [A-Za-z0-9]
+      `_${'a'.repeat(25)}`, // 25-char body (max is 24: leading char + 23 more) → overlong
+    ]) {
+      expect(isSafeSuffix(s), s).toBe(false);
+    }
+  });
+
+  it('SUFFIX_TOKEN is the safe-charset shape (sanity: bounds at the 24-char body)', () => {
+    expect(SUFFIX_TOKEN.test(`_${'a'.repeat(24)}`)).toBe(true);  // body = leading char + 23 more = 24 (max)
+    expect(SUFFIX_TOKEN.test(`_${'a'.repeat(25)}`)).toBe(false); // one over the 24-char body cap
+  });
+
+  it('validateTiers ACCEPTS a free-form lower tier with a resolution top tier (mixed ladder)', () => {
+    const r = validateTiers([{ scale: 1, suffix: '_1080p' }, { scale: 0.5, suffix: '_mobile' }]);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.tiers.map((t) => t.suffix)).toEqual(['_1080p', '_mobile']); // high→low
+  });
+
+  it('validateTiers ACCEPTS an all-free-form ladder (top tier free-form too)', () => {
+    const r = validateTiers([{ scale: 1, suffix: '_full' }, { scale: 0.5, suffix: '_mobile' }, { scale: 0.25, suffix: '_lq' }]);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.tiers.map((t) => t.scale)).toEqual([1, 0.5, 0.25]);
+  });
+
+  it('validateTiers REJECTS each format-name / dotted / slashed / no-separator / empty-body / overlong suffix', () => {
+    for (const bad of ['_png', '_webp', '_avif', '_jpeg', '_a.b', '_a/b', 'mobile', '__', `_${'a'.repeat(25)}`]) {
+      const r = validateTiers([{ scale: 1, suffix: '_1080p' }, { scale: 0.5, suffix: bad }]);
+      expect(r.ok, bad).toBe(false);
+      if (!r.ok) expect(r.errors.some((e) => e.startsWith('badSuffix')), bad).toBe(true);
+    }
+  });
+
+  it('the other guards are UNCHANGED with free-form suffixes (dup case-insensitive, no top tier)', () => {
+    const dup = validateTiers([{ scale: 1, suffix: '_Mobile' }, { scale: 0.5, suffix: '_mobile' }]);
+    expect(dup.ok).toBe(false);
+    if (!dup.ok) expect(dup.errors.some((e) => e.startsWith('dupSuffix'))).toBe(true);
+    const noTop = validateTiers([{ scale: 0.75, suffix: '_mobile' }, { scale: 0.5, suffix: '_lq' }]);
+    expect(noTop.ok).toBe(false);
+    if (!noTop.ok) expect(noTop.errors.some((e) => e.startsWith('noTopTier'))).toBe(true);
+  });
+
+  it('is deterministic: same input ⇒ deep-equal result (regex + Set, no Date/Math.random)', () => {
+    const tiers = [{ scale: 1, suffix: '_1080p' }, { scale: 0.5, suffix: '_mobile' }, { scale: 0.25, suffix: '_lq' }];
+    expect(validateTiers([...tiers])).toEqual(validateTiers([...tiers]));
+    expect(isSafeSuffix('_mobile')).toBe(isSafeSuffix('_mobile'));
   });
 });
 

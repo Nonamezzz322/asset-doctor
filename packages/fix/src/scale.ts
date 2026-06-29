@@ -31,6 +31,38 @@ export const DEFAULT_SCALE_TIERS: readonly ScaleTier[] = [
 export const RESOLUTION_TOKEN = /^[_-](\d{2,4}p|@?\d+x|hd|sd)$/i;
 
 /**
+ * A filesystem-safe, build-safe FREE-FORM tier suffix: a leading separator (`_` or `-`), then a leading
+ * body char from [A-Za-z0-9] (so `__` / `-_` are rejected), then 0..23 more chars from the SAFE charset
+ * [A-Za-z0-9_-] (24-char body cap keeps it a sane filename fragment). NO dot (would fake an extension in
+ * variantManifestName), NO slash (would inject a directory into the emitted path), NO `@` (density `@2x`
+ * stays the RESOLUTION_TOKEN's job). Charset-safe for tieredName/variantManifestName verbatim injection.
+ */
+export const SUFFIX_TOKEN = /^[_-][A-Za-z0-9][A-Za-z0-9_-]{0,23}$/;
+
+/** Format-token bodies a free-form suffix must NOT equal (compared case-insensitively against the suffix
+ *  BODY, after the leading separator). A `_png` suffix would collide with the multi-format token (EXT) and
+ *  be mis-peeled as a FORMAT token by stemOf — so it is rejected even though it matches SUFFIX_TOKEN. */
+const FORMAT_TOKEN_BODY = new Set(['png', 'webp', 'avif', 'jpg', 'jpeg']);
+
+/**
+ * Is `s` a valid tier suffix? SUPERSET of RESOLUTION_TOKEN — every currently-valid resolution suffix
+ * (`_720p`/`@2x`/`_hd`/`_sd`) stays valid (zero regression), AND a safe free-form suffix (`_mobile`/`_lq`/
+ * `_hidpi`/`_x2`) is now accepted. A free-form suffix is accepted iff it matches SUFFIX_TOKEN and its body
+ * is NOT a format name (png/webp/avif/jpg/jpeg, case-insensitive). Pure; deterministic (regex + Set).
+ *
+ * HONEST RE-INGEST TRADE: resolution-shaped suffixes (`_720p`/`@2x`/`_hd`) still cluster as today via
+ * variants.ts (one loaded-VRAM count per device). A CUSTOM non-resolution tier (e.g. `_mobile`) is NOT
+ * recognized as a tier-variant if the built output is later re-analyzed — its tiers show as SEPARATE
+ * assets. That is a CONSERVATIVE over-count of the advisory `variants` WARN (never a fabricated cluster,
+ * never affecting the hard VRAM gate). We deliberately do NOT widen variants.ts clustering: doing so would
+ * falsely cluster genuinely-different files (icon_blue/icon_red). See docs/improvements/ab-r4-suffix-policy.md.
+ */
+export function isSafeSuffix(s: string): boolean {
+  if (RESOLUTION_TOKEN.test(s)) return true;
+  return SUFFIX_TOKEN.test(s) && !FORMAT_TOKEN_BODY.has(s.slice(1).toLowerCase());
+}
+
+/**
  * Scaled size for a loose image — the loose-image analogue of scaleAtlas geometry: the SAME
  * `Math.max(1, Math.round(n * scale))` 1px floor (no zero-pixel dimension), integer-only, deterministic.
  * scale >= 1 ⇒ identity (NEVER upscale; a fresh copy so callers can't alias the input). Pure.
@@ -65,7 +97,8 @@ export type TierValidation =
  * into a skipped[] honesty entry rather than silently emitting a bad export. Rejects:
  *   - empty input (nothing to emit);
  *   - any non-finite scale, scale <= 0, or scale > 1 (UPSCALE forbidden);
- *   - empty suffix, or a suffix not matching RESOLUTION_TOKEN (so tiers always cluster on re-ingest);
+ *   - empty suffix, or a suffix rejected by isSafeSuffix (free-form allowed, but no dot/slash/@, no
+ *     overlong body, and never a format-name body that would collide with multi-format naming);
  *   - duplicate suffixes (case-insensitive — they would clobber each other's emitted names);
  *   - a ladder with NO scale === 1 top tier (must include/handle the full-source top tier).
  * Pure and deterministic: same input ⇒ same result (stable high→low sort, ties broken by suffix).
@@ -84,7 +117,7 @@ export function validateTiers(tiers: ScaleTier[]): TierValidation {
 
     const suffix = t.suffix;
     if (!suffix) errors.push('badSuffix: empty suffix');
-    else if (!RESOLUTION_TOKEN.test(suffix)) errors.push(`badSuffix: "${suffix}" is not a resolution token`);
+    else if (!isSafeSuffix(suffix)) errors.push(`badSuffix: "${suffix}" is not a safe tier suffix (use [A-Za-z0-9_-], not a format name)`);
     else {
       const key = suffix.toLowerCase();
       if (seen.has(key)) errors.push(`dupSuffix: "${suffix}"`);
