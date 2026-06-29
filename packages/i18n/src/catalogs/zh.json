@@ -53,6 +53,10 @@
   "severity.warn": "警告",
   "severity.ok": "正常",
   "severity.info": "提示",
+  "a11y.diagnosisReady": {
+    "$count": "n",
+    "other": "诊断完成。发现 {n} 个问题。"
+  },
   "triage.verdict": "诊断",
   "triage.allClear": "未发现问题",
   "triage.filter.crit": {

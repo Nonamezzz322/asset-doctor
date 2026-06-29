@@ -32,6 +32,7 @@ import { VerdictBar } from './components/VerdictBar';
 import { TriageLedger } from './components/TriageLedger';
 import { useDebounced } from './lib/useDebounced';
 import { buildIndex, countCandidates, defaultSelectOpts, DEFAULT_SEVERITIES, DEFAULT_SORT, selectRows, type LedgerRow, type SelectOpts, type SortKey } from './lib/triage';
+import { analysisReadyMessage, resultCountMessage } from './lib/announce';
 
 type Phase =
   | { t: 'idle' }
@@ -83,6 +84,18 @@ export function App() {
   // data.
   const probeAbort = useRef<AbortController | null>(null);
 
+  // ── a11y live region (round: aria-live) ─────────────────────────────────────────────────────────────
+  // ONE persistent visually-hidden polite region speaks every otherwise-silent analysis transition: the
+  // analyzing→done diagnosis-ready moment and the settled "showing N of M" count. It is mounted ONCE at the
+  // top of <main> (below) so it survives the Dropzone↔results swap. `nudge` is an alternating trailing-NBSP
+  // toggle: when an emit lands the SAME text as before (e.g. clear-then-retype yields an identical count),
+  // SRs may not re-announce unchanged textContent — flipping one invisible char forces a fresh announcement.
+  // This region concern is deliberately kept OUT of the pure formatters (announce.ts stays string-equal-
+  // testable). `emitLive` is the single imperative entry point used by both the run() success path and the
+  // count effect; it always flips `nudge` so a repeat string still speaks.
+  const [live, setLive] = useState<{ text: string; nudge: boolean }>({ text: '', nudge: false });
+  const emitLive = (text: string): void => setLive((prev) => ({ text, nudge: !prev.nudge }));
+
   useEffect(() => {
     inputRef.current?.setAttribute('webkitdirectory', '');
   }, []);
@@ -119,12 +132,19 @@ export function App() {
       // of truth, can't drift); falls back to the first asset when there are no problems. Runs ONCE per
       // analysis here (before the probe write-back), and autoSelectedFor is stamped so the probe re-set
       // never re-selects (correction #1).
-      const firstRows = selectRows(buildIndex(rep), defaultSelectOpts());
+      const firstIndex = buildIndex(rep);
+      const firstRows = selectRows(firstIndex, defaultSelectOpts());
       const worst = firstRows[0];
       setSelectedAsset((worst ?? undefined)?.assetRef ?? rep.assets[0]?.assetRef);
       setSelectedFinding(worst?.scope === 'asset' ? worst.id : undefined);
       autoSelectedFor.current = rep;
       setPhase({ t: 'done' });
+      // Speak the diagnosis-ready moment for assistive tech (the ≤10s payoff is otherwise a silent DOM swap).
+      // Emitted IMPERATIVELY here — exactly once per analysis, BEFORE the async probe write-back below — so the
+      // probe re-set (a NEW report object with the same findings, App.tsx attachProbeReadings) can never
+      // re-announce "diagnosis ready". HONEST: problems = crit+warn+info on the SAME freshly-built index
+      // VerdictBar/auto-select read; ok/clean and VRAM are never spoken.
+      emitLive(analysisReadyMessage(firstIndex.tally, t));
       // THEN, non-blocking, replay each atlas through real offscreen-WebGL (main thread) and fill in
       // the MEASURED draw-calls / decoded-VRAM. Skipped silently when there's no WebGL or no atlas.
       // The probe RE-READS each atlas's bytes from disk on demand via the SAME lazy readers (Round 21 #2 —
@@ -248,6 +268,26 @@ export function App() {
     setSelectedFinding(top.scope === 'asset' ? top.id : undefined);
   }, [rows, report, selectedAsset]);
 
+  // a11y: speak the settled "showing N of M" whenever a filter/search/sort changes the visible count. Keyed
+  // on the two integers [rows.length, totalRows] — they only change AFTER the existing 150ms search debounce
+  // settles (debouncedSearch), so this is naturally debounced with zero new timers and no per-keystroke chatter
+  // (PERF: no row iteration). HONEST: announces the EXACT ledger numbers (rows.length / totalRows), never VRAM.
+  // The FIRST settle for a fresh report is skipped (countAnnouncedFor guard) because emitLive already spoke
+  // "Diagnosis ready. N problems." for that same moment — we only want the count on subsequent control changes.
+  const countAnnouncedFor = useRef<AnalysisReport | null>(null);
+  useEffect(() => {
+    if (!report || phase.t !== 'done') return;
+    if (countAnnouncedFor.current !== report) {
+      // Fresh report: the diagnosis-ready announcement already covered this settle; arm for the NEXT change.
+      countAnnouncedFor.current = report;
+      return;
+    }
+    emitLive(resultCountMessage(rows.length, totalRows, t));
+    // Deliberately keyed on the two settled integers (with report/phase as fresh-report guards). `t` and
+    // `emitLive` are intentionally NOT deps: keying on `t` would re-announce the count on a mere relocale,
+    // and `emitLive` is a per-render closure over the stable setLive — including it would add no signal.
+  }, [rows.length, totalRows, report, phase.t]);
+
   const onRowClick = (row: LedgerRow) => {
     setSelectedAsset(row.assetRef);
     // A folder finding spans many assets ⇒ no single-asset overlay to highlight.
@@ -298,6 +338,16 @@ export function App() {
       </header>
 
       <main className="mx-auto max-w-6xl px-6 py-10">
+        {/* a11y: ONE persistent polite live region, mounted unconditionally as the FIRST child of <main> so it
+            survives the Dropzone↔results swap (mounting a region and its text in the same tick is unreliable in
+            some SRs). role=status + aria-live=polite for non-urgent announcements; aria-atomic so the whole
+            phrase is read, not just a changed number. Visually clipped (.ad-sr-only) — no layout, no focus, no
+            new tab stop. It speaks the diagnosis-ready moment and the settled "showing N of M". The trailing
+            NBSP toggle (live.nudge) forces re-announcement of an identical string. */}
+        <span role="status" aria-live="polite" aria-atomic="true" className="ad-sr-only">
+          {live.text}
+          {live.nudge ? ' ' : ''}
+        </span>
         {phase.t !== 'done' && (
           <Dropzone
             phase={phase}
@@ -449,6 +499,9 @@ function Dropzone({
         className="ad-grid ad-clip ad-viewer-shadow relative mt-9 rounded-2xl border border-film-border p-3.5"
       >
         <div
+          // a11y: aria-busy while analysis runs so assistive tech knows the region is updating (cleared the
+          // moment phase leaves 'analyzing' — the whole Dropzone unmounts at done, so it can never get stuck on).
+          aria-busy={analyzing}
           className={`relative flex min-h-[240px] flex-col items-center justify-center gap-5 overflow-hidden rounded-[10px] border-2 border-dashed px-6 py-10 text-center transition-colors ${
             dragging ? 'border-teal bg-teal/10' : 'border-teal/35'
           }`}
@@ -456,7 +509,10 @@ function Dropzone({
           <div className="ad-scanline" />
           <Logo size={40} />
           {analyzing ? (
-            <p className="font-mono text-sm text-[#9be7e7]">
+            // a11y: the otherwise-silent progress text becomes a polite live region so a SR user who clicked
+            // "open folder" hears "analyzing… N/M · label". aria-atomic reads the whole phrase, not just the
+            // changed number. No copy/visual change — the existing localized strings are spoken verbatim.
+            <p role="status" aria-live="polite" aria-atomic="true" className="font-mono text-sm text-[#9be7e7]">
               {t('dropzone.analyzing')}{' '}
               {phase.progress ? t('dropzone.progress', { done: phase.progress.done, total: phase.progress.total, label: phase.progress.label }) : ''}
             </p>
@@ -472,7 +528,10 @@ function Dropzone({
         </div>
       </div>
 
-      {phase.t === 'error' && <p className="mt-3 text-center font-mono text-xs text-crit">{phase.message}</p>}
+      {/* a11y: role=alert (implicit aria-live=assertive) so a failed parse is announced immediately —
+          interrupting is correct for a failure. The message is the existing localized phase.message
+          (e.g. error.noFiles) or the raw worker message; nothing is fabricated. */}
+      {phase.t === 'error' && <p role="alert" className="mt-3 text-center font-mono text-xs text-crit">{phase.message}</p>}
       <p className="mt-5 text-center font-mono text-[11px] text-ink-soft">{t('dropzone.footnote')}</p>
     </section>
   );

@@ -56,6 +56,13 @@
   "severity.warn": "warn",
   "severity.ok": "ok",
   "severity.info": "info",
+  "a11y.diagnosisReady": {
+    "$count": "n",
+    "one": "Диагноз готов. Найдена {n} проблема.",
+    "few": "Диагноз готов. Найдено {n} проблемы.",
+    "many": "Диагноз готов. Найдено {n} проблем.",
+    "other": "Диагноз готов. Найдено {n} проблем."
+  },
   "triage.verdict": "Диагноз",
   "triage.allClear": "проблем не найдено",
   "triage.filter.crit": {

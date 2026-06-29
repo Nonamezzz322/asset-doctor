@@ -55,6 +55,11 @@
   "severity.warn": "avviso",
   "severity.ok": "ok",
   "severity.info": "info",
+  "a11y.diagnosisReady": {
+    "$count": "n",
+    "one": "Diagnosi pronta. {n} problema rilevato.",
+    "other": "Diagnosi pronta. {n} problemi rilevati."
+  },
   "triage.verdict": "Diagnosi",
   "triage.allClear": "nessun problema rilevato",
   "triage.filter.crit": {

@@ -38,6 +38,9 @@ describe('catalog completeness (all 9 locales)', () => {
       // Render the measured-probe sprite-batch plural — both forms carry {n}, no leftover braces.
       expect(translate(loc, 'readout.batched', { n: 12 })).not.toContain('{');
       expect(translate(loc, 'readout.batched', { n: 1 })).not.toContain('{');
+      // The aria-live diagnosis-ready plural — both forms carry {n}, no leftover braces (singular n=1, plural n=5).
+      expect(translate(loc, 'a11y.diagnosisReady', { n: 1 })).not.toContain('{');
+      expect(translate(loc, 'a11y.diagnosisReady', { n: 5 })).not.toContain('{');
       // Texture-bleeding plural — both forms carry {pairs}, no leftover braces in any locale.
       expect(translate(loc, 'find.bleeding.title', { pairs: 1 })).not.toContain('{');
       expect(translate(loc, 'find.bleeding.title', { pairs: 5 })).not.toContain('{');

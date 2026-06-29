@@ -54,6 +54,11 @@
   "severity.warn": "चेतावनी",
   "severity.ok": "ठीक",
   "severity.info": "जानकारी",
+  "a11y.diagnosisReady": {
+    "$count": "n",
+    "one": "निदान तैयार। {n} समस्या मिली।",
+    "other": "निदान तैयार। {n} समस्याएँ मिलीं।"
+  },
   "triage.verdict": "निदान",
   "triage.allClear": "कोई समस्या नहीं मिली",
   "triage.filter.crit": {

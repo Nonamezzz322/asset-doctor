@@ -158,6 +158,22 @@ body {
   animation: ad-scan 2.1s ease-in-out 0.2s both;
 }
 
+/* a11y: the canonical screen-reader-only clip pattern. Visually removes content (clipped to 1px) while
+   keeping it in the accessibility tree — used by the persistent aria-live region that speaks analysis
+   state transitions. Token-free by design: sets no color/font/spacing/brand surface, only the standard
+   visually-hidden geometry; no animation ⇒ reduced-motion safe. */
+.ad-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ad-reveal,
   .ad-pulse-dot {

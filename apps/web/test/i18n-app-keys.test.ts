@@ -25,8 +25,14 @@ import { OP_KIND_ORDER } from '../src/lib/op-manifest';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const comp = (name: string): string => readFileSync(join(here, '..', 'src', 'components', name), 'utf8');
+const lib = (name: string): string => readFileSync(join(here, '..', 'src', 'lib', name), 'utf8');
 const appSrc =
   readFileSync(join(here, '..', 'src', 'App.tsx'), 'utf8') +
+  '\n' +
+  // announce.ts owns the t('a11y.diagnosisReady') call (the aria-live diagnosis-ready announcement) and the
+  // t('triage.showing') reuse for the live result-count. App.tsx invokes the formatters but never names those
+  // keys as literals, so without scanning announce.ts a renamed a11y.* key would silently render a raw key.
+  lib('announce.ts') +
   '\n' +
   // Also scan FilmViewer.tsx — it owns probe/readout t() keys (readout.declared/measured/drawCalls/batched)
   // that App.tsx never references, so without this a future key rename there would silently render raw keys.
@@ -131,6 +137,14 @@ describe('app i18n keys exist in the en catalog', () => {
     ]) {
       expect(CATALOGS.en[k], `${k} must exist in en.json`).toBeDefined();
     }
+  });
+
+  it('the aria-live announcement key is catalogued (its t() call lives in announce.ts, not App.tsx)', () => {
+    // a11y.diagnosisReady is emitted by analysisReadyMessage (announce.ts) — pinned explicitly because the
+    // literal lives outside App.tsx; the static scan above also covers it now that announce.ts is in appSrc.
+    expect(CATALOGS.en['a11y.diagnosisReady'], 'a11y.diagnosisReady must exist in en.json').toBeDefined();
+    // The result-count announcement reuses the existing ledger key (no new key) — pinned for parity.
+    expect(CATALOGS.en['triage.showing'], 'triage.showing must exist in en.json').toBeDefined();
   });
 
   it('the Feature 4 pack panel keys are catalogued (regression for the missing-keys bug)', () => {
