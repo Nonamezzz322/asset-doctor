@@ -9,6 +9,7 @@ import type {
   Asset,
   Atlas,
   AtlasFrameHashes,
+  AtlasFrameTrims,
   Blit,
   FixOp,
   FormatTarget,
@@ -381,28 +382,41 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     // aggressive dedup needs per-image features (SHA-256 + dHash); skip the decode cost otherwise.
     const features = opts.aggressive ? await computeFeatures(bytesByRef) : undefined;
 
-    // ── Frame-redundancy aliasing (round19, BLOCKER B1 + MAJOR M1) ─────────────────────────────────────
-    // A frame-redundant atlas is usually FULLY packed (its duplicate frames fill the sheet), so it triggers
-    // NO occupancy/wasted finding ⇒ NO repack today. For the finding to fire (and emit its OWN repack op) the
-    // worker MUST compute per-atlas sprite-region hashes and feed them into analyze() BEFORE planFix. This is
-    // ONE full-resolution decode per QUALIFYING merged atlas page — identical magnitude to the composePageEncode
-    // source decode a repack already pays — gated to pages with ≥ minDuplicates sprites (a cheaper pre-filter:
-    // a sheet with fewer sprites can never reach the gate) and bounded by extractFrameRegions' own px/sprite
-    // caps. `frameRedundancy:false` ⇒ skip the whole pass (no hashing, no finding, no new op ⇒ byte-identical).
-    // The map is REUSED below to build the per-atlas alias maps threaded into repackAtlases. Respect cancelled.
+    // ── Diagnosis decode pass: frame-redundancy hashes (round19) + trim-margin bboxes (round21 #0) ───────
+    // BLOCKER B0/B1: the fix worker re-runs analyze() itself, so the within-atlas frame-redundancy AND
+    // trim-margin findings ONLY fire here if the worker computes the per-atlas hashes/bboxes and FEEDS them in
+    // (mirroring analyze.worker.ts:224-261/143). Both are usually FULLY-PACKED atlases ⇒ NO occupancy/wasted
+    // finding ⇒ NO repack today, so without this the plan's frame-redundancy / trim-margin branches match
+    // NOTHING and the toggle is a dead no-op. The decode is SHARED: ONE full-resolution decode per qualifying
+    // merged atlas page (identical magnitude to the composePageEncode source decode a repack already pays)
+    // yields BOTH the region hashes and the opaque bboxes (hashAtlasFrames returns {hashes,bboxes}; the bboxes
+    // piggyback on the SAME page buffer ⇒ zero extra decode when both toggles are on). B1: the pass runs when
+    // `frameRedundancyOn || trimMarginOn`, and EACH array is kept independently — `frameRedundancy:false,
+    // trimMargin:true` still gets trim bboxes (no minDuplicates floor — a single padded sprite can fire),
+    // `trimMargin:false` keeps no bboxes ⇒ byte-identical to today. `frameHashByRef` is REUSED below to build
+    // the per-atlas alias maps threaded into repackAtlases; its minDuplicates pre-filter is preserved exactly
+    // (a sheet with fewer sprites can never cluster — frame-redundancy stays byte-identical). Respect cancelled.
     const frameRedundancyOn = opts.frameRedundancy !== false;
+    const trimMarginOn = opts.trimMargin !== false;
     const minDuplicates = DEFAULT_THRESHOLDS.frameRedundancy?.minDuplicates ?? Infinity;
     const frameHashByRef = new Map<string, (string | null)[]>();
-    if (frameRedundancyOn) {
+    const frameTrimByRef = new Map<string, (TrimRect | null)[]>();
+    if (frameRedundancyOn || trimMarginOn) {
       for (const a of merged) {
         if (cancelled) return; // superseded — stop before the next (heavy) page decode
         if (a.kind !== 'atlas') continue;
-        // Cheap pre-filter: a page with fewer than minDuplicates sprites can never reach the cluster gate.
-        if (a.atlas.sprites.length < minDuplicates) continue;
+        // Frame-redundancy's cheap pre-filter (a page with fewer than minDuplicates sprites can never reach the
+        // cluster gate) gates ONLY whether we want hashes for THIS page; trim-margin has no such floor. Skip
+        // the decode entirely only when NEITHER half wants this page.
+        const wantHashes = frameRedundancyOn && a.atlas.sprites.length >= minDuplicates;
+        const wantTrims = trimMarginOn;
+        if (!wantHashes && !wantTrims) continue;
         const bytes = bytesByRef.get(a.atlas.name);
         if (!bytes) continue;
-        const hashes = await hashAtlasFrames(bytes, a.atlas.sprites);
-        if (hashes) frameHashByRef.set(a.atlas.name, hashes);
+        const res = await hashAtlasFrames(bytes, a.atlas.sprites);
+        if (!res) continue; // whole page skipped (caps / decode fail) — both rules honestly never fire for it
+        if (wantHashes) frameHashByRef.set(a.atlas.name, res.hashes);
+        if (wantTrims) frameTrimByRef.set(a.atlas.name, res.bboxes);
       }
       if (cancelled) return;
     }
@@ -410,14 +424,20 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       atlasRef,
       frameHashes: hashes,
     }));
+    const frameTrims: AtlasFrameTrims[] = [...frameTrimByRef].map(([atlasRef, bboxes]) => ({
+      atlasRef,
+      bboxes,
+    }));
 
     // measure format savings (native WebP) so format findings → transcode ops appear; feed the frame-region
-    // hashes so the frame-redundancy finding fires (and its plan branch emits a repack op for the aliasing).
+    // hashes so the frame-redundancy finding fires (its plan branch emits a repack op for the aliasing) AND the
+    // per-frame opaque bboxes so the trim-margin finding fires (its plan branch emits a repack op for the trim).
     const report = await analyze(merged, undefined, {
       missingImages: grouped.missing,
       encodeImage: makeEncoder(bytesByRef),
       ...(features ? { features } : {}),
       ...(frameHashes.length ? { frameHashes } : {}),
+      ...(frameTrims.length ? { frameTrims } : {}),
     });
 
     // Owner/consumer dedup (Feature 1, aggressive only): decide which exact-dup copy is the OWNER (kept,
@@ -564,6 +584,11 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         // OWN repack op (the atlas is usually fully packed ⇒ no occupancy repack would schedule it). The
         // aliasing itself is worker-side (alias maps below, threaded into repackAtlases). false ⇒ no new op.
         frameRedundancy: frameRedundancyOn,
+        // Trim-margin → repack scheduling (round21 #0): forward the toggle so a trim-margin finding emits its
+        // OWN repack op (the padded atlas is usually fully packed ⇒ no occupancy repack would schedule it). The
+        // trim itself is worker-side (buildTrimArrays → repackAtlases({trim}), the r20 execute path). false ⇒
+        // no new op (and no frameTrims fed above) ⇒ byte-identical to today.
+        trimMargin: trimMarginOn,
         isAtlasRef: (ref) => atlasByRef.has(ref),
         // Edge-extrude (bleed, design OPTION A): forward the UI knob. planFix floors it to a non-negative
         // int and STAMPS it onto every repack/pack op (the only ops whose worker compose blits a rectangle
@@ -4028,17 +4053,21 @@ async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** Frame-redundancy hashing in the fix path (round19) — the SAME pure-core split as analyze.worker.ts: ONE
- *  full-resolution decode per atlas page, then the PURE extractFrameRegions does the caps/bounds/flat-guard/
- *  region-extraction off that single buffer; each surviving region's tightly-packed RGBA bytes are SHA-256'd
- *  here (crypto.subtle is async). Index-aligned to `sprites`. Returns null (whole page skipped) when
+/** Frame-redundancy hashing + trim-margin bboxes in the fix path — the SAME pure-core split as
+ *  analyze.worker.ts:224-261 (round19 hashes + round21 #0 bboxes): ONE full-resolution decode per atlas page,
+ *  then the PURE extractFrameRegions does the caps/bounds/flat-guard/region-extraction off that single buffer
+ *  (each surviving region's tightly-packed RGBA bytes are SHA-256'd here — crypto.subtle is async), and the
+ *  PURE alphaBBox reads the SAME buffer for each UNtrimmed sprite's opaque bbox. BOTH arrays are index-aligned
+ *  to `sprites` and computed off ONE shared decode (the trim bboxes piggyback on the `page` buffer — ZERO extra
+ *  decode). A bbox is null for an already-trimmed sprite (skipped — the rule re-gates on Sprite.trimmed) or a
+ *  fully-transparent untrimmed frame (alphaBBox finds no opaque pixel). Returns null (whole page skipped) when
  *  OffscreenCanvas is unavailable, the decode fails, the 2d context is unavailable, or the page exceeds the
- *  size/sprite caps — the rule simply never fires for that page. Identical magnitude to the composePageEncode
- *  source decode a repack already pays. Deterministic (stable SHA + deterministic flat threshold). */
+ *  size/sprite caps — both rules simply never fire for that page. Identical magnitude to the composePageEncode
+ *  source decode a repack already pays. Deterministic (stable SHA + deterministic flat threshold + integer bbox). */
 async function hashAtlasFrames(
   pageBytes: ArrayBuffer,
   sprites: Sprite[],
-): Promise<(string | null)[] | null> {
+): Promise<{ hashes: (string | null)[]; bboxes: (TrimRect | null)[] } | null> {
   if (typeof OffscreenCanvas === 'undefined') return null;
   try {
     const bmp = await createImageBitmap(new Blob([pageBytes]));
@@ -4055,18 +4084,25 @@ async function hashAtlasFrames(
     }
     c2d.drawImage(bmp, 0, 0);
     bmp.close();
-    const page = c2d.getImageData(0, 0, width, height).data; // one full-res read; the pure helper does the rest
+    const page = c2d.getImageData(0, 0, width, height).data; // one full-res read; both halves read this buffer
     const regions = extractFrameRegions(
       page,
       width,
       height,
       sprites.map((sp) => sp.frame),
     );
-    if (!regions) return null; // whole page skipped (caps) — honest, the rule never fires for it
-    const out: (string | null)[] = [];
+    if (!regions) return null; // whole page skipped (caps) — honest, BOTH rules never fire for it
+    const hashes: (string | null)[] = [];
     for (const region of regions)
-      out.push(region === null ? null : await sha256Hex(region.buffer as ArrayBuffer));
-    return out;
+      hashes.push(region === null ? null : await sha256Hex(region.buffer as ArrayBuffer));
+    // Trim bboxes off the SAME page buffer (no second decode). Only for UNtrimmed sprites; alphaBBox returns a
+    // FRAME-RELATIVE top-left bbox (exactly what trimMarginFinding expects), or null for a fully transparent
+    // frame. `regions` already cleared the caps, so this loop is bounded by the same ceilings.
+    const src = { data: page, width };
+    const bboxes: (TrimRect | null)[] = sprites.map((sp) =>
+      sp.trimmed ? null : alphaBBox(src, { x: sp.frame.x, y: sp.frame.y, w: sp.frame.w, h: sp.frame.h }),
+    );
+    return { hashes, bboxes };
   } catch {
     return null;
   }

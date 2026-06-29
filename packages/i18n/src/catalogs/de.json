@@ -450,6 +450,8 @@
   "license.err.generic": "Aktivierung fehlgeschlagen",
   "fix.settings.frameRedundancy": "Doppelte Animationsframes verweisen",
   "fix.settings.frameRedundancyHint": "Byte-identische Animationsframes einmal packen und jeden doppelten Namen auf die gemeinsame Region zeigen lassen — kleineres Sheet und weniger VRAM. Drop-in: jeder Framename wird weiterhin aufgelöst. Exakter VRAM, keine Schätzung.",
+  "fix.settings.trimMargin": "Ränder ungetrimmter Sprites beschneiden",
+  "fix.settings.trimMarginHint": "Jedes ungetrimmte Sprite beim Repacken auf seine deckenden Grenzen zuschneiden — kleineres Sheet und weniger VRAM. Drop-in: jeder Name wird weiterhin aufgelöst. Exakter VRAM, keine Schätzung.",
   "fix.framesAliased": { "$count": "n", "one": "{n} doppelten Frame auf eine gemeinsame Region verwiesen — VRAM {before:bytes} → {after:bytes} (alle Framenamen werden weiterhin aufgelöst)", "other": "{n} doppelte Frames auf eine gemeinsame Region verwiesen — VRAM {before:bytes} → {after:bytes} (alle Framenamen werden weiterhin aufgelöst)" },
   "fix.trimmedOnRepack": { "$count": "n", "one": "{n} ungetrimmten Sprite auf seine opaken Grenzen getrimmt — {area} px zurückgewonnen, VRAM {before:bytes} → {after:bytes} (alle Namen werden weiterhin aufgelöst)", "other": "{n} ungetrimmte Sprites auf ihre opaken Grenzen getrimmt — {area} px zurückgewonnen, VRAM {before:bytes} → {after:bytes} (alle Namen werden weiterhin aufgelöst)" }
 }

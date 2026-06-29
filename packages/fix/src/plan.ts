@@ -78,6 +78,19 @@ export interface PlanOptions {
    *  today (the finding stays a diagnosis-only verdict). The aliasing itself happens worker-side inside
    *  `repackAtlases` (the plan carries no pixels); the plan only schedules the repack. */
   frameRedundancy?: boolean;
+  /** Trim-margin → repack scheduling (round21 #0). A `trim-margin` finding fires on a (usually FULLY-PACKED)
+   *  atlas whose UNtrimmed sprites carry reclaimable transparent padding — so, exactly like frame-redundancy,
+   *  it produces NO occupancy/wasted finding and NO repack op today, and a trim done inside an existing repack
+   *  would NEVER fire on the target case. THEREFORE the finding must emit its OWN repack op (reusing the
+   *  `repack` OpKind so tally/manifest/selective-fix/receipt all work) so the worker can tighten each untrimmed
+   *  frame to its opaque bounds (the r20 trim-on-repack execute path: `buildTrimArrays`→`repackAtlases({trim})`).
+   *  This flag gates that new op: ON (the worker's default — `undefined` is treated as ON) ⇒ a trim-margin
+   *  finding adds a repack op, guarded against double-emit with the occupancy AND frame-redundancy paths via the
+   *  shared `repacked` set (findings are SORTED at analyze.ts, so the Set guard — not push order — is what
+   *  prevents a second op). `false` ⇒ NO new op ⇒ byte-identical to today (the finding stays a diagnosis-only
+   *  verdict). The trim itself happens worker-side (the plan carries no pixels; vramSaved is the exact
+   *  before−after from `repackAtlases`, the disk number stays an estimate — invariant 5). */
+  trimMargin?: boolean;
 }
 
 /**
@@ -131,6 +144,15 @@ export interface PlanOptions {
  * targets `opts.targetMime` exactly like the format op (the plan holds no source mime; the finding's
  * `params.srcLabel` is copy-only, not op routing). OFF/no wasted-alpha finding ⇒ no op carries `opaque`
  * ⇒ byte-identical to today (the finding stays a diagnosis-only verdict; CLI/headless unaffected).
+ *
+ * TRIM-MARGIN → REPACK (`opts.trimMargin`, round21 #0): a `trim-margin` finding fires on a (usually fully-
+ * packed) atlas whose untrimmed sprites carry reclaimable transparent padding — so it earns NO occupancy/
+ * wasted finding and thus NO repack op above. When ON (the default — `undefined` is ON), the finding emits its
+ * OWN pass-1 `repack` op so the worker's r20 trim-on-repack execute path tightens each untrimmed frame to its
+ * opaque bounds. GUARDS: owners/folder findings are skipped; the shared `repacked` set prevents a double-emit
+ * when occupancy OR frame-redundancy already scheduled this atlas (that repack already trims, since the worker
+ * passes the same trim arrays). The order is irrelevant — findings are SORTED at analyze.ts, so the Set guard
+ * (not push order) is load-bearing. `false`/absent-when-set ⇒ NO new op ⇒ byte-identical to today.
  */
 export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: DedupGroup[], packGroups?: PackGroup[]): FixPlan {
   const ops: FixOp[] = [];
@@ -278,7 +300,10 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
       // round19: a frame-redundancy finding ALSO becomes a pass-1 repack (B1) when the opt is on, so a
       // frame-redundant atlas must be pre-excluded from tiering exactly like occupancy/wasted-regions.
       const isFrameRepack = f.rule === 'frame-redundancy' && opts.frameRedundancy !== false && f.scope !== 'folder';
-      if ((f.rule === 'occupancy' || f.rule === 'wasted-regions' || isFrameRepack) && !protectedOwners.has(f.assetRef)) willRepack.add(f.assetRef);
+      // round21 #0: a trim-margin finding ALSO becomes a pass-1 repack when the opt is on (same reasoning —
+      // a padded-but-fully-packed atlas gets no occupancy repack), so pre-exclude it from tiering too.
+      const isTrimRepack = f.rule === 'trim-margin' && opts.trimMargin !== false && f.scope !== 'folder';
+      if ((f.rule === 'occupancy' || f.rule === 'wasted-regions' || isFrameRepack || isTrimRepack) && !protectedOwners.has(f.assetRef)) willRepack.add(f.assetRef);
     }
     for (const f of report.findings) {
       if (f.scope === 'folder') continue; // per-asset only — folder findings have no single tier target
@@ -318,6 +343,21 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
       // clusters). GUARDS: owners are never repack targets; the `repacked` set prevents a double-emit when
       // the occupancy path ALREADY scheduled this atlas (that repack aliases too, since the worker passes
       // the same alias maps). Gated on opts.frameRedundancy !== false ⇒ false/absent-when-set ⇒ no new op
+      // ⇒ byte-identical to today. Folder findings have no single atlas target — skip them.
+      if (f.scope === 'folder' || protectedOwners.has(f.assetRef) || repacked.has(f.assetRef)) continue;
+      repacked.add(f.assetRef);
+      ops.push({ kind: 'repack', atlasRefs: [f.assetRef], targetMime: opts.targetMime, pot: true, allowRotation: false, padding: opts.padding, maxSize: opts.maxSize, ...extrudeField });
+    } else if (f.rule === 'trim-margin' && opts.trimMargin !== false) {
+      // round21 #0: a trim-margin atlas is usually FULLY packed (its untrimmed sprites — padding and all —
+      // fill the sheet), so it triggers NO occupancy/wasted finding and therefore NO repack op above. Emit
+      // our OWN repack (reusing the `repack` OpKind so the dry-run tally, change-manifest, selective-fix mask,
+      // and receipt grouping all work unchanged) so the worker's r20 trim-on-repack execute path tightens each
+      // untrimmed frame to its opaque bounds (buildTrimArrays → repackAtlases({trim}); trimmedSprites surfaces
+      // in the receipt, vramSaved is the exact before−after). GUARDS: owners are never repack targets; the
+      // shared `repacked` set prevents a double-emit when the occupancy OR frame-redundancy path ALREADY
+      // scheduled this atlas (that repack already trims, since the worker threads the same trim arrays). The
+      // order is irrelevant — findings are SORTED (analyze.ts), so the Set guard, not push order, is what
+      // makes double-emit impossible. Gated on opts.trimMargin !== false ⇒ false/absent-when-set ⇒ no new op
       // ⇒ byte-identical to today. Folder findings have no single atlas target — skip them.
       if (f.scope === 'folder' || protectedOwners.has(f.assetRef) || repacked.has(f.assetRef)) continue;
       repacked.add(f.assetRef);

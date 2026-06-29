@@ -453,6 +453,8 @@
   "license.err.generic": "Échec de l'activation",
   "fix.settings.frameRedundancy": "Aliaser les images d’animation en double",
   "fix.settings.frameRedundancyHint": "Empaqueter une seule fois les images d’animation identiques octet pour octet et pointer chaque nom en double vers la région partagée : feuille plus petite et moins de VRAM. Sans changement de chargement : chaque nom d’image reste résolu. VRAM exacte, sans estimation.",
+  "fix.settings.trimMargin": "Rogner les marges des sprites non rognés",
+  "fix.settings.trimMarginHint": "Ajuster chaque sprite non rogné à ses limites opaques lors d’un réempaquetage : feuille plus petite et moins de VRAM. Sans changement de chargement : chaque nom reste résolu. VRAM exacte, sans estimation.",
   "fix.framesAliased": { "$count": "n", "one": "{n} image en double aliasée vers une région partagée — VRAM {before:bytes} → {after:bytes} (tous les noms d’images restent résolus)", "other": "{n} images en double aliasées vers une région partagée — VRAM {before:bytes} → {after:bytes} (tous les noms d’images restent résolus)" },
   "fix.trimmedOnRepack": { "$count": "n", "one": "{n} sprite non rogné rogné à ses limites opaques — {area} px récupérés, VRAM {before:bytes} → {after:bytes} (tous les noms restent résolus)", "other": "{n} sprites non rognés rognés à leurs limites opaques — {area} px récupérés, VRAM {before:bytes} → {after:bytes} (tous les noms restent résolus)" }
 }

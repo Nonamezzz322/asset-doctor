@@ -453,6 +453,8 @@
   "license.err.generic": "Falha na ativação",
   "fix.settings.frameRedundancy": "Vincular quadros de animação duplicados",
   "fix.settings.frameRedundancyHint": "Empacota uma vez os quadros de animação idênticos byte a byte e aponta cada nome duplicado para a região compartilhada: folha menor e menos VRAM. Sem mudança de carregamento: cada nome de quadro ainda é resolvido. VRAM exata, sem estimativa.",
+  "fix.settings.trimMargin": "Recortar margens de sprites não recortados",
+  "fix.settings.trimMarginHint": "Ajusta cada sprite não recortado aos seus limites opacos dentro de um reempacotamento: folha menor e menos VRAM. Sem mudança de carregamento: cada nome ainda é resolvido. VRAM exata, sem estimativa.",
   "fix.framesAliased": { "$count": "n", "one": "Vinculado {n} quadro duplicado a uma região compartilhada — VRAM {before:bytes} → {after:bytes} (todos os nomes de quadro ainda resolvem)", "other": "Vinculados {n} quadros duplicados a uma região compartilhada — VRAM {before:bytes} → {after:bytes} (todos os nomes de quadro ainda resolvem)" },
   "fix.trimmedOnRepack": { "$count": "n", "one": "Recortado {n} sprite sem recorte para seus limites opacos — recuperados {area} px, VRAM {before:bytes} → {after:bytes} (todos os nomes ainda resolvem)", "other": "Recortados {n} sprites sem recorte para seus limites opacos — recuperados {area} px, VRAM {before:bytes} → {after:bytes} (todos os nomes ainda resolvem)" }
 }

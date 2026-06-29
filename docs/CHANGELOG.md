@@ -10,6 +10,30 @@ GitHub creds — user pushes); commit hashes below are over that base.
 
 ---
 
+## Round 21 — selection (#0 shipped) — 2026-06-29
+Pick: **(#0) standalone trim-margin → repack scheduling** — uncaps the r20 trim-on-repack FIX so it fires
+even when no occupancy/frame-redundancy/merge repack is already scheduled.
+
+- **#0 Standalone trim-margin → repack scheduling** (`docs/improvements/round21-standalone-trim-margin-repack-sche.md`)
+  — a `trim-margin` finding now emits its OWN pass-1 `repack` op (`PlanOptions.trimMargin`, default ON), so a
+  padded-but-FULLY-PACKED atlas (no occupancy/wasted finding ⇒ no repack today) finally gets trimmed. Reuses
+  the r20 trim-on-repack execute path (`buildTrimArrays` → `repackAtlases({trim})`): exact `vramSaved`
+  before−after, the disk number stays an estimate (invariant 5), `trimmedSprites` surfaces in the receipt.
+  Guarded against double-emit with the occupancy AND frame-redundancy paths via the shared `repacked` set
+  (order-free — findings are SORTED), and pre-excluded from tiering like the other repack-driving findings.
+  **Skeptic BLOCKER B0/B1 (load-bearing):** the FIX worker re-runs `analyze()` itself, but its local
+  `hashAtlasFrames` returned ONLY hashes (no bboxes) and NEVER passed `frameTrims`, so the trim-margin finding
+  fired in the FREE diagnosis worker but **never** in the fix worker → the feature would have been a no-op (a
+  dead toggle). Fixed by porting the analyze worker's `{hashes,bboxes}` shape into the fix worker and feeding
+  `frameTrims` (key `bboxes`) into its `analyze()` call; the diagnosis decode pass now runs when
+  `frameRedundancyOn || trimMarginOn` (shared page decode — one decode either way) and keeps each array
+  independently (a `frameRedundancy:false, trimMargin:true` run still gets trim bboxes; `trimMargin:false` ⇒
+  byte-identical). `FixOptions.trimMargin` + App toggle (default ON) + i18n ×9. Tests exercise the REAL
+  analyze→plan path (synthetic decoded RGBA → real `alphaBBox` → `frameTrims` → `analyze` → `planFix`): a
+  fully-packed padded atlas ⇒ exactly one repack op + `trimmedSprites > 0` realized; no double-emit when
+  occupancy also fires; additive (off ⇒ byte-identical). ADDITIVE — default-on but absent-field ⇒ no plan/byte
+  change when nothing qualifies.
+
 ## Round 20 — selection (#0 shipped) — 2026-06-29
 Pick: **(#0) trim-on-repack FIX** (shipped below) — turns the r19 trim-margin DETECTOR into a Pro fix.
 

@@ -534,6 +534,8 @@ function SettingsPanel({
   setBestFormatPerImage,
   frameRedundancy,
   setFrameRedundancy,
+  trimMargin,
+  setTrimMargin,
   overrides,
   setOverrides,
 }: {
@@ -551,6 +553,8 @@ function SettingsPanel({
   setBestFormatPerImage: (b: boolean) => void;
   frameRedundancy: boolean;
   setFrameRedundancy: (b: boolean) => void;
+  trimMargin: boolean;
+  setTrimMargin: (b: boolean) => void;
   overrides: { match: string; quality: number }[];
   setOverrides: (o: { match: string; quality: number }[]) => void;
 }) {
@@ -596,6 +600,13 @@ function SettingsPanel({
       <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.settings.frameRedundancyHint')}>
         <input type="checkbox" checked={frameRedundancy} onChange={(e) => setFrameRedundancy(e.target.checked)} className="accent-teal" />
         {t('fix.settings.frameRedundancy')}
+      </label>
+      {/* Trim-margin → repack scheduling (round21 #0) — DEFAULT ON. Untrimmed sprites carrying transparent
+          padding are tightened to their opaque bounds inside a scheduled repack; every name still resolves, the
+          sheet shrinks, exact VRAM before→after (invariant 5). */}
+      <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.settings.trimMarginHint')}>
+        <input type="checkbox" checked={trimMargin} onChange={(e) => setTrimMargin(e.target.checked)} className="accent-teal" />
+        {t('fix.settings.trimMargin')}
       </label>
 
       <div className="mt-3 border-t border-line pt-2">
@@ -1276,6 +1287,12 @@ function FixCard({ files }: { files: PickedFile[] }) {
   // resolves, the sheet is smaller, exact VRAM before→after (invariant 5, no estimate). Off ⇒ no hashing, no
   // new op, no aliasing ⇒ byte-identical to today (the frame-redundancy finding stays a diagnosis-only verdict).
   const [frameRedundancy, setFrameRedundancy] = useState(true);
+  // Trim-margin → repack scheduling (round21 #0) — DEFAULT ON (drop-in, lossless, shrinks the sheet). UNtrimmed
+  // sprites carrying transparent padding get tightened to their opaque bounds inside a scheduled repack — every
+  // name still resolves (trimmed:true + spriteSourceSize), the sheet is smaller, exact VRAM before→after
+  // (invariant 5, no estimate). Off ⇒ no bboxes fed, no new op, no trim ⇒ byte-identical to today (the
+  // trim-margin finding stays a diagnosis-only verdict).
+  const [trimMargin, setTrimMargin] = useState(true);
   const [overrides, setOverrides] = useState<{ match: string; quality: number }[]>([]);
 
   // Feature 4 — own Pro opt-in, DEFAULT OFF (NOT under aggressive). Defaults reproduce today: off ⇒ no
@@ -1496,6 +1513,11 @@ function FixCard({ files }: { files: PickedFile[] }) {
       // `false` when the user opts OUT (keeps a default run's option bag byte-identical to today's absent
       // field). ON ⇒ duplicate frames alias onto one packed region (drop-in, exact VRAM before→after).
       frameRedundancy: frameRedundancy ? undefined : false,
+      // Trim-margin → repack scheduling (round21 #0) — DEFAULT ON. The worker treats undefined as ON, so we
+      // only send `false` when the user opts OUT (keeps a default run's option bag byte-identical to today's
+      // absent field). ON ⇒ untrimmed sprites are tightened to their opaque bounds inside a scheduled repack
+      // (drop-in, exact VRAM before→after).
+      trimMargin: trimMargin ? undefined : false,
       marking: aggressive && Object.keys(marking).length > 0 ? marking : undefined,
       skinGuard: aggressive && Object.keys(skinGuard).length > 0 ? skinGuard : undefined,
       overrides: overrides.length > 0 ? overrides.filter((o) => o.match.trim() !== '') : undefined,
@@ -1640,7 +1662,7 @@ function FixCard({ files }: { files: PickedFile[] }) {
   const sawPlan = useRef(false);
   useEffect(() => {
     if (sawPlan.current) setPhase({ t: 'idle' });
-  }, [aggressive, polygon, marking, effort, scaleAwareQ, webpNearLossless, pngRecompress, opaqueAlpha, bestFormatPerImage, frameRedundancy, overrides, packLoose, packMode, packGranularity, packTrim, extrude, tierEnable, tierSuffixes, profileEnable, profileFormats, customTiers, profileOverrides, ktx2Enable, pngquantEnable]);
+  }, [aggressive, polygon, marking, effort, scaleAwareQ, webpNearLossless, pngRecompress, opaqueAlpha, bestFormatPerImage, frameRedundancy, trimMargin, overrides, packLoose, packMode, packGranularity, packTrim, extrude, tierEnable, tierSuffixes, profileEnable, profileFormats, customTiers, profileOverrides, ktx2Enable, pngquantEnable]);
   // Consent is NEVER sticky: drop the per-run "uploaded to server" acknowledgement the moment BOTH backend
   // ops are disabled OR the backend becomes unreachable, so a fresh run can't inherit a prior tick. The user
   // must re-consent each time the upload path could engage.
@@ -1702,6 +1724,8 @@ function FixCard({ files }: { files: PickedFile[] }) {
             setBestFormatPerImage={setBestFormatPerImage}
             frameRedundancy={frameRedundancy}
             setFrameRedundancy={setFrameRedundancy}
+            trimMargin={trimMargin}
+            setTrimMargin={setTrimMargin}
             overrides={overrides}
             setOverrides={setOverrides}
           />

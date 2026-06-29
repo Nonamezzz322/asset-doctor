@@ -126,6 +126,19 @@ export interface FixOptions {
    *  byte-identical to today (the finding stays a diagnosis-only verdict). */
   frameRedundancy?: boolean;
 
+  // ── Trim-margin → repack scheduling (round21 #0) — DEFAULT ON (drop-in, lossless, shrinks the sheet). ──
+  /** Schedule a repack that tightens UNtrimmed sprites to their opaque bounds (round21 #0). The diagnosis
+   *  MEASURES the reclaimable transparent padding (trim-margin finding, opaque bboxes off the decoded page);
+   *  when this is ON (the default — undefined is treated as ON) the worker computes those bboxes BEFORE analyze
+   *  so the finding fires, and the finding emits its OWN repack op (a padded atlas is usually FULLY packed ⇒ no
+   *  occupancy/wasted repack would otherwise schedule it). The trim itself runs in the existing r20 trim-on-
+   *  repack execute path (buildTrimArrays → repackAtlases({trim})): each untrimmed frame is tightened to its
+   *  opaque core, trimmedSprites/trimmedAreaReclaimed surface in the receipt, vramSaved is the EXACT before→after
+   *  (the disk number stays an estimate — invariant 5). DROP-IN: every name still resolves (trimmed:true +
+   *  spriteSourceSize). `false` ⇒ no bboxes fed, no new op, no trim ⇒ byte-identical to today (the finding stays
+   *  a diagnosis-only verdict). */
+  trimMargin?: boolean;
+
   // ── Edge-extrude (bleed) — own Pro toggle, DEFAULT OFF (0). ──
   /** Replicate each rectangle sprite's outermost edge rows/cols into the symmetric packing gutter (px),
    *  to kill bilinear/mipmap seams in packed sheets. UI knob 0(off)/1/2. The plan sets each repack/pack

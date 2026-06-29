@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import type { AnalysisReport, Atlas, Blit, DedupGroup, FixOp, PackGroup } from '@asset-doctor/core';
+import type { AnalysisReport, Atlas, AtlasFrameTrims, Blit, DedupGroup, FixOp, PackGroup, TrimRect } from '@asset-doctor/core';
 import { parseAtlas, parseAtlasManifest, parseSpineAtlasText, parseSpinePage } from '@asset-doctor/parsers';
 import { analyze, DEFAULT_THRESHOLDS } from '@asset-doctor/analysis';
-import { ACC_CELL, buildAtlasAliasMap, emitSpineAtlasText, emitTexturePackerJson, pack, planFix, repackAtlases, repackAtlasesPolygon, scaleAtlas, type AtlasAliasMap, type MaskItem, type Placement, type RawMesh } from '../src/index';
+import { ACC_CELL, alphaBBox, buildAtlasAliasMap, emitSpineAtlasText, emitTexturePackerJson, pack, planFix, repackAtlases, repackAtlasesPolygon, scaleAtlas, type AtlasAliasMap, type MaskItem, type Placement, type RawMesh } from '../src/index';
 
 const fixDir = fileURLToPath(new URL('../../../fixtures/sample-projects/tp-hash-symbols/', import.meta.url));
 function loadAtlas(): Atlas {
@@ -1344,5 +1344,127 @@ describe('frame-redundancy aliasing (round19)', () => {
     expect(aliased.atlases.flatMap((a) => a.sprites)).toHaveLength(8); // all 8 names still resolve
     expect(aliased.vramBytesAfter).toBeLessThan(plain.vramBytesAfter); // a genuine POT-tier VRAM drop
     expect(aliased.vramBytesAfter).toBe(aliased.atlases.reduce((n, a) => n + a.size.w * a.size.h * 4, 0)); // EXACT Σ w·h·4, no estimate
+  });
+});
+
+// ── round21 #0: standalone trim-margin → repack scheduling, through the REAL fix-worker analyze→plan wiring.
+// The fix worker decodes each atlas page, computes each UNtrimmed sprite's opaque bbox via the SAME pure
+// alphaBBox these tests call, feeds `frameTrims` into analyze(), then runs planFix. We reproduce that exact
+// pipeline (synthetic decoded RGBA → alphaBBox → frameTrims → analyze → planFix) so the test PROVES the
+// trim-margin finding fires and the plan emits its OWN repack op on a FULLY-PACKED padded atlas — the case
+// where no occupancy/wasted repack would ever schedule it (B0/B1). No OffscreenCanvas: the in-test RGBA
+// buffer is the same data createImageBitmap+getImageData would hand the worker, and alphaBBox is the SAME
+// pure helper @asset-doctor/fix exports + the worker imports.
+describe('trim-margin → repack scheduling (round21 #0) — real analyze→plan wiring', () => {
+  // A FULLY-PACKED 128×64 sheet: two 64×64 untrimmed frames fill it edge-to-edge (100% coverage ⇒ NO
+  // occupancy/wasted finding would ever schedule a repack). Each carries an opaque 32×32 core inset at
+  // (16,16) within its frame ⇒ 16px margin on every side, recoverable = 2×(64²−32²) = 6144 px of 8192.
+  const SHEET_W = 128;
+  const SHEET_H = 64;
+  const CORE = { x: 16, y: 16, w: 32, h: 32 }; // frame-relative opaque bbox of every padded sprite
+  // Build the decoded page: transparent everywhere except each frame's inset opaque core (textured RGB so the
+  // art is honest; alphaBBox reads ALPHA only). Exactly the buffer the worker reads off the decoded page.
+  const decodePage = (frames: { x: number; y: number }[]): Uint8ClampedArray => {
+    const buf = new Uint8ClampedArray(SHEET_W * SHEET_H * 4); // all-zero = fully transparent
+    for (const f of frames) {
+      for (let dy = 0; dy < CORE.h; dy++) {
+        for (let dx = 0; dx < CORE.w; dx++) {
+          const px = f.x + CORE.x + dx;
+          const py = f.y + CORE.y + dy;
+          const o = (py * SHEET_W + px) * 4;
+          buf[o] = ((dx + dy) & 1) ? 200 : 40; // 2-color checker (textured core)
+          buf[o + 1] = 90;
+          buf[o + 2] = 160;
+          buf[o + 3] = 255; // opaque
+        }
+      }
+    }
+    return buf;
+  };
+  const paddedAtlas = (): Atlas => ({
+    name: 'pad.png',
+    imageRef: 'pad.png',
+    size: { w: SHEET_W, h: SHEET_H },
+    sprites: [
+      { name: 'a', frame: { x: 0, y: 0, w: 64, h: 64 }, rotated: false, trimmed: false, sourceSize: { w: 64, h: 64 } },
+      { name: 'b', frame: { x: 64, y: 0, w: 64, h: 64 }, rotated: false, trimmed: false, sourceSize: { w: 64, h: 64 } },
+    ],
+    source: { kind: 'pixi' },
+  });
+  // The SAME analyze 3rd-arg the worker builds: AtlasFrameTrims with key `bboxes` (NOT `frameTrims`), bboxes
+  // computed via the real alphaBBox off the decoded page, null for any already-trimmed sprite (none here).
+  const frameTrimsFor = (atlas: Atlas, page: Uint8ClampedArray): AtlasFrameTrims[] => {
+    const src = { data: page, width: SHEET_W };
+    const bboxes: (TrimRect | null)[] = atlas.sprites.map((s) =>
+      s.trimmed ? null : alphaBBox(src, { x: s.frame.x, y: s.frame.y, w: s.frame.w, h: s.frame.h }),
+    );
+    return [{ atlasRef: atlas.name, bboxes }];
+  };
+  const imageOf = (atlas: Atlas) => ({ name: atlas.name, imageRef: atlas.imageRef, size: atlas.size, mime: 'image/png' as const, byteSize: 4000 });
+  const base = { targetMime: 'image/webp' as const, quality: 0.9, lossless: true, padding: 2, maxSize: 4096, maxEdge: 2048, aggressive: false };
+
+  it('B0/B1: a FULLY-PACKED padded atlas fires trim-margin (no occupancy) ⇒ EXACTLY one repack op', async () => {
+    const atlas = paddedAtlas();
+    const page = decodePage(atlas.sprites.map((s) => ({ x: s.frame.x, y: s.frame.y })));
+    const report = await analyze([{ kind: 'atlas', atlas, image: imageOf(atlas) }], undefined, { frameTrims: frameTrimsFor(atlas, page) });
+    // The sheet is 100% packed ⇒ NO occupancy / wasted-regions finding would schedule a repack.
+    expect(report.findings.some((f) => f.rule === 'occupancy' || f.rule === 'wasted-regions')).toBe(false);
+    // ...but the trim-margin finding fired off the real-decoded bboxes (B0 — the worker's analyze() now sees them).
+    expect(report.findings.some((f) => f.rule === 'trim-margin')).toBe(true);
+    // ...and (trimMargin default ON) it emits its OWN repack op — the whole point of the feature.
+    const repacks = planFix(report, base).ops.filter((o) => o.kind === 'repack');
+    expect(repacks).toHaveLength(1);
+    expect(repacks[0]!.kind === 'repack' && repacks[0]!.atlasRefs).toEqual(['pad.png']);
+  });
+
+  it('the scheduled repack REALIZES the trim: trimmedSprites > 0 (r20 execute path, real bboxes)', async () => {
+    const atlas = paddedAtlas();
+    const page = decodePage(atlas.sprites.map((s) => ({ x: s.frame.x, y: s.frame.y })));
+    const ft = frameTrimsFor(atlas, page);
+    // The plan schedules exactly one repack (asserted above). Feeding the SAME real bboxes into the r20
+    // trim-on-repack execute path (repackAtlases({trim})) is what the worker does to realize that op.
+    const trim = ft[0]!.bboxes;
+    const r = repackAtlases([atlas], { allowRotation: false, padding: base.padding, maxSize: base.maxSize, trim: [trim] });
+    expect(r.trimmedSprites).toBeGreaterThan(0); // the receipt's trimmedSprites surfaces this (worker line 3718)
+    expect(r.trimmedSprites).toBe(2); // both padded sprites tightened to their opaque cores
+    expect(r.trimmedAreaReclaimed).toBe(2 * (64 * 64 - CORE.w * CORE.h)); // 6144 px — exact, measured
+    // Drop-in: every name still resolves, each tightened to its bbox extent.
+    const out = new Map(r.atlases.flatMap((a) => a.sprites).map((s) => [s.name, s]));
+    expect(out.size).toBe(2);
+    for (const s of out.values()) expect({ w: s.frame.w, h: s.frame.h }).toEqual({ w: CORE.w, h: CORE.h });
+  });
+
+  it('NO double-emit: when occupancy ALSO fires on the same atlas ⇒ still EXACTLY one repack op', async () => {
+    // The untrimmed-padding fixture is a 256×256 sheet with 4 small frames ⇒ occupancy fires (under-filled)
+    // AND trim-margin fires (untrimmed padding) on the SAME atlasRef. The shared `repacked` set must collapse
+    // them to ONE repack op (order-free — findings are SORTED at analyze.ts), never two.
+    const padDir = fileURLToPath(new URL('../../../fixtures/sample-projects/untrimmed-padding/', import.meta.url));
+    const res = parseAtlas(JSON.parse(readFileSync(`${padDir}sheet.json`, 'utf8')) as unknown, { ref: 'sheet.png', bytes: new Uint8Array(readFileSync(`${padDir}sheet.png`)) });
+    if (!res.ok || res.asset.kind !== 'atlas') throw new Error('untrimmed-padding fixture parse failed');
+    const atlas = res.asset.atlas;
+    const golden = JSON.parse(readFileSync(`${padDir}expected.json`, 'utf8')) as { regions: { name: string; bbox: TrimRect | null }[] };
+    const bboxByName = new Map(golden.regions.map((g) => [g.name, g.bbox]));
+    const bboxes: (TrimRect | null)[] = atlas.sprites.map((s) => (s.trimmed ? null : bboxByName.get(s.name) ?? null));
+    const report = await analyze([{ kind: 'atlas', atlas, image: imageOf(atlas) }], undefined, { frameTrims: [{ atlasRef: atlas.name, bboxes }] });
+    expect(report.findings.some((f) => f.rule === 'occupancy' || f.rule === 'wasted-regions')).toBe(true); // under-filled ⇒ occupancy
+    expect(report.findings.some((f) => f.rule === 'trim-margin')).toBe(true); // untrimmed padding ⇒ trim-margin
+    const repacks = planFix(report, base).ops.filter((o) => o.kind === 'repack');
+    expect(repacks).toHaveLength(1); // ONE op for the atlas — the occupancy + trim-margin findings collapse
+    expect(repacks[0]!.kind === 'repack' && repacks[0]!.atlasRefs).toEqual(['sheet.png']);
+  });
+
+  it('additive: trimMargin:false ⇒ NO new repack op, plan byte-identical to omitting the frameTrims feed', async () => {
+    const atlas = paddedAtlas();
+    const page = decodePage(atlas.sprites.map((s) => ({ x: s.frame.x, y: s.frame.y })));
+    // OFF in the WORKER means it never feeds frameTrims (no bbox pass), so analyze() has no trim-margin
+    // finding at all — modeled here by omitting the 3rd-arg frameTrims (the worker's `trimMargin:false` path).
+    const reportOff = await analyze([{ kind: 'atlas', atlas, image: imageOf(atlas) }]);
+    expect(reportOff.findings.some((f) => f.rule === 'trim-margin')).toBe(false);
+    expect(planFix(reportOff, base).ops.some((o) => o.kind === 'repack')).toBe(false);
+    // And even if a trim-margin finding WERE present, opts.trimMargin:false suppresses its repack op (the
+    // plan-level gate) ⇒ byte-identical to the no-finding plan above.
+    const reportOn = await analyze([{ kind: 'atlas', atlas, image: imageOf(atlas) }], undefined, { frameTrims: frameTrimsFor(atlas, page) });
+    expect(planFix(reportOn, { ...base, trimMargin: false }).ops.some((o) => o.kind === 'repack')).toBe(false);
+    expect(planFix(reportOn, { ...base, trimMargin: false })).toEqual(planFix(reportOff, base));
   });
 });
