@@ -32,6 +32,7 @@ func main() {
 	enc := &encode.Dispatcher{
 		Toktx:    encode.NewToktxEncoder(cfg.ToktxPath, cfg.TmpDir, cfg.ExecTimeout),
 		PngQuant: encode.NewPngQuantEncoder(cfg.PngQuantPath, cfg.TmpDir, cfg.ExecTimeout),
+		Resample: encode.NewResampleEncoder(cfg.VipsPath, cfg.TmpDir, cfg.ExecTimeout),
 	}
 	srv := &http.Server{
 		Addr:    cfg.Addr,
@@ -54,8 +55,8 @@ func main() {
 	})
 
 	go func() {
-		logger.Printf("encoder sidecar listening on %s (toktx=%s, pngquant=%s, tmp=%s, maxConcurrent=%d)",
-			cfg.Addr, cfg.ToktxPath, cfg.PngQuantPath, cfg.TmpDir, cfg.MaxConcurrent)
+		logger.Printf("encoder sidecar listening on %s (toktx=%s, pngquant=%s, vips=%s, tmp=%s, maxConcurrent=%d)",
+			cfg.Addr, cfg.ToktxPath, cfg.PngQuantPath, cfg.VipsPath, cfg.TmpDir, cfg.MaxConcurrent)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Fatalf("serve: %v", err)
 		}

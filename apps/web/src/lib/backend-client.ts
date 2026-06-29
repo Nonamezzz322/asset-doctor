@@ -29,10 +29,22 @@ export const KTX2_PROFILE = 'uastc-zstd-mip';
  *  the output decodes to full RGBA8888 on the GPU ⇒ ZERO VRAM change (no VRAM accounting for pngquant). */
 export const PNGQUANT_PROFILE = 'pngquant-256-fs';
 
+/** The pinned libvips lanczos3 profile the apps/encoder sidecar allow-lists (round24-libvips-lanczos3-
+ *  resample-op-sidecar.md): a forced-w×h lanczos3 DOWNSCALE of the uploaded full-res PNG. Sent verbatim in
+ *  `profile` so the encode is deterministic + the sidecar rejects anything else (closed set, no flag
+ *  injection). DISK/QUALITY-ONLY: the produced tile is the SAME dimensions the browser would have emitted ⇒
+ *  ZERO VRAM change AND no disk saving (no VRAM/disk accounting for resample); the only thing it carries is a
+ *  MEASURED high-frequency-energy retention delta (resample-quality.ts). For resample, encodeRemote's `w`/`h`
+ *  are the OUTPUT target tier dims and `pngBytes` is the FULL-RES source PNG (the asymmetry vs ktx2/pngquant,
+ *  where w/h describe the uploaded page). */
+export const RESAMPLE_PROFILE = 'vips-lanczos3';
+
 /** Map a native op kind → its pinned wire profile. The SINGLE place the op↔profile pairing lives, so the
  *  worker can never request an op with the wrong profile (the sidecar would 415 it via RequiredProfile). */
 export function profileForOp(op: NativeOpKind): string {
-  return op === 'pngquant' ? PNGQUANT_PROFILE : KTX2_PROFILE;
+  if (op === 'pngquant') return PNGQUANT_PROFILE;
+  if (op === 'resample') return RESAMPLE_PROFILE;
+  return KTX2_PROFILE;
 }
 
 /** The pinned KTX2 profile bakes a full mip chain — the worker MUST charge MIP_OVERHEAD on the produced

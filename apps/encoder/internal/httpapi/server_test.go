@@ -87,6 +87,17 @@ func validPngQuantBody(png []byte, w, h int) string {
 	return string(b)
 }
 
+func validResampleBody(png []byte, w, h int) string {
+	b, _ := json.Marshal(processRequest{
+		PNG:     base64.StdEncoding.EncodeToString(png),
+		W:       w,
+		H:       h,
+		Op:      "resample",
+		Profile: "vips-lanczos3",
+	})
+	return string(b)
+}
+
 func do(s *Server, method, path, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	rec := httptest.NewRecorder()
@@ -163,12 +174,59 @@ func TestProcessPngQuantSuccess(t *testing.T) {
 	}
 }
 
+// TestProcessResampleSuccess (round24): a valid resample request routes through, the encoder receives the
+// PROPAGATED Op (NOT hard-coded KTX2) + its profile, and the bytes stream back. W/H here are the OUTPUT
+// target tier dims (the asymmetry vs ktx2/pngquant); the server passes them through verbatim.
+func TestProcessResampleSuccess(t *testing.T) {
+	want := []byte("RESAMPLED-FAKE-BYTES")
+	fe := &fakeEncoder{out: want}
+	s, _ := newTestServer(t, fe)
+	rec := do(s, http.MethodPost, "/process", validResampleBody([]byte("PNGDATA"), 512, 256))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%q, want 200", rec.Code, rec.Body.String())
+	}
+	if !bytes.Equal(rec.Body.Bytes(), want) {
+		t.Fatalf("body = %q, want %q", rec.Body.Bytes(), want)
+	}
+	// The server must PROPAGATE the op (resample) + its target dims, not hard-code anything.
+	if fe.lastReq.Op != encode.Resample || fe.lastReq.Profile != encode.ProfileVipsLanczos3 {
+		t.Fatalf("encoder got op=%q profile=%q, want resample/vips-lanczos3", fe.lastReq.Op, fe.lastReq.Profile)
+	}
+	if fe.lastReq.W != 512 || fe.lastReq.H != 256 {
+		t.Fatalf("encoder got target w=%d h=%d, want 512x256", fe.lastReq.W, fe.lastReq.H)
+	}
+}
+
+// TestProcessResampleOversize (round24): the resample upload is the FULL-RES source, so the caps matter most
+// here. A target dim over MaxDim → 415 through the real HTTP path (the worker falls back to the browser
+// tile honestly). A body over the cap → 413. Both reuse the shared cap path (no resample-specific gap).
+func TestProcessResampleOversize(t *testing.T) {
+	s, _ := newTestServer(t, &fakeEncoder{out: []byte("x")}) // MaxDim = 4096
+	rec := do(s, http.MethodPost, "/process", validResampleBody([]byte("x"), 4097, 16))
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("oversize status = %d, want 415", rec.Code)
+	}
+	if c := decodeErr(t, rec).Code; c != "dimensions_out_of_range" {
+		t.Fatalf("code = %q, want dimensions_out_of_range", c)
+	}
+
+	s2, _ := newTestServer(t, &fakeEncoder{out: []byte("x")})
+	s2.cfg.MaxBodyBytes = 64 // tiny cap; the MaxBytesReader headroom is 2x = 128 raw bytes
+	big := strings.Repeat("A", 4096)
+	rec2 := do(s2, http.MethodPost, "/process", validResampleBody([]byte(big), 16, 16))
+	if rec2.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversize-body status = %d, want 413", rec2.Code)
+	}
+}
+
 // TestProcessOpProfileMismatch: a known op + a known-but-foreign profile (the OTHER op's profile) → 415.
 func TestProcessOpProfileMismatch(t *testing.T) {
 	s, _ := newTestServer(t, &fakeEncoder{out: []byte("x")})
 	cases := []struct{ op, profile string }{
 		{"pngquant", "uastc-zstd-mip"}, // pngquant with the ktx2 profile
 		{"ktx2", "pngquant-256-fs"},    // ktx2 with the pngquant profile
+		{"resample", "uastc-zstd-mip"}, // resample with the ktx2 profile (round24)
+		{"ktx2", "vips-lanczos3"},      // ktx2 with the resample profile (round24)
 	}
 	for _, tc := range cases {
 		t.Run(tc.op+"/"+tc.profile, func(t *testing.T) {

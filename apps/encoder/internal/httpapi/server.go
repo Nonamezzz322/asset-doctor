@@ -65,8 +65,8 @@ type processRequest struct {
 	PNG     string `json:"png"`     // base64 std-encoded PNG bytes
 	W       int    `json:"w"`       // declared width  (cross-checked against caps; trusted from gateway)
 	H       int    `json:"h"`       // declared height
-	Op      string `json:"op"`      // "ktx2" | "pngquant"
-	Profile string `json:"profile"` // op-specific: "uastc-zstd-mip" (ktx2) | "pngquant-256-fs" (pngquant)
+	Op      string `json:"op"`      // "ktx2" | "pngquant" | "resample"
+	Profile string `json:"profile"` // op-specific: "uastc-zstd-mip" (ktx2) | "pngquant-256-fs" (pngquant) | "vips-lanczos3" (resample)
 }
 
 func (s *Server) handleProcess(w http.ResponseWriter, r *http.Request) {

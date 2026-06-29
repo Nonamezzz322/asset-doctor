@@ -9,6 +9,7 @@ func TestLoadDefaults(t *testing.T) {
 	// No env set → safe defaults.
 	t.Setenv("ADDR", "")
 	t.Setenv("TOKTX_PATH", "")
+	t.Setenv("VIPS_PATH", "")
 	t.Setenv("MAX_BODY_BYTES", "")
 	t.Setenv("MAX_DIM", "")
 	t.Setenv("MAX_CONCURRENT", "")
@@ -19,6 +20,9 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if c.ToktxPath != "toktx" {
 		t.Fatalf("ToktxPath default = %q", c.ToktxPath)
+	}
+	if c.VipsPath != "vips" {
+		t.Fatalf("VipsPath default = %q", c.VipsPath)
 	}
 	if c.MaxBodyBytes != 32<<20 {
 		t.Fatalf("MaxBodyBytes default = %d", c.MaxBodyBytes)

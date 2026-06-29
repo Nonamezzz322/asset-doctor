@@ -85,4 +85,31 @@ describe('catalog completeness (all 9 locales)', () => {
       expect(translate(loc, 'fix.migrate.copy')).not.toContain('{');
     }
   });
+
+  // round24: the OPT-IN libvips lanczos3 resample op keys render with their placeholders filled in every
+  // locale — INCLUDING the SEPARATE new tier-only hint key (B2: a new key, NOT a retarget of whyNoKernel).
+  it('every locale renders the resample backend keys (round24) without leftover braces', () => {
+    for (const loc of LOCALES) {
+      expect(translate(loc, 'fix.backend.resample')).not.toContain('{');
+      expect(translate(loc, 'fix.backend.resampleHint')).not.toContain('{');
+      expect(translate(loc, 'fix.backend.costResample')).not.toContain('{');
+      expect(translate(loc, 'fix.backend.receiptResample', { produced: 3, uploaded: 4, host: 'api.test' })).not.toContain('{');
+      // The measured HF-energy delta renders as a percentage (:pct), never a leftover brace.
+      const q = translate(loc, 'fix.backend.receiptResampleQuality', { pct: 0.12 });
+      expect(q).not.toContain('{');
+      expect(q).toContain('12%');
+      expect(translate(loc, 'fix.backend.resampleTierHint')).not.toContain('{');
+    }
+  });
+
+  // B2 (load-bearing honesty): the existing `whyNoKernel` note MUST stay UNCHANGED — it still renders at the
+  // non-tier downscale sites where resample is NOT routed, so retargeting it would lie there. This pins the en
+  // copy so a future "retarget" can't slip through; the resample hint lives in the SEPARATE key asserted above.
+  it('whyNoKernel is left untouched (a separate resample key carries the tier hint — B2)', () => {
+    expect(translate('en', 'fix.skipped.whyNoKernel')).toBe(
+      "Downscale kernel isn't configurable in-browser — the browser's high-quality resampler is used.",
+    );
+    // The resample tier hint is a DISTINCT key, never the same string as whyNoKernel.
+    expect(translate('en', 'fix.backend.resampleTierHint')).not.toBe(translate('en', 'fix.skipped.whyNoKernel'));
+  });
 });

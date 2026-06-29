@@ -39,6 +39,20 @@ func TestSupportedProfilesAllowlist(t *testing.T) {
 	}
 }
 
+// TestResampleAllowlist (round24): the resample op + vips-lanczos3 profile are in the closed allowlists and
+// pinned to each other via opProfiles, so the HTTP layer can route + enforce them like the other two ops.
+func TestResampleAllowlist(t *testing.T) {
+	if !SupportedOps[Resample] {
+		t.Fatal("resample must be a supported op")
+	}
+	if !SupportedProfiles[ProfileVipsLanczos3] {
+		t.Fatal("vips-lanczos3 must be a supported profile")
+	}
+	if p, ok := RequiredProfile(Resample); !ok || p != ProfileVipsLanczos3 {
+		t.Fatalf("RequiredProfile(resample) = %q,%v want vips-lanczos3,true", p, ok)
+	}
+}
+
 // TestToktxEncoderRejectsUnsupported verifies the encoder validates op/profile BEFORE ever touching the
 // filesystem or shelling out — so these paths are testable with no toktx binary present.
 func TestToktxEncoderRejectsUnsupported(t *testing.T) {

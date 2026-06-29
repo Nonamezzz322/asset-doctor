@@ -104,6 +104,7 @@ func (e *PngQuantEncoder) Encode(ctx context.Context, req Request) ([]byte, erro
 type Dispatcher struct {
 	Toktx    Encoder
 	PngQuant Encoder
+	Resample Encoder
 }
 
 func (d *Dispatcher) Encode(ctx context.Context, req Request) ([]byte, error) {
@@ -112,6 +113,8 @@ func (d *Dispatcher) Encode(ctx context.Context, req Request) ([]byte, error) {
 		return d.Toktx.Encode(ctx, req)
 	case PngQuant:
 		return d.PngQuant.Encode(ctx, req)
+	case Resample:
+		return d.Resample.Encode(ctx, req)
 	default:
 		return nil, ErrUnsupported
 	}

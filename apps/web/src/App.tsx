@@ -838,6 +838,8 @@ function BackendKtx2Panel({
   setKtx2Enable,
   pngquantEnable,
   setPngquantEnable,
+  resampleEnable,
+  setResampleEnable,
   consent,
   setConsent,
   uploadPreview,
@@ -848,6 +850,8 @@ function BackendKtx2Panel({
   setKtx2Enable: (b: boolean) => void;
   pngquantEnable: boolean;
   setPngquantEnable: (b: boolean) => void;
+  resampleEnable: boolean;
+  setResampleEnable: (b: boolean) => void;
   consent: boolean;
   setConsent: (b: boolean) => void;
   /** HONEST upper-bound of files that would leave the device under the enabled ops (count + short sample),
@@ -855,7 +859,7 @@ function BackendKtx2Panel({
   uploadPreview: { count: number; sample: string[] };
 }) {
   const { t } = useI18n();
-  const anyEnable = ktx2Enable || pngquantEnable;
+  const anyEnable = ktx2Enable || pngquantEnable || resampleEnable;
   return (
     <details className="mt-2 rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
       <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">{t('fix.backend.title')}</summary>
@@ -879,6 +883,14 @@ function BackendKtx2Panel({
             {t('fix.backend.pngquant')}
           </label>
 
+          {/* round24: the OPT-IN libvips lanczos3 resample op (high-quality tier downscale; DISK/QUALITY-only,
+              NO GPU/VRAM change). Shares this panel's host + consent + reachability. Takes effect on the
+              scale-tier downscale path (a real lower tier); the top tier (scale 1) is never resampled. */}
+          <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.backend.resampleHint')}>
+            <input type="checkbox" checked={resampleEnable} onChange={(e) => setResampleEnable(e.target.checked)} className="accent-teal" />
+            {t('fix.backend.resample')}
+          </label>
+
           {anyEnable ? (
             <>
               {/* Reachability status from the healthz probe (fired only after Pro unlock + a toggle). */}
@@ -898,6 +910,7 @@ function BackendKtx2Panel({
                   </>
                 ) : null}
                 {pngquantEnable ? <li>{t('fix.backend.costPngquant')}</li> : null}
+                {resampleEnable ? <li>{t('fix.backend.costResample')}</li> : null}
               </ul>
 
               {/* TRANSPARENCY (round12): the EXACT upper-bound count + a short sample of which files would
@@ -954,12 +967,18 @@ function TierPanel({
   setTierEnable,
   tierSuffixes,
   setTierSuffixes,
+  resampleAvailable,
 }: {
   tierEnable: boolean;
   setTierEnable: (b: boolean) => void;
   /** Suffixes of the lower tiers the user opted into (the scale-1 top tier is always implied). */
   tierSuffixes: Set<string>;
   setTierSuffixes: (s: Set<string>) => void;
+  /** round24: the OPT-IN lanczos3 resample backend op is enabled+configured+consented this run, so the tier
+   *  DOWNSCALE path will actually use the vips kernel (not the browser resampler). Surfaces a SEPARATE
+   *  tier-only hint key — NEVER retargets the existing `whyNoKernel` note (which stays true at the non-tier
+   *  sites where resample is not routed). False ⇒ the tier downscale uses the browser resampler as today. */
+  resampleAvailable: boolean;
 }) {
   const { t } = useI18n();
   // Map each default tier's suffix → a label key ("_720p" → "fix.tier.label.720p").
@@ -1017,10 +1036,15 @@ function TierPanel({
               under-filled-atlas case isn't a confusing silent single-resolution result. */}
           <p className="font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.tier.repackNote')}</p>
 
-          {/* Downscale honesty — REUSE the existing browser-limit notes (no kernel / no pre-blur control). */}
+          {/* Downscale honesty — REUSE the existing browser-limit notes (no kernel / no pre-blur control).
+              round24: when the OPT-IN lanczos3 resample backend op is live this run, the tier DOWNSCALE will
+              actually use the vips kernel — surface a SEPARATE tier-only hint (NEVER retarget whyNoKernel,
+              which stays true on the non-tier paths where resample is not routed). The whyNoKernel note still
+              applies to the in-browser fallback (resample off / declined / hashFilenames on), so both show. */}
           <ul className="space-y-1 border-t border-line pt-2 font-mono text-[10px] leading-relaxed text-ink-soft/80">
             <li>{t('fix.skipped.whyNoKernel')}</li>
             <li>{t('fix.skipped.whyNoPreBlur')}</li>
+            {resampleAvailable ? <li className="text-teal">{t('fix.backend.resampleTierHint')}</li> : null}
           </ul>
         </div>
       ) : null}
@@ -1409,8 +1433,12 @@ function FixCard({ files }: { files: PickedFile[] }) {
   // backend host + consent + healthz gate as KTX2 (no new privacy surface). DEFAULT OFF ⇒ no `pngquant` op
   // forwarded ⇒ the worker's pngquant path is dead ⇒ byte-identical to today.
   const [pngquantEnable, setPngquantEnable] = useState(false);
-  // Either backend op being enabled opens the shared backend path (healthz probe + consent).
-  const backendAnyEnable = ktx2Enable || pngquantEnable;
+  // round24: the OPT-IN libvips lanczos3 resample op (high-quality tier DOWNSCALE → measured high-frequency
+  // retention; DISK/QUALITY-only, NO GPU/VRAM change). Shares the SAME backend host + consent + healthz gate.
+  // DEFAULT OFF ⇒ no `resample` op forwarded ⇒ the worker's resample path is dead ⇒ byte-identical to today.
+  const [resampleEnable, setResampleEnable] = useState(false);
+  // Any backend op being enabled opens the shared backend path (healthz probe + consent).
+  const backendAnyEnable = ktx2Enable || pngquantEnable || resampleEnable;
   const [backendConsent, setBackendConsent] = useState(false);
   const [backendReady, setBackendReady] = useState(false);
 
@@ -1426,12 +1454,14 @@ function FixCard({ files }: { files: PickedFile[] }) {
       const ref = keyOf(f);
       const isPng = /\.png$/i.test(ref);
       const isImage = /\.(png|webp|jpe?g|avif)$/i.test(ref);
-      // KTX2 ⇒ any raster page; pngquant ⇒ PNG only. Union when both ops are enabled.
-      if ((ktx2Enable && isImage) || (pngquantEnable && isPng)) refs.push(ref);
+      // KTX2 ⇒ any raster page; pngquant ⇒ PNG only; resample ⇒ any raster page that a tier downscale could
+      // emit (honest UPPER bound — the worker uploads only the actually-tiered, hashFilenames-off refs at
+      // execute, never more). Union when multiple ops are enabled.
+      if ((ktx2Enable && isImage) || (pngquantEnable && isPng) || (resampleEnable && isImage)) refs.push(ref);
     }
     refs.sort(cmp);
     return { count: refs.length, sample: refs.slice(0, 8) };
-  }, [files, backendAnyEnable, ktx2Enable, pngquantEnable]);
+  }, [files, backendAnyEnable, ktx2Enable, pngquantEnable, resampleEnable]);
   // Derive the ExportProfile the worker consumes. Formats kept in the canonical FORMAT_KEYS order (PNG,
   // WebP, AVIF) — deterministic. Tiers = the implied scale-1 top (validateProfile requires it) + any custom
   // rows. Per-format compression: PNG is native-lossless (no quality field); WebP/AVIF carry quality unless
@@ -1610,6 +1640,7 @@ function FixCard({ files }: { files: PickedFile[] }) {
     const ops: NativeOpKind[] = [];
     if (ktx2Enable) ops.push('ktx2');
     if (pngquantEnable) ops.push('pngquant');
+    if (resampleEnable) ops.push('resample');
     if (ops.length === 0) return undefined; // nothing opted in ⇒ dead path
     return { apiBase: API_BASE, token: stored.token, ops, consent: true };
   }
@@ -1737,7 +1768,7 @@ function FixCard({ files }: { files: PickedFile[] }) {
   const sawPlan = useRef(false);
   useEffect(() => {
     if (sawPlan.current) setPhase({ t: 'idle' });
-  }, [aggressive, polygon, marking, effort, scaleAwareQ, webpNearLossless, pngRecompress, opaqueAlpha, bestFormatPerImage, frameRedundancy, trimMargin, overrides, packLoose, packMode, packGranularity, packTrim, extrude, tierEnable, tierSuffixes, profileEnable, profileFormats, customTiers, profileOverrides, ktx2Enable, pngquantEnable]);
+  }, [aggressive, polygon, marking, effort, scaleAwareQ, webpNearLossless, pngRecompress, opaqueAlpha, bestFormatPerImage, frameRedundancy, trimMargin, overrides, packLoose, packMode, packGranularity, packTrim, extrude, tierEnable, tierSuffixes, profileEnable, profileFormats, customTiers, profileOverrides, ktx2Enable, pngquantEnable, resampleEnable]);
   // Consent is NEVER sticky: drop the per-run "uploaded to server" acknowledgement the moment BOTH backend
   // ops are disabled OR the backend becomes unreachable, so a fresh run can't inherit a prior tick. The user
   // must re-consent each time the upload path could engage.
@@ -1823,6 +1854,7 @@ function FixCard({ files }: { files: PickedFile[] }) {
             setTierEnable={setTierEnable}
             tierSuffixes={tierSuffixes}
             setTierSuffixes={setTierSuffixes}
+            resampleAvailable={resampleEnable && backendWillUpload}
           />
 
           <ExportProfilePanel
@@ -1889,6 +1921,8 @@ function FixCard({ files }: { files: PickedFile[] }) {
             setKtx2Enable={setKtx2Enable}
             pngquantEnable={pngquantEnable}
             setPngquantEnable={setPngquantEnable}
+            resampleEnable={resampleEnable}
+            setResampleEnable={setResampleEnable}
             consent={backendConsent}
             setConsent={setBackendConsent}
             uploadPreview={uploadPreview}
@@ -2018,14 +2052,28 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
                   before: bn.bytesBefore ?? 0,
                   after: bn.bytesAfter ?? 0,
                 })
-              : t('fix.backend.receipt', {
-                  produced: bn.produced,
-                  uploaded: bn.uploaded,
-                  host: bn.host,
-                })}
+              : bn.op === 'resample'
+                ? t('fix.backend.receiptResample', {
+                    produced: bn.produced,
+                    uploaded: bn.uploaded,
+                    host: bn.host,
+                  })
+                : t('fix.backend.receipt', {
+                    produced: bn.produced,
+                    uploaded: bn.uploaded,
+                    host: bn.host,
+                  })}
           </p>
           {bn.failed > 0 ? (
             <p className="font-mono text-[10px] text-warn">{t('fix.backend.receiptFailed', { failed: bn.failed })}</p>
+          ) : null}
+          {/* round24 resample: the MEASURED high-frequency-energy retention delta — a FACT ("retained N% more
+              high-frequency content at the same file size"), NOT a "sharper/cleaner/better" verdict (invariant
+              3: lanczos3's extra HF energy includes ringing/overshoot, an artifact). DISK/QUALITY-only — there
+              is NO VRAM and NO disk field for resample, ever (invariant 5). Shown only when >0 (a ≤0 delta kept
+              the browser tile and reads as 0). */}
+          {bn.op === 'resample' && (bn.qualityHfEnergyDelta ?? 0) > 0 ? (
+            <p className="font-mono text-[10px] text-ok">{t('fix.backend.receiptResampleQuality', { pct: bn.qualityHfEnergyDelta ?? 0 })}</p>
           ) : null}
           {/* KTX2 worst-case VRAM ceiling rides on the ktx2 entry only; pngquant is DISK-ONLY (no VRAM field). */}
           {bn.op === 'ktx2' && (receipt.ktx2VramBytesWorstCase ?? 0) > 0 ? (

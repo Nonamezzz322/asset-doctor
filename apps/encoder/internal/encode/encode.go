@@ -23,16 +23,28 @@ const (
 	// instead of emitting an ugly result. DISK-ONLY: a quantized PNG still decodes to full RGBA8888 on the
 	// GPU ⇒ ZERO VRAM change. This profile NEVER claims a GPU win — the saving is a smaller download only.
 	ProfilePngQuant256 Profile = "pngquant-256-fs"
+
+	// ProfileVipsLanczos3: libvips lanczos3 resample (round24-libvips-lanczos3-resample-op-sidecar.md). The
+	// op downscales a FULL-RES source PNG to the request's target W/H with a high-quality lanczos3 kernel —
+	// the one downscale kernel the browser canvas resampler can't be steered to. DISK/QUALITY-ONLY: the
+	// produced PNG decodes to full RGBA8888 on the GPU ⇒ ZERO VRAM change, and the file is the SAME tier
+	// dimensions the browser would have emitted ⇒ NO disk-saving claim either. The ONLY thing it carries is a
+	// MEASURED high-frequency-energy retention delta (computed client-side); this profile NEVER claims VRAM.
+	ProfileVipsLanczos3 Profile = "vips-lanczos3"
 )
 
 // Op names the requested native operation (round13-pngquant-backend.md). The set is CLOSED (SupportedOps):
 //   - ktx2     : GPU-texture encode (toktx). The honest VRAM win.
 //   - pngquant : lossy-indexed PNG re-compression. DISK-ONLY (decodes to full RGBA on the GPU).
+//   - resample : libvips lanczos3 downscale (round24). DISK/QUALITY-ONLY (a tier-dimensioned PNG; NO VRAM).
+//                ASYMMETRY (load-bearing): for ktx2/pngquant the Request W/H DESCRIBE the input page; for
+//                resample they are the OUTPUT target the source is downscaled TO (the source is full-res).
 type Op string
 
 const (
 	KTX2     Op = "ktx2"
 	PngQuant Op = "pngquant"
+	Resample Op = "resample"
 )
 
 // SupportedOps is the closed allowlist of ops the HTTP layer validates against (closed set → no surprise
@@ -40,6 +52,7 @@ const (
 var SupportedOps = map[Op]bool{
 	KTX2:     true,
 	PngQuant: true,
+	Resample: true,
 }
 
 // opProfiles pins the ONE profile each op requires. The HTTP layer rejects any other op×profile pairing
@@ -48,6 +61,7 @@ var SupportedOps = map[Op]bool{
 var opProfiles = map[Op]Profile{
 	KTX2:     ProfileUASTCZstdMip,
 	PngQuant: ProfilePngQuant256,
+	Resample: ProfileVipsLanczos3,
 }
 
 // RequiredProfile returns the single profile an op accepts, and whether the op is known. The HTTP layer
@@ -58,6 +72,8 @@ func RequiredProfile(op Op) (Profile, bool) {
 }
 
 // Request is one decoded process request. PNG holds the raw uploaded image bytes (never logged).
+// W/H ASYMMETRY (round24): for ktx2/pngquant they DESCRIBE the input page; for resample they are the
+// OUTPUT target the full-res source PNG is downscaled TO.
 type Request struct {
 	PNG     []byte
 	W       int
@@ -92,4 +108,5 @@ type Encoder interface {
 var SupportedProfiles = map[Profile]bool{
 	ProfileUASTCZstdMip: true,
 	ProfilePngQuant256:  true,
+	ProfileVipsLanczos3: true,
 }

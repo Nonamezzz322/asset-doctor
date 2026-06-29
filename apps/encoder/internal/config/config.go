@@ -23,6 +23,11 @@ type Config struct {
 	// exec it). DISK-ONLY op — the sidecar still holds no secrets.
 	PngQuantPath string
 
+	// VipsPath is the absolute path to the pinned `vips` binary (libvips-tools, round24 lanczos3 resample).
+	// The Dockerfile installs a pinned apt package and sets this; locally it defaults to "vips" on PATH
+	// (tests never exec it). DISK/QUALITY-ONLY op (a tier-dimensioned PNG; NO VRAM) — still no secrets.
+	VipsPath string
+
 	// TmpDir is the scratch directory for ephemeral temp-in/temp-out files. In compose this is a tmpfs
 	// (RAM-backed, never persisted). Falls back to the OS temp dir.
 	TmpDir string
@@ -55,6 +60,7 @@ func Load() *Config {
 		Addr:          env("ADDR", ":8090"),
 		ToktxPath:     env("TOKTX_PATH", "toktx"),
 		PngQuantPath:  env("PNGQUANT_PATH", "pngquant"),
+		VipsPath:      env("VIPS_PATH", "vips"),
 		TmpDir:        env("TMP_DIR", os.TempDir()),
 		MaxBodyBytes:  envInt64("MAX_BODY_BYTES", 32<<20), // 32 MiB
 		MaxDim:        envInt("MAX_DIM", 8192),

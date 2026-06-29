@@ -217,6 +217,12 @@ import type {
 // call in the fix path and it fires ONLY behind opts.backend + per-run consent (backendOn). KTX2_PROFILE_
 // BAKES_MIPS keeps the wire profile + the VRAM-ceiling accounting (vramCeilingOfPage mips arg) in sync.
 import { encodeRemote, KTX2_PROFILE_BAKES_MIPS } from '../lib/backend-client';
+// OPT-IN libvips lanczos3 resample tier post-pass (round24-libvips-lanczos3-resample-op-sidecar.md). The
+// gate predicate (opt-in/consent + the B1 hashFilenames interaction) + the HF-energy measure are PURE +
+// Node-tested so the control flow can't drift (the worker can't run headless). resampleOn gates the WHOLE
+// path: false ⇒ the existing OffscreenCanvas tier downscale runs ⇒ byte-identical output.
+import { resampleOn, resampleSkippedByHashFilenames } from '../lib/resample-collect';
+import { hfEnergy, aggregateHfEnergyDelta } from '../lib/resample-quality';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 const post = (m: FixResponse): void => ctx.postMessage(m);
@@ -1093,6 +1099,55 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     // skipped[] note per ref (mirroring the tier loop's other v1-scope notes — Spine-stays-PNG :2034,
     // tierTransformed :2011). Gated on pngquantOn so backend-off stays byte-identical. Once-per-ref via this set.
     const pngquantTierSkipNoted = new Set<string>();
+    // ── OPT-IN libvips lanczos3 resample (round24-libvips-lanczos3-resample-op-sidecar.md) — GATED collector ─
+    // SAFETY (load-bearing): the resample path is LIVE only when the user configured a backend AND ticked
+    // per-run consent AND opted the `resample` op in AND a host+token exist — the SAME opt-in shape as the
+    // KTX2/pngquant gates — AND (B1) hashFilenames is OFF. The gate lives in the PURE resampleOn predicate
+    // (Node-tested) so it can't drift. FALSE ⇒ recordResampleCandidate is a no-op ⇒ the candidates array stays
+    // empty ⇒ the post-pass never runs ⇒ the existing OffscreenCanvas tier downscale's output is BYTE-IDENTICAL
+    // to today. resample is an IN-PLACE tier replace (the produced tile is the SAME dims/format/path the
+    // browser would have emitted — DISK/QUALITY-only, NO new file, NO referencesChanged, NO VRAM/disk claim);
+    // the ONLY thing it carries is a MEASURED high-frequency-energy retention delta.
+    //
+    // B1 (cache-busting integrity, the central skeptic blocker): an in-place tile replace under content-hash
+    // names would leave the filename's hash describing the OLD (browser) bytes ⇒ content/hash mismatch that
+    // defeats round9. v1 takes the simpler accepted route: resampleOn is FALSE when hashFilenames is on, so the
+    // in-place replace below is only ever reached on the byte-stable (hashOff) path. When resample WOULD be
+    // eligible but is suppressed solely by hashFilenames, surface ONE honest skip note (invariant 3 — never a
+    // silent no-op).
+    const resampleEnabled = resampleOn({ backend: opts.backend, hashFilenames: opts.hashFilenames });
+    // One emitted tier the backend MAY re-downscale with lanczos3. `srcBytes` = the FULL-RES source page bytes
+    // (the post-pass PNG-re-encodes these and uploads them — the asymmetry vs ktx2/pngquant, which upload the
+    // already-downscaled page); `targetW/H` = the EXACT tier dims the browser composed (the vips OUTPUT box);
+    // `browserTile` = the browser tile's RGBA ImageData (captured once per tier, for the HF-energy measure);
+    // `targets` = each (path, mime, encOpts) variant emitted at this tier — the post-pass re-encodes the vips
+    // bitmap to each + replaces `out` at the SAME path. hashOff guarantees the path is byte-stable (B1).
+    interface ResampleTarget {
+      path: string;
+      mime: ImageMime;
+      encOpts: EncodeOpts;
+    }
+    interface ResampleCandidate {
+      ref: string;
+      srcBytes: ArrayBuffer;
+      targetW: number;
+      targetH: number;
+      browserTile: ImageData;
+      targets: ResampleTarget[];
+    }
+    const resampleCandidates: ResampleCandidate[] = [];
+    const recordResampleCandidate = (c: ResampleCandidate): void => {
+      if (!resampleEnabled) return;
+      resampleCandidates.push(c);
+    };
+    // round24 B1 honest-skip: resample WOULD be eligible (backend + consent + op opted in) but is suppressed
+    // SOLELY by hashFilenames (an in-place tile replace under content-hash names would break round9). Surface
+    // ONE note per downscaled-tier ref (invariant 3 — never a silent no-op). Once-per-ref via this set.
+    const resampleHashSkipPending = resampleSkippedByHashFilenames({
+      backend: opts.backend,
+      hashFilenames: opts.hashFilenames,
+    });
+    const resampleHashSkipNoted = new Set<string>();
     const skipped: { assetRef: string; reason: string }[] = [];
     // ROUND7 T6: an invalid export profile rejected above ⇒ no emit + honest `(profile)` reasons. Seed
     // `skipped` with them so the receipt is honest (never a silent drop). Valid/absent profile ⇒ empty.
@@ -3188,6 +3243,11 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           // mime post-encode via the AVIF→WebP→PNG / WebP→PNG fallbacks; emit the FIRST, SKIP the later (honest
           // note) — never overwrite. Keyed on the actual emitted image path (which carries the post-encode ext).
           const emittedThisTier = new Set<string>();
+          // round24 resample: collect the (path, mime, encOpts) variants emitted at THIS tier so the post-pass
+          // can re-encode the vips tile to each + replace `out` in place. A no-op shell when resample is off
+          // (resampleTierTargets stays empty ⇒ no candidate recorded ⇒ byte-identical). The tile.scale<1 guard
+          // below ensures the top tier (scale 1, no downscale ⇒ nothing for lanczos3 to improve) is skipped.
+          const resampleTierTargets: ResampleTarget[] = [];
           for (const te0 of tierEncodes) {
             const enc = await encodeCanvas(canvas, c2d, te0.mime, te0.encOpts);
             if (!enc) {
@@ -3222,6 +3282,12 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
             // variantManifestName (byte-identical). The skeleton copy is NOT hashed (runtime-convention referrer).
             const emittedImage = await hashEmit(tierImagePath, enc.bytes);
             out.push({ path: emittedImage, bytes: enc.bytes });
+            // round24 resample: record this variant's emitted path + format so the post-pass can replace its
+            // bytes in place with the lanczos3 tile (only collected when resampleEnabled, and only for a real
+            // downscale — tier.scale<1; the candidate is pushed after the format loop). hashOff is guaranteed by
+            // the gate (B1) ⇒ emittedImage===tierImagePath is byte-stable, so the in-place replace is sound.
+            if (resampleEnabled && tier.scale < 1)
+              resampleTierTargets.push({ path: emittedImage, mime: enc.mime, encOpts: te0.encOpts });
             tierFilesEmitted++;
             if (profileOn) profileFilesEmitted++;
             // round13 finding [0]: a `nativePng`-marked PNG (FormatTarget.pngLossy) reached the MULTI-TIER path
@@ -3317,6 +3383,34 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           // only, never VRAM (invariant 5). Recorded once per tier, after the format loop.
           if (emittedThisTier.size > 0)
             tierVramBytes[ti] = (tierVramBytes[ti] ?? 0) + dst.w * dst.h * 4;
+          // round24 resample: register ONE candidate per downscaled tier that emitted ≥1 variant. Capture the
+          // browser tile's RGBA ImageData (off the canvas the browser already composed — the HONEST fallback
+          // baseline the HF-energy delta measures against) + the full-res source bytes + the exact tier dims.
+          // No-op when resample is off (resampleTierTargets is empty). The post-pass uploads the full-res source
+          // (PNG-re-encoded) ONCE per tier, gets the lanczos3 tile, measures the delta, and replaces each
+          // target's bytes in place. cancelled is re-checked per candidate in the post-pass.
+          if (resampleEnabled && resampleTierTargets.length > 0) {
+            const browserTile = c2d.getImageData(0, 0, dst.w, dst.h);
+            recordResampleCandidate({
+              ref,
+              srcBytes: bytes,
+              targetW: dst.w,
+              targetH: dst.h,
+              browserTile,
+              targets: resampleTierTargets,
+            });
+          }
+          // round24 B1: resample is opted-in but SUPPRESSED by hashFilenames (v1 gates it off rather than
+          // re-threading the cache-bust chain). Surface ONE honest note per downscaled-tier ref so it is never
+          // a silent no-op (invariant 3); emittedThisTier>0 means this ref actually got a downscaled tier.
+          if (resampleHashSkipPending && tier.scale < 1 && emittedThisTier.size > 0 && !resampleHashSkipNoted.has(ref)) {
+            resampleHashSkipNoted.add(ref);
+            skipped.push({
+              assetRef: ref,
+              reason:
+                'resample skipped: lanczos3 tier downscale is not yet supported with content-hash cache-busting — used the browser resampler',
+            });
+          }
         }
         srcBmp.close();
         if (composeFailed || !emittedAny) continue;
@@ -3644,6 +3738,160 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       }
     }
 
+    // ── OPT-IN libvips lanczos3 resample tier post-pass (round24-libvips-lanczos3-resample-op-sidecar.md) ───
+    // SAFETY (load-bearing): resampleEnabled false ⇒ resampleCandidates is empty ⇒ this loop never runs ⇒
+    // `out` is unchanged ⇒ the zip is BYTE-IDENTICAL to today (the existing OffscreenCanvas tier downscale's
+    // output stands). It runs ONLY when the user configured a backend AND ticked per-run consent AND opted the
+    // `resample` op in AND hashFilenames is OFF (B1). Assets leave the device HERE (and in the KTX2/pngquant
+    // passes) and only here.
+    //
+    // For each DOWNSCALED tier candidate (one per ref×tier):
+    //   1. PNG-re-encode the FULL-RES source page (M2: the source may be lossy JPEG/WebP, but the sidecar's
+    //      `png` field expects PNG — reuse the KTX2 createImageBitmap→drawImage→convertToBlob('image/png')
+    //      idiom). The full-res PNG is materially larger than a tile and pushes the 32 MiB/8192/64 Mpx caps —
+    //      an oversized upload 413/415s and we fall back to the browser tile honestly.
+    //   2. upload it via encodeRemote('resample', targetW, targetH) → the gateway verifies token + quota +
+    //      reverse-proxies to the sidecar; on 200 we get a lanczos3 PNG tile at EXACTLY the tier dims.
+    //   3. measure the HONEST high-frequency-energy retention delta (vips tile vs the browser tile, SAME dims)
+    //      — a MEASURED fact, never a verdict (invariant 3). Accumulate the energies for ONE aggregate.
+    //   4. re-encode the vips bitmap to EACH tier format for this candidate + REPLACE the page bytes at the
+    //      SAME path (the pre-zip Map is last-write-wins). DISK/QUALITY-only: same dims/format/path as the
+    //      browser tile ⇒ NO new file, NO referencesChanged, NO VRAM/disk claim, ever.
+    // On ANY failure (re-encode fail / unreachable / declined / size cap / vips decode fail) or a ≤0 delta we
+    // KEEP the browser tile (already in `out`) and surface an HONEST skipped[] note. `failed` counts only REAL
+    // failures (≤0 delta = kept, NOT a failure).
+    let resampleOpRan = false;
+    let resampleUploaded = 0;
+    let resampleProduced = 0;
+    let resampleFailed = 0;
+    let resampleSumVipsEnergy = 0;
+    let resampleSumBrowserEnergy = 0;
+    if (resampleEnabled && resampleCandidates.length > 0) {
+      const backend = opts.backend!; // resampleEnabled guarantees presence + consent + token + host
+      resampleOpRan = true;
+      let i = 0;
+      for (const c of resampleCandidates) {
+        if (cancelled) return; // superseded — stop before the next (re-encode + upload) resample candidate
+        post({
+          type: 'fix-progress',
+          label: `resample ${basename(c.ref)}`,
+          done: i++,
+          total: resampleCandidates.length,
+        });
+        // (1) PNG-re-encode the FULL-RES source for the sidecar (M2 — handles lossy JPEG/WebP sources).
+        let pngBytes: Uint8Array | null = null;
+        try {
+          const bmp = await createImageBitmap(new Blob([c.srcBytes as BlobPart]));
+          const canvas = new OffscreenCanvas(bmp.width, bmp.height);
+          const c2d = canvas.getContext('2d');
+          if (c2d) {
+            c2d.drawImage(bmp, 0, 0);
+            const blob = await canvas.convertToBlob({ type: 'image/png' });
+            pngBytes = new Uint8Array(await blob.arrayBuffer());
+          }
+          bmp.close();
+        } catch {
+          pngBytes = null;
+        }
+        if (!pngBytes) {
+          resampleFailed++;
+          skipped.push({
+            assetRef: c.ref,
+            reason: 'resample skipped: could not re-encode the full-res source for upload — kept browser tile',
+          });
+          continue;
+        }
+        // (2) upload (the ONLY network call; gated by consent above). Never throws (encodeRemote catches).
+        //     For resample, w/h are the OUTPUT target tier dims (the asymmetry vs ktx2/pngquant).
+        resampleUploaded++;
+        const res = await encodeRemote(pngBytes, 'resample', c.targetW, c.targetH, {
+          apiBase: backend.apiBase,
+          token: backend.token,
+        });
+        if (!res.ok) {
+          resampleFailed++;
+          skipped.push({
+            assetRef: c.ref,
+            reason: `resample skipped: backend ${res.code} — kept browser tile`,
+          });
+          continue;
+        }
+        // (3) decode the vips PNG tile + measure the HONEST HF-energy retention vs the browser tile (same dims).
+        let vipsData: ImageData | null = null;
+        try {
+          const vbmp = await createImageBitmap(new Blob([res.bytes as BlobPart], { type: 'image/png' }));
+          if (vbmp.width === c.targetW && vbmp.height === c.targetH) {
+            const vcanvas = new OffscreenCanvas(c.targetW, c.targetH);
+            const vctx = vcanvas.getContext('2d');
+            if (vctx) {
+              vctx.drawImage(vbmp, 0, 0);
+              vipsData = vctx.getImageData(0, 0, c.targetW, c.targetH);
+            }
+          }
+          vbmp.close();
+        } catch {
+          vipsData = null;
+        }
+        if (!vipsData) {
+          resampleFailed++;
+          skipped.push({
+            assetRef: c.ref,
+            reason: 'resample skipped: could not decode the backend tile — kept browser tile',
+          });
+          continue;
+        }
+        const vipsEnergy = hfEnergy(vipsData.data, c.targetW, c.targetH);
+        const browserEnergy = hfEnergy(c.browserTile.data, c.targetW, c.targetH);
+        if (vipsEnergy <= browserEnergy) {
+          // ≤0 delta: lanczos3 did NOT retain more high-frequency content here — KEEP the browser tile. This is
+          // an HONEST outcome (NOT a failure): it does NOT increment `failed`, and it contributes 0 to the
+          // aggregate (the browser tile is already in `out`). Surface it so it's never a silent no-op.
+          skipped.push({
+            assetRef: c.ref,
+            reason: 'resample kept browser tile: lanczos3 did not retain more high-frequency content here',
+          });
+          continue;
+        }
+        // (4) re-encode the vips bitmap to EACH tier format + REPLACE the page bytes in place (B1: hashOff ⇒
+        //     the path is byte-stable, so an in-place replace is sound — the pre-zip Map is last-write-wins).
+        let replacedAny = false;
+        try {
+          const tbmp = await createImageBitmap(
+            new ImageData(
+              new Uint8ClampedArray(vipsData.data),
+              c.targetW,
+              c.targetH,
+            ),
+          );
+          for (const tgt of c.targets) {
+            const tcanvas = new OffscreenCanvas(c.targetW, c.targetH);
+            const tctx = tcanvas.getContext('2d');
+            if (!tctx) continue;
+            tctx.drawImage(tbmp, 0, 0);
+            const enc = await encodeCanvas(tcanvas, tctx, tgt.mime, tgt.encOpts);
+            if (enc) {
+              out.push({ path: tgt.path, bytes: enc.bytes }); // in-place replace (same path, last-write-wins)
+              replacedAny = true;
+            }
+          }
+          tbmp.close();
+        } catch {
+          replacedAny = false;
+        }
+        if (!replacedAny) {
+          resampleFailed++;
+          skipped.push({
+            assetRef: c.ref,
+            reason: 'resample skipped: could not re-encode the backend tile to the tier format(s) — kept browser tile',
+          });
+          continue;
+        }
+        resampleProduced++;
+        resampleSumVipsEnergy += vipsEnergy;
+        resampleSumBrowserEnergy += browserEnergy;
+      }
+    }
+
     if (cancelled) return; // superseded — skip the (potentially large) zip build entirely
     post({ type: 'fix-progress', label: 'zipping', done: total - 1, total });
     // `out` path-dedup before zip (design §6 step 9): last-write-wins for a deliberate replace; guards
@@ -3726,6 +3974,22 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         host: backendHost,
         bytesBefore: pngquantBytesBefore,
         bytesAfter: pngquantBytesAfter,
+      });
+    }
+    // round24 resample: ONE entry when the op ran AND ≥1 tile was produced OR ≥1 hard-FAILED (mirrors the
+    // pngquant all-decline suppression — a run where every candidate was a ≤0-delta KEEP surfaces those in
+    // skipped[] but emits no misleading "0 produced" block). The ONLY number it carries is the MEASURED
+    // high-frequency-energy retention delta (invariant 3 — a fact, not a verdict); there is NO disk/VRAM field
+    // (invariant 5 — the tile is the SAME dims/format as the browser tile). On a 0-produced/failed-only run the
+    // aggregate is 0 (no fabricated number). Empty ⇒ omitted ⇒ receipt byte-identical to today.
+    if (resampleOpRan && (resampleProduced > 0 || resampleFailed > 0)) {
+      backendNative.push({
+        op: 'resample',
+        uploaded: resampleUploaded,
+        produced: resampleProduced,
+        failed: resampleFailed,
+        host: backendHost,
+        qualityHfEnergyDelta: aggregateHfEnergyDelta(resampleSumVipsEnergy, resampleSumBrowserEnergy),
       });
     }
     const receipt: FixReceipt = {

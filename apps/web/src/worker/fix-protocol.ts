@@ -206,8 +206,15 @@ export interface FixOptions {
  *  - `ktx2`     : UASTC → Zstd, baked mips. The one honest GPU-VRAM win (block-compressed ≤1 B/px).
  *  - `pngquant` : lossy-indexed PNG re-compression. DISK-ONLY: a quantized PNG still decodes to full
  *                 RGBA8888 on the GPU ⇒ ZERO VRAM change (vramCeiling stays raster w·h·4). The win is a
- *                 SMALLER DOWNLOAD / cache, NEVER a GPU/VRAM win — there is no pngquant VRAM field, ever. */
-export type NativeOpKind = 'ktx2' | 'pngquant';
+ *                 SMALLER DOWNLOAD / cache, NEVER a GPU/VRAM win — there is no pngquant VRAM field, ever.
+ *  - `resample` : libvips lanczos3 DOWNSCALE of a tier (round24-libvips-lanczos3-resample-op-sidecar.md) —
+ *                 the one downscale kernel the browser canvas resampler can't be steered to. The worker
+ *                 uploads the FULL-RES top tier and gets back a tile at the SAME tier dimensions the browser
+ *                 would have emitted. DISK/QUALITY-ONLY: it changes NEITHER disk weight NOR VRAM (same dims
+ *                 as the browser tile, decodes to full RGBA8888) — there is NO disk-saving and NO VRAM field
+ *                 for resample, EVER. The ONLY number it carries is a MEASURED high-frequency-energy
+ *                 retention delta (`qualityHfEnergyDelta`), a fact, not a verdict. */
+export type NativeOpKind = 'ktx2' | 'pngquant' | 'resample';
 
 /** OPT-IN backend configuration (round12-backend-processing.md §5). PRESENT ⇒ the user configured a host
  *  AND we hold a valid entitlement token; the worker may offer native ops. ABSENT on FixOptions ⇒ the whole
@@ -221,7 +228,8 @@ export interface BackendOptions {
   /** ed25519 entitlement token (offline-verified in the browser; sent as `Authorization: Bearer <token>`).
    *  The gateway re-verifies it server-side before any work — closes the free-CPU hole. */
   token: string;
-  /** Native ops the user opted into. v1 only `['ktx2']`. Empty/absent ⇒ no op eligible ⇒ no upload. */
+  /** Native ops the user opted into (`'ktx2'` | `'pngquant'` | `'resample'`). Empty/absent ⇒ no op
+   *  eligible ⇒ no upload. */
   ops: NativeOpKind[];
   /** PER-RUN explicit consent. FALSE/absent ⇒ the worker NEVER uploads (it falls back to the browser path
    *  with an honest skip note). Only TRUE after the user ticked the consent box THIS run. */
@@ -473,10 +481,21 @@ export interface FixReceipt {
     produced: number;
     failed: number;
     host: string;
-    /** pngquant ONLY: real measured original page byte sum (disk). Omitted for ktx2. */
+    /** pngquant ONLY: real measured original page byte sum (disk). Omitted for ktx2/resample. */
     bytesBefore?: number;
-    /** pngquant ONLY: real measured re-compressed page byte sum (disk). Omitted for ktx2. */
+    /** pngquant ONLY: real measured re-compressed page byte sum (disk). Omitted for ktx2/resample. */
     bytesAfter?: number;
+    /** resample ONLY (round24-libvips-lanczos3-resample-op-sidecar.md): the MEASURED fraction of EXTRA
+     *  high-frequency (Laplacian) energy the lanczos3 tiles retained over the browser-canvas tiles at the
+     *  SAME tier dimensions (Σ vips-tile HF energy − Σ browser-tile HF energy, over the produced tiles,
+     *  ÷ Σ browser-tile HF energy; clamp ≥0). HONESTY (invariant 3): this is a MEASURED fact about
+     *  high-frequency CONTENT retention — NOT a "sharper/cleaner/better detail" verdict (lanczos3's extra HF
+     *  energy includes ringing/overshoot, an artifact, not detail). The receipt copy is "lanczos3 retained
+     *  N% more high-frequency content at the same file size". DISK/QUALITY-ONLY: there is NO VRAM field and
+     *  NO disk-saving field for resample, EVER (invariant 5 — the tile is the SAME dims as the browser tile,
+     *  decodes to full RGBA8888). On a ≤0 delta the browser tile is kept and this reads 0 (not a failure).
+     *  Omitted for ktx2/pngquant. */
+    qualityHfEnergyDelta?: number;
   }[];
   /** HONEST worst-case GPU VRAM CEILING (bytes) of the produced `.ktx2` pages — Σ vramCeilingOfPage('ktx2-
    *  uastc', w, h, mipsBaked). This is an UPPER BOUND ("GPU VRAM ≤ …"), NEVER w·h·4 and NEVER folded into the

@@ -23,7 +23,7 @@ export const minPole = 0.12;
 export const SOLID_STD = 2;
 
 /** Grayscale luma from RGBA pixel data at byte index i. */
-export function luma(data: Uint8ClampedArray | number[], i: number): number {
+export function luma(data: Uint8ClampedArray | Uint8Array | number[], i: number): number {
   return 0.299 * (data[i] ?? 0) + 0.587 * (data[i + 1] ?? 0) + 0.114 * (data[i + 2] ?? 0);
 }
 

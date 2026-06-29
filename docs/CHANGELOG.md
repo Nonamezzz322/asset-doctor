@@ -10,6 +10,44 @@ GitHub creds — user pushes); commit hashes below are over that base.
 
 ---
 
+## Round 24 — selection (#0 shipped) — 2026-06-29
+Pick: **(#0) libvips lanczos3 resample sidecar op + honest measured-quality receipt** — the scale-tier
+DOWNSCALE path uses the browser canvas resampler, which can't be steered to a specific kernel. This adds an
+OPT-IN backend `resample` op (libvips lanczos3) that downscales the full-res top tier with a high-quality
+kernel and REPLACES the browser tile at the SAME dimensions/format. DISK/QUALITY-only (invariant 5: same
+dims ⇒ no VRAM, no disk saving); the receipt carries ONLY a MEASURED high-frequency-energy retention delta
+(invariant 3: a fact, never a "sharper/cleaner" verdict — lanczos3's extra HF energy includes ringing).
+
+- **#0 libvips lanczos3 resample op (sidecar) + measured high-frequency-energy receipt**
+  (`docs/improvements/round24-libvips-lanczos3-resample-op-sidec.md`)
+  — **Sidecar** (`apps/encoder`): new `Resample` op + `vips-lanczos3` profile in the closed allowlists
+  (`encode.go`), a mock-testable `ResampleEncoder` shelling to a pinned `vips` over `/dev/stdin`→`/dev/stdout`
+  (no temp files; `thumbnail_source … --size force` for EXACT tier dims, `.png[strip]` deterministic;
+  `resample.go`), Dispatcher arm + `VipsPath` config + `main.go` wiring, and a pinned `libvips-tools` apt
+  package + stable `/usr/local/bin/vips` symlink in the Dockerfile. The op-agnostic gateway (`apps/api`)
+  needed ZERO changes (verified). W/H ASYMMETRY: for resample they are the OUTPUT target the full-res source
+  is downscaled TO (documented; tested). **Client**: `'resample'` in `NativeOpKind` + `profileForOp` +
+  `RESAMPLE_PROFILE`; pure Node-tested HF-energy measure (mean |Laplacian| over luma → clamped retention
+  delta, `resample-quality.ts`) + pure gated predicate (`resample-collect.ts`); a GATED worker tier post-pass
+  that uploads the full-res top tier (PNG-re-encoded, M2), gets the vips tile, measures the delta, re-encodes
+  to each tier format, and replaces the browser tile IN PLACE. **B1 (cache-busting integrity)**: chose the
+  design-accepted simpler v1 — resample is GATED OFF when `hashFilenames` is on (an in-place replace under
+  content-hash names would leave the hash describing the OLD bytes), with an honest tier-path skip note;
+  never an unconditional in-place replace. **B2**: a SEPARATE new `fix.backend.resampleTierHint` key on the
+  tier path only — `whyNoKernel` left UNTOUCHED (still true at its 2 non-tier sites). **M1**: the receipt
+  field is `qualityHfEnergyDelta` ("retained N% more high-frequency content at the same file size"), clamped
+  ≥0, ≤0 keeps the browser tile (delta 0, not failed); NO VRAM/disk field. ADDITIVE: backend off / op not
+  selected / declined / hashFilenames on ⇒ the existing OffscreenCanvas tier downscale runs ⇒ byte-identical.
+  SAFETY (round12/13 parity): opt-in, per-run consent, entitlement-gated, sidecar non-root/RO/stdin-stdout.
+  Live e2e deferred (deploy creds-blocked); shipped behind a mock Encoder + pure helpers like toktx/pngquant.
+  — **Tests**: sidecar `resample_test.go` (closed flags, op/profile/dims reject pre-exec, missing-binary
+  no-byte-leak, `/bin/cat` stdin→stdout passthrough, empty-output fail, Dispatcher routing) + allowlist
+  assertions + `server_test.go` (op-propagation success, op×profile 415, full-res caps 413/415); TS
+  `resample-quality.test.ts` (sharp>blur, identical=0, ≤0 clamp, flat=0, determinism) +
+  `resample-collect.test.ts` (opt-in gate + the B1 hashFilenames interaction) + i18n drift (6 new keys × 9
+  catalogs; `whyNoKernel` asserted unchanged). Review verdict: SALVAGEABLE → all 2 blockers + 2 majors fixed.
+  Gate: typecheck + vitest + lint + `go build/vet/test` (encoder + api) green.
+
 ## Round 23 — selection (#0 shipped) — 2026-06-29
 Pick: **(#0) bitmap-font (.fnt BMFont) parser + ingest grouping + glyph-page audit** — AngelCode BMFont
 glyph sheets were an unrecognized file type (silently dropped). A parsed `.fnt` page is structurally an
