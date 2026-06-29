@@ -12,9 +12,12 @@
 // absent) is the honest substitute for a pixel e2e. Pixel byte-identity is verified MANUALLY (see footer).
 
 import { describe, expect, it } from 'vitest';
-import type { ExportProfile, ImageMime } from '@asset-doctor/core';
+import type { Atlas, ExportProfile, ImageMime } from '@asset-doctor/core';
 import {
+  atlasNeedsForcedFormat,
   formatEncode,
+  renamedTo,
+  repointAtlasImage,
   resolveProfileForRef,
   tieredName,
   validateProfile,
@@ -337,6 +340,108 @@ describe('format-only profile asset selection (finding [0])', () => {
   it('atlas-only folder + format-only profile ⇒ ZERO eligible (worker surfaces an honest (profile) skip + assets=0)', () => {
     const assets: LooseAsset[] = [{ ref: 'sheet.png', flagged: false, claimed: false, isAtlas: true }];
     expect(formatOnlySelection(profile, assets)).toEqual([]);
+  });
+});
+
+// ── SINGLE-FORMAT FORMAT-ONLY ATLAS-FORCE decision (AB-R3, round7-export-profile.md §5d-bis) ──────────────
+// The residual the loose pass does NOT close: a PREBUILT atlas under a single-format format-only profile was
+// transcoded to the chosen format ONLY when its page earned a `format` finding. The new worker driver now
+// forces EVERY eligible prebuilt page. No worker harness (B2), so the per-atlas DECISION + the resulting page/
+// sidecar rename is modeled here against the SAME pure primitives the worker calls: validateProfile (gate +
+// single-format detection) → atlasNeedsForcedFormat (eligibility) → renamedTo (page) + repointAtlasImage
+// (sidecar). Load-bearing: only a SINGLE-format format-only profile forces; multi-format / multi-tier refuse.
+
+const sheet = (imageRef: string): Atlas => ({
+  name: 'sheet',
+  imageRef,
+  size: { w: 1024, h: 1024 },
+  sprites: [
+    { name: 'a', frame: { x: 0, y: 0, w: 16, h: 16 }, rotated: false, trimmed: false, sourceSize: { w: 16, h: 16 } },
+  ],
+  source: { kind: 'texturepacker-hash' },
+});
+
+/** Model the worker's atlas-force pass for ONE prebuilt atlas: gate (single-format format-only?) → eligibility
+ *  (atlasNeedsForcedFormat) → on force, the page rename + the sidecar repoint. Mirrors the worker driver. */
+function atlasForceDecision(
+  p: ExportProfile,
+  args: { pagePath: string; sidecarPath: string; atlas: Atlas; sourceMime: ImageMime; isSpineMultiPage?: boolean; hasSidecar?: boolean; alreadyClaimed?: boolean },
+) {
+  const v = validateProfile(p);
+  if (!v.ok) return { ok: false as const, errors: v.errors };
+  const formatOnly = !v.tiers.some((t) => t.scale < 1); // single scale-1 tier ⇒ format-only (driver gate)
+  const multi = v.formats.length > 1; // multi-format ⇒ driver gated OFF (profileMulti)
+  const targetMime = v.formats[0]!.format;
+  const decision = atlasNeedsForcedFormat({
+    sourceMime: args.sourceMime,
+    targetMime,
+    isMultiFormat: multi,
+    isSpineMultiPage: args.isSpineMultiPage ?? false,
+    hasSidecar: args.hasSidecar ?? true,
+    alreadyClaimed: args.alreadyClaimed ?? false,
+  });
+  // The driver only runs under format-only + single-format; outside that it never forces (byte-identical).
+  const wouldRun = formatOnly && !multi;
+  if (!wouldRun || !decision.force) return { ok: true as const, forced: false, skipReason: decision.skipReason };
+  const newPage = renamedTo(args.pagePath, targetMime);
+  const repointed = repointAtlasImage(args.atlas, args.sidecarPath, newPage);
+  return { ok: true as const, forced: true, newPage, imageRef: repointed.imageRef };
+}
+
+describe('single-format format-only atlas-force decision (AB-R3)', () => {
+  it('single-format AVIF, PNG sheet that earned NO finding ⇒ FORCED: page → .avif, sidecar repointed', () => {
+    const p: ExportProfile = { formats: [{ format: 'image/avif', quality: 85 }], tiers: [{ label: 'full', scale: 1, suffix: '_1080p' }] };
+    const d = atlasForceDecision(p, { pagePath: 'ui/sheet.png', sidecarPath: 'ui/sheet.json', atlas: sheet('sheet.png'), sourceMime: 'image/png' });
+    expect(d.ok).toBe(true);
+    if (!d.ok) return;
+    expect(d.forced).toBe(true);
+    expect(d.newPage).toBe('ui/sheet.avif'); // page ext-swapped to the single target format
+    expect(d.imageRef).toBe('sheet.avif'); // sidecar meta.image repointed (same dir ⇒ basename) — no dangle
+  });
+
+  it('AVIF source + AVIF target ⇒ NOT forced, NO skip noise (already the chosen format)', () => {
+    const p: ExportProfile = { formats: [{ format: 'image/avif', quality: 85 }], tiers: [{ label: 'full', scale: 1, suffix: '_1080p' }] };
+    const d = atlasForceDecision(p, { pagePath: 'ui/sheet.avif', sidecarPath: 'ui/sheet.json', atlas: sheet('sheet.avif'), sourceMime: 'image/avif' });
+    expect(d.ok && d.forced).toBe(false);
+    expect(d.ok && d.skipReason).toBeUndefined();
+  });
+
+  it('MULTI-format profile ⇒ atlas NOT forced (driver gated off; one page can\'t fan across N sidecars)', () => {
+    const p: ExportProfile = { formats: [{ format: 'image/avif', quality: 85 }, { format: 'image/webp' }], tiers: [{ label: 'full', scale: 1, suffix: '_1080p' }] };
+    const d = atlasForceDecision(p, { pagePath: 'ui/sheet.png', sidecarPath: 'ui/sheet.json', atlas: sheet('sheet.png'), sourceMime: 'image/png' });
+    expect(d.ok && d.forced).toBe(false);
+  });
+
+  it('MULTI-tier profile ⇒ atlas NOT forced by this pass (the tier loop already forces it)', () => {
+    const p: ExportProfile = { formats: [{ format: 'image/avif', quality: 85 }], tiers: [{ label: 'full', scale: 1, suffix: '_1080p' }, { label: 'half', scale: 0.5, suffix: '_540p' }] };
+    const d = atlasForceDecision(p, { pagePath: 'ui/sheet.png', sidecarPath: 'ui/sheet.json', atlas: sheet('sheet.png'), sourceMime: 'image/png' });
+    expect(d.ok && d.forced).toBe(false);
+  });
+
+  it('no sidecar / multi-page Spine / already-claimed ⇒ NOT forced, surfaced skip (honest)', () => {
+    const p: ExportProfile = { formats: [{ format: 'image/webp', quality: 80 }], tiers: [{ label: 'full', scale: 1, suffix: '_1080p' }] };
+    const noSidecar = atlasForceDecision(p, { pagePath: 'a/s.png', sidecarPath: 'a/s.json', atlas: sheet('s.png'), sourceMime: 'image/png', hasSidecar: false });
+    expect(noSidecar.ok && noSidecar.forced).toBe(false);
+    expect(noSidecar.ok && noSidecar.skipReason).toContain('sidecar unavailable');
+    const claimed = atlasForceDecision(p, { pagePath: 'a/s.png', sidecarPath: 'a/s.json', atlas: sheet('s.png'), sourceMime: 'image/png', alreadyClaimed: true });
+    expect(claimed.ok && claimed.forced).toBe(false);
+    expect(claimed.ok && claimed.skipReason).toContain('already claimed');
+  });
+
+  it('cross-dir sidecar ⇒ repointed imageRef stays relative to the SIDECAR dir (resolves back, no dangle)', () => {
+    const p: ExportProfile = { formats: [{ format: 'image/webp', quality: 80 }], tiers: [{ label: 'full', scale: 1, suffix: '_1080p' }] };
+    const d = atlasForceDecision(p, { pagePath: 'img/sheet.png', sidecarPath: 'data/sheet.json', atlas: sheet('../img/sheet.png'), sourceMime: 'image/png' });
+    expect(d.ok && d.forced).toBe(true);
+    if (!d.ok || !d.forced) return;
+    expect(d.newPage).toBe('img/sheet.webp');
+    expect(d.imageRef).toBe('../img/sheet.webp'); // relative to data/ → resolves back to img/sheet.webp
+  });
+
+  it('deterministic — same atlas + same single-format profile ⇒ same decision (page + repoint)', () => {
+    const p: ExportProfile = { formats: [{ format: 'image/avif', quality: 70 }], tiers: [{ label: 'full', scale: 1, suffix: '_1080p' }] };
+    const a = atlasForceDecision(p, { pagePath: 'ui/sheet.png', sidecarPath: 'ui/sheet.json', atlas: sheet('sheet.png'), sourceMime: 'image/png' });
+    const b = atlasForceDecision(p, { pagePath: 'ui/sheet.png', sidecarPath: 'ui/sheet.json', atlas: sheet('sheet.png'), sourceMime: 'image/png' });
+    expect(a).toEqual(b);
   });
 });
 

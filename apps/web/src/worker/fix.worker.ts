@@ -153,6 +153,10 @@ import {
   // ≤ ~1 B/px (UASTC/BC7), NEVER w·h·4; mips baked ⇒ ×4/3. The ONE source of truth for the receipt's
   // ktx2VramBytesWorstCase so the worker can't drift from the honest ceiling model.
   vramCeilingOfPage,
+  // PURE eligibility predicate (AB-R3 §5d-bis): under a SINGLE-format format-only profile, force the chosen
+  // format onto every eligible PREBUILT atlas page (closing the last findings-gated residual). Lifts the
+  // prebuilt-atlas passthrough gate logic so the new driver + a Node test share ONE decision (no drift).
+  atlasNeedsForcedFormat,
   type ManifestAsset,
   type EmittedVariant,
   type ManifestAssetKind,
@@ -1239,7 +1243,37 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       // predicted as transcoded — else the owner's actual name (original) would diverge from the prediction
       // (renamed) and Phase C would silently degrade an otherwise-running dedup to keep-consumer. Mask with
       // runs(op). When transcode is NOT excluded this is exactly today's `op?.kind === 'transcode'`.
-      const transcoded = op?.kind === 'transcode' && runs(op);
+      // AB-R3 (§5d-bis): under a SINGLE-format format-only profile, an OWNER atlas with NO transcode op is
+      // still force-transcoded by the new atlas-force driver (it iterates `merged`, not findings). Predict THAT
+      // so Phase C doesn't see a false divergence ("predicted original, executed renamed") and silently degrade
+      // an otherwise-running dedup to keep-consumer. Mirrors the eligibility the driver checks (atlasNeedsForced
+      // Format), with alreadyClaimed=false — an owner is protected from repack/resize/merge (plan.ts), so the
+      // ONLY claim it can carry here is its own transcode op (the branch above). DIVERGENCE-SAFE: if execute
+      // bails on size-loss, forceAtlasFormat leaves ownerActualName on the original ⇒ Phase C keeps the consumer
+      // (the existing K8 machinery). Gated identically to the driver ⇒ profile absent/multi-tier/multi-format ⇒
+      // forcedAtlas stays false ⇒ byte-identical prediction to today. Only meaningful for atlas owners.
+      const forcedAtlas =
+        !op &&
+        profileOn &&
+        !profileHasLowerTier &&
+        !profileMulti &&
+        atlasByRef.has(ref) &&
+        (() => {
+          const p = pathByRef.get(ref);
+          if (!p) return false;
+          const isSpinePage = spineRefs.has(ref);
+          const sidecar = isSpinePage ? spineInfoOf(ref)?.path : manifestPathOf(ref);
+          const rp = resolveProfile(ref);
+          return atlasNeedsForcedFormat({
+            sourceMime: mimeOf(p),
+            targetMime: rp.formats[0]!.format,
+            isMultiFormat: rp.formats.length > 1,
+            isSpineMultiPage: isSpinePage && (spineInfoOf(ref)?.pages ?? 1) > 1,
+            hasSidecar: sidecar != null,
+            alreadyClaimed: false,
+          }).force;
+        })();
+      const transcoded = (op?.kind === 'transcode' && runs(op)) || forcedAtlas;
       // round10-profile-overrides.md §5 (M2, load-bearing): when profileOn, a transcoded owner actually fans
       // out via emitLooseProfileFanout, whose canonical owner image is renamedTo(srcPath, <mime of the FIRST
       // resolved format>). Predict THAT first-format mime (honoring overrides) so Phase C doesn't see a false
@@ -1259,7 +1293,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           ? profileOn
             ? resolveProfile(ref).formats[0]!.format
             : effectiveForTranscode(ref, op.targetMime).targetMime
-          : opts.targetMime;
+          : forcedAtlas
+            ? // AB-R3: the force driver re-encodes to the profile's single format (formats[0]); mirror execute.
+              resolveProfile(ref).formats[0]!.format
+            : opts.targetMime;
       return {
         imagePath: pathByRef.get(ref),
         manifestPath: manifestPathOf(ref),
@@ -1732,6 +1769,135 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       preMask = snapKeys(maskCache);
       preMesh = snapKeys(meshCache);
       preTrim = snapKeys(trimCache);
+    };
+    // ── Prebuilt-atlas PASSTHROUGH transcode body (round20 #1; AB-R3 §5d-bis) ──────────────────────────────
+    // Re-encode ONE prebuilt atlas page to `targetMime` VERBATIM (no recompose — frame geometry/trim/pivot/mesh
+    // untouched), swapping its extension and repointing its sidecar at the new page (else the loader resolves a
+    // file that no longer exists). SINGLE SOURCE OF TRUTH: called by BOTH the finding-driven transcode op
+    // handler AND the AB-R3 format-only atlas-force driver, so there is exactly ONE implementation (no drift).
+    // The CALLER owns the eligibility gates (sidecar present, not already replaced, not multi-page Spine, the
+    // multi-format-profile policy) — the op handler inline, the driver via atlasNeedsForcedFormat. This helper
+    // is reached only AFTER those gates pass. `opaque` threads the op's channel-drop intent (driver: undefined).
+    // HONESTY (invariant 5): identical pixel dims ⇒ identical RGBA8888 VRAM ⇒ NO vramSaved. Keep-original on
+    // size-loss (never ship a larger page under a fix banner) — returns forced=false, the source page stays.
+    // On EVERY keep-original bail, a dedup-OWNER atlas (predicted transcoded under AB-R3) must have its actual
+    // name reset to the ORIGINAL on BOTH the hashed (ownerActualName) and un-hashed (ownerActualUnhashed —
+    // the Phase-C divergence basis) maps, so Phase C sees the divergence vs the renamed prediction and KEEPS
+    // the consumer pointed at the still-shipped original page (else it repoints to a never-emitted renamed
+    // page ⇒ dangling ref). Mirrors the loose keep-original path; no-op when ref is not a dedup owner.
+    const keepOriginalOwner = (ref: string, path: string): void => {
+      if (ownerActualName.has(ref)) {
+        ownerActualName.get(ref)!.image = path;
+        ownerActualUnhashed.set(ref, path);
+      }
+    };
+    const forceAtlasFormat = async (
+      ref: string,
+      atlasOfRef: Atlas,
+      path: string,
+      sidecar: string,
+      targetMime: ImageMime,
+      opaque?: boolean,
+    ): Promise<{ forced: boolean }> => {
+      const isSpinePage = spineRefs.has(ref);
+      const bytes = bytesByRef.get(ref);
+      if (!bytes) {
+        skipped.push({ assetRef: ref, reason: 'image unavailable' });
+        keepOriginalOwner(ref, path);
+        return { forced: false };
+      }
+      const effA = effectiveForTranscode(ref, targetMime);
+      const encA = await transcode(bytes, effA.targetMime, {
+        ...encOptsFor(effA, false),
+        opaque,
+      });
+      if (!encA) {
+        skipped.push({ assetRef: ref, reason: `transcode to ${effA.targetMime} unavailable` });
+        keepOriginalOwner(ref, path);
+        return { forced: false };
+      }
+      // Never ship a WORSE page from the fix that fixes dangling refs. The opaque guard (parity with the
+      // loose path) PLUS a general size-loss guard for the atlas path: a larger atlas page has no
+      // downstream dedup/Phase-C accounting to absorb it, so on size loss we KEEP the original page AND
+      // the original sidecar (no out.push, no rename) ⇒ no dangling ref created. Honest skip.
+      if (
+        transcodeIsSizeLoss(opaque, encA.bytes.length, bytes.byteLength) ||
+        encA.bytes.length >= bytes.byteLength
+      ) {
+        skipped.push({
+          assetRef: ref,
+          reason: `transcode kept original: re-encode was not smaller (${encA.bytes.length} ≥ ${bytes.byteLength} B)`,
+        });
+        keepOriginalOwner(ref, path);
+        return { forced: false };
+      }
+      const newPageA = renamedTo(path, encA.mime);
+      // Cache-bust (round9): hash the FINAL page bytes → patch the sidecar's imageRef to the hashed page →
+      // emit the sidecar → hash it. hashOff ⇒ emittedPage===newPageA, emittedSidecar===sidecar (no rename),
+      // but the page name STILL changed by extension ⇒ this is reference-changing (see below).
+      const emittedPageA = await hashEmit(newPageA, encA.bytes);
+      out.push({ path: emittedPageA, bytes: encA.bytes });
+      replaced.add(path);
+      // Repoint the sidecar at the new page (relative to the SIDECAR's own dir → resolves back through
+      // parseAtlas) and re-serialize it deterministically (frames/trim/pivot/mesh AND the top-level
+      // `animations` map carried verbatim — `animations` refs frame keys, which this page rename leaves intact).
+      const repointedA = repointAtlasImage(atlasOfRef, sidecar, emittedPageA);
+      // Multipack (round28): the sibling-JSON list flows verbatim on the byte-stable default (sidecar keeps
+      // its name, siblings untouched). Under hashOn the sibling `.json` sidecars are renamed (hashEmit) ⇒ a
+      // verbatim ["sheet-1.json"] would dangle ⇒ strip it + surface an honest skip note (better an
+      // unlinked-but-valid page-0 than a dangling sibling reference; hash-aware regeneration is deferred).
+      if (hashOn && repointedA.relatedMultiPacks) {
+        repointedA.relatedMultiPacks = undefined;
+        skipped.push({
+          assetRef: ref,
+          reason:
+            'multipack: related_multi_packs dropped under content-hashed filenames (sibling sidecars renamed) — load sibling packs explicitly',
+        });
+      }
+      const sidecarBytesA = te.encode(
+        isSpinePage ? emitSpineAtlasText(repointedA) : emitTexturePackerJson(repointedA),
+      );
+      const emittedSidecarA = await hashEmit(sidecar, sidecarBytesA);
+      out.push({ path: emittedSidecarA, bytes: sidecarBytesA });
+      replaced.add(sidecar);
+      // A page-format change ALWAYS renames the page ⇒ NOT a stable-name drop-in ⇒ fire these
+      // UNCONDITIONALLY (do NOT copy resize-atlas's `if (hashOn)` gate — resize keeps the source extension,
+      // transcode does not). Pixi manifest: the page loads via its sidecar (meta.image / .atlas line).
+      referencesChanged = true;
+      recordVariant(ref, isSpinePage ? 'spine' : 'atlas', emittedPageA, {
+        scale: 1,
+        suffix: '',
+        src: emittedSidecarA,
+      });
+      changeRows.push(
+        ...(isSpinePage
+          ? repackChanges(sidecar, emittedSidecarA) // Spine .atlas carries no static page-image map
+          : repackChanges(sidecar, emittedSidecarA, emittedPageA)),
+      );
+      // Phase B bookkeeping: if this atlas page is a retained dedup OWNER, record its ACTUAL emitted image
+      // so Phase C repoints CONSUMERS at the real page (no-op when not an owner). Mirrors the loose path.
+      if (ownerActualName.has(ref)) {
+        ownerActualName.get(ref)!.image = emittedPageA;
+        ownerActualUnhashed.set(ref, newPageA);
+      }
+      // OPT-IN KTX2 (round12): offer the re-encoded page for a sibling .ktx2 + its own .ktx2.json sidecar —
+      // TexturePacker ONLY. The post-pass hardcodes `.json`→`.ktx2.json` + emitTexturePackerJson, so a Spine
+      // `.atlas` sidecar would ship malformed; the Spine repack path likewise records no KTX2 candidate.
+      if (!isSpinePage)
+        recordKtx2Candidate({
+          ref,
+          imagePath: emittedPageA,
+          pageBytes: encA.bytes,
+          pageMime: encA.mime,
+          w: atlasOfRef.size.w,
+          h: atlasOfRef.size.h,
+          atlasSidecar: { path: emittedSidecarA, atlas: repointedA },
+        });
+      // DISK-only: identical pixel dims ⇒ identical RGBA8888 VRAM (invariant 5). No vramSaved increment.
+      operations.push(
+        `transcode atlas ${basename(ref)} → ${encA.mime.replace('image/', '')}${opaque ? ' (opaque)' : ''}`,
+      );
+      return { forced: true };
     };
     for (const op of plan.ops) {
       if (cancelled) return; // superseded — stop the (heavy) pixel-op loop before the next op (drain frees pins)
@@ -2462,95 +2628,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
               assetRef: ref,
               reason: 'export profile: atlas pages stay single-format — emitted one page only',
             });
-          const effA = effectiveForTranscode(ref, op.targetMime);
-          const encA = await transcode(bytes, effA.targetMime, {
-            ...encOptsFor(effA, false),
-            opaque: op.opaque,
-          });
-          if (!encA) {
-            skipped.push({ assetRef: ref, reason: `transcode to ${effA.targetMime} unavailable` });
-            continue;
-          }
-          // Never ship a WORSE page from the fix that fixes dangling refs. The opaque guard (parity with the
-          // loose path) PLUS a general size-loss guard for the atlas path: a larger atlas page has no
-          // downstream dedup/Phase-C accounting to absorb it, so on size loss we KEEP the original page AND
-          // the original sidecar (no out.push, no rename) ⇒ no dangling ref created. Honest skip.
-          if (
-            transcodeIsSizeLoss(op.opaque, encA.bytes.length, bytes.byteLength) ||
-            encA.bytes.length >= bytes.byteLength
-          ) {
-            skipped.push({
-              assetRef: ref,
-              reason: `transcode kept original: re-encode was not smaller (${encA.bytes.length} ≥ ${bytes.byteLength} B)`,
-            });
-            continue;
-          }
-          const newPageA = renamedTo(path, encA.mime);
-          // Cache-bust (round9): hash the FINAL page bytes → patch the sidecar's imageRef to the hashed page →
-          // emit the sidecar → hash it. hashOff ⇒ emittedPage===newPageA, emittedSidecar===sidecar (no rename),
-          // but the page name STILL changed by extension ⇒ this is reference-changing (see below).
-          const emittedPageA = await hashEmit(newPageA, encA.bytes);
-          out.push({ path: emittedPageA, bytes: encA.bytes });
-          replaced.add(path);
-          // Repoint the sidecar at the new page (relative to the SIDECAR's own dir → resolves back through
-          // parseAtlas) and re-serialize it deterministically (frames/trim/pivot/mesh AND the top-level
-          // `animations` map carried verbatim — `animations` refs frame keys, which this page rename leaves intact).
-          const repointedA = repointAtlasImage(atlasOfRef, sidecar, emittedPageA);
-          // Multipack (round28): the sibling-JSON list flows verbatim on the byte-stable default (sidecar keeps
-          // its name, siblings untouched). Under hashOn the sibling `.json` sidecars are renamed (hashEmit) ⇒ a
-          // verbatim ["sheet-1.json"] would dangle ⇒ strip it + surface an honest skip note (better an
-          // unlinked-but-valid page-0 than a dangling sibling reference; hash-aware regeneration is deferred).
-          if (hashOn && repointedA.relatedMultiPacks) {
-            repointedA.relatedMultiPacks = undefined;
-            skipped.push({
-              assetRef: ref,
-              reason:
-                'multipack: related_multi_packs dropped under content-hashed filenames (sibling sidecars renamed) — load sibling packs explicitly',
-            });
-          }
-          const sidecarBytesA = te.encode(
-            isSpinePage ? emitSpineAtlasText(repointedA) : emitTexturePackerJson(repointedA),
-          );
-          const emittedSidecarA = await hashEmit(sidecar, sidecarBytesA);
-          out.push({ path: emittedSidecarA, bytes: sidecarBytesA });
-          replaced.add(sidecar);
-          // A page-format change ALWAYS renames the page ⇒ NOT a stable-name drop-in ⇒ fire these
-          // UNCONDITIONALLY (do NOT copy resize-atlas's `if (hashOn)` gate — resize keeps the source extension,
-          // transcode does not). Pixi manifest: the page loads via its sidecar (meta.image / .atlas line).
-          referencesChanged = true;
-          recordVariant(ref, isSpinePage ? 'spine' : 'atlas', emittedPageA, {
-            scale: 1,
-            suffix: '',
-            src: emittedSidecarA,
-          });
-          changeRows.push(
-            ...(isSpinePage
-              ? repackChanges(sidecar, emittedSidecarA) // Spine .atlas carries no static page-image map
-              : repackChanges(sidecar, emittedSidecarA, emittedPageA)),
-          );
-          // Phase B bookkeeping: if this atlas page is a retained dedup OWNER, record its ACTUAL emitted image
-          // so Phase C repoints CONSUMERS at the real page (no-op when not an owner). Mirrors the loose path.
-          if (ownerActualName.has(ref)) {
-            ownerActualName.get(ref)!.image = emittedPageA;
-            ownerActualUnhashed.set(ref, newPageA);
-          }
-          // OPT-IN KTX2 (round12): offer the re-encoded page for a sibling .ktx2 + its own .ktx2.json sidecar —
-          // TexturePacker ONLY. The post-pass hardcodes `.json`→`.ktx2.json` + emitTexturePackerJson, so a Spine
-          // `.atlas` sidecar would ship malformed; the Spine repack path likewise records no KTX2 candidate.
-          if (!isSpinePage)
-            recordKtx2Candidate({
-              ref,
-              imagePath: emittedPageA,
-              pageBytes: encA.bytes,
-              pageMime: encA.mime,
-              w: atlasOfRef.size.w,
-              h: atlasOfRef.size.h,
-              atlasSidecar: { path: emittedSidecarA, atlas: repointedA },
-            });
-          // DISK-only: identical pixel dims ⇒ identical RGBA8888 VRAM (invariant 5). No vramSaved increment.
-          operations.push(
-            `transcode atlas ${basename(ref)} → ${encA.mime.replace('image/', '')}${op.opaque ? ' (opaque)' : ''}`,
-          );
+          // The eligibility gates above (sidecar present, not already replaced, not multi-page Spine) have
+          // passed; re-encode VERBATIM via the shared helper (single source of truth with the AB-R3 driver).
+          await forceAtlasFormat(ref, atlasOfRef, path, sidecar, op.targetMime, op.opaque);
           continue;
         }
         // Effective per-asset options (folder/type overrides; no downscale ⇒ scale 1 ⇒ quality unchanged).
@@ -3536,6 +3616,64 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         operations.push(
           `export profile ${basename(imagePath)} → ${nFmt} format${nFmt === 1 ? '' : 's'}`,
         );
+      }
+    }
+
+    // ── SINGLE-FORMAT FORMAT-ONLY ATLAS-FORCE PASS (AB-R3, round7-export-profile.md §5d-bis) ────────────────
+    // The residual gap the loose pass above does NOT close: a PREBUILT atlas under a SINGLE-format format-only
+    // profile (one scale-1 tier ⇒ profileHasLowerTier=false ⇒ tieringOn=false, AND formats.length===1) was
+    // transcoded to the chosen format ONLY when its PAGE earned a `format` finding (the passthrough-transcode
+    // op at the loose handler). A page already in the target format, near-optimal, or sub-threshold passed
+    // through VERBATIM ⇒ picking "AVIF, single tier" silently produced a MIXED-format folder. An explicit
+    // "emit the chosen format for the WHOLE folder" request must force EVERY eligible prebuilt page too.
+    // SCOPE — SINGLE-format only (profileMulti=false): a multi-format profile can't safely fan one page across
+    // N sidecar entries (the existing :2460 guard), and a MULTI-tier profile already forces atlases via the
+    // tier loop (loop #1). So this whole block is inside `profileOn && !profileHasLowerTier && !profileMulti`
+    // — profile absent / multi-tier / multi-format ⇒ it NEVER runs ⇒ `out`/zip byte-identical to today.
+    // Must run BEFORE the pass-through loop (below) so the forced page's OLD path is in replaced/dropped and
+    // the pass-through doesn't ALSO ship the original. Respects every prior claim (replaced/dropped/profile-
+    // Owned) exactly like the loose pass. Honesty: every refusal is a surfaced skipped[] note (atlasNeedsForced
+    // Format returns the reason); keep-original-on-size-loss lives in forceAtlasFormat; identical pixel dims ⇒
+    // NO vramSaved (invariant 5). Deterministic: `merged` is a stable order; the target is formats[0].
+    if (profileOn && !profileHasLowerTier && !profileMulti) {
+      for (const a of merged) {
+        if (a.kind !== 'atlas') continue; // prebuilt atlases only (loose images already forced by the pass above)
+        const ref = a.atlas.name;
+        if (profileOwned.has(ref)) continue; // a riding transcode op already force-transcoded this page
+        const path = pathByRef.get(ref);
+        if (!path) continue;
+        if (replaced.has(path) || dropped.has(path)) continue; // claimed by a repack/merge/dedup/passthrough
+        const isSpinePage = spineRefs.has(ref);
+        const sidecar = isSpinePage ? spineInfoOf(ref)?.path : manifestPathOf(ref);
+        // Single target format (formats[0]; honors a per-ref override, which a single-format BASE could widen —
+        // the predicate's isMultiFormat guard then refuses an override-widened ref as multi-format, honestly).
+        const rp = resolveProfile(ref);
+        const targetMime = rp.formats[0]!.format;
+        const decision = atlasNeedsForcedFormat({
+          sourceMime: mimeOf(path),
+          targetMime,
+          isMultiFormat: rp.formats.length > 1,
+          isSpineMultiPage: isSpinePage && (spineInfoOf(ref)?.pages ?? 1) > 1,
+          hasSidecar: sidecar != null,
+          alreadyClaimed:
+            sidecar != null && (replaced.has(sidecar) || dropped.has(sidecar)),
+        });
+        if (!decision.force) {
+          if (decision.skipReason) skipped.push({ assetRef: ref, reason: decision.skipReason });
+          continue;
+        }
+        // force=true ⇒ sidecar is guaranteed present (the predicate refuses a missing one). Re-encode VERBATIM
+        // via the SHARED helper (single source of truth with the op handler) — it keeps-original-on-size-loss,
+        // renames the page, repoints + re-emits the sidecar, drops the old page (replaced.add), records the
+        // variant / change rows / KTX2 candidate / ops line. opaque undefined (no analysis channel-drop intent).
+        const { forced } = await forceAtlasFormat(ref, a.atlas, path, sidecar!, targetMime);
+        if (forced) {
+          // DISK file count (invariant 5: not a VRAM/saving claim). Mirror the loose path's owner bookkeeping —
+          // forceAtlasFormat already patched ownerActualName/ownerActualUnhashed when this ref is a dedup owner.
+          profileAssets++;
+          profileFilesEmitted++;
+          profileOwned.add(ref);
+        }
       }
     }
 

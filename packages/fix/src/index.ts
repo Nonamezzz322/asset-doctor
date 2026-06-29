@@ -57,6 +57,11 @@ export { dirOf, normalize, resolveImageRef, relativeImageRef } from './dedup-rep
 // dangling-reference guard — the worker and its Node round-trip test both import these (no re-implementation).
 export { EXT, renamedTo, predictOwnerFinalNames, isOwnerAwareDrop } from './dedup-exec';
 export type { OwnerFinalName, OwnerPlanInput } from './dedup-exec';
+// PURE eligibility predicate (AB-R3, §5d-bis): force the chosen format onto a prebuilt atlas page under a
+// SINGLE-format format-only profile. Lifts the worker's inline prebuilt-atlas passthrough gate logic so the
+// new atlas-force driver and a Node test share ONE decision (no drift).
+export { atlasNeedsForcedFormat } from './atlasProfileForce';
+export type { AtlasForceArgs, AtlasForceDecision } from './atlasProfileForce';
 
 // ── GPU-residency CEILING (round12 backend-processing §7) ──────────────────────────────────────
 // PURE worst-case VRAM helper: raster ⇒ w·h·4 (today's model); KTX2/compressed ⇒ ≤ ~1 B/px CEILING
