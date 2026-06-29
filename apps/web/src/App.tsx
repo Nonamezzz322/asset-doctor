@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type SyntheticEvent } from 'react';
 import type { AnalysisReport, AssetMetrics, BundleAvailability, ExportFormat, ExportProfile, Finding, FormatTarget, LazyMarking, ProfileOverride, ResolutionTier, ScaleTier, Severity, SkinGuard } from '@asset-doctor/core';
 import type { PackMode, StaticGranularity } from '@asset-doctor/ingest';
 import { bundleOf, cmp } from '@asset-doctor/analysis';
@@ -18,6 +18,7 @@ import { runAnalysis, type Progress } from './lib/worker-client';
 import { planFix, runFix, type FixOutcome, type FixProgress } from './lib/fix-client';
 import type { BackendOptions, FixChange, FixOptions, FixPlanSummary, FixReceipt, NativeOpKind, SheetDiff } from './worker/fix-protocol';
 import { fmtBytes } from './lib/format';
+import { OPTIMIZE_ENTRY, optimizeEntryEnabled, PROFILE_PANEL_ANCHOR } from './lib/optimize-entry';
 import { groupOps, OP_KIND_ORDER, REFERENCE_CHANGING, type OpKind } from './lib/op-manifest';
 import { migrationSnippet, type Engine } from './lib/loader-migration';
 import { LOCALES, NATIVE_NAME, useI18n } from './lib/i18n';
@@ -54,6 +55,10 @@ export function App() {
   const { t } = useI18n();
   const [phase, setPhase] = useState<Phase>({ t: 'idle' });
   const [files, setFiles] = useState<PickedFile[]>([]);
+  // AB-R2: presentation-only deep-link flag for the first-class "optimize this folder" affordance. Lifted
+  // here so the results-aside anchor (below) and FixCard's ExportProfilePanel share ONE source of truth.
+  // Default false ⇒ panel default-collapsed ⇒ render byte-identical to today until the anchor is clicked.
+  const [profilePanelOpen, setProfilePanelOpen] = useState(false);
   // Round 21 #2: LAZY dir-aware byte readers for the picked folder — keyed by the SAME keyOf the workers/probe
   // use so a basename collision across folders never resolves the wrong bytes. Replaces the former EAGER byte
   // `map` (which captured `f.bytes` BEFORE runAnalysis transferred — and would hold DETACHED buffers after the
@@ -405,7 +410,24 @@ export function App() {
                   )}
                   <h2 className="font-mono text-xs uppercase tracking-[0.06em] text-teal">{t('findings.title')}</h2>
                   <Findings findings={assetFindings} selectedId={selectedFinding} onSelect={setSelectedFinding} />
-                  <FixCard files={files} />
+                  <FixCard files={files} profilePanelOpen={profilePanelOpen} setProfilePanelOpen={setProfilePanelOpen} />
+                  {/* AB-R2: first-class deep-link to the optimize/build config. Gated on having files (inert
+                      otherwise). Opens the (lifted) ExportProfilePanel and scrolls the FixCard into view; if
+                      the Pro gate is ON + locked, the card shows activation — scrolling there is honest, no
+                      false promise. Smooth scroll is honored unless the user prefers reduced motion. */}
+                  {optimizeEntryEnabled(files.length, true) ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfilePanelOpen(true);
+                        const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+                        document.getElementById(PROFILE_PANEL_ANCHOR)?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth' });
+                      }}
+                      className="block font-mono text-xs text-teal underline-offset-2 hover:underline"
+                    >
+                      {t(OPTIMIZE_ENTRY.anchorKey)}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => setPhase({ t: 'idle' })}
@@ -1205,6 +1227,8 @@ function ExportProfilePanel({
   setOverrides,
   avifSubsample,
   setAvifSubsample,
+  open,
+  onToggleOpen,
 }: {
   profileEnable: boolean;
   setProfileEnable: (b: boolean) => void;
@@ -1219,6 +1243,11 @@ function ExportProfilePanel({
   /** Profile-wide AVIF chroma subsample (3=4:4:4, 1=4:2:2, 0=4:2:0). undefined ⇒ @jsquash default (omit). */
   avifSubsample: number | undefined;
   setAvifSubsample: (s: number | undefined) => void;
+  /** AB-R2 deep-link: when defined, the outer <details> becomes CONTROLLED so the results-aside anchor can
+   *  open it. undefined ⇒ uncontrolled, default-collapsed (today's render is byte-identical). onToggleOpen
+   *  fires on native disclosure clicks so a manual collapse keeps the lifted state in sync (no desync). */
+  open?: boolean;
+  onToggleOpen?: () => void;
 }) {
   const { t } = useI18n();
   const patch = (mime: ExportFormat, p: Partial<ProfileFormatState>): void => setFormats({ ...formats, [mime]: { ...formats[mime], ...p } });
@@ -1232,8 +1261,23 @@ function ExportProfilePanel({
   const patchOverride = (i: number, p: Partial<UiOverride>): void => setOverrides(overrides.map((o, j) => (j === i ? { ...o, ...p } : o)));
   const removeOverride = (i: number): void => setOverrides(overrides.filter((_, j) => j !== i));
 
+  // AB-R2: controlled only when `open` is supplied (deep-link from the results-aside anchor). undefined ⇒
+  // omit the prop entirely ⇒ native uncontrolled <details>, default-collapsed — byte-identical to today.
+  // onToggle keeps the lifted state in sync with native disclosure clicks (open OR manual collapse), and
+  // only fires the callback when the DOM open-state actually diverges from the controlled value, so a
+  // controlled re-render that re-asserts the same state never loops.
+  const onToggle = onToggleOpen
+    ? (e: SyntheticEvent<HTMLDetailsElement>): void => {
+        if (open === undefined || e.currentTarget.open !== open) onToggleOpen();
+      }
+    : undefined;
   return (
-    <details className="mt-2 rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
+    <details
+      id={PROFILE_PANEL_ANCHOR}
+      {...(open !== undefined ? { open } : {})}
+      onToggle={onToggle}
+      className="mt-2 rounded-md border border-line bg-bg p-2 text-left open:pb-2.5"
+    >
       <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">{t('fix.profile.title')}</summary>
 
       <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.profile.hint')}</p>
@@ -1425,7 +1469,7 @@ function ExportProfilePanel({
 // The Phase-2 fix: repack + transcode the loaded folder in a worker, then download a drop-in
 // optimized .zip. Assets never leave the device. The Pro gate is OFF by default (free) and only
 // engages when VITE_PRO_GATE === 'true' — then a valid offline-verified entitlement is required.
-function FixCard({ files }: { files: PickedFile[] }) {
+function FixCard({ files, profilePanelOpen, setProfilePanelOpen }: { files: PickedFile[]; profilePanelOpen: boolean; setProfilePanelOpen: (b: boolean) => void }) {
   const { t } = useI18n();
   const [phase, setPhase] = useState<FixPhase>({ t: 'idle' });
   const [aggressive, setAggressive] = useState(false);
@@ -1928,7 +1972,13 @@ function FixCard({ files }: { files: PickedFile[] }) {
 
   return (
     <div className="rounded-xl border-2 border-teal/70 bg-panel p-4 text-center">
-      <p className="font-mono text-xs text-ink-soft">{t('pro.note')}</p>
+      {/* AB-R2: first-class "optimize this folder" header — names the capability the SAME Pro fix engine
+          already has (convert / scale variants / repack, structure preserved). Honest copy, no new claim;
+          pro.note is retained below as the small Phase-2 sub-note. Token-driven (font-display / font-mono /
+          text-ink / text-ink-soft / teal — no new tokens). */}
+      <h3 className="font-display text-base font-semibold text-ink">{t(OPTIMIZE_ENTRY.titleKey)}</h3>
+      <p className="mx-auto mt-1 max-w-sm font-mono text-[11px] leading-relaxed text-ink-soft">{t(OPTIMIZE_ENTRY.subKey)}</p>
+      <p className="mt-1 font-mono text-[10px] text-ink-soft/70">{t('pro.note')}</p>
       {phase.t === 'planning' ? (
         <p className="mt-2.5 font-mono text-xs text-teal">{t('dropzone.analyzing')}</p>
       ) : phase.t === 'running' ? (
@@ -2005,6 +2055,8 @@ function FixCard({ files }: { files: PickedFile[] }) {
             setOverrides={setProfileOverrides}
             avifSubsample={profileAvifSubsample}
             setAvifSubsample={setProfileAvifSubsample}
+            open={profilePanelOpen}
+            onToggleOpen={() => setProfilePanelOpen(!profilePanelOpen)}
           />
 
           {/* PixiJS-v8 asset manifest (round8-pixi-manifest.md C6) — additive, DEFAULT OFF. Off ⇒ no extra
