@@ -9,7 +9,7 @@ the Pro fix generates optimized output; native-only ops run on an opt-in backend
 ## 1. Diagnosis — the free audit (in-browser, objective, ≤10s)
 
 - **Whole-folder import** — File System Access API + `webkitdirectory` fallback + drag-drop; dir-aware grouping (manifest/spine + image) into a normalized `Asset` model.
-- **Parsers** — TexturePacker JSON (Hash + Array), PixiJS atlas, single PNG/WebP/JPG/AVIF (header-based dims), and Spine/libGDX `.atlas` (legacy + modern, multi-page, rotation/trim). Pure & worker-safe.
+- **Parsers** — TexturePacker JSON (Hash + Array), PixiJS atlas, single PNG/WebP/JPG/AVIF (header-based dims), Spine/libGDX `.atlas` (legacy + modern, multi-page, rotation/trim), and BMFont `.fnt` in **all three serializations — TEXT, XML, and binary** (byte-identical `FntPage[]`; binary is the BMFont.exe/libGDX default). Pure & worker-safe.
 - **Occupancy + wasted-region map** — grid coverage map per atlas; highlights empty space (the film-viewer overlay).
 - **Dimensions audit** — NPOT (gated on real POT-padding-waste) + oversize (calibrated edge threshold).
 - **Format audit** — tries a real AVIF/WebP encode and only reports a saving it actually measured.
@@ -23,6 +23,7 @@ the Pro fix generates optimized output; native-only ops run on an opt-in backend
 - **Solid-fill detector** — single-color images pinning VRAM for one color (reuses the decoded 9×8 sample).
 - **Wasted-alpha detector** — fully-opaque images carrying an alpha channel (full-frame opaque pass, short-circuit, instant-wow safe); disk-only saving.
 - **Frame-redundancy detector** — byte-identical duplicate frames *within* an atlas (per-region SHA, flat-guarded, instant-wow caps); exact wasted atlas-area/VRAM.
+- **Strippable-metadata detector** — pure header-only byte-walk (no decode) summing EXACT strippable ancillary bytes (PNG `iCCP/eXIf/tEXt/iTXt/zTXt/tIME`, JPEG `APP1..15`+`COM`, WebP `EXIF/XMP/ICCP`; render-affecting chunks excluded); **disk-only** saving (the GPU decodes to RGBA8888 regardless), MAX-de-overlapped vs the format/wasted-alpha findings, names the existing oxipng/re-encode fix. Conservative true lower bound (never over-claims).
 - **Unparsed-file surfacing** — files that look like a manifest but can't be parsed are shown honestly (never silently dropped) + hardened frame/Spine parsers (reject neg/zero/OOB rects; Spine `numsRaw` per-region recovery).
 
 ## 2. Render-probe & runtime profiler (the moat)
@@ -75,6 +76,7 @@ the Pro fix generates optimized output; native-only ops run on an opt-in backend
 - **KTX2 GPU-compressed textures** — a Go `toktx` sidecar (`apps/encoder`) encodes `.ktx2` (UASTC + zstd + mips); the only fix that cuts real **GPU VRAM 4–8×** (browser-impossible). Reached through `apps/api` as an entitlement-gated reverse proxy (keeps the billing backend thin). Hardened sidecar (non-root, RO-FS, caps, no persistence, no image-byte logging).
 - **Measured KTX2 VRAM probe** — transcodes the produced `.ktx2` on the probing GPU and reads real compressed residency (`compressedTexImage2D` instrument); shown beside the worst-case ceiling, device-local. Transcoder is self-hosted (no CDN fetch).
 - **pngquant lossy-PNG** — a 2nd sidecar op (256-color quantization, browser-impossible); disk-only (never a VRAM claim); quality-floor decline kept-not-failed.
+- **libvips lanczos3 resample** — a 3rd sidecar op that downscales a scale-tier with a high-quality kernel the browser canvas can't be steered to, replacing the browser tile at the SAME dims/format; carries ONLY a MEASURED high-frequency-energy retention delta (a fact, never a "sharper" verdict — invariant 3) and NO VRAM/disk claim (invariant 5). Fires on **every genuinely downscaled tier including the oversize-clamped TOP tier** (`dst < src`, not just `tier.scale < 1`), with an honest skip note when suppressed by content-hash filenames.
 - **Privacy model** — assets leave the device ONLY on explicit per-run opt-in + consent (with an upload count/preview); default OFF ⇒ everything stays local and byte-identical.
 
 ## 7. Backend — Slice B (thin Go billing/license)
@@ -96,4 +98,4 @@ the Pro fix generates optimized output; native-only ops run on an opt-in backend
 
 ---
 
-*Generated mid-session 2026-06-29. Branch `feat/asset-pipeline` (= local `main`), ~31 commits over `origin/main`, all green. Deploy (GH Pages) awaits the user's `git push origin main`; live backend ops need the toktx/pngquant binaries in the deployed sidecar.*
+*Updated 2026-06-29 (through round 25). Branch `feat/asset-pipeline` (= local `main`), ~52 commits over `origin/main`, all green. Deploy (GH Pages) awaits the user's `git push origin main`; live backend ops need the toktx/pngquant/vips binaries in the deployed sidecar.*
