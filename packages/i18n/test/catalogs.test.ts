@@ -41,6 +41,13 @@ describe('catalog completeness (all 9 locales)', () => {
       // Texture-bleeding plural — both forms carry {pairs}, no leftover braces in any locale.
       expect(translate(loc, 'find.bleeding.title', { pairs: 1 })).not.toContain('{');
       expect(translate(loc, 'find.bleeding.title', { pairs: 5 })).not.toContain('{');
+      // Declared-vs-real dimension mismatch — the three direction messageKeys all carry {dw}{dh}{rw}{rh}
+      // (the off-edge detail also {off}); every locale fills them with no leftover braces.
+      const dmP = { dw: 1024, dh: 1024, rw: 512, rh: 512, off: 2, dir: 'shrunk' };
+      expect(translate(loc, 'find.dimension-mismatch-shrunk-offedge.title', dmP)).not.toContain('{');
+      expect(translate(loc, 'find.dimension-mismatch-shrunk-offedge.detail', dmP)).not.toContain('{');
+      expect(translate(loc, 'find.dimension-mismatch-shrunk.detail', dmP)).not.toContain('{');
+      expect(translate(loc, 'find.dimension-mismatch-grown.detail', dmP)).not.toContain('{');
       // round22 #2: the honest footprint preview — the alsoRuns plural (both forms carry {n}) + the two
       // measured-now :bytes templates render without leftover braces in every locale.
       expect(translate(loc, 'fix.plan.alsoRuns', { n: 1 })).not.toContain('{');

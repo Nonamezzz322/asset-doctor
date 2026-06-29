@@ -10,6 +10,7 @@ import {
   frameRedundancyFinding,
   trimMarginFinding,
   bleedingFinding,
+  dimensionMismatchFinding,
   wastedAlphaFinding,
   strippableMetadataFinding,
   strippableMetadataAggregateFinding,
@@ -69,6 +70,27 @@ async function realFindings(): Promise<Finding[]> {
     sprites: [0, 1].map((i) => ({ name: `t${i}`, frame: { x: i * 32, y: 0, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 32, h: 32 } })),
   };
   out.push(bleedingFinding(blAtlas, { ...cfg, bleeding: { minPairs: 1, warnPairs: 16 } })!);
+  // dimension-mismatch: three direction-distinct messageKeys (one Rule). CORRECTNESS findings — NO estimate.
+  // (a) shrunk + off-edge (crit): declared 1024² but the real image is 512², and a frame is placed past 512.
+  const dmAtlas: Atlas = {
+    name: 'declared.png', imageRef: 'declared.png', size: { w: 1024, h: 1024 }, source: { kind: 'pixi' },
+    sprites: [{ name: 'off', frame: { x: 600, y: 0, w: 100, h: 100 }, rotated: false, trimmed: false, sourceSize: { w: 100, h: 100 } }],
+  };
+  const dmImg512: ImageAsset = { name: 'declared.png', imageRef: 'declared.png', size: { w: 512, h: 512 }, mime: 'image/png', byteSize: 8000 };
+  out.push(dimensionMismatchFinding(dmAtlas, dmImg512, cfg)!);
+  // (b) shrunk, all frames in bounds (warn): declared 1024², real 512², the only frame fits within 512.
+  const dmAtlasIn: Atlas = {
+    name: 'declared-in.png', imageRef: 'declared-in.png', size: { w: 1024, h: 1024 }, source: { kind: 'pixi' },
+    sprites: [{ name: 'in', frame: { x: 0, y: 0, w: 100, h: 100 }, rotated: false, trimmed: false, sourceSize: { w: 100, h: 100 } }],
+  };
+  out.push(dimensionMismatchFinding(dmAtlasIn, dmImg512, cfg)!);
+  // (c) grown (info): declared 512² but the real image is 1024² (extra border the manifest doesn't map).
+  const dmAtlasGrown: Atlas = {
+    name: 'declared-small.png', imageRef: 'declared-small.png', size: { w: 512, h: 512 }, source: { kind: 'pixi' },
+    sprites: [{ name: 'g', frame: { x: 0, y: 0, w: 100, h: 100 }, rotated: false, trimmed: false, sourceSize: { w: 100, h: 100 } }],
+  };
+  const dmImg1024: ImageAsset = { name: 'declared-small.png', imageRef: 'declared-small.png', size: { w: 1024, h: 1024 }, mime: 'image/png', byteSize: 8000 };
+  out.push(dimensionMismatchFinding(dmAtlasGrown, dmImg1024, cfg)!);
   // wasted-alpha: a fully-opaque PNG re-encoded opaque saves bytes (sizer 7000 < byteSize 10000 = 30%)
   out.push((await wastedAlphaFinding('flat.png', img('flat.png', 256, 256, 10000).image, cfg, async () => 7000))!);
   // strippable-metadata: a PNG carrying 80 KB of ICC/EXIF metadata ⇒ warn (≥ warnBytes 64 KB). DISK-only.
@@ -117,7 +139,7 @@ describe('renderFinding — English catalog reproduces the baked strings (drift 
     const findings = await realFindings();
     const keys = new Set(findings.map((f) => f.messageKey));
     // sanity: we exercised every messageKey family the rules emit
-    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'frame-redundancy', 'trim-margin', 'bleeding', 'cross-atlas-redundancy', 'font-glyph-page', 'wasted-alpha', 'strippable-metadata', 'strippable-metadata-aggregate', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'integrity', 'format-aggregate', 'variants']));
+    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'frame-redundancy', 'trim-margin', 'bleeding', 'dimension-mismatch-shrunk-offedge', 'dimension-mismatch-shrunk', 'dimension-mismatch-grown', 'cross-atlas-redundancy', 'font-glyph-page', 'wasted-alpha', 'strippable-metadata', 'strippable-metadata-aggregate', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'integrity', 'format-aggregate', 'variants']));
     for (const f of findings) {
       expect(f.messageKey, `${f.id} must carry a messageKey`).toBeTruthy();
       const r = renderFinding(f, 'en');

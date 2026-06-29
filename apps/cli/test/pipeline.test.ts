@@ -36,4 +36,26 @@ describe('auditDir (Node pipeline)', () => {
     const { assetSizes } = await auditDir(fix('single-images'));
     expect(assetSizes['hero.png']).toEqual({ w: 2050, h: 2050 });
   });
+
+  it('surfaces dimension-mismatch on the CLI with NO config (DEFAULT_THRESHOLDS opt-in)', async () => {
+    // The fixture's meta.size declares 1024² but the real PNG is 512²; one frame samples past the real
+    // edge ⇒ crit. resolveThresholds(undefined) returns DEFAULT_THRESHOLDS whole, so the rule fires headlessly.
+    const { report } = await auditDir(fix('dimension-mismatch'));
+    const dm = report.findings.find((f) => f.rule === 'dimension-mismatch');
+    expect(dm).toBeDefined();
+    expect(dm?.severity).toBe('crit');
+    expect(dm?.estimate).toBeUndefined(); // correctness finding — never a saving (invariant 5)
+    expect(report.totals.potentialDiskSaved).toBe(0); // nothing flows into the disk headline
+  });
+
+  it('a budget config that supplies thresholds (omitting dimensionMismatch) suppresses it', async () => {
+    // resolveThresholds keeps only the seven enumerated groups when a config's thresholds object is present,
+    // so dimensionMismatch (NOT enumerated) drops out and the finding is suppressed — mirrors bleeding.
+    const { report } = await auditDir(fix('dimension-mismatch'), {
+      version: 1,
+      budgets: {},
+      thresholds: { occupancy: { warn: 0.8, crit: 0.6 } },
+    });
+    expect(report.findings.some((f) => f.rule === 'dimension-mismatch')).toBe(false);
+  });
 });

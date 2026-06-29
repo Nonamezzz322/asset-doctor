@@ -10,10 +10,39 @@ GitHub creds — user pushes); commit hashes below are over that base.
 
 ---
 
-## Round 28 — selection (2 deferred-item picks; multipacks shipped) — 2026-06-29
+## Round 28 — selection (2 deferred-item picks; all shipped) — 2026-06-29
 Round 28 targeted the two strongest DEFERRED backlog items the round-27 judge flagged as deserving their own
 scoped rounds (both premise-verified, rejected from r27 only for scope): a skeptic-architect re-verified each
 against the real code and returned **PROCEED** for both. Designs in `docs/improvements/round28-*.md`.
+
+- **(gamedev/honesty) declared-vs-real atlas dimension-mismatch detector — the always-on static sibling of the
+  render-probe label** (`docs/improvements/round28-dimension-mismatch.md`)
+  — For an atlas, `atlas.size` is the DECLARED manifest size (`meta.size` / Spine page `size:`) while
+  `image.size` is the REAL decoded pixel header — yet `analyze.ts` charges VRAM + runs `dimensionFindings` on the
+  DECLARED value and **never compares the two** for atlases, so a stale/downscaled/POT-rounded manifest (frames
+  sampling off a smaller real texture, UVs shifted) was invisible in the free audit (surfaced only by the
+  optional WebGL render-probe label). Worse, the parser's own out-of-bounds frame pass tests the DECLARED size,
+  so a frame can pass it yet sample outside the smaller real texture. **New pure rule**
+  `dimensionMismatchFinding(atlas, image, cfg)` (zero decode, integer compare of two numbers the parser already
+  holds) with a calibrated **absolute tolerance** (`tolerancePx: 2` — benign odd-trim/rounding stays SILENT;
+  healthy trimmed/POT atlases have declared==real and never fire) and **direction handling**: real<declared with
+  a placed frame past the real bounds ⇒ `crit` (frames sample off the real edge — the bug the OOB pass misses);
+  real<declared all in-bounds ⇒ `warn`; real>declared (extra border) ⇒ `info`. **Invariant-5 honest:** carries
+  **NO estimate at all** — it states TWO MEASUREMENTS (declared W×H vs real W×H), never a delta-saving, and
+  factually discloses that the static VRAM estimate is charged on the declared size so it over-/under-states the
+  real footprint (a disclosure of the existing accounting, never a fix-saving claim); no overlay. Fires
+  in-browser + on CLI `audit`/`init` via `DEFAULT_THRESHOLDS`; suppressed when a budget config omits the key
+  (not in `resolveThresholds`, same posture as bleeding). **Contained — DETECT only:** no VRAM-basis change, no
+  parser OOB change, no fix-engine, no worker/backend change.
+  — **i18n**: three flat per-direction messageKeys under the one `dimension-mismatch` Rule (the proven
+  `format`/`format-lossless` routing — no renderer change), across all 9 locales with identical `{dw}{dh}{rw}{rh}`
+  (+`{off}`) placeholders; render-drift + catalogs parity green. **Golden**: a hand-authored
+  `fixtures/sample-projects/dimension-mismatch/` (declared 1024² + real 512² PNG + one off-edge frame),
+  expected.json reconciled honestly through the real parse→analyze path; the **3 existing ATLAS_CASES goldens
+  stay green with NO expected.json edits** (verified zero existing fixtures diverge). CLI test asserts it fires
+  via `auditDir` and is suppressed by a budget config. Review verdict: **SHIP** (zero blockers/majors; honestyOk
+  + noFalsePositive). Gate: typecheck + analysis (161) + i18n (25) + budget (31) + cli (15) + full vitest + lint
+  green.
 
 - **(parity/honesty) preserve `meta.related_multi_packs` on the verbatim passthrough/resize re-emit — multipack
   round-trip safety on the PAID path** (`docs/improvements/round28-multipacks-preserve.md`)

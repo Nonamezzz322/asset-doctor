@@ -157,6 +157,15 @@
     "other": "{pairs} pares de fotogramas en este atlas se tocan sin separación entre ellos. SI tus sprites usan filtrado lineal/trilineal o mipmaps, el muestreador puede arrastrar los téxeles del borde del vecino y mostrar costuras de 1px; el pixel art con vecino más cercano no se ve afectado."
   },
   "find.bleeding.fix": "Reempaqueta con una separación de 1–2px y extrusión de bordes (bleed) para que los fotogramas en contacto no muestreen a través del límite — la opción de extrusión del fix Pro lo hace.",
+  "find.dimension-mismatch-shrunk-offedge.title": "El manifiesto declara {dw}×{dh} — la imagen en realidad es {rw}×{rh}",
+  "find.dimension-mismatch-shrunk-offedge.detail": "El tamaño declarado en el manifiesto {dw}×{dh} es mayor que la textura real {rw}×{rh}. {off} fotograma(s) referencian píxeles más allá del borde real y muestrearán transparencia/basura en tiempo de ejecución (la comprobación de límites usa el tamaño declarado y no lo detecta). La estimación estática de VRAM (w·h·4) se calcula sobre el tamaño DECLARADO, por lo que SOBRESTIMA la huella real. Son dos mediciones, no un ahorro.",
+  "find.dimension-mismatch-shrunk-offedge.fix": "Vuelve a exportar el atlas para que meta.size coincida con la imagen real, o vuelve a exportar la imagen al tamaño declarado — el manifiesto y la textura deben coincidir.",
+  "find.dimension-mismatch-shrunk.title": "El manifiesto declara {dw}×{dh} — la imagen en realidad es {rw}×{rh}",
+  "find.dimension-mismatch-shrunk.detail": "El tamaño declarado en el manifiesto {dw}×{dh} es mayor que la textura real {rw}×{rh}. Los fotogramas permanecen dentro de los límites, pero el mapeo UV asume el lienzo declarado y la estimación estática de VRAM (w·h·4, calculada sobre el tamaño DECLARADO) sobrestima los píxeles reales. Son dos mediciones, no un ahorro.",
+  "find.dimension-mismatch-shrunk.fix": "Vuelve a exportar el atlas para que meta.size coincida con la imagen real, o vuelve a exportar la imagen al tamaño declarado — el manifiesto y la textura deben coincidir.",
+  "find.dimension-mismatch-grown.title": "El manifiesto declara {dw}×{dh} — la imagen en realidad es {rw}×{rh}",
+  "find.dimension-mismatch-grown.detail": "El tamaño declarado en el manifiesto {dw}×{dh} es menor que la textura real {rw}×{rh}; la imagen lleva un borde extra que el manifiesto no mapea. Los fotogramas permanecen dentro de los límites; la estimación estática de VRAM (w·h·4, calculada sobre el tamaño DECLARADO) subestima los píxeles reales. Son dos mediciones, no un ahorro.",
+  "find.dimension-mismatch-grown.fix": "Vuelve a exportar el atlas para que meta.size coincida con la imagen real, o vuelve a exportar la imagen al tamaño declarado — el manifiesto y la textura deben coincidir.",
   "find.cross-atlas-redundancy.title": {
     "$count": "dupes",
     "one": "{dupes} fotograma duplicado en {sheets} atlas — píxeles idénticos en hojas separadas",

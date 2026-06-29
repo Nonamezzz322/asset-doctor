@@ -24,6 +24,7 @@ import { DEFAULT_THRESHOLDS } from './config';
 import {
   bleedingFinding,
   dimensionFindings,
+  dimensionMismatchFinding,
   formatFinding,
   frameRedundancyFinding,
   occupancyFinding,
@@ -215,6 +216,14 @@ export async function analyze(
       // no finding ⇒ byte-identical.
       const bleed = bleedingFinding(atlas, cfg);
       if (bleed) findings.push(bleed);
+      // Declared (atlas.size = manifest meta.size / Spine page size:) vs REAL (image.size = decoded pixel
+      // header) atlas dimensions. A pure integer compare of two values the parser already holds — the
+      // always-on static sibling of the optional render-probe's declared-vs-measured label. A CORRECTNESS
+      // finding: NO saving (it states two measurements, invariant 5), so NOTHING flows into
+      // potentialDiskSaved/totals. Absent cfg.dimensionMismatch (a budget config that omits it) ⇒ no finding
+      // ⇒ byte-identical; DEFAULT_THRESHOLDS keeps it on for browser + CLI audit/init.
+      const dm = dimensionMismatchFinding(atlas, image, cfg);
+      if (dm) findings.push(dm);
       await addFormat(atlas.name, image, 'unknown'); // M1: atlases keep today's lossy verdict
       // Strippable ancillary metadata on the atlas PAGE image (the manifest JSON is never scanned). De-overlapped
       // with the page's format saving via bumpBest (one re-encode transcodes AND strips the metadata).

@@ -155,6 +155,15 @@
     "other": "{pairs} Frame-Paare in diesem Atlas berühren sich ohne Abstand dazwischen. WENN deine Sprites lineare/trilineare Filterung oder Mipmaps verwenden, kann der Sampler die Randtexel des Nachbarn hereinziehen und 1px-Nähte zeigen; Nearest-Neighbor-Pixelart ist nicht betroffen."
   },
   "find.bleeding.fix": "Mit 1–2px Abstand neu packen und Kanten extrudieren (Bleed), damit sich berührende Frames nicht über die Grenze samplen — die Extrude-Option des Pro-Fix erledigt das.",
+  "find.dimension-mismatch-shrunk-offedge.title": "Manifest deklariert {dw}×{dh} — das Bild ist tatsächlich {rw}×{rh}",
+  "find.dimension-mismatch-shrunk-offedge.detail": "Die im Manifest deklarierte Größe {dw}×{dh} ist größer als die echte Textur {rw}×{rh}. {off} Frame(s) verweisen auf Pixel jenseits der echten Kante und samplen zur Laufzeit Transparenz/Müll (die Grenzprüfung nutzt die deklarierte Größe und übersieht das). Die statische VRAM-Schätzung (w·h·4) wird auf der DEKLARIERTEN Größe berechnet und ÜBERSCHÄTZT daher den echten Speicherbedarf. Das sind zwei Messungen, keine Ersparnis.",
+  "find.dimension-mismatch-shrunk-offedge.fix": "Exportiere den Atlas neu, damit meta.size dem tatsächlichen Bild entspricht, oder exportiere das Bild in der deklarierten Größe neu — Manifest und Textur müssen übereinstimmen.",
+  "find.dimension-mismatch-shrunk.title": "Manifest deklariert {dw}×{dh} — das Bild ist tatsächlich {rw}×{rh}",
+  "find.dimension-mismatch-shrunk.detail": "Die im Manifest deklarierte Größe {dw}×{dh} ist größer als die echte Textur {rw}×{rh}. Die Frames bleiben innerhalb der Grenzen, aber das UV-Mapping geht von der deklarierten Leinwand aus und die statische VRAM-Schätzung (w·h·4, auf der DEKLARIERTEN Größe berechnet) überschätzt die echten Pixel. Das sind zwei Messungen, keine Ersparnis.",
+  "find.dimension-mismatch-shrunk.fix": "Exportiere den Atlas neu, damit meta.size dem tatsächlichen Bild entspricht, oder exportiere das Bild in der deklarierten Größe neu — Manifest und Textur müssen übereinstimmen.",
+  "find.dimension-mismatch-grown.title": "Manifest deklariert {dw}×{dh} — das Bild ist tatsächlich {rw}×{rh}",
+  "find.dimension-mismatch-grown.detail": "Die im Manifest deklarierte Größe {dw}×{dh} ist kleiner als die echte Textur {rw}×{rh}; das Bild trägt einen zusätzlichen Rand, den das Manifest nicht abbildet. Die Frames bleiben innerhalb der Grenzen; die statische VRAM-Schätzung (w·h·4, auf der DEKLARIERTEN Größe berechnet) unterschätzt die echten Pixel. Das sind zwei Messungen, keine Ersparnis.",
+  "find.dimension-mismatch-grown.fix": "Exportiere den Atlas neu, damit meta.size dem tatsächlichen Bild entspricht, oder exportiere das Bild in der deklarierten Größe neu — Manifest und Textur müssen übereinstimmen.",
   "find.cross-atlas-redundancy.title": {
     "$count": "dupes",
     "one": "{dupes} doppelter Frame über {sheets} Atlanten — identische Pixel auf getrennten Sheets",

@@ -17,6 +17,7 @@ export {
   frameRedundancyFinding,
   trimMarginFinding,
   bleedingFinding,
+  dimensionMismatchFinding,
   wastedAlphaFinding,
   strippableMetadataFinding,
   wastedRegions,

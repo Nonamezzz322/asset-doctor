@@ -153,6 +153,15 @@
     "other": "此图集中有 {pairs} 对帧彼此相接、之间没有间距。如果你的精灵使用线性/三线性过滤或 mipmap，采样器可能拉入相邻帧的边缘纹素并显示 1px 接缝；最近邻像素美术不受影响。"
   },
   "find.bleeding.fix": "以 1–2px 间距重排并对边缘进行扩边（bleed），使相接的帧不会跨越边界采样 — Pro 修复的扩边选项可做到这一点。",
+  "find.dimension-mismatch-shrunk-offedge.title": "清单声明 {dw}×{dh} — 图像实际为 {rw}×{rh}",
+  "find.dimension-mismatch-shrunk-offedge.detail": "清单声明的尺寸 {dw}×{dh} 大于真实纹理 {rw}×{rh}。有 {off} 个帧引用了真实边缘之外的像素，运行时会采样到透明/垃圾内容（边界检查使用声明尺寸，因而漏掉了这一点）。静态显存估算（w·h·4）按声明尺寸计算，因此高估了真实占用。这是两个测量值，而非节省量。",
+  "find.dimension-mismatch-shrunk-offedge.fix": "重新导出图集使 meta.size 与实际图像一致，或按声明尺寸重新导出图像 — 清单与纹理必须一致。",
+  "find.dimension-mismatch-shrunk.title": "清单声明 {dw}×{dh} — 图像实际为 {rw}×{rh}",
+  "find.dimension-mismatch-shrunk.detail": "清单声明的尺寸 {dw}×{dh} 大于真实纹理 {rw}×{rh}。帧仍在边界内，但 UV 映射假定的是声明的画布，且静态显存估算（w·h·4，按声明尺寸计算）高估了真实像素。这是两个测量值，而非节省量。",
+  "find.dimension-mismatch-shrunk.fix": "重新导出图集使 meta.size 与实际图像一致，或按声明尺寸重新导出图像 — 清单与纹理必须一致。",
+  "find.dimension-mismatch-grown.title": "清单声明 {dw}×{dh} — 图像实际为 {rw}×{rh}",
+  "find.dimension-mismatch-grown.detail": "清单声明的尺寸 {dw}×{dh} 小于真实纹理 {rw}×{rh}；图像带有清单未映射的额外边框。帧仍在边界内；静态显存估算（w·h·4，按声明尺寸计算）低估了真实像素。这是两个测量值，而非节省量。",
+  "find.dimension-mismatch-grown.fix": "重新导出图集使 meta.size 与实际图像一致，或按声明尺寸重新导出图像 — 清单与纹理必须一致。",
   "find.cross-atlas-redundancy.title": {
     "$count": "dupes",
     "one": "{dupes} 个重复帧跨 {sheets} 个图集 — 不同图集上像素完全相同",

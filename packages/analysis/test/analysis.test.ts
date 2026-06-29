@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import type { Asset, Atlas, ImageAsset, ImageMime, Rect } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseFntText, parseFntPage, type FntPage } from '@asset-doctor/parsers';
 import { groupFiles, type RawFile } from '@asset-doctor/ingest';
-import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, crossAtlasRedundancyFinding, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, crossAtlasRedundancyFinding, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -31,6 +31,8 @@ const ATLAS_CASES = [
   { dir: 'tp-hash-symbols', manifest: 'symbols.json', img: 'symbols.png' },
   { dir: 'tp-array-oversize', manifest: 'sheet.json', img: 'sheet.png' },
   { dir: 'pixi-packed-ok', manifest: 'packed.json', img: 'packed.png' },
+  // Declared meta.size (1024²) ≠ the real PNG (512²); one frame sampled past the real edge → crit.
+  { dir: 'dimension-mismatch', manifest: 'sheet.json', img: 'sheet.png' },
 ];
 
 describe('analyze — atlas goldens', () => {
@@ -847,6 +849,115 @@ describe('bleeding (frame pairs touching with 0px gutter)', () => {
     // 2 frames with a 1px gutter ⇒ no pair ⇒ no bleeding finding, even with the DEFAULT gate live.
     const report = await analyze([blAsset(blAtlas('pad2.png', [{ x: 0, y: 0, w: 32, h: 32 }, { x: 33, y: 0, w: 32, h: 32 }]))]);
     expect(report.findings.some((f) => f.rule === 'bleeding')).toBe(false);
+  });
+});
+
+describe('dimension-mismatch (declared meta.size ≠ real decoded image pixels)', () => {
+  // A pure atlas with a DECLARED size and placed frames. The real image size is supplied separately on the
+  // ImageAsset (the rule compares atlas.size against image.size — no decode).
+  const dmAtlas = (
+    name: string,
+    declared: { w: number; h: number },
+    frames: { x: number; y: number; w: number; h: number }[],
+  ): Atlas => ({
+    name,
+    imageRef: name,
+    size: declared,
+    sprites: frames.map((f, i) => ({ name: `d${i}`, frame: { x: f.x, y: f.y, w: f.w, h: f.h }, rotated: false, trimmed: false, sourceSize: { w: f.w, h: f.h } })),
+    source: { kind: 'pixi' },
+  });
+  const realImg = (name: string, real: { w: number; h: number }): ImageAsset => ({
+    name, imageRef: name, size: real, mime: 'image/png', byteSize: 8000,
+  });
+  const dmAsset = (atlas: Atlas, real: { w: number; h: number }, byteSize = 8000): Asset => ({
+    kind: 'atlas', atlas, image: { name: atlas.name, imageRef: atlas.imageRef, size: real, mime: 'image/png', byteSize },
+  });
+
+  it('real < declared with a frame past the REAL edge ⇒ crit, off-edge messageKey, NO estimate, NO overlay', () => {
+    // Declared 1024², real 512². A frame at x600+w100=700 is within declared 1024 (survives parsing) but
+    // past the real 512 → it samples off the smaller texture ⇒ crit.
+    const a = dmAtlas('off.png', { w: 1024, h: 1024 }, [{ x: 0, y: 0, w: 100, h: 100 }, { x: 600, y: 0, w: 100, h: 100 }]);
+    const f = dimensionMismatchFinding(a, realImg('off.png', { w: 512, h: 512 }), DEFAULT_THRESHOLDS)!;
+    expect(f).not.toBeNull();
+    expect(f.rule).toBe('dimension-mismatch');
+    expect(f.severity).toBe('crit');
+    expect(f.messageKey).toBe('dimension-mismatch-shrunk-offedge');
+    // Two MEASUREMENTS, never a delta-saving (invariant 5).
+    expect(f.estimate).toBeUndefined();
+    expect(f.overlay).toBeUndefined();
+    expect(f.params).toEqual({ dw: 1024, dh: 1024, rw: 512, rh: 512, off: 1, dir: 'shrunk' });
+  });
+
+  it('real < declared but ALL frames in real bounds ⇒ warn (milder), shrunk messageKey, off:0', () => {
+    const a = dmAtlas('in.png', { w: 1024, h: 1024 }, [{ x: 0, y: 0, w: 100, h: 100 }, { x: 200, y: 0, w: 100, h: 100 }]);
+    const f = dimensionMismatchFinding(a, realImg('in.png', { w: 512, h: 512 }), DEFAULT_THRESHOLDS)!;
+    expect(f.severity).toBe('warn');
+    expect(f.messageKey).toBe('dimension-mismatch-shrunk');
+    expect(f.params).toEqual({ dw: 1024, dh: 1024, rw: 512, rh: 512, off: 0, dir: 'shrunk' });
+    expect(f.estimate).toBeUndefined();
+  });
+
+  it('real > declared (extra border) ⇒ info, grown messageKey, off:0', () => {
+    const a = dmAtlas('grown.png', { w: 512, h: 512 }, [{ x: 0, y: 0, w: 100, h: 100 }]);
+    const f = dimensionMismatchFinding(a, realImg('grown.png', { w: 1024, h: 1024 }), DEFAULT_THRESHOLDS)!;
+    expect(f.severity).toBe('info');
+    expect(f.messageKey).toBe('dimension-mismatch-grown');
+    expect(f.params).toEqual({ dw: 512, dh: 512, rw: 1024, rh: 1024, off: 0, dir: 'grown' });
+    expect(f.estimate).toBeUndefined();
+  });
+
+  it('within tolerance on BOTH axes ⇒ null (benign rounding stays silent)', () => {
+    // declared 1026×1024, real 1024² → dw=2, dh=0, both ≤ tolerancePx(2) ⇒ null.
+    const a = dmAtlas('tol.png', { w: 1026, h: 1024 }, [{ x: 0, y: 0, w: 100, h: 100 }]);
+    expect(dimensionMismatchFinding(a, realImg('tol.png', { w: 1024, h: 1024 }), DEFAULT_THRESHOLDS)).toBeNull();
+  });
+
+  it('declared == real ⇒ null', () => {
+    const a = dmAtlas('eq.png', { w: 512, h: 512 }, [{ x: 0, y: 0, w: 100, h: 100 }]);
+    expect(dimensionMismatchFinding(a, realImg('eq.png', { w: 512, h: 512 }), DEFAULT_THRESHOLDS)).toBeNull();
+  });
+
+  it('just past tolerance on ONE axis ⇒ fires (dw=3 > 2)', () => {
+    const a = dmAtlas('edge.png', { w: 1027, h: 1024 }, [{ x: 0, y: 0, w: 100, h: 100 }]);
+    const f = dimensionMismatchFinding(a, realImg('edge.png', { w: 1024, h: 1024 }), DEFAULT_THRESHOLDS)!;
+    expect(f).not.toBeNull();
+    expect(f.severity).toBe('warn'); // real smaller, frame in bounds
+  });
+
+  it('no dimensionMismatch config ⇒ null (a budget config that omits the key suppresses it)', () => {
+    const cfg = { ...DEFAULT_THRESHOLDS };
+    delete cfg.dimensionMismatch;
+    const a = dmAtlas('nocfg.png', { w: 1024, h: 1024 }, [{ x: 600, y: 0, w: 100, h: 100 }]);
+    expect(dimensionMismatchFinding(a, realImg('nocfg.png', { w: 512, h: 512 }), cfg)).toBeNull();
+  });
+
+  it('off-edge proof is deterministic (frame names sorted) and counts only genuine overruns', () => {
+    // Two frames past the real 512 edge (x600 and y700), one in-bounds. off counts the two overruns.
+    const a = dmAtlas('multi.png', { w: 1024, h: 1024 }, [
+      { x: 0, y: 0, w: 100, h: 100 },       // d0 in bounds
+      { x: 600, y: 0, w: 100, h: 100 },     // d1 past x
+      { x: 0, y: 700, w: 100, h: 100 },     // d2 past y
+    ]);
+    const f = dimensionMismatchFinding(a, realImg('multi.png', { w: 512, h: 512 }), DEFAULT_THRESHOLDS)!;
+    expect(f.severity).toBe('crit');
+    expect(f.params?.off).toBe(2);
+  });
+
+  it('analyze() emits dimension-mismatch by default (DEFAULT_THRESHOLDS) and NOTHING flows into totals', async () => {
+    const a = dmAtlas('flow.png', { w: 1024, h: 1024 }, [{ x: 600, y: 0, w: 100, h: 100 }]);
+    const report = await analyze([dmAsset(a, { w: 512, h: 512 })]);
+    const dm = report.findings.find((f) => f.rule === 'dimension-mismatch');
+    expect(dm).toBeDefined();
+    expect(dm?.severity).toBe('crit');
+    expect(dm?.estimate).toBeUndefined();
+    // Invariant 5: a correctness finding never contributes to the disk savings headline.
+    expect(report.totals.potentialDiskSaved).toBe(0);
+  });
+
+  it('analyze() stays silent when declared == real (DEFAULT byte-identical)', async () => {
+    const a = dmAtlas('match.png', { w: 512, h: 512 }, [{ x: 0, y: 0, w: 100, h: 100 }]);
+    const report = await analyze([dmAsset(a, { w: 512, h: 512 })]);
+    expect(report.findings.some((f) => f.rule === 'dimension-mismatch')).toBe(false);
   });
 });
 

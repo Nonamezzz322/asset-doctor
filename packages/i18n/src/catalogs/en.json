@@ -135,6 +135,15 @@
     "other": "{pairs} frame pairs in this atlas touch with no gutter between them. IF your sprites use linear/trilinear filtering or mipmaps, the sampler can pull a neighbor's edge texels in and show 1px seams; nearest-neighbor pixel art is unaffected."
   },
   "find.bleeding.fix": "Repack with a 1–2px gutter and edge-extrude (bleed) so touching frames don't sample across the boundary — the Pro fix's extrude option does this.",
+  "find.dimension-mismatch-shrunk-offedge.title": "Manifest declares {dw}×{dh} — image is actually {rw}×{rh}",
+  "find.dimension-mismatch-shrunk-offedge.detail": "The manifest's declared size {dw}×{dh} is larger than the real texture {rw}×{rh}. {off} frame(s) reference pixels past the real edge and will sample transparent/garbage at runtime (the bounds check uses the declared size and misses this). The static VRAM estimate (w·h·4) is charged on the DECLARED size, so it OVER-states the real footprint. These are two measurements, not a saving.",
+  "find.dimension-mismatch-shrunk-offedge.fix": "Re-export the atlas so meta.size matches the actual image, or re-export the image at the declared size — the manifest and the texture must agree.",
+  "find.dimension-mismatch-shrunk.title": "Manifest declares {dw}×{dh} — image is actually {rw}×{rh}",
+  "find.dimension-mismatch-shrunk.detail": "The manifest's declared size {dw}×{dh} is larger than the real texture {rw}×{rh}. Frames stay in bounds, but UV mapping assumes the declared canvas and the static VRAM estimate (w·h·4, charged on the DECLARED size) over-states the real pixels. These are two measurements, not a saving.",
+  "find.dimension-mismatch-shrunk.fix": "Re-export the atlas so meta.size matches the actual image, or re-export the image at the declared size — the manifest and the texture must agree.",
+  "find.dimension-mismatch-grown.title": "Manifest declares {dw}×{dh} — image is actually {rw}×{rh}",
+  "find.dimension-mismatch-grown.detail": "The manifest's declared size {dw}×{dh} is smaller than the real texture {rw}×{rh}; the image carries extra border the manifest doesn't map. Frames stay in bounds; the static VRAM estimate (w·h·4, charged on the DECLARED size) under-states the real pixels. These are two measurements, not a saving.",
+  "find.dimension-mismatch-grown.fix": "Re-export the atlas so meta.size matches the actual image, or re-export the image at the declared size — the manifest and the texture must agree.",
   "find.cross-atlas-redundancy.title": {
     "$count": "dupes",
     "one": "{dupes} duplicate frame across {sheets} atlases — identical pixels on separate sheets",

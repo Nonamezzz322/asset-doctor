@@ -287,6 +287,8 @@ export type Rule =
   | 'trim-margin'
   // per-atlas group: frame PAIRS sharing an edge with 0px gutter (texture-bleeding risk under linear/mipmaps)
   | 'bleeding'
+  // per-atlas: declared manifest size (meta.size / Spine page size:) ≠ the real decoded image pixels
+  | 'dimension-mismatch'
   // whole-folder (scope: 'folder'): frames whose pixel REGIONS are byte-identical ACROSS ≥2 atlases
   | 'cross-atlas-redundancy'
   // per-bmfont-page glyph-sheet readout (informational; a parsed .fnt page IS an atlas)
@@ -609,6 +611,14 @@ export interface ThresholdConfig {
    *  lie, invariant 5). Severity info/warn only. Optional/additive: absent ⇒ suppressed. Browser-only — NOT
    *  enumerated by resolveThresholds (CLI never opts in). */
   bleeding?: { minPairs: number; warnPairs: number };
+  /** Declared-vs-real atlas dimension mismatch gate (browser + headless via DEFAULT_THRESHOLDS; a budget
+   *  config that omits it suppresses it, mirroring bleeding). Fires ONLY when atlas.size (declared meta.size /
+   *  Spine page size:) differs from image.size (the real decoded pixels) by MORE than `tolerancePx` on either
+   *  axis. CORRECTNESS finding — carries NO diskBytesSaved/vramBytesSaved (it states two measurements, never a
+   *  saving; invariant 5). crit when real<declared AND a placed frame exceeds the real bounds (samples off the
+   *  smaller texture); warn when real<declared within frame bounds; info when real>declared (extra border).
+   *  Optional/additive: absent ⇒ suppressed. NOT enumerated by resolveThresholds. */
+  dimensionMismatch?: { tolerancePx: number };
   /** Cross-atlas-redundancy (frames whose pixel REGIONS are byte-identical ACROSS ≥2 atlases) gate.
    *  `minDuplicates` — the number of DISTINCT SHEETS a frame must recur on before firing (≥2 ⇒ on ≥2
    *  sheets; each atlas contributes ONE unit, so an atlas's own intra-atlas dupes are frameRedundancy's

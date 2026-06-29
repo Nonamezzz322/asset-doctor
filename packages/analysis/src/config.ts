@@ -59,6 +59,15 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   // can GROW the sheet, invariant 5); info/warn only. Browser-only — NOT in resolveThresholds (the CLI never
   // opts in). Provisional defaults; calibrate against real exports (a TexturePacker sheet packed with
   // padding>=1 produces ZERO pairs and must stay silent — the key calibration check).
+  dimensionMismatch: { tolerancePx: 2 }, // CALIBRATE — declared(meta.size)-vs-real(image pixels) gate. Fires
+  // only when |declared − real| > 2px on either axis. WHY 2px: a 0–2px difference is benign rounding (an
+  // odd-trimmed export, a 1px content-extent shave) and must stay SILENT; a real stale/downscaled/POT-rounded
+  // manifest diverges by ≥ a meaningful margin (typ. 24/48/whole-power-of-two px). Healthy trimmed atlases do
+  // NOT diverge at all (TexturePacker writes meta.size == the trimmed sheet == the real image). Absolute px
+  // (not %): the dangerous physics is absolute (a frame sampling 24px past the real edge is a torn sprite; a
+  // % gate would false-positive a 1px overrun on a huge sheet and miss a 24px overrun on a small one).
+  // CORRECTNESS finding — NO disk/VRAM saving (invariant 5). Fires on CLI audit/init (DEFAULT_THRESHOLDS)
+  // honestly; a budget config that omits the key suppresses it (mirrors bleeding).
   strippableMetadata: { minBytes: 4096, warnBytes: 65536 }, // CALIBRATE — strippable ancillary-metadata gate.
   // A loose/atlas-page image carrying ICC/EXIF/XMP + non-essential chunks the GPU never uses. `minBytes`: the
   // metadata must reach ≥ this (4 KB) before flagging (a tiny tIME chunk is noise). `warnBytes`: at/above this

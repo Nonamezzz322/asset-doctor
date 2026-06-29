@@ -1,0 +1,29 @@
+{
+  "kind": "atlas",
+  "format": "texturepacker-hash",
+  "atlas": {
+    "w": 1024,
+    "h": 1024
+  },
+  "real": {
+    "w": 512,
+    "h": 512
+  },
+  "frameCount": 4,
+  "occupancy": 0.124,
+  "findings": [
+    {
+      "rule": "dimension-mismatch",
+      "severity": "crit"
+    },
+    {
+      "rule": "occupancy",
+      "severity": "crit"
+    },
+    {
+      "rule": "wasted-regions",
+      "severity": "info"
+    }
+  ],
+  "note": "Stale/downscaled manifest: meta.size declares 1024×1024 but the real PNG is 512×512. The frame off_right (x600+w100=700) survives the parser's OOB pass (it tests the DECLARED 1024) yet samples past the REAL 512 edge → dimension-mismatch crit (1 off-edge frame). Occupancy is computed on the declared 1024² (12.4%) so it also reads crit. The static VRAM is charged on the declared 1024² (4 MB), which OVER-states the real 512² footprint — the finding discloses this honestly (two measurements, never a saving)."
+}

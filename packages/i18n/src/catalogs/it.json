@@ -157,6 +157,15 @@
     "other": "{pairs} coppie di fotogrammi in questo atlas si toccano senza spaziatura tra di loro. SE i tuoi sprite usano filtraggio lineare/trilineare o mipmap, il campionatore può tirare dentro i texel di bordo del vicino e mostrare cuciture da 1px; la pixel art con vicino più prossimo non è interessata."
   },
   "find.bleeding.fix": "Ricompatta con una spaziatura di 1–2px ed estrusione dei bordi (bleed) così i fotogrammi a contatto non campionano oltre il confine — l'opzione di estrusione del fix Pro lo fa.",
+  "find.dimension-mismatch-shrunk-offedge.title": "Il manifest dichiara {dw}×{dh} — l'immagine è in realtà {rw}×{rh}",
+  "find.dimension-mismatch-shrunk-offedge.detail": "La dimensione dichiarata nel manifest {dw}×{dh} è maggiore della texture reale {rw}×{rh}. {off} fotogramma(i) fanno riferimento a pixel oltre il bordo reale e a runtime campioneranno trasparenza/spazzatura (il controllo dei limiti usa la dimensione dichiarata e non lo rileva). La stima statica della VRAM (w·h·4) è calcolata sulla dimensione DICHIARATA, quindi SOVRASTIMA l'ingombro reale. Sono due misurazioni, non un risparmio.",
+  "find.dimension-mismatch-shrunk-offedge.fix": "Riesporta l'atlas in modo che meta.size corrisponda all'immagine reale, oppure riesporta l'immagine alla dimensione dichiarata — il manifest e la texture devono concordare.",
+  "find.dimension-mismatch-shrunk.title": "Il manifest dichiara {dw}×{dh} — l'immagine è in realtà {rw}×{rh}",
+  "find.dimension-mismatch-shrunk.detail": "La dimensione dichiarata nel manifest {dw}×{dh} è maggiore della texture reale {rw}×{rh}. I fotogrammi restano entro i limiti, ma la mappatura UV presuppone la tela dichiarata e la stima statica della VRAM (w·h·4, calcolata sulla dimensione DICHIARATA) sovrastima i pixel reali. Sono due misurazioni, non un risparmio.",
+  "find.dimension-mismatch-shrunk.fix": "Riesporta l'atlas in modo che meta.size corrisponda all'immagine reale, oppure riesporta l'immagine alla dimensione dichiarata — il manifest e la texture devono concordare.",
+  "find.dimension-mismatch-grown.title": "Il manifest dichiara {dw}×{dh} — l'immagine è in realtà {rw}×{rh}",
+  "find.dimension-mismatch-grown.detail": "La dimensione dichiarata nel manifest {dw}×{dh} è minore della texture reale {rw}×{rh}; l'immagine porta un bordo extra che il manifest non mappa. I fotogrammi restano entro i limiti; la stima statica della VRAM (w·h·4, calcolata sulla dimensione DICHIARATA) sottostima i pixel reali. Sono due misurazioni, non un risparmio.",
+  "find.dimension-mismatch-grown.fix": "Riesporta l'atlas in modo che meta.size corrisponda all'immagine reale, oppure riesporta l'immagine alla dimensione dichiarata — il manifest e la texture devono concordare.",
   "find.cross-atlas-redundancy.title": {
     "$count": "dupes",
     "one": "{dupes} fotogramma duplicato su {sheets} atlas — pixel identici su fogli separati",

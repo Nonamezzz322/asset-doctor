@@ -157,6 +157,15 @@
     "other": "{pairs} pares de quadros neste atlas se tocam sem espaçamento entre eles. SE seus sprites usarem filtragem linear/trilinear ou mipmaps, o amostrador pode puxar os téxeis de borda do vizinho e mostrar emendas de 1px; pixel art com vizinho mais próximo não é afetado."
   },
   "find.bleeding.fix": "Reempacote com espaçamento de 1–2px e extrusão de bordas (bleed) para que quadros em contato não amostrem através do limite — a opção de extrusão do fix Pro faz isso.",
+  "find.dimension-mismatch-shrunk-offedge.title": "O manifesto declara {dw}×{dh} — a imagem na verdade é {rw}×{rh}",
+  "find.dimension-mismatch-shrunk-offedge.detail": "O tamanho declarado no manifesto {dw}×{dh} é maior que a textura real {rw}×{rh}. {off} quadro(s) referenciam pixels além da borda real e vão amostrar transparência/lixo em tempo de execução (a verificação de limites usa o tamanho declarado e não detecta isso). A estimativa estática de VRAM (w·h·4) é calculada sobre o tamanho DECLARADO, então SUPERESTIMA a pegada real. São duas medições, não uma economia.",
+  "find.dimension-mismatch-shrunk-offedge.fix": "Reexporte o atlas para que meta.size corresponda à imagem real, ou reexporte a imagem no tamanho declarado — o manifesto e a textura precisam concordar.",
+  "find.dimension-mismatch-shrunk.title": "O manifesto declara {dw}×{dh} — a imagem na verdade é {rw}×{rh}",
+  "find.dimension-mismatch-shrunk.detail": "O tamanho declarado no manifesto {dw}×{dh} é maior que a textura real {rw}×{rh}. Os quadros permanecem dentro dos limites, mas o mapeamento UV assume a tela declarada e a estimativa estática de VRAM (w·h·4, calculada sobre o tamanho DECLARADO) superestima os pixels reais. São duas medições, não uma economia.",
+  "find.dimension-mismatch-shrunk.fix": "Reexporte o atlas para que meta.size corresponda à imagem real, ou reexporte a imagem no tamanho declarado — o manifesto e a textura precisam concordar.",
+  "find.dimension-mismatch-grown.title": "O manifesto declara {dw}×{dh} — a imagem na verdade é {rw}×{rh}",
+  "find.dimension-mismatch-grown.detail": "O tamanho declarado no manifesto {dw}×{dh} é menor que a textura real {rw}×{rh}; a imagem carrega uma borda extra que o manifesto não mapeia. Os quadros permanecem dentro dos limites; a estimativa estática de VRAM (w·h·4, calculada sobre o tamanho DECLARADO) subestima os pixels reais. São duas medições, não uma economia.",
+  "find.dimension-mismatch-grown.fix": "Reexporte o atlas para que meta.size corresponda à imagem real, ou reexporte a imagem no tamanho declarado — o manifesto e a textura precisam concordar.",
   "find.cross-atlas-redundancy.title": {
     "$count": "dupes",
     "one": "{dupes} quadro duplicado em {sheets} atlas — pixels idênticos em folhas separadas",

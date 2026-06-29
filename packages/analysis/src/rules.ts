@@ -628,6 +628,93 @@ export function bleedingFinding(atlas: Atlas, cfg: ThresholdConfig): Finding | n
   };
 }
 
+/** Declared (atlas.size, from manifest meta.size / Spine page size:) vs REAL (image.size, the decoded
+ *  pixel header — zero decode) atlas dimensions. A pure integer compare of two numbers the parser already
+ *  holds; generates nothing (invariant 3). CORRECTNESS finding — NO saving (invariant 5); it states the two
+ *  MEASUREMENTS, never a delta. Direction matters: real<declared is the dangerous case (frames can sample
+ *  off the smaller real texture — the parser's OOB pass tests the DECLARED size and misses it), real>declared
+ *  is a mild extra-border note. The static VRAM estimate (analyze.ts) is charged on the DECLARED size, so
+ *  real<declared OVER-states and real>declared UNDER-states the real footprint — the copy DISCLOSES that
+ *  (factual, never a fix-saving). The always-on static sibling of the optional render-probe's
+ *  declared-vs-measured label (different mechanism — this needs no GPU). Returns null with no config or
+ *  within tolerancePx on BOTH axes. Three messageKeys (one Rule) select the direction-appropriate wording —
+ *  the same one-rule/many-keys pattern as format/format-lossless. */
+export function dimensionMismatchFinding(
+  atlas: Atlas,
+  image: ImageAsset,
+  cfg: ThresholdConfig,
+): Finding | null {
+  if (!cfg.dimensionMismatch) return null;
+  const dw = atlas.size.w - image.size.w;
+  const dh = atlas.size.h - image.size.h;
+  const tol = cfg.dimensionMismatch.tolerancePx;
+  if (Math.abs(dw) <= tol && Math.abs(dh) <= tol) return null; // benign rounding stays silent
+
+  // real < declared on at least one axis = the manifest claims a bigger canvas than the texture has.
+  const realSmaller = atlas.size.w > image.size.w || atlas.size.h > image.size.h;
+
+  const declared = `${atlas.size.w}×${atlas.size.h}`;
+  const real = `${image.size.w}×${image.size.h}`;
+
+  let severity: Severity;
+  let direction: 'shrunk' | 'grown';
+  let messageKey: string;
+  let offEdge: string[] = [];
+  let title: string;
+  let detail: string;
+
+  if (realSmaller) {
+    direction = 'shrunk';
+    // Scan placed frames for any exceeding the REAL bounds (the parser OOB pass tested the DECLARED size and
+    // let these through). Source order; names sorted for a deterministic proof.
+    offEdge = atlas.sprites
+      .filter((s) => s.frame.x + s.frame.w > image.size.w || s.frame.y + s.frame.h > image.size.h)
+      .map((s) => s.name)
+      .sort();
+    const off = offEdge.length;
+    severity = off > 0 ? 'crit' : 'warn';
+    title = `Manifest declares ${declared} — image is actually ${real}`;
+    if (off > 0) {
+      messageKey = 'dimension-mismatch-shrunk-offedge';
+      detail =
+        `The manifest's declared size ${declared} is larger than the real texture ${real}. ` +
+        `${off} frame(s) reference pixels past the real edge and will sample transparent/garbage at runtime ` +
+        `(the bounds check uses the declared size and misses this). The static VRAM estimate (w·h·4) is ` +
+        `charged on the DECLARED size, so it OVER-states the real footprint. These are two measurements, not a saving.`;
+    } else {
+      messageKey = 'dimension-mismatch-shrunk';
+      detail =
+        `The manifest's declared size ${declared} is larger than the real texture ${real}. Frames stay in ` +
+        `bounds, but UV mapping assumes the declared canvas and the static VRAM estimate (w·h·4, charged on ` +
+        `the DECLARED size) over-states the real pixels. These are two measurements, not a saving.`;
+    }
+  } else {
+    // real ≥ declared on every axis (real larger somewhere): extra border the manifest doesn't map.
+    direction = 'grown';
+    severity = 'info';
+    messageKey = 'dimension-mismatch-grown';
+    title = `Manifest declares ${declared} — image is actually ${real}`;
+    detail =
+      `The manifest's declared size ${declared} is smaller than the real texture ${real}; the image carries ` +
+      `extra border the manifest doesn't map. Frames stay in bounds; the static VRAM estimate (w·h·4, charged ` +
+      `on the DECLARED size) under-states the real pixels. These are two measurements, not a saving.`;
+  }
+
+  return {
+    id: `${atlas.name}:dimension-mismatch`,
+    rule: 'dimension-mismatch',
+    severity,
+    assetRef: atlas.name,
+    title,
+    detail,
+    fix: `Re-export the atlas so meta.size matches the actual image, or re-export the image at the declared size — the manifest and the texture must agree.`,
+    // NO estimate field — a CORRECTNESS finding, not a saving: it states two measurements (declared vs real),
+    // never a delta. Charging a diskBytesSaved/vramBytesSaved here would be a lie (invariant 5).
+    messageKey,
+    params: { dw: atlas.size.w, dh: atlas.size.h, rw: image.size.w, rh: image.size.h, off: offEdge.length, dir: direction },
+  };
+}
+
 export function wastedRegions(
   atlas: Atlas,
   cfg: ThresholdConfig,
