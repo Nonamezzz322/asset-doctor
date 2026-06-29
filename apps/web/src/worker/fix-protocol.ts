@@ -520,8 +520,36 @@ export type PlanOpCounts = Partial<
   Record<'repack' | 'resize' | 'transcode' | 'drop' | 'merge' | 'pack' | 'dedup' | 'tier', number>
 >;
 
+/** HONEST fix-simulation footprint preview (round22 #2, docs/improvements/round22-honest-fix-simulation-
+ *  footprint-pr.md). The Plan card may surface ONLY footprint deltas that are HONESTLY KNOWN before the
+ *  compose loop runs — split into "measured now" (before→after disk/VRAM computable pre-compose from the
+ *  already-MEASURED finding geometry/sizes) vs "computed at execute" (transcode/encode-dependent sizes the
+ *  encode alone resolves). INVARIANT 5: `diskBytesSaved` and `vramBytesSaved` are kept DISTINCT — never a
+ *  combined headline. INVARIANT 3: this is a fix-PLAN preview (the plan already exists; nothing is
+ *  generated). Never a fabricated number; an op that contributes nothing knowable is EXCLUDED here and
+ *  counted in `deferredOps` ("+N more computed at download") instead. */
+export interface FixPlanFootprint {
+  /** Σ measured DISK bytes the SURVIVING transcode/opaque ops save (srcBytes − bestBytes / srcBytes −
+   *  opaqueBytes, clamp ≥0). The format-finding deltas are the lossy q0.9 canvas ESTIMATE (sets
+   *  `estimated`); the opaque-alpha delta is a MEASURED channel-drop. ≥0. */
+  diskBytesSaved: number;
+  /** Σ EXACT VRAM the SURVIVING resize × dimensions-oversize ops reclaim (params.vram − to.w·to.h·4,
+   *  clamp ≥0). npot/solid are EXCLUDED — planFix emits no op for them, and a resize achieves neither
+   *  their POT-padding nor their 1×1 reclaim (different, non-additive baselines). ≥0. NEVER conflated
+   *  with `diskBytesSaved` (invariant 5: disk weight ≠ GPU footprint). */
+  vramBytesSaved: number;
+  /** True iff ≥1 disk delta is the lossy q0.9 canvas ESTIMATE (a format finding) ⇒ the UI prefixes "~"
+   *  so the number is shown as estimated, never an exact pre-encode saving. */
+  estimated: boolean;
+  /** Count of NON-summable ops that ALSO run (repack/merge/pack/dedup + the worker-folded scale-tier
+   *  multiplier) — their before→after is NOT knowable pre-compose. NEVER folded into disk/vram; surfaced
+   *  honestly as "+N more computed at download". */
+  deferredOps: number;
+}
+
 /** The dry-run preview the worker posts in 'plan' mode. Deterministic; carries NO pixels and — by
- *  design — NO byte/VRAM savings (counts only, until execute). */
+ *  design — NO byte/VRAM savings (counts only, until execute) EXCEPT the optional honest `footprint`
+ *  preview (round22 #2), which surfaces ONLY pre-compose-knowable disk/VRAM deltas + a deferred count. */
 export interface FixPlanSummary {
   /** Op tally grouped by kind (zero kinds omitted). */
   opCounts: PlanOpCounts;
@@ -538,6 +566,10 @@ export interface FixPlanSummary {
   /** True ⇒ some checks are deferred to execute (pixel-dependent skips, the refs-flag caveat, the tier
    *  "up to N" upper bound). The UI surfaces this as the honesty note. */
   hasDeferredChecks: boolean;
+  /** HONEST footprint preview (round22 #2) — ONLY pre-compose-knowable disk/VRAM deltas (measured-now)
+   *  + a count of ops sized at download (deferred). ADDITIVE: absent ⇒ counts-only card byte-identical to
+   *  today (no measured-now rows). Distinct disk vs VRAM (invariant 5); never a fabricated total. */
+  footprint?: FixPlanFootprint;
 }
 
 /** One produced `.ktx2` page + its raster source, TRANSFERRED from the worker on `fix-done` so the MAIN

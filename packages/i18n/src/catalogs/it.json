@@ -268,7 +268,15 @@
   "fix.plan.run": "Esegui correzione",
   "fix.plan.back": "Indietro",
   "fix.plan.empty": "Niente da modificare — questa cartella è già pulita.",
-  "fix.plan.deferredNote": "Solo il numero di operazioni — il risparmio in byte e VRAM viene mostrato dopo l'esecuzione (peso su disco ≠ carico GPU). Il contrassegno «riferimenti modificati» è una previsione (un fallback PNG può comunque essere drop-in) e i livelli di risoluzione sono un limite superiore; alcuni controlli vengono eseguiti solo all'avvio della correzione.",
+  "fix.plan.measuredNow": "Misurato ora:",
+  "fix.plan.measuredNowDisk": "disco −{disk:bytes}",
+  "fix.plan.measuredNowVram": "VRAM −{vram:bytes}",
+  "fix.plan.alsoRuns": {
+    "$count": "n",
+    "one": "+{n} operazione in più, dimensione al download",
+    "other": "+{n} operazioni in più, dimensione al download"
+  },
+  "fix.plan.deferredNote": "I risparmi «misurati ora» sono solo i delta noti prima dell'esecuzione (il disco del transcode è una stima con perdita q0.9, contrassegnata ~, e può differire dall'encode senza perdita Pro; la VRAM del ridimensionamento è esatta). Le dimensioni di repack/merge/pack/dedup/tier vengono calcolate al download. Il risparmio in byte e VRAM è distinto (peso su disco ≠ carico GPU). Il contrassegno «riferimenti modificati» è una previsione (un fallback PNG può comunque essere drop-in) e i livelli di risoluzione sono un limite superiore; alcuni controlli vengono eseguiti solo all'avvio della correzione.",
   "fix.plan.include": "Includi {op} nella correzione",
   "fix.plan.deselected": "non verrà eseguito",
   "fix.plan.noneSelected": "Niente selezionato — scegli almeno un'operazione da eseguire.",

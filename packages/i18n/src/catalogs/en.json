@@ -245,7 +245,15 @@
   "fix.plan.run": "Run fix",
   "fix.plan.back": "Back",
   "fix.plan.empty": "Nothing to change — this folder is already clean.",
-  "fix.plan.deferredNote": "Operation counts only — byte and VRAM savings are shown after you run the fix (disk weight ≠ GPU footprint). The references-changed flag is a prediction (a PNG fallback may still be a drop-in), and resolution tiers are an upper bound; some checks run only at execute time.",
+  "fix.plan.measuredNow": "Measured now:",
+  "fix.plan.measuredNowDisk": "disk −{disk:bytes}",
+  "fix.plan.measuredNowVram": "VRAM −{vram:bytes}",
+  "fix.plan.alsoRuns": {
+    "$count": "n",
+    "one": "+{n} more op sized at download",
+    "other": "+{n} more ops sized at download"
+  },
+  "fix.plan.deferredNote": "Measured-now savings are only the deltas knowable before running (transcode disk is a lossy q0.9 estimate, marked ~, and may differ from the lossless Pro encode; resize VRAM is exact). Repack/merge/pack/dedup/tier sizes are computed at download. Byte and VRAM savings are distinct (disk weight ≠ GPU footprint). The references-changed flag is a prediction (a PNG fallback may still be a drop-in), and resolution tiers are an upper bound; some checks run only at execute time.",
   "fix.plan.include": "Include {op} in the fix",
   "fix.plan.deselected": "won't run",
   "fix.plan.noneSelected": "Nothing selected — choose at least one operation to run.",

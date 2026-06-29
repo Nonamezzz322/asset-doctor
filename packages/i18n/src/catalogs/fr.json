@@ -268,7 +268,15 @@
   "fix.plan.run": "Lancer la correction",
   "fix.plan.back": "Retour",
   "fix.plan.empty": "Rien à modifier — ce dossier est déjà propre.",
-  "fix.plan.deferredNote": "Nombre d'opérations uniquement — les économies en octets et en VRAM s'affichent après l'exécution (poids sur disque ≠ charge GPU). L'indicateur « références modifiées » est une prédiction (un repli PNG peut rester un drop-in) et les niveaux de résolution sont une borne supérieure ; certaines vérifications n'ont lieu qu'à l'exécution.",
+  "fix.plan.measuredNow": "Mesuré maintenant :",
+  "fix.plan.measuredNowDisk": "disque −{disk:bytes}",
+  "fix.plan.measuredNowVram": "VRAM −{vram:bytes}",
+  "fix.plan.alsoRuns": {
+    "$count": "n",
+    "one": "+{n} opération de plus, taille au téléchargement",
+    "other": "+{n} opérations de plus, taille au téléchargement"
+  },
+  "fix.plan.deferredNote": "Les économies « mesurées maintenant » ne sont que les écarts connus avant l'exécution (le disque du transcodage est une estimation avec perte q0.9, marquée ~, et peut différer de l'encodage sans perte Pro ; la VRAM du redimensionnement est exacte). Les tailles de repack/merge/pack/dedup/tier sont calculées au téléchargement. Les économies en octets et en VRAM sont distinctes (poids sur disque ≠ charge GPU). L'indicateur « références modifiées » est une prédiction (un repli PNG peut rester un drop-in) et les niveaux de résolution sont une borne supérieure ; certaines vérifications n'ont lieu qu'à l'exécution.",
   "fix.plan.include": "Inclure {op} dans la correction",
   "fix.plan.deselected": "ne sera pas exécuté",
   "fix.plan.noneSelected": "Rien de sélectionné — choisissez au moins une opération à exécuter.",

@@ -170,6 +170,10 @@ import {
   type OpKind,
   type PlanGateInputs,
 } from '../lib/op-manifest';
+// PURE honest fix-simulation footprint preview (round22 #2): sums ONLY pre-compose-knowable disk/VRAM
+// deltas (transcode/opaque disk · oversize×resize VRAM) + a count of ops sized at download. NEVER a
+// fabricated total; disk vs VRAM distinct (invariant 5). Absent footprint ⇒ summary byte-identical.
+import { summarizeFixPlanFootprint } from '../lib/plan-footprint';
 // PURE loader-migration row builders (docs/improvements/loader-migration.md). The worker captures only
 // GENUINE loader-CALL changes (merge/pack/tier/loose-rename/bare-drop — NOT dedup, which rewrites the
 // consumer manifest in place) as one-line builder calls; finalizeChanges sorts+dedups deterministically.
@@ -882,8 +886,15 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         skipped: planSkips,
         referencesChanged: predictRefsChanged,
       };
+      // HONEST footprint preview (round22 #2): sum ONLY pre-compose-knowable disk/VRAM deltas off the
+      // SURVIVING countedOps (transcode/opaque disk · oversize×resize VRAM); everything else (repack/merge/
+      // pack/dedup) is a count. The scale-tier multiplier is a worker-side per-asset op (NOT a FixOp), so
+      // fold its upper bound into the deferred count when tiering survives the mask — it contributes 0 to
+      // disk/VRAM (invariant 5: the runtime loads ONE tier; the top tier == the source footprint).
+      const footprint = summarizeFixPlanFootprint(report, countedOps, excluded);
+      if (footprint && !tierExcluded && tierAssets > 0) footprint.deferredOps += tierAssets;
       if (cancelled) return; // superseded — suppress a fix-plan that would race the terminate
-      post({ type: 'fix-plan', summary: summarizePlan(gate) });
+      post({ type: 'fix-plan', summary: { ...summarizePlan(gate), ...(footprint ? { footprint } : {}) } });
       return;
     }
 

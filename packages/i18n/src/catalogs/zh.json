@@ -259,7 +259,15 @@
   "fix.plan.run": "执行修复",
   "fix.plan.back": "返回",
   "fix.plan.empty": "无需更改——此文件夹已经很干净。",
-  "fix.plan.deferredNote": "仅操作数量——字节和显存节省将在执行修复后显示（磁盘体积 ≠ GPU 占用）。引用已更改标记只是预测（PNG 回退仍可能是直接替换），分辨率分级为上限；部分检查仅在执行时进行。",
+  "fix.plan.measuredNow": "现在已测：",
+  "fix.plan.measuredNowDisk": "磁盘 −{disk:bytes}",
+  "fix.plan.measuredNowVram": "显存 −{vram:bytes}",
+  "fix.plan.alsoRuns": {
+    "$count": "n",
+    "one": "另有 +{n} 项操作，大小在下载时计算",
+    "other": "另有 +{n} 项操作，大小在下载时计算"
+  },
+  "fix.plan.deferredNote": "「现在已测」节省仅为运行前可知的增量（转码磁盘是有损 q0.9 估算，标记为 ~，可能与 Pro 无损编码不同；缩放显存是精确值）。repack/merge/pack/dedup/tier 的大小在下载时计算。字节与显存节省彼此独立（磁盘体积 ≠ GPU 占用）。引用已更改标记只是预测（PNG 回退仍可能是直接替换），分辨率分级为上限；部分检查仅在执行时进行。",
   "fix.plan.include": "在修复中包含 {op}",
   "fix.plan.deselected": "不会执行",
   "fix.plan.noneSelected": "未选择任何操作 — 请至少选择一项操作来运行。",

@@ -268,7 +268,15 @@
   "fix.plan.run": "Ejecutar corrección",
   "fix.plan.back": "Atrás",
   "fix.plan.empty": "Nada que cambiar — esta carpeta ya está limpia.",
-  "fix.plan.deferredNote": "Solo el número de operaciones — el ahorro en bytes y VRAM se muestra después de ejecutar (peso en disco ≠ carga de GPU). El indicador de «referencias cambiadas» es una predicción (un PNG de reserva aún puede ser drop-in) y los niveles de resolución son un límite superior; algunas comprobaciones solo se ejecutan al aplicar la corrección.",
+  "fix.plan.measuredNow": "Medido ahora:",
+  "fix.plan.measuredNowDisk": "disco −{disk:bytes}",
+  "fix.plan.measuredNowVram": "VRAM −{vram:bytes}",
+  "fix.plan.alsoRuns": {
+    "$count": "n",
+    "one": "+{n} operación más, tamaño al descargar",
+    "other": "+{n} operaciones más, tamaño al descargar"
+  },
+  "fix.plan.deferredNote": "El ahorro «medido ahora» son solo los deltas conocidos antes de ejecutar (el disco del transcode es una estimación con pérdida q0.9, marcada con ~, y puede diferir del codificado sin pérdida de Pro; la VRAM del redimensionado es exacta). Los tamaños de repack/merge/pack/dedup/tier se calculan al descargar. El ahorro en bytes y VRAM es distinto (peso en disco ≠ carga de GPU). El indicador de «referencias cambiadas» es una predicción (un PNG de reserva aún puede ser drop-in) y los niveles de resolución son un límite superior; algunas comprobaciones solo se ejecutan al aplicar la corrección.",
   "fix.plan.include": "Incluir {op} en la corrección",
   "fix.plan.deselected": "no se ejecutará",
   "fix.plan.noneSelected": "Nada seleccionado: elige al menos una operación para ejecutar.",

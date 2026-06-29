@@ -2328,6 +2328,30 @@ function PlanCard({ summary, excluded, pending, onToggle, onRun, onBack, disable
           })}
         </div>
       )}
+      {/* HONEST fix-simulation footprint preview (round22 #2): two stacked rows, never a fabricated total.
+          Row 1 "measured now" — ONLY the pre-compose-knowable deltas (transcode/opaque disk · oversize×resize
+          VRAM), disk and VRAM kept VISIBLY DISTINCT (invariant 5: disk weight ≠ GPU footprint; VRAM in its
+          own teal token). The "~" prefix marks an estimated (lossy q0.9) disk number — never an exact saving.
+          Each segment renders ONLY when its value > 0 (a VRAM-only plan never shows a fabricated "disk −0 B").
+          Row 2 "+N more computed at download" — the ops whose size the encode/pack alone resolves. Absent
+          footprint ⇒ neither row renders ⇒ the card is byte-identical to today (additive). */}
+      {summary.footprint && (summary.footprint.diskBytesSaved > 0 || summary.footprint.vramBytesSaved > 0) ? (
+        <p className="flex flex-wrap items-baseline gap-x-2 font-mono text-[11px]">
+          <span className="uppercase tracking-[0.06em] text-ink-soft">{t('fix.plan.measuredNow')}</span>
+          {summary.footprint.diskBytesSaved > 0 ? (
+            <span className="text-ink">
+              {summary.footprint.estimated ? '~' : ''}
+              {t('fix.plan.measuredNowDisk', { disk: summary.footprint.diskBytesSaved })}
+            </span>
+          ) : null}
+          {summary.footprint.vramBytesSaved > 0 ? (
+            <span className="text-teal">{t('fix.plan.measuredNowVram', { vram: summary.footprint.vramBytesSaved })}</span>
+          ) : null}
+        </p>
+      ) : null}
+      {summary.footprint && summary.footprint.deferredOps > 0 ? (
+        <p className="font-mono text-[10px] text-ink-soft">{t('fix.plan.alsoRuns', { n: summary.footprint.deferredOps })}</p>
+      ) : null}
       {/* Prominent reference-changing warning — REUSED receipt banner (fix.mergeWarn): committing this plan
           rewrites manifest/loader references (a prediction; a PNG fallback may still resolve drop-in). */}
       {summary.referencesChanged ? <p className="font-mono text-[10px] text-warn">⚠ {t('fix.mergeWarn')}</p> : null}

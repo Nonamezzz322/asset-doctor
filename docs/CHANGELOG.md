@@ -74,6 +74,34 @@ per-atlas, discarding the cross-atlas comparison; this clusters them across ALL 
   disk-only, T4 additivity deep-equal). Rides the existing aggressive atlas-merge path; rotated-mismatch +
   name-collision guards inherited from the merge path unchanged.
 
+- **#2 Honest fix-simulation footprint preview on the Plan card** (`docs/improvements/round22-honest-fix-simulation-footprint-pr.md`)
+  — the dry-run Plan card now surfaces a HONEST before→after footprint preview alongside the op counts, split into
+  two stacked rows that never fabricate a total. New PURE `summarizeFixPlanFootprint(report, ops, excluded)`
+  (`apps/web/src/lib/plan-footprint.ts`) aggregates ONLY the deltas knowable BEFORE compose, from the already-
+  MEASURED finding geometry: **measured now** — DISK = `format`/`format-lossless` srcBytes−bestBytes for a ref with a
+  SURVIVING transcode op (lossy q0.9 estimate ⇒ `estimated`, UI prefixes `~`) + `wasted-alpha` srcBytes−opaqueBytes
+  for a SURVIVING opaque transcode (measured channel drop); VRAM = `dimensions-oversize` `params.vram` − to.w·h·4 for
+  a SURVIVING resize (EXACT). **computed at execute** — `deferredOps` counts repack/merge/pack/dedup + the worker-
+  folded scale-tier multiplier (sizes the encode/pack alone resolves) → "+N more computed at download". New optional
+  `FixPlanFootprint` + `FixPlanSummary.footprint?` (`fix-protocol.ts`); the worker attaches it in the plan block over
+  `countedOps`+`excluded` and folds `tierAssets` into `deferredOps` when tiering survives the mask. `PlanCard`
+  (`App.tsx`) renders the two rows, disk vs VRAM VISUALLY DISTINCT (VRAM in its own teal token), each segment only
+  when >0 (a VRAM-only plan never shows a fabricated "disk −0 B").
+  **HONESTY (load-bearing, invariants 3/5):** the preview sums ONLY pre-compose-knowable numbers; disk and VRAM are
+  kept DISTINCT (never a combined headline); a transcode never feeds VRAM and a resize never feeds disk; **npot/solid
+  are EXCLUDED entirely** (planFix emits no op for them, and a resize achieves neither their POT-padding nor 1×1
+  reclaim — different non-additive baselines, would fabricate a win the run never produces); an op that contributes
+  nothing knowable is excluded and counted honestly as deferred. DIAGNOSIS objectivity preserved — this is a fix-PLAN
+  preview (the plan exists; it generates nothing). **ADDITIVE:** nothing measurable ⇒ `undefined` ⇒ no footprint
+  attached ⇒ the Plan card is byte-identical to today. **DETERMINISM:** stable Set/Map sums over the deterministically-
+  ordered findings/ops, no Date/random. i18n: 3 new keys (`fix.plan.measuredNow` label + `measuredNowDisk`/
+  `measuredNowVram` with `{disk:bytes}`/`{vram:bytes}` hints, split so a VRAM-only plan shows no disk row + `alsoRuns`
+  plural `{n}`) × 9 catalogs (drift + plural-render guarded); `fix.plan.deferredNote` extended with the estimate vs
+  exact + at-download caveat. Tests: PURE `apps/web/test/plan-footprint.test.ts` (correct buckets, disk≠VRAM,
+  invariant-5 separation, op-gating, format∩wasted-alpha-once, mask zeroing, BLOCKER-1 npot/solid 0-VRAM regression,
+  deferredOps, empty⇒undefined, negative-clamp, determinism) + `plan-worker.test.ts` (rewritten honesty assertion —
+  optional top-level footprint with DISTINCT disk/VRAM, repack-is-deferred headline honesty, mask-all⇒undefined).
+
 ---
 
 ## Round 21 — selection (#0 shipped) — 2026-06-29

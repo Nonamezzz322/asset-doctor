@@ -33,6 +33,7 @@ import { parseAtlas, parseImage, parseSpineAtlasText, parseSpinePage, type Spine
 import { analyze, mergeSharedAtlases, hasResolutionToken } from '@asset-doctor/analysis';
 import { planFix, validateTiers, DEFAULT_SCALE_TIERS, resolveImageRef, renamedTo, EXT, isOwnerAwareDrop } from '@asset-doctor/fix';
 import { summarizePlan, summarizeOpCounts, dedupKeepConsumerSkip, deselectedSkips, fixOpKind, type OpKind, type PlanGateInputs } from '../src/lib/op-manifest';
+import { summarizeFixPlanFootprint } from '../src/lib/plan-footprint';
 import type { FixOptions, FixPlanSummary } from '../src/worker/fix-protocol';
 
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects/tier-source');
@@ -366,15 +367,48 @@ describe('dry-run plan preview — worker plan short-circuit (T6)', () => {
     }
   });
 
-  it('HONESTY (invariant 5): the plan summary carries op COUNTS only — no byte/VRAM field', async () => {
+  it('HONESTY (invariant 5): top-level summary is counts/flags only, plus the OPTIONAL honest footprint', async () => {
+    // round22 #2: the summary may now carry an OPTIONAL `footprint` (the honest pre-compose preview). Every
+    // OTHER top-level key stays counts/flags only (no byte/VRAM headline) — and the footprint, when present,
+    // keeps `diskBytesSaved` and `vramBytesSaved` as DISTINCT numeric fields (never a combined "saved" total).
     const b = await buildWorkerState(loadRawFiles());
     const { summary } = assemblePlanGate(b, baseOptions({ scaleTiers: ladder }));
-    expect(Object.keys(summary).sort()).toEqual(['hasDeferredChecks', 'opCounts', 'referencesChanged', 'skipped', 'totalOps']);
+    const ALLOWED_TOP = ['footprint', 'hasDeferredChecks', 'opCounts', 'referencesChanged', 'skipped', 'totalOps'];
+    expect(Object.keys(summary).sort().every((k) => ALLOWED_TOP.includes(k))).toBe(true);
     const FORBIDDEN = /(byte|vram|saved|saving|kb|mb|disk)/i;
-    const probe = JSON.stringify(summary);
-    // no numeric byte/VRAM key anywhere in the serialized summary (counts + boolean flags only).
-    for (const k of Object.keys(summary)) expect(FORBIDDEN.test(k)).toBe(false);
-    expect(probe.length).toBeGreaterThan(0); // sanity: summary did serialize
+    // no byte/VRAM key at the top level (the footprint is the ONLY carve-out for those fields).
+    for (const k of Object.keys(summary)) if (k !== 'footprint') expect(FORBIDDEN.test(k)).toBe(false);
+    if (summary.footprint) {
+      // invariant-5 separation: disk and VRAM are DISTINCT numeric fields, never a combined headline.
+      expect(typeof summary.footprint.diskBytesSaved).toBe('number');
+      expect(typeof summary.footprint.vramBytesSaved).toBe('number');
+      expect('saved' in summary.footprint).toBe(false);
+      expect('total' in summary.footprint).toBe(false);
+    }
+    expect(JSON.stringify(summary).length).toBeGreaterThan(0); // sanity: summary did serialize
+  });
+
+  // ── round22 #2: the honest footprint preview through the REAL worker plan-gate assembly ──────────────
+  it('footprint: the under-filled sheet repack is a DEFERRED op — never folded into disk/VRAM (headline honesty)', async () => {
+    // The tier-source mirror has no encoder, so no transcode/resize fires here; the under-filled 128×128 sheet
+    // earns a repack → deferredOps. The repack payoff is NOT knowable pre-compose, so it must appear in
+    // NEITHER disk NOR vram — only the count.
+    const b = await buildWorkerState(loadRawFiles());
+    const { gate, summary } = assemblePlanGate(b, baseOptions());
+    const fp = summarizeFixPlanFootprint(b.report, gate.ops, new Set());
+    expect(fp).toBeDefined();
+    expect(fp!.deferredOps).toBeGreaterThanOrEqual(1);
+    expect(fp!.diskBytesSaved).toBe(0); // no encoder ⇒ no transcode delta
+    expect(fp!.vramBytesSaved).toBe(0); // nothing oversize in this fixture
+    expect(summary.footprint).toBeUndefined(); // assemblePlanGate (mirror) does not attach footprint — that's the worker's job
+  });
+
+  it('footprint: deselecting transcode/resize zeroes the matching bucket; counts-only plan ⇒ undefined', async () => {
+    const b = await buildWorkerState(loadRawFiles());
+    const { gate } = assemblePlanGate(b, baseOptions());
+    // mask out every deferred kind too ⇒ nothing knowable, nothing deferred ⇒ undefined.
+    const fpMaskAll = summarizeFixPlanFootprint(b.report, gate.ops, new Set<OpKind>(['repack', 'merge', 'pack', 'dedup', 'transcode', 'resize']));
+    expect(fpMaskAll).toBeUndefined();
   });
 
   it('the plan summary == summarizeOpCounts(plan.ops, tierAssets) — single source of truth, deterministic', async () => {

@@ -38,6 +38,12 @@ describe('catalog completeness (all 9 locales)', () => {
       // Render the measured-probe sprite-batch plural — both forms carry {n}, no leftover braces.
       expect(translate(loc, 'readout.batched', { n: 12 })).not.toContain('{');
       expect(translate(loc, 'readout.batched', { n: 1 })).not.toContain('{');
+      // round22 #2: the honest footprint preview — the alsoRuns plural (both forms carry {n}) + the two
+      // measured-now :bytes templates render without leftover braces in every locale.
+      expect(translate(loc, 'fix.plan.alsoRuns', { n: 1 })).not.toContain('{');
+      expect(translate(loc, 'fix.plan.alsoRuns', { n: 3 })).not.toContain('{');
+      expect(translate(loc, 'fix.plan.measuredNowDisk', { disk: 4096 })).not.toContain('{');
+      expect(translate(loc, 'fix.plan.measuredNowVram', { vram: 16 * 1048576 })).not.toContain('{');
     }
   });
 

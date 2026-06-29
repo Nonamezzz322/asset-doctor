@@ -265,7 +265,15 @@
   "fix.plan.run": "Fix ausführen",
   "fix.plan.back": "Zurück",
   "fix.plan.empty": "Nichts zu ändern — dieser Ordner ist bereits sauber.",
-  "fix.plan.deferredNote": "Nur die Anzahl der Vorgänge — Einsparungen bei Bytes und VRAM werden nach der Ausführung angezeigt (Speichergröße ≠ GPU-Last). Das Kennzeichen „Referenzen geändert“ ist eine Vorhersage (ein PNG-Fallback kann weiterhin Drop-in sein), und Auflösungsstufen sind eine Obergrenze; einige Prüfungen laufen erst zur Laufzeit.",
+  "fix.plan.measuredNow": "Jetzt gemessen:",
+  "fix.plan.measuredNowDisk": "Speicher −{disk:bytes}",
+  "fix.plan.measuredNowVram": "VRAM −{vram:bytes}",
+  "fix.plan.alsoRuns": {
+    "$count": "n",
+    "one": "+{n} weiterer Vorgang, Größe beim Download",
+    "other": "+{n} weitere Vorgänge, Größe beim Download"
+  },
+  "fix.plan.deferredNote": "„Jetzt gemessen“-Einsparungen sind nur die vor dem Lauf bekannten Deltas (Transcode-Speicher ist eine verlustbehaftete q0.9-Schätzung, mit ~ markiert, und kann vom verlustfreien Pro-Encode abweichen; Resize-VRAM ist exakt). Größen von Repack/Merge/Pack/Dedup/Tier werden beim Download berechnet. Byte- und VRAM-Einsparungen sind getrennt (Speichergröße ≠ GPU-Last). Das Kennzeichen „Referenzen geändert“ ist eine Vorhersage (ein PNG-Fallback kann weiterhin Drop-in sein), und Auflösungsstufen sind eine Obergrenze; einige Prüfungen laufen erst zur Laufzeit.",
   "fix.plan.include": "{op} in den Fix einbeziehen",
   "fix.plan.deselected": "wird nicht ausgeführt",
   "fix.plan.noneSelected": "Nichts ausgewählt — wähle mindestens eine Operation aus.",
