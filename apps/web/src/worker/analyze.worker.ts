@@ -7,12 +7,14 @@ import type { Asset, AtlasFrameHashes, AtlasFrameTrims, ImageFeatures, ImageMime
 import { parseAtlas, parseImage, parseSpinePage, type MalformedFrame, type ParseResult, type SpinePage } from '@asset-doctor/parsers';
 import { analyze, mergeSharedAtlases, type EncodeSizer, type OpaqueEncodeSizer } from '@asset-doctor/analysis';
 import { alphaBBox } from '@asset-doctor/fix';
+import { pageExceedsScanBudget, scanSkipReason } from '../lib/bitmap-budget';
 import { groupFiles, keyOf, type RawFile } from '../lib/group';
 import {
   alphaFullyOpaque,
   classifyContent,
   dHashFromGray,
   extractFrameRegions,
+  FRAME_HASH_MAX_SPRITES,
   isFlat,
   isSolidColor,
   luma,
@@ -98,7 +100,9 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
         unparsed.push({ ref, reason: res.error });
       }
     }
-    unparsed.sort((a, b) => a.ref.localeCompare(b.ref));
+    // NB (Round 21 #2): the unparsed.sort() is HOISTED to AFTER the frame-hash loop below — the feature loop
+    // and the frame-hash loop both push NEW size-skip entries, so sorting here would leave those unsorted.
+    // Sorting once after every push keeps the order deterministic regardless of which pages busted the cap.
 
     // Per-image features for folder-level duplicate detection + the content-class format verdict.
     // ONE decode per image yields both the dHash AND the content class (zero extra getImageData).
@@ -110,13 +114,17 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       // and JPEG/AVIF loose images never pay the full-resolution decode (instant-wow: most files skip it).
       const m = looseMime.get(assetRef);
       const scanAlpha = m === 'image/png' || m === 'image/webp';
-      const { dHash, contentClass, solid, opaque } = await decodeFeatures(bytes, scanAlpha);
+      const { dHash, contentClass, solid, opaque, scanSkipped, w, h } = await decodeFeatures(bytes, scanAlpha);
       const feat: ImageFeatures = { assetRef, contentHash };
       if (dHash) feat.dHash = dHash;
       if (contentClass !== 'unknown') feat.contentClass = contentClass;
       if (solid) feat.solid = true; // additive: only ever set when true
       if (opaque) feat.opaque = true; // additive: only ever set when true (full-frame alpha === 255)
       features.push(feat);
+      // Round 21 #2: the alpha scan was GATED OFF for an oversize loose page — surface that honestly in
+      // unparsed[] (it was a SILENT skip before). Only when scanAlpha was wanted AND the page busted the cap;
+      // a non-alpha format or an under-cap page pushes nothing ⇒ additive (no entry, no number change).
+      if (scanSkipped) unparsed.push({ ref: assetRef, reason: scanSkipReason(w, h) });
     }
 
     // Hoisted so the frame-redundancy hashing runs on the POST-MERGE sprite list (mergeSharedAtlases unions
@@ -136,11 +144,25 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       const bytes = imageBytes.get(a.atlas.name);
       if (!bytes) continue;
       const res = await hashAtlasFrames(bytes, a.atlas.sprites);
-      if (res) {
+      if (res.kind === 'ok') {
         frameHashes.push({ atlasRef: a.atlas.name, frameHashes: res.hashes });
         frameTrims.push({ atlasRef: a.atlas.name, bboxes: res.bboxes });
+      } else if (res.kind === 'sizeskip') {
+        // Round 21 #2: the WHOLE page busted the px cap — surface that honestly (was a SILENT skip before).
+        unparsed.push({ ref: a.atlas.name, reason: scanSkipReason(res.w, res.h) });
+      } else if (res.kind === 'spriteskip') {
+        // The page has more sprites than the frame-redundancy cap — a DISTINCT reason from the px cap.
+        unparsed.push({
+          ref: a.atlas.name,
+          reason: `skipped for size: ${res.n} sprites exceeds ${FRAME_HASH_MAX_SPRITES} sprite scan cap`,
+        });
       }
+      // res.kind === 'fail' (no OffscreenCanvas / decode / ctx failure / degenerate page) ⇒ no entry,
+      // exactly as before this change (those were never surfaced and are not honesty regressions here).
     }
+    // Round 21 #2: sort once, AFTER both loops above have pushed every size-skip entry, so the unparsed
+    // order is deterministic regardless of WHICH pages busted the cap (analyze passes it through verbatim).
+    unparsed.sort((a, b) => a.ref.localeCompare(b.ref));
 
     const report = await analyze(merged, undefined, {
       encodeImage: makeEncoder(imageBytes),
@@ -163,13 +185,6 @@ async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** Per-image cap (px) on the full-frame opaque scan. The 9×8 path is always cheap; the opaque scan needs
- *  a FULL-RESOLUTION getImageData (one extra full decode), so we cap it to keep the free diagnosis ≤10s.
- *  ~24 MP covers 4096×4096 (a generous loose-art ceiling); above it we skip honestly (no `opaque`
- *  feature ⇒ no finding) rather than risk a slow read on an outlier. Short-circuit means most images bail
- *  on the first transparent pixel well before the scan cost matters; this cap bounds the worst case. */
-const ALPHA_SCAN_MAX_PX = 4096 * 4096 * 1.5; // ≈ 25.2 MP
-
 /** ONE 9×8 decode → BOTH the dHash (near-dup detection) AND the content class (format verdict). The
  *  9×8 RGBA sample is read once with getImageData; `dHash` is null for featureless fills (they collapse
  *  to one hash → false near-dup matches), `contentClass` is the lossy-vs-lossless hint (Inv 4: NO
@@ -177,44 +192,72 @@ const ALPHA_SCAN_MAX_PX = 4096 * 4096 * 1.5; // ≈ 25.2 MP
  *  `solid` (single-color / fully transparent — drives the loose-only solid-fill finding). When
  *  `scanAlpha` (a loose PNG/WebP), the SAME decoded bitmap is also drawn at FULL resolution for a
  *  full-frame opaque scan (`opaque` — alpha === 255 on every pixel; short-circuits on the first
- *  non-opaque pixel, so most images bail instantly). 'unknown' / solid:false / opaque:false on any
- *  decode failure, when OffscreenCanvas is unavailable, or when the image exceeds ALPHA_SCAN_MAX_PX. */
+ *  non-opaque pixel, so most images bail instantly). The full-frame scan is GATED by the shared
+ *  pageExceedsScanBudget (Round 21 #2: ANALYZE_PAGE_MAX_PX, the single-sourced ≈25.2 MP per-page cap that
+ *  bounds this transient w·h·4 getImageData read ≤10s) — an oversize page sets `scanSkipped` so the CALLER
+ *  can surface it honestly in unparsed[] (it was a SILENT skip before). 'unknown' / solid:false /
+ *  opaque:false / scanSkipped:false on any decode failure or when OffscreenCanvas is unavailable. `w`/`h`
+ *  are the decoded dimensions (0 when never decoded) so the caller can build the skip reason after the
+ *  bitmap is closed. */
 async function decodeFeatures(
   bytes: ArrayBuffer,
   scanAlpha: boolean,
-): Promise<{ dHash: string | null; contentClass: ContentClass; solid: boolean; opaque: boolean }> {
+): Promise<{
+  dHash: string | null;
+  contentClass: ContentClass;
+  solid: boolean;
+  opaque: boolean;
+  scanSkipped: boolean;
+  w: number;
+  h: number;
+}> {
   if (typeof OffscreenCanvas === 'undefined')
-    return { dHash: null, contentClass: 'unknown', solid: false, opaque: false };
+    return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, scanSkipped: false, w: 0, h: 0 };
   try {
     const bmp = await createImageBitmap(new Blob([bytes]));
+    const { width, height } = bmp; // capture before close() so the caller's skip reason has the dimensions
     const canvas = new OffscreenCanvas(9, 8);
     const c2d = canvas.getContext('2d');
     if (!c2d) {
       bmp.close();
-      return { dHash: null, contentClass: 'unknown', solid: false, opaque: false };
+      return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, scanSkipped: false, w: width, h: height };
     }
     c2d.drawImage(bmp, 0, 0, 9, 8);
     const data = c2d.getImageData(0, 0, 9, 8).data;
     // Full-frame opaque scan: reuse the SAME bitmap (already decoded) at full resolution. Gated to loose
-    // alpha-bearing formats and a size cap; alphaFullyOpaque short-circuits on the first non-opaque pixel.
+    // alpha-bearing formats and the shared px cap; alphaFullyOpaque short-circuits on the first non-opaque
+    // pixel. `scanSkipped` is true ONLY when the scan was WANTED (scanAlpha) but the page busted the cap —
+    // a non-alpha format never wanted it ⇒ never "skipped" ⇒ no unparsed entry.
     let opaque = false;
-    if (scanAlpha && bmp.width > 0 && bmp.height > 0 && bmp.width * bmp.height <= ALPHA_SCAN_MAX_PX) {
-      const full = new OffscreenCanvas(bmp.width, bmp.height);
+    const scanSkipped = scanAlpha && pageExceedsScanBudget(width, height);
+    if (scanAlpha && !pageExceedsScanBudget(width, height)) {
+      const full = new OffscreenCanvas(width, height);
       const fctx = full.getContext('2d', { willReadFrequently: true });
       if (fctx) {
         fctx.drawImage(bmp, 0, 0);
-        opaque = alphaFullyOpaque(fctx.getImageData(0, 0, bmp.width, bmp.height).data);
+        opaque = alphaFullyOpaque(fctx.getImageData(0, 0, width, height).data);
       }
     }
     bmp.close();
     const gray: number[] = [];
     for (let p = 0; p < 9 * 8; p++) gray.push(luma(data, p * 4));
     const dHash = isFlat(gray) ? null : dHashFromGray(gray); // featureless → skip perceptual matching
-    return { dHash, contentClass: classifyContent(gray, data), solid: isSolidColor(gray, data), opaque };
+    return { dHash, contentClass: classifyContent(gray, data), solid: isSolidColor(gray, data), opaque, scanSkipped, w: width, h: height };
   } catch {
-    return { dHash: null, contentClass: 'unknown', solid: false, opaque: false };
+    return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, scanSkipped: false, w: 0, h: 0 };
   }
 }
+
+/** Discriminated result of hashAtlasFrames (Round 21 #2). `ok` carries the index-aligned hashes + bboxes;
+ *  `sizeskip`/`spriteskip` are the two DISTINCT whole-page skip reasons the worker surfaces in unparsed[]
+ *  (the px cap vs the sprite-count cap — `extractFrameRegions` returns null for BOTH, so they're separated
+ *  here by re-checking the caps the worker already knows); `fail` is a non-honesty bail (no OffscreenCanvas,
+ *  decode/ctx failure, or a degenerate page) — surfaced as nothing, exactly as before this change. */
+type FrameHashResult =
+  | { kind: 'ok'; hashes: (string | null)[]; bboxes: (TrimRect | null)[] }
+  | { kind: 'sizeskip'; w: number; h: number }
+  | { kind: 'spriteskip'; n: number }
+  | { kind: 'fail' };
 
 /** Hash each sprite's PIXEL REGION off the atlas page (within-atlas frame-redundancy) AND compute each
  *  UNtrimmed sprite's OPAQUE bounding box (within-atlas trim-margin) — BOTH off ONE shared decode. ONE
@@ -226,26 +269,33 @@ async function decodeFeatures(
  *  SHA-256'd here (crypto.subtle is async). Both arrays are index-aligned to `sprites`. A bbox is computed ONLY
  *  for an UNtrimmed sprite (`!sp.trimmed`) — an already-trimmed sprite is `null` (skipped; the rule re-gates on
  *  Sprite.trimmed anyway); a fully-transparent untrimmed frame is `null` too (alphaBBox finds no opaque pixel —
- *  the rule reads that as a whole-frame margin). Reuses the SAME caps: `extractFrameRegions` returns null ⇒ the
- *  WHOLE page is skipped for BOTH halves. Returns null when OffscreenCanvas is unavailable, the decode fails,
- *  the 2d context is unavailable, or the page exceeds the size/sprite cap. Deterministic. */
-async function hashAtlasFrames(
-  pageBytes: ArrayBuffer,
-  sprites: Sprite[],
-): Promise<{ hashes: (string | null)[]; bboxes: (TrimRect | null)[] } | null> {
-  if (typeof OffscreenCanvas === 'undefined') return null;
+ *  the rule reads that as a whole-frame margin). Reuses the SAME caps as before via the shared
+ *  pageExceedsScanBudget (Round 21 #2 — the px cap is single-sourced now); a busted cap skips the WHOLE page
+ *  for BOTH halves and is surfaced HONESTLY (the two cap reasons disambiguated for unparsed[]) instead of
+ *  silently. Deterministic. */
+async function hashAtlasFrames(pageBytes: ArrayBuffer, sprites: Sprite[]): Promise<FrameHashResult> {
+  if (typeof OffscreenCanvas === 'undefined') return { kind: 'fail' };
+  // Sprite-count cap: known WITHOUT a decode. extractFrameRegions checks this first internally; we mirror it
+  // here so the whole-page skip is surfaced as the DISTINCT sprite reason (not conflated with the px cap).
+  if (sprites.length > FRAME_HASH_MAX_SPRITES) return { kind: 'spriteskip', n: sprites.length };
   try {
     const bmp = await createImageBitmap(new Blob([pageBytes]));
     const { width, height } = bmp;
     if (width <= 0 || height <= 0) {
       bmp.close();
-      return null;
+      return { kind: 'fail' }; // degenerate page — not an honest "too big" skip, just unhashable
+    }
+    // Px cap: the page is too large to read at full resolution. Surface honestly (was silent before). Check
+    // BEFORE allocating the full-resolution canvas/getImageData so the oversize page never pays the read.
+    if (pageExceedsScanBudget(width, height)) {
+      bmp.close();
+      return { kind: 'sizeskip', w: width, h: height };
     }
     const canvas = new OffscreenCanvas(width, height);
     const c2d = canvas.getContext('2d', { willReadFrequently: true });
     if (!c2d) {
       bmp.close();
-      return null;
+      return { kind: 'fail' };
     }
     c2d.drawImage(bmp, 0, 0);
     bmp.close();
@@ -256,7 +306,9 @@ async function hashAtlasFrames(
       height,
       sprites.map((sp) => sp.frame),
     );
-    if (!regions) return null; // whole page skipped (caps) — honest, BOTH rules never fire for it
+    // Both caps were re-checked above, so a null here would be a defensive guard only — treat as a non-honesty
+    // fail (no unparsed entry) rather than fabricate a reason. In practice unreachable after the cap checks.
+    if (!regions) return { kind: 'fail' };
     const hashes: (string | null)[] = [];
     for (const region of regions) hashes.push(region === null ? null : await sha256Hex(region.buffer as ArrayBuffer));
     // Trim bboxes off the SAME page buffer (no second decode). Only for UNtrimmed sprites; alphaBBox returns a
@@ -266,9 +318,9 @@ async function hashAtlasFrames(
     const bboxes: (TrimRect | null)[] = sprites.map((sp) =>
       sp.trimmed ? null : alphaBBox(src, { x: sp.frame.x, y: sp.frame.y, w: sp.frame.w, h: sp.frame.h }),
     );
-    return { hashes, bboxes };
+    return { kind: 'ok', hashes, bboxes };
   } catch {
-    return null;
+    return { kind: 'fail' };
   }
 }
 

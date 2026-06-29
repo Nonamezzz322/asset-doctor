@@ -28,6 +28,41 @@
 // WORKING-SET bound on decoded SOURCE bitmaps held DURING fixing; it is NOT a VRAM saving and is NEVER folded
 // into vramBytesAfter/vramSaved. The optional receipt note (decodeWorkingSet) is descriptive only.
 
+// ── Round 21 #2: analyze (FREE-path) worker scan-cap POLICY ──────────────────────────────────────────
+// The analyze worker decodes each loose PNG/WebP and each atlas page to an ImageBitmap, then reads it at
+// FULL resolution via getImageData (decodeFeatures' alpha scan; hashAtlasFrames' page buffer) — each a
+// transient w·h·4 RGBA surface. Unlike the FIX worker, every such bitmap is close()d EAGERLY right after
+// the read (verified analyze.worker.ts), so the worker keeps NO many-bitmaps-live working set ⇒ a
+// BitmapBudget LRU INSTANCE here would never evict (dead code). The honest, no-fork reuse of this module
+// is therefore its POLICY half: ONE source of truth for the per-page px cap that bounds those transient
+// full-resolution reads — replacing the two byte-identical 4096·4096·1.5 constants that had drifted apart
+// (the worker's inline ALPHA_SCAN_MAX_PX and perceptual's FRAME_HASH_MAX_PX). Same convention as
+// ktx2-probe-collect.ts: the load-bearing predicate lives in a Node-pure module the worker imports verbatim
+// so a headless Vitest can cover what production runs.
+//
+// HONESTY (Inv 5): ANALYZE_PAGE_MAX_PX is a WORKING-SET bound on a transient decode buffer — NEVER a VRAM
+// or saving number. ADDITIVITY: above the cap the worker SKIPS the optional feature (opaque scan / frame
+// hash) honestly and surfaces it in the report's `unparsed[]`; the cap value is unchanged from before, so
+// the exact same pages are scanned ⇒ identical findings/report. DETERMINISM: pure integer-ish px math, no
+// Date/random/iteration order.
+
+/** Per-page px cap on the analyze worker's FULL-RESOLUTION reads (decodeFeatures' alpha scan + the
+ *  hashAtlasFrames page buffer, each a w·h·4 RGBA surface resident transiently). ONE source of truth
+ *  replacing the worker's old inline ALPHA_SCAN_MAX_PX and perceptual's FRAME_HASH_MAX_PX (both
+ *  4096·4096·1.5 ≈ 25.2 MP — a generous loose-art/page ceiling). Above it the worker skips honestly. */
+export const ANALYZE_PAGE_MAX_PX = 4096 * 4096 * 1.5; // ≈ 25.2 MP
+
+/** TRUE when a w×h page exceeds the scan budget (skip the full-resolution read honestly). Pure. A
+ *  degenerate w≤0 || h≤0 page ⇒ true (nothing to scan — matches the worker's existing >0 guards). Uses
+ *  `>` so a page EXACTLY at the cap is still scanned, byte-identical to the old `<= ALPHA_SCAN_MAX_PX`. */
+export const pageExceedsScanBudget = (w: number, h: number): boolean =>
+  w <= 0 || h <= 0 || w * h > ANALYZE_PAGE_MAX_PX;
+
+/** Deterministic English reason for an oversize-skip `unparsed[]` entry (free-form, matching the existing
+ *  ingest/parse skip reasons; CLI stays EN). `toFixed(1)` ⇒ stable across runs. */
+export const scanSkipReason = (w: number, h: number): string =>
+  `skipped for size: ${w}×${h} (${((w * h) / 1e6).toFixed(1)} MP) exceeds ${(ANALYZE_PAGE_MAX_PX / 1e6).toFixed(1)} MP scan budget`;
+
 /** Anything with byte-cost dimensions + a close() that frees native memory. ImageBitmap satisfies this
  *  structurally, so the worker passes real bitmaps while the test passes a fake that records close() calls —
  *  keeping the policy Node-pure. */

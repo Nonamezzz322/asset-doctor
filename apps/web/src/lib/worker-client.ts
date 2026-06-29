@@ -9,8 +9,11 @@ export interface Progress {
   label: string;
 }
 
-/** Run the analysis worker. Bytes are structured-cloned (not transferred), so the caller
- *  keeps its copies for rendering the film-viewer. No network is involved. */
+/** Run the analysis worker. Round 21 #2: bytes are TRANSFERRED into the worker when EVERY PickedFile carries
+ *  a re-readable `file` — the worker becomes the SOLE resident copy (killing the former ~2× copy: worker
+ *  clone + main-thread eager byte map), and the caller re-reads on demand from disk (lib/source-bytes.ts) for
+ *  the FilmViewer/probe/fix. If ANY file lacks `file` (a legacy producer with no re-read path), bytes are
+ *  CLONED instead (today's behavior) so those callers stay correct. Either way no network is involved. */
 export function runAnalysis(
   files: PickedFile[],
   onProgress: (p: Progress) => void,
@@ -48,9 +51,13 @@ export function runAnalysis(
       reject(new Error(e.message || 'worker error'));
       worker.terminate();
     };
-    worker.postMessage({
-      type: 'analyze',
-      files: files.map((f) => ({ path: f.path, name: f.name, bytes: f.bytes })),
-    });
+    const payload = files.map((f) => ({ path: f.path, name: f.name, bytes: f.bytes }));
+    // TRANSFER only when the caller can re-read every file from disk afterward (else the detach would strand
+    // the FilmViewer/probe/fix with no bytes). All-or-nothing: a single legacy file ⇒ clone the whole batch.
+    const canTransfer = files.length > 0 && files.every((f) => f.file !== undefined);
+    worker.postMessage(
+      { type: 'analyze', files: payload },
+      canTransfer ? payload.map((f) => f.bytes) : [],
+    );
   });
 }

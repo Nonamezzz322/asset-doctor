@@ -11,6 +11,7 @@ import {
   type PickedFile,
 } from './lib/import';
 import { keyOf } from './lib/group';
+import { readSourceBytes, sourceReaders } from './lib/source-bytes';
 import { attachProbeReadings } from './lib/probe-run';
 import { runAnalysis, type Progress } from './lib/worker-client';
 import { planFix, runFix, type FixOutcome, type FixProgress } from './lib/fix-client';
@@ -50,12 +51,14 @@ export function App() {
   const { t } = useI18n();
   const [phase, setPhase] = useState<Phase>({ t: 'idle' });
   const [files, setFiles] = useState<PickedFile[]>([]);
-  // ONE shared dir-aware byte map for the picked folder — keyed by the SAME keyOf the workers/probe use
-  // so a basename collision across folders never resolves the wrong bytes. Built once per run() (from
-  // `picked`) and reused for BOTH the FilmViewer selection (selectedBytes) AND the render-probe, collapsing
-  // the former double copy (fileMap useMemo + a per-run bytesByRef) into a single resident map (~½ the
-  // folder's ArrayBuffer memory). State (not useMemo) so `run()` writes the same object the probe gets.
-  const [fileMap, setFileMap] = useState<Map<string, ArrayBuffer>>(new Map());
+  // Round 21 #2: LAZY dir-aware byte readers for the picked folder — keyed by the SAME keyOf the workers/probe
+  // use so a basename collision across folders never resolves the wrong bytes. Replaces the former EAGER byte
+  // `map` (which captured `f.bytes` BEFORE runAnalysis transferred — and would hold DETACHED buffers after the
+  // transfer): each reader RE-READS from disk on demand (lib/source-bytes), so the worker holds the only
+  // resident copy of the folder's bytes (the former ~2× copy is gone). Built once per run() (from `picked`)
+  // and reused for BOTH the FilmViewer selection AND the render-probe. State (not useMemo) so `run()` writes
+  // the same object the probe closes over.
+  const [readers, setReaders] = useState<Map<string, () => Promise<ArrayBuffer | null>>>(new Map());
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [selectedAsset, setSelectedAsset] = useState<string | undefined>();
   const [selectedFinding, setSelectedFinding] = useState<string | undefined>();
@@ -94,13 +97,15 @@ export function App() {
     probeAbort.current?.abort();
     const ctrl = new AbortController();
     probeAbort.current = ctrl;
-    // Build the ONE dir-aware byte map here, from `picked`, keyed by the SAME keyOf the workers/probe use
-    // (assetRef === atlas.name === keyOf). This `map` IS the object stored in state AND handed to the probe,
-    // so there is exactly one resident copy of the folder's bytes (no second bytesByRef).
-    const map = new Map<string, ArrayBuffer>();
-    for (const f of picked) map.set(keyOf(f), f.bytes);
+    // Round 21 #2: build the LAZY dir-aware readers from `picked`, keyed by the SAME keyOf the workers/probe
+    // use (assetRef === atlas.name === keyOf). These readers close over each PickedFile's retained `.file`
+    // and re-read from disk on demand — they do NOT touch `.bytes`, so building them BEFORE runAnalysis (which
+    // TRANSFERS/detaches `.bytes` into the worker) is safe; the old eager `map.set(keyOf(f), f.bytes)` would
+    // instead have captured the about-to-be-detached buffers. This `lazyReaders` IS the object stored in state
+    // AND closed over by the probe, so there is exactly ONE resident copy of the folder's bytes (in the worker).
+    const lazyReaders = sourceReaders(picked);
     setFiles(picked);
-    setFileMap(map);
+    setReaders(lazyReaders);
     setReport(null);
     setSelectedFinding(undefined);
     setPhase({ t: 'analyzing' });
@@ -121,10 +126,11 @@ export function App() {
       setPhase({ t: 'done' });
       // THEN, non-blocking, replay each atlas through real offscreen-WebGL (main thread) and fill in
       // the MEASURED draw-calls / decoded-VRAM. Skipped silently when there's no WebGL or no atlas.
-      // The probe looks bytes up by the SAME key this map is built with — the one map, reused. Reuses the
-      // SAME `ctrl` created above (a re-drop aborts it ⇒ the worker rejects AbortError before this even
-      // attaches; if it attaches and is then aborted, the ctrl.signal.aborted guard drops the write-back).
-      void attachProbeReadings(rep, (ref) => map.get(ref), ctrl.signal).then((probed) => {
+      // The probe RE-READS each atlas's bytes from disk on demand via the SAME lazy readers (Round 21 #2 —
+      // the worker holds the only resident copy; the accessor is async now). Reuses the SAME `ctrl` created
+      // above (a re-drop aborts it ⇒ the worker rejects AbortError before this even attaches; if it attaches
+      // and is then aborted, the ctrl.signal.aborted guards drop the write-back).
+      void attachProbeReadings(rep, (ref) => lazyReaders.get(ref)?.(), ctrl.signal).then((probed) => {
         // Only write back if this probe wasn't superseded AND it actually produced readings (a new
         // object reference signals readings attached; identity ⇒ nothing measured, leave the report).
         if (!ctrl.signal.aborted && probed !== rep) setReport(probed);
@@ -201,7 +207,31 @@ export function App() {
     () => report?.findings.filter((f) => f.scope !== 'folder' && f.assetRef === debouncedSelected) ?? [],
     [report, debouncedSelected],
   );
-  const selectedBytes = debouncedSelected ? fileMap.get(debouncedSelected) : undefined;
+  // Round 21 #2: the selected film's bytes are RE-READ from disk on demand (the worker holds the only resident
+  // copy now). Async ⇒ resolved into state by the effect below, gated by a cancel flag so a rapid re-selection
+  // never lands stale bytes on a newer film. null ⇒ no bytes yet (loading) OR the source is unavailable
+  // (folder moved/deleted, or a legacy producer with no `file`) → the honest "no image" branch renders, never
+  // a fabricated film. The re-read is byte-identical to the original ⇒ identical decode/overlay (Inv 3).
+  const [selectedBytes, setSelectedBytes] = useState<ArrayBuffer | null>(null);
+  useEffect(() => {
+    if (!debouncedSelected) {
+      setSelectedBytes(null);
+      return;
+    }
+    let cancelled = false;
+    const reader = readers.get(debouncedSelected);
+    if (!reader) {
+      setSelectedBytes(null);
+      return;
+    }
+    setSelectedBytes(null); // clear the prior film while the new one re-reads (no stale overlay)
+    void reader().then((b) => {
+      if (!cancelled) setSelectedBytes(b);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedSelected, readers]);
   const selectedMetrics = report?.assets.find((a) => a.assetRef === debouncedSelected);
 
   // Orphan-reselect: when a filter/sort/search change leaves the current selection out of the visible rows,
@@ -1598,6 +1628,29 @@ function FixCard({ files }: { files: PickedFile[] }) {
   // preview (no `over`) resets the selection to empty unconditionally, so re-entering the plan starts full.
   // A FRESH preview (over absent) flips to the 'planning' spinner; a TOGGLE re-preview (over present) keeps
   // the PlanCard MOUNTED with a subtle pending hint (no flicker, no lost checkbox focus) — design B1/S4.
+  // Round 21 #2: re-source the picked files from disk BEFORE posting to the fix worker. runAnalysis
+  // TRANSFERRED (detached) the original `files[i].bytes` into the analyze worker ONLY when every file had a
+  // re-readable `.file` (worker-client canTransfer); in that mode posting `files` as-is would ship
+  // empty/detached buffers (and a second post of an already-transferred buffer throws). Re-read each file's
+  // bytes fresh via its retained `.file` (fix is user-initiated, off the ≤10s path).
+  //
+  // LEGACY/CLONE FALLBACK (additivity): when ANY file lacks `.file`, runAnalysis CLONED instead of
+  // transferring, so `f.bytes` is STILL VALID — we must reuse it rather than refuse. A re-read miss falls
+  // back to the still-attached live bytes IFF they are non-detached (byteLength > 0). A transferred buffer
+  // is detached ⇒ byteLength === 0 ⇒ no `.file` re-read ⇒ still refused HONESTLY (we never zip a detached
+  // buffer). Only when EVERYTHING is unavailable (no re-read AND detached/empty) is the whole fix refused
+  // → caller surfaces an error rather than producing a corrupt zip.
+  async function resourceFiles(): Promise<PickedFile[] | null> {
+    const out: PickedFile[] = [];
+    for (const f of files) {
+      const re = await readSourceBytes(f);
+      const bytes = re ?? (f.bytes.byteLength ? f.bytes : null);
+      if (!bytes) return null;
+      out.push({ ...f, bytes });
+    }
+    return out;
+  }
+
   async function preview(over?: Set<OpKind>) {
     if (!over) setExcludeKinds(new Set());
     const seq = ++previewSeq.current;
@@ -1609,7 +1662,13 @@ function FixCard({ files }: { files: PickedFile[] }) {
     if (over) setPhase((p) => (p.t === 'plan' ? { ...p, pending: true } : { t: 'planning' }));
     else setPhase({ t: 'planning' });
     try {
-      const summary = await planFix(files, buildOptions(over), ctrl.signal);
+      const sourced = await resourceFiles();
+      if (seq !== previewSeq.current) return; // a newer toggle superseded this preview during the re-read
+      if (!sourced) {
+        setPhase({ t: 'error', message: t('error.noFiles') });
+        return;
+      }
+      const summary = await planFix(sourced, buildOptions(over), ctrl.signal);
       if (seq !== previewSeq.current) return; // a newer toggle superseded this preview — drop the stale resolve
       setPhase({ t: 'plan', summary });
     } catch (e) {
@@ -1644,7 +1703,14 @@ function FixCard({ files }: { files: PickedFile[] }) {
     fixAbort.current = ctrl;
     setPhase({ t: 'running', p: { label: '', done: 0, total: 1 } });
     try {
-      const out = await runFix(files, buildOptions(), (p) => setPhase({ t: 'running', p }), ctrl.signal);
+      // Round 21 #2: re-read fresh bytes (the originals were transferred into the analyze worker). Null ⇒
+      // the folder is no longer readable → refuse honestly rather than zip detached/empty buffers.
+      const sourced = await resourceFiles();
+      if (!sourced) {
+        setPhase({ t: 'error', message: t('error.noFiles') });
+        return;
+      }
+      const out = await runFix(sourced, buildOptions(), (p) => setPhase({ t: 'running', p }), ctrl.signal);
       downloadZip(out.zip);
       setPhase({ t: 'done', out });
     } catch (e) {

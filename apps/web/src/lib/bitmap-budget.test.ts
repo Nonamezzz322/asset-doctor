@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { BITMAP_BUDGET_BYTES, BitmapBudget, bitmapBytes, type Closeable } from './bitmap-budget';
+import {
+  ANALYZE_PAGE_MAX_PX,
+  BITMAP_BUDGET_BYTES,
+  BitmapBudget,
+  bitmapBytes,
+  pageExceedsScanBudget,
+  scanSkipReason,
+  type Closeable,
+} from './bitmap-budget';
+import { FRAME_HASH_MAX_PX } from './perceptual';
 
 /** A fake decoded bitmap that records close() calls — lets the LRU/budget POLICY be tested headless in Node
  *  (the worker's real ImageBitmap needs a browser). `bytes` = w·h·4, so a square edge of √(n/4) sets a
@@ -228,5 +237,50 @@ describe('BitmapBudget — determinism', () => {
 describe('BITMAP_BUDGET_BYTES', () => {
   it('is the documented 256 MB working-set bound', () => {
     expect(BITMAP_BUDGET_BYTES).toBe(256 * 1024 * 1024);
+  });
+});
+
+// ── Round 21 #2: the analyze (FREE-path) scan-cap policy (pure; the worker imports it verbatim). ──
+describe('ANALYZE_PAGE_MAX_PX', () => {
+  it('is the documented ≈25.2 MP per-page scan ceiling (unchanged value — behavior-preserving)', () => {
+    expect(ANALYZE_PAGE_MAX_PX).toBe(4096 * 4096 * 1.5);
+  });
+
+  it('is SINGLE-SOURCED with perceptual.FRAME_HASH_MAX_PX (drift-guard: the two caps can never diverge)', () => {
+    expect(FRAME_HASH_MAX_PX).toBe(ANALYZE_PAGE_MAX_PX);
+  });
+});
+
+describe('pageExceedsScanBudget', () => {
+  it('false for a page UNDER the cap (4096² is scanned)', () => {
+    expect(pageExceedsScanBudget(4096, 4096)).toBe(false);
+  });
+
+  it('true for a page OVER the cap (8192² is skipped)', () => {
+    expect(pageExceedsScanBudget(8192, 8192)).toBe(true);
+  });
+
+  it('boundary: EXACTLY at the cap is scanned (false), +1px over is skipped (true) — matches old `<=`', () => {
+    // ANALYZE_PAGE_MAX_PX = 4096·4096·1.5. A 1-row page of exactly that width sits exactly at the cap.
+    const wAtCap = ANALYZE_PAGE_MAX_PX;
+    expect(pageExceedsScanBudget(wAtCap, 1)).toBe(false); // == cap ⇒ scanned (uses `>`, not `>=`)
+    expect(pageExceedsScanBudget(wAtCap + 1, 1)).toBe(true); // one px over ⇒ skipped
+  });
+
+  it('degenerate dimensions (≤0) ⇒ true (nothing to scan, mirrors the worker >0 guards)', () => {
+    expect(pageExceedsScanBudget(0, 4096)).toBe(true);
+    expect(pageExceedsScanBudget(4096, 0)).toBe(true);
+    expect(pageExceedsScanBudget(-1, 10)).toBe(true);
+  });
+});
+
+describe('scanSkipReason', () => {
+  it('is deterministic and reports the page size + MP vs the budget (stable toFixed(1))', () => {
+    const r = scanSkipReason(8192, 8192);
+    expect(r).toBe(scanSkipReason(8192, 8192)); // deterministic
+    expect(r).toContain('8192×8192');
+    expect(r).toContain('skipped for size:');
+    expect(r).toContain('67.1 MP'); // 8192·8192 / 1e6 = 67.108864 → 67.1
+    expect(r).toContain('25.2 MP scan budget'); // ANALYZE_PAGE_MAX_PX / 1e6 → 25.2
   });
 });

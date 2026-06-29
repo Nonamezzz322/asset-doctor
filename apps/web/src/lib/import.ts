@@ -8,6 +8,12 @@ export interface PickedFile {
   path: string;
   name: string;
   bytes: ArrayBuffer;
+  /** ADDITIVE (Round 21 #2). The re-readable source File for this entry — all three ingest paths already
+   *  hold one (FS Access getFile(), the <input> File, the drag fileEntry.file()). Lets the main thread
+   *  RE-READ the bytes from disk AFTER runAnalysis TRANSFERS (detaches) `bytes` into the analyze worker,
+   *  instead of keeping a second resident copy of the whole folder. Read via lib/source-bytes.ts. Absent
+   *  ⇒ runAnalysis CLONES (today's behavior, no re-read path) so any legacy producer stays correct. */
+  file?: File;
 }
 
 const RELEVANT_RE = /\.(json|atlas|png|webp|jpe?g|avif)$/i;
@@ -41,7 +47,7 @@ async function readFsDir(handle: FsDirHandle, prefix: string, out: PickedFile[])
     if (h.kind === 'file') {
       if (!RELEVANT_RE.test(name)) continue;
       const file = await h.getFile();
-      out.push({ path, name, bytes: await file.arrayBuffer() });
+      out.push({ path, name, bytes: await file.arrayBuffer(), file });
     } else {
       await readFsDir(h, path, out);
     }
@@ -55,7 +61,7 @@ export async function filesFromInput(list: FileList): Promise<PickedFile[]> {
   for (const file of Array.from(list)) {
     if (!RELEVANT_RE.test(file.name)) continue;
     const rel = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-    out.push({ path: rel || file.name, name: file.name, bytes: await file.arrayBuffer() });
+    out.push({ path: rel || file.name, name: file.name, bytes: await file.arrayBuffer(), file });
   }
   return out;
 }
@@ -78,7 +84,7 @@ async function readEntry(entry: FileSystemEntry, out: PickedFile[]): Promise<voi
     const fileEntry = entry as FileSystemFileEntry;
     const file = await new Promise<File>((res, rej) => fileEntry.file(res, rej));
     if (RELEVANT_RE.test(file.name)) {
-      out.push({ path: entry.fullPath.replace(/^\//, ''), name: file.name, bytes: await file.arrayBuffer() });
+      out.push({ path: entry.fullPath.replace(/^\//, ''), name: file.name, bytes: await file.arrayBuffer(), file });
     }
   } else if (entry.isDirectory) {
     const reader = (entry as FileSystemDirectoryEntry).createReader();

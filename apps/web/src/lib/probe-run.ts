@@ -33,9 +33,10 @@ export function webglAvailable(): boolean {
   }
 }
 
-/** Decode an atlas's bytes to an ImageBitmap the probe can upload. The web app already holds these
- *  bytes (fileMap) for the FilmViewer; we decode our own off-critical-path copy here. Returns null on
- *  decode failure so one bad image never aborts the whole probe pass. */
+/** Decode an atlas's bytes to an ImageBitmap the probe can upload. The host re-reads these bytes from
+ *  disk on demand (Round 21 #2 — the analyze worker holds the only resident copy); we decode our own
+ *  off-critical-path copy here. Returns null on decode failure so one bad image never aborts the whole
+ *  probe pass. */
 async function decode(bytes: ArrayBuffer): Promise<ImageBitmap | null> {
   try {
     return await createImageBitmap(new Blob([bytes]));
@@ -51,14 +52,17 @@ async function decode(bytes: ArrayBuffer): Promise<ImageBitmap | null> {
  *
  * @param report  the static analysis report (rendered already).
  * @param bytesOf resolve an asset's raw bytes by its assetRef. MAJOR2 invariant: the key passed here
- *                is `AssetMetrics.assetRef` === the atlas.name === the app's fileMap keyOf ref — the
- *                three are the same value, not interchangeable by luck. Asserted in tests.
+ *                is `AssetMetrics.assetRef` === the atlas.name === the app's keyOf ref — the three are
+ *                the same value, not interchangeable by luck. Asserted in tests. Round 21 #2: this may
+ *                now resolve ASYNCHRONOUSLY (the host re-reads the bytes from disk on demand, since
+ *                runAnalysis transfers/detaches the originals); a sync accessor still works (await of a
+ *                non-Promise is the value). undefined/null ⇒ that atlas simply shows no measured line.
  * @param signal  optional abort signal: when a fresh analysis starts, the caller aborts the stale
  *                probe so its late results can't overwrite the new report.
  */
 export async function attachProbeReadings(
   report: AnalysisReport,
-  bytesOf: (assetRef: string) => ArrayBuffer | undefined,
+  bytesOf: (assetRef: string) => Promise<ArrayBuffer | null | undefined> | ArrayBuffer | null | undefined,
   signal?: AbortSignal,
 ): Promise<AnalysisReport> {
   const frames = report.atlasFrames;
@@ -72,8 +76,9 @@ export async function attachProbeReadings(
   for (const ref of Object.keys(frames)) {
     if (signal?.aborted) return report;
     const rects = frames[ref] as Rect[];
-    const bytes = bytesOf(ref);
-    if (!bytes) continue; // no bytes for this atlas (shouldn't happen — see MAJOR2 invariant)
+    const bytes = await bytesOf(ref); // may re-read from disk (Round 21 #2) — sequential, off the ≤10s path
+    if (signal?.aborted) return report; // a fresh run may have superseded us during the async re-read
+    if (!bytes) continue; // no bytes for this atlas (re-read failed / shouldn't happen — MAJOR2 invariant)
     const bmp = await decode(bytes);
     if (!bmp) continue;
     try {

@@ -2,6 +2,7 @@
 // grayscale and calls these; keeping the math here means it can be unit-tested without a canvas.
 
 import type { ContentClass } from '@asset-doctor/core';
+import { ANALYZE_PAGE_MAX_PX } from './bitmap-budget';
 
 const DW = 9; // sample width
 const DH = 8; // sample height
@@ -139,9 +140,10 @@ export interface FrameRect {
 
 /** Per-page caps mirroring the worker's full-frame opaque scan (instant-wow ≤10s). A page above the px cap
  *  or with more than the sprite cap is skipped WHOLE (the rule never fires for it) rather than risking a
- *  slow read — honestly, not silently. Same ceilings the worker used inline; single-sourced here so the
- *  pure logic the rule depends on is one testable unit. */
-export const FRAME_HASH_MAX_PX = 4096 * 4096 * 1.5; // ≈ 25.2 MP — generous loose-art ceiling
+ *  slow read — honestly, not silently. Round 21 #2: the px ceiling is now SINGLE-SOURCED as
+ *  ANALYZE_PAGE_MAX_PX in bitmap-budget.ts (the worker's old inline ALPHA_SCAN_MAX_PX used the same value;
+ *  re-exporting it here unifies the two so they can't drift). FRAME_HASH_MAX_SPRITES stays — a distinct axis. */
+export { ANALYZE_PAGE_MAX_PX as FRAME_HASH_MAX_PX } from './bitmap-budget';
 export const FRAME_HASH_MAX_SPRITES = 4096; // real animation sheets are well under this
 
 /** Area-average a sub-rect of a full-resolution RGBA page down to a 9×8 grayscale sample (the same grid the
@@ -221,7 +223,7 @@ export function extractFrameRegions(
   rects: FrameRect[],
 ): (Uint8Array | null)[] | null {
   if (rects.length > FRAME_HASH_MAX_SPRITES) return null;
-  if (pageW <= 0 || pageH <= 0 || pageW * pageH > FRAME_HASH_MAX_PX) return null;
+  if (pageW <= 0 || pageH <= 0 || pageW * pageH > ANALYZE_PAGE_MAX_PX) return null;
   const out: (Uint8Array | null)[] = [];
   for (const rect of rects) {
     const { x, y, w, h } = rect;

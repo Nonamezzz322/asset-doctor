@@ -55,6 +55,40 @@ even when no occupancy/frame-redundancy/merge repack is already scheduled.
   surfaces `sheet.png#bad.png` + `sheet.png#over.png` while the good frames stay diagnosed).
   **Gate:** `pnpm typecheck` + `pnpm test` (parsers 17→22, apps/web 407→408; all packages green) + `pnpm lint` clean.
 
+- **#2 Bound the analyze (FREE-path) worker's resident bytes** (`docs/improvements/round21-bound-the-analyze-free-path-worker.md`)
+  — kills the genuine ~2× source-byte copy on the free diagnosis path and makes the previously-SILENT oversize
+  scan skips honest. **(a) Transfer + lazy re-read.** `runAnalysis` now TRANSFERS each `PickedFile.bytes` into
+  the analyze worker (the worker becomes the SOLE resident copy) when EVERY file carries a re-readable `file`
+  (additive `PickedFile.file?: File`, populated by all three ingest paths); else it CLONES (today's behavior) so
+  legacy callers stay correct. The main thread no longer keeps an eager dir-aware byte `map` (which had captured
+  `f.bytes` BEFORE the transfer ⇒ would have held DETACHED buffers — the sequencing BLOCKER) — it RE-READS from
+  disk on demand via new pure `lib/source-bytes.ts` (`readSourceBytes` / `sourceReaders`, keyed by the SAME
+  `keyOf`). The FilmViewer selection (async-resolved into state, cancel-guarded; null ⇒ honest "no image"
+  branch, never a fabricated film), the render-probe (`attachProbeReadings` `bytesOf` widened to async + an
+  extra post-re-read abort guard), and the fix path (FixCard re-sources fresh bytes before `planFix`/`runFix`;
+  any null ⇒ honest refuse, never a corrupt zip) all read through it. **(b) Honest oversize skips + cap unify.**
+  The worker's full-resolution `decodeFeatures` alpha scan and `hashAtlasFrames` page read are gated by the
+  shared `pageExceedsScanBudget` / surfaced via `scanSkipReason` (new in `lib/bitmap-budget.ts` as the
+  single-sourced `ANALYZE_PAGE_MAX_PX` — `perceptual.FRAME_HASH_MAX_PX` now re-exports it; the worker's inline
+  `ALPHA_SCAN_MAX_PX` is deleted, ending the byte-identical-but-forked drift). An oversize page now lands a
+  `{ref, reason}` in the existing `unparsed[]` (px-cap vs sprite-cap kept as TWO distinct reasons via a
+  discriminated `hashAtlasFrames` result) instead of vanishing silently; the `unparsed.sort()` is hoisted to
+  AFTER both push-loops so order is deterministic. **No `BitmapBudget` LRU instance in the analyze worker** — its
+  decoded bitmaps are already `close()`d eagerly (no many-live working set, unlike the FIX worker), so an LRU
+  here would be dead code; the honest, no-fork reuse of `bitmap-budget.ts` is its px-cap POLICY half (a
+  documented working-set bound, Inv 5 — never a VRAM/saving number). HONESTY (Inv 3/5): re-read bytes are
+  byte-identical to the original ⇒ identical findings/report/overlay; the cap value is unchanged ⇒ the same
+  pages are scanned ⇒ no measured-number drift. ADDITIVITY: under the cap nothing is skipped and no `unparsed`
+  entry is added; a legacy `PickedFile` (no `file`) still clones. Inv 1: transfer is intra-process, re-read is
+  local disk — zero network. Inv 4: transfer is cheaper than clone and re-reads are lazy (selected/probed/fix)
+  ⇒ off the ≤10s critical path. Tests: extended `bitmap-budget.test.ts` (the cap predicate boundary/degenerate,
+  `scanSkipReason` determinism, the `perceptual.FRAME_HASH_MAX_PX === ANALYZE_PAGE_MAX_PX` drift-guard); new
+  pure `source-bytes.test.ts` (exact bytes, null-on-missing-file, null-on-reject, dir-aware keys, laziness); new
+  `analyze-transfer-skip.test.ts` (runAnalysis posts a non-empty transfer list when all files have `file`, empty
+  when one lacks it; the worker's whole-page skip mapping fires SELECTIVELY, surfaces the two distinct reasons,
+  and sorts deterministically).
+  **Gate:** `pnpm typecheck` + `pnpm test` + `pnpm lint`.
+
 ## Round 20 — selection (#0 shipped) — 2026-06-29
 Pick: **(#0) trim-on-repack FIX** (shipped below) — turns the r19 trim-margin DETECTOR into a Pro fix.
 
