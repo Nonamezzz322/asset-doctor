@@ -54,6 +54,13 @@ describe('catalog completeness (all 9 locales)', () => {
       expect(translate(loc, 'fix.plan.alsoRuns', { n: 3 })).not.toContain('{');
       expect(translate(loc, 'fix.plan.measuredNowDisk', { disk: 4096 })).not.toContain('{');
       expect(translate(loc, 'fix.plan.measuredNowVram', { vram: 16 * 1048576 })).not.toContain('{');
+      // FilmViewer canvas accessible name — the {regions} plural (forms 0/1/3) carries {name}{w}{h}{regions}
+      // (altNoDims drops {w}{h}); every locale fills them with no leftover braces. 0 → 'other' (Intl en).
+      for (const regions of [0, 1, 3]) {
+        const p = { name: 'hero.png', w: 512, h: 256, regions };
+        expect(translate(loc, 'film.alt', p), `${loc} film.alt regions=${regions}`).not.toContain('{');
+        expect(translate(loc, 'film.altNoDims', p), `${loc} film.altNoDims regions=${regions}`).not.toContain('{');
+      }
     }
   });
 

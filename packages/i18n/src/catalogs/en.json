@@ -25,6 +25,21 @@
   "readout.onFirstRender": "on first render",
   "readout.declaredVsMeasured": "declared vs measured",
   "readout.deltaTooltip": "Two measurements, not a saving: declared = manifest atlas geometry, measured = real decoded pixels from a WebGL render. The signed difference is the gap between the two methods, never a savings.",
+  "legend.heading": "overlay legend",
+  "legend.empty": "empty",
+  "legend.transparent": "transparent margin",
+  "legend.bleeding": "bleeding",
+  "legend.duplicateFrame": "duplicate frame",
+  "film.alt": {
+    "$count": "regions",
+    "one": "Atlas {name}, {w}×{h} pixels, {regions} highlighted region",
+    "other": "Atlas {name}, {w}×{h} pixels, {regions} highlighted regions"
+  },
+  "film.altNoDims": {
+    "$count": "regions",
+    "one": "Atlas {name}, {regions} highlighted region",
+    "other": "Atlas {name}, {regions} highlighted regions"
+  },
   "dropzone.title": "Drop an asset folder to diagnose",
   "dropzone.subtitle": "TexturePacker / Pixi atlases + loose images. Analysis runs locally — nothing leaves your device.",
   "dropzone.open": "Open folder",

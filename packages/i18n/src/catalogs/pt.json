@@ -525,5 +525,20 @@
   "fix.framesAliased": { "$count": "n", "one": "Vinculado {n} quadro duplicado a uma região compartilhada — VRAM {before:bytes} → {after:bytes} (todos os nomes de quadro ainda resolvem)", "other": "Vinculados {n} quadros duplicados a uma região compartilhada — VRAM {before:bytes} → {after:bytes} (todos os nomes de quadro ainda resolvem)" },
   "fix.crossSheetFramesDeduped": { "$count": "n", "one": "Removido {n} quadro duplicado entre folhas mescladas para uma região compartilhada — {vram:bytes} de VRAM recuperada (todos os nomes de quadro ainda resolvem)", "other": "Removidos {n} quadros duplicados entre folhas mescladas para uma região compartilhada — {vram:bytes} de VRAM recuperada (todos os nomes de quadro ainda resolvem)" },
   "fix.crossSheetFramesDedupedDiskOnly": { "$count": "n", "one": "Removido {n} quadro duplicado entre folhas mescladas para uma região compartilhada — mesmo nível de VRAM, apenas disco (todos os nomes de quadro ainda resolvem)", "other": "Removidos {n} quadros duplicados entre folhas mescladas para uma região compartilhada — mesmo nível de VRAM, apenas disco (todos os nomes de quadro ainda resolvem)" },
-  "fix.trimmedOnRepack": { "$count": "n", "one": "Recortado {n} sprite sem recorte para seus limites opacos — recuperados {area} px, VRAM {before:bytes} → {after:bytes} (todos os nomes ainda resolvem)", "other": "Recortados {n} sprites sem recorte para seus limites opacos — recuperados {area} px, VRAM {before:bytes} → {after:bytes} (todos os nomes ainda resolvem)" }
+  "fix.trimmedOnRepack": { "$count": "n", "one": "Recortado {n} sprite sem recorte para seus limites opacos — recuperados {area} px, VRAM {before:bytes} → {after:bytes} (todos os nomes ainda resolvem)", "other": "Recortados {n} sprites sem recorte para seus limites opacos — recuperados {area} px, VRAM {before:bytes} → {after:bytes} (todos os nomes ainda resolvem)" },
+  "legend.heading": "legenda de sobreposição",
+  "legend.empty": "vazio",
+  "legend.transparent": "margem transparente",
+  "legend.bleeding": "sangramento",
+  "legend.duplicateFrame": "moldura duplicada",
+  "film.alt": {
+    "$count": "regions",
+    "one": "Atlas {name}, {w}×{h} pixels, {regions} região destacada",
+    "other": "Atlas {name}, {w}×{h} pixels, {regions} regiões destacadas"
+  },
+  "film.altNoDims": {
+    "$count": "regions",
+    "one": "Atlas {name}, {regions} região destacada",
+    "other": "Atlas {name}, {regions} regiões destacadas"
+  }
 }

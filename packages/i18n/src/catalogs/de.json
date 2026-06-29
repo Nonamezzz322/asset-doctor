@@ -522,5 +522,20 @@
   "fix.framesAliased": { "$count": "n", "one": "{n} doppelten Frame auf eine gemeinsame Region verwiesen — VRAM {before:bytes} → {after:bytes} (alle Framenamen werden weiterhin aufgelöst)", "other": "{n} doppelte Frames auf eine gemeinsame Region verwiesen — VRAM {before:bytes} → {after:bytes} (alle Framenamen werden weiterhin aufgelöst)" },
   "fix.crossSheetFramesDeduped": { "$count": "n", "one": "{n} doppelten Frame über zusammengeführte Sheets hinweg auf eine gemeinsame Region dedupliziert — {vram:bytes} VRAM freigegeben (alle Framenamen werden weiterhin aufgelöst)", "other": "{n} doppelte Frames über zusammengeführte Sheets hinweg auf eine gemeinsame Region dedupliziert — {vram:bytes} VRAM freigegeben (alle Framenamen werden weiterhin aufgelöst)" },
   "fix.crossSheetFramesDedupedDiskOnly": { "$count": "n", "one": "{n} doppelten Frame über zusammengeführte Sheets hinweg auf eine gemeinsame Region dedupliziert — gleiche VRAM-Stufe, nur Festplatte (alle Framenamen werden weiterhin aufgelöst)", "other": "{n} doppelte Frames über zusammengeführte Sheets hinweg auf eine gemeinsame Region dedupliziert — gleiche VRAM-Stufe, nur Festplatte (alle Framenamen werden weiterhin aufgelöst)" },
-  "fix.trimmedOnRepack": { "$count": "n", "one": "{n} ungetrimmten Sprite auf seine opaken Grenzen getrimmt — {area} px zurückgewonnen, VRAM {before:bytes} → {after:bytes} (alle Namen werden weiterhin aufgelöst)", "other": "{n} ungetrimmte Sprites auf ihre opaken Grenzen getrimmt — {area} px zurückgewonnen, VRAM {before:bytes} → {after:bytes} (alle Namen werden weiterhin aufgelöst)" }
+  "fix.trimmedOnRepack": { "$count": "n", "one": "{n} ungetrimmten Sprite auf seine opaken Grenzen getrimmt — {area} px zurückgewonnen, VRAM {before:bytes} → {after:bytes} (alle Namen werden weiterhin aufgelöst)", "other": "{n} ungetrimmte Sprites auf ihre opaken Grenzen getrimmt — {area} px zurückgewonnen, VRAM {before:bytes} → {after:bytes} (alle Namen werden weiterhin aufgelöst)" },
+  "legend.heading": "Overlay-Legende",
+  "legend.empty": "leer",
+  "legend.transparent": "transparenter Rand",
+  "legend.bleeding": "Bleeding",
+  "legend.duplicateFrame": "doppelter Frame",
+  "film.alt": {
+    "$count": "regions",
+    "one": "Atlas {name}, {w}×{h} Pixel, {regions} hervorgehobener Bereich",
+    "other": "Atlas {name}, {w}×{h} Pixel, {regions} hervorgehobene Bereiche"
+  },
+  "film.altNoDims": {
+    "$count": "regions",
+    "one": "Atlas {name}, {regions} hervorgehobener Bereich",
+    "other": "Atlas {name}, {regions} hervorgehobene Bereiche"
+  }
 }

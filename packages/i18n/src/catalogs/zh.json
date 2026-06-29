@@ -511,5 +511,20 @@
   "fix.framesAliased": { "$count": "n", "one": "已将 {n} 个重复帧别名化到共享区域 — 显存 {before:bytes} → {after:bytes}（所有帧名称仍可解析）", "other": "已将 {n} 个重复帧别名化到共享区域 — 显存 {before:bytes} → {after:bytes}（所有帧名称仍可解析）" },
   "fix.crossSheetFramesDeduped": { "$count": "n", "one": "已将合并图集间的 {n} 个重复帧去重到共享区域 — 回收 {vram:bytes} 显存（所有帧名称仍可解析）", "other": "已将合并图集间的 {n} 个重复帧去重到共享区域 — 回收 {vram:bytes} 显存（所有帧名称仍可解析）" },
   "fix.crossSheetFramesDedupedDiskOnly": { "$count": "n", "one": "已将合并图集间的 {n} 个重复帧去重到共享区域 — 显存层级不变，仅节省磁盘（所有帧名称仍可解析）", "other": "已将合并图集间的 {n} 个重复帧去重到共享区域 — 显存层级不变，仅节省磁盘（所有帧名称仍可解析）" },
-  "fix.trimmedOnRepack": { "$count": "n", "one": "已将 {n} 个未裁剪精灵裁剪到其不透明边界 — 回收 {area} px，显存 {before:bytes} → {after:bytes}（所有名称仍可解析）", "other": "已将 {n} 个未裁剪精灵裁剪到其不透明边界 — 回收 {area} px，显存 {before:bytes} → {after:bytes}（所有名称仍可解析）" }
+  "fix.trimmedOnRepack": { "$count": "n", "one": "已将 {n} 个未裁剪精灵裁剪到其不透明边界 — 回收 {area} px，显存 {before:bytes} → {after:bytes}（所有名称仍可解析）", "other": "已将 {n} 个未裁剪精灵裁剪到其不透明边界 — 回收 {area} px，显存 {before:bytes} → {after:bytes}（所有名称仍可解析）" },
+  "legend.heading": "叠加图例",
+  "legend.empty": "空白",
+  "legend.transparent": "透明边距",
+  "legend.bleeding": "渗色",
+  "legend.duplicateFrame": "重复帧",
+  "film.alt": {
+    "$count": "regions",
+    "one": "图集 {name}，{w}×{h} 像素，{regions} 个高亮区域",
+    "other": "图集 {name}，{w}×{h} 像素，{regions} 个高亮区域"
+  },
+  "film.altNoDims": {
+    "$count": "regions",
+    "one": "图集 {name}，{regions} 个高亮区域",
+    "other": "图集 {name}，{regions} 个高亮区域"
+  }
 }

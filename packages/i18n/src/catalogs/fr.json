@@ -525,5 +525,20 @@
   "fix.framesAliased": { "$count": "n", "one": "{n} image en double aliasée vers une région partagée — VRAM {before:bytes} → {after:bytes} (tous les noms d’images restent résolus)", "other": "{n} images en double aliasées vers une région partagée — VRAM {before:bytes} → {after:bytes} (tous les noms d’images restent résolus)" },
   "fix.crossSheetFramesDeduped": { "$count": "n", "one": "{n} image en double dédupliquée entre les feuilles fusionnées vers une région partagée — {vram:bytes} de VRAM récupérée (tous les noms d’images restent résolus)", "other": "{n} images en double dédupliquées entre les feuilles fusionnées vers une région partagée — {vram:bytes} de VRAM récupérée (tous les noms d’images restent résolus)" },
   "fix.crossSheetFramesDedupedDiskOnly": { "$count": "n", "one": "{n} image en double dédupliquée entre les feuilles fusionnées vers une région partagée — même palier de VRAM, disque uniquement (tous les noms d’images restent résolus)", "other": "{n} images en double dédupliquées entre les feuilles fusionnées vers une région partagée — même palier de VRAM, disque uniquement (tous les noms d’images restent résolus)" },
-  "fix.trimmedOnRepack": { "$count": "n", "one": "{n} sprite non rogné rogné à ses limites opaques — {area} px récupérés, VRAM {before:bytes} → {after:bytes} (tous les noms restent résolus)", "other": "{n} sprites non rognés rognés à leurs limites opaques — {area} px récupérés, VRAM {before:bytes} → {after:bytes} (tous les noms restent résolus)" }
+  "fix.trimmedOnRepack": { "$count": "n", "one": "{n} sprite non rogné rogné à ses limites opaques — {area} px récupérés, VRAM {before:bytes} → {after:bytes} (tous les noms restent résolus)", "other": "{n} sprites non rognés rognés à leurs limites opaques — {area} px récupérés, VRAM {before:bytes} → {after:bytes} (tous les noms restent résolus)" },
+  "legend.heading": "légende des calques",
+  "legend.empty": "vide",
+  "legend.transparent": "marge transparente",
+  "legend.bleeding": "débordement",
+  "legend.duplicateFrame": "image en double",
+  "film.alt": {
+    "$count": "regions",
+    "one": "Atlas {name}, {w}×{h} pixels, {regions} région mise en évidence",
+    "other": "Atlas {name}, {w}×{h} pixels, {regions} régions mises en évidence"
+  },
+  "film.altNoDims": {
+    "$count": "regions",
+    "one": "Atlas {name}, {regions} région mise en évidence",
+    "other": "Atlas {name}, {regions} régions mises en évidence"
+  }
 }

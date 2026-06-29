@@ -525,5 +525,20 @@
   "fix.framesAliased": { "$count": "n", "one": "Se vinculó {n} fotograma duplicado a una región compartida — VRAM {before:bytes} → {after:bytes} (todos los nombres de fotograma siguen resolviéndose)", "other": "Se vincularon {n} fotogramas duplicados a una región compartida — VRAM {before:bytes} → {after:bytes} (todos los nombres de fotograma siguen resolviéndose)" },
   "fix.crossSheetFramesDeduped": { "$count": "n", "one": "Se desduplicó {n} fotograma duplicado entre hojas fusionadas a una región compartida — se recuperó {vram:bytes} de VRAM (todos los nombres de fotograma siguen resolviéndose)", "other": "Se desduplicaron {n} fotogramas duplicados entre hojas fusionadas a una región compartida — se recuperó {vram:bytes} de VRAM (todos los nombres de fotograma siguen resolviéndose)" },
   "fix.crossSheetFramesDedupedDiskOnly": { "$count": "n", "one": "Se desduplicó {n} fotograma duplicado entre hojas fusionadas a una región compartida — mismo nivel de VRAM, solo disco (todos los nombres de fotograma siguen resolviéndose)", "other": "Se desduplicaron {n} fotogramas duplicados entre hojas fusionadas a una región compartida — mismo nivel de VRAM, solo disco (todos los nombres de fotograma siguen resolviéndose)" },
-  "fix.trimmedOnRepack": { "$count": "n", "one": "Se recortó {n} sprite sin recortar a sus límites opacos — se recuperaron {area} px, VRAM {before:bytes} → {after:bytes} (todos los nombres siguen resolviéndose)", "other": "Se recortaron {n} sprites sin recortar a sus límites opacos — se recuperaron {area} px, VRAM {before:bytes} → {after:bytes} (todos los nombres siguen resolviéndose)" }
+  "fix.trimmedOnRepack": { "$count": "n", "one": "Se recortó {n} sprite sin recortar a sus límites opacos — se recuperaron {area} px, VRAM {before:bytes} → {after:bytes} (todos los nombres siguen resolviéndose)", "other": "Se recortaron {n} sprites sin recortar a sus límites opacos — se recuperaron {area} px, VRAM {before:bytes} → {after:bytes} (todos los nombres siguen resolviéndose)" },
+  "legend.heading": "leyenda de superposición",
+  "legend.empty": "vacío",
+  "legend.transparent": "margen transparente",
+  "legend.bleeding": "sangrado",
+  "legend.duplicateFrame": "fotograma duplicado",
+  "film.alt": {
+    "$count": "regions",
+    "one": "Atlas {name}, {w}×{h} píxeles, {regions} región resaltada",
+    "other": "Atlas {name}, {w}×{h} píxeles, {regions} regiones resaltadas"
+  },
+  "film.altNoDims": {
+    "$count": "regions",
+    "one": "Atlas {name}, {regions} región resaltada",
+    "other": "Atlas {name}, {regions} regiones resaltadas"
+  }
 }

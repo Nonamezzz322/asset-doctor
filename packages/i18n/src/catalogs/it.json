@@ -525,5 +525,20 @@
   "fix.framesAliased": { "$count": "n", "one": "Collegato {n} fotogramma duplicato a una regione condivisa — VRAM {before:bytes} → {after:bytes} (tutti i nomi dei fotogrammi vengono ancora risolti)", "other": "Collegati {n} fotogrammi duplicati a una regione condivisa — VRAM {before:bytes} → {after:bytes} (tutti i nomi dei fotogrammi vengono ancora risolti)" },
   "fix.crossSheetFramesDeduped": { "$count": "n", "one": "Deduplicato {n} fotogramma duplicato tra fogli uniti in una regione condivisa — recuperati {vram:bytes} di VRAM (tutti i nomi dei fotogrammi vengono ancora risolti)", "other": "Deduplicati {n} fotogrammi duplicati tra fogli uniti in una regione condivisa — recuperati {vram:bytes} di VRAM (tutti i nomi dei fotogrammi vengono ancora risolti)" },
   "fix.crossSheetFramesDedupedDiskOnly": { "$count": "n", "one": "Deduplicato {n} fotogramma duplicato tra fogli uniti in una regione condivisa — stesso livello di VRAM, solo disco (tutti i nomi dei fotogrammi vengono ancora risolti)", "other": "Deduplicati {n} fotogrammi duplicati tra fogli uniti in una regione condivisa — stesso livello di VRAM, solo disco (tutti i nomi dei fotogrammi vengono ancora risolti)" },
-  "fix.trimmedOnRepack": { "$count": "n", "one": "Ritagliato {n} sprite non ritagliato ai suoi limiti opachi — recuperati {area} px, VRAM {before:bytes} → {after:bytes} (tutti i nomi vengono ancora risolti)", "other": "Ritagliati {n} sprite non ritagliati ai loro limiti opachi — recuperati {area} px, VRAM {before:bytes} → {after:bytes} (tutti i nomi vengono ancora risolti)" }
+  "fix.trimmedOnRepack": { "$count": "n", "one": "Ritagliato {n} sprite non ritagliato ai suoi limiti opachi — recuperati {area} px, VRAM {before:bytes} → {after:bytes} (tutti i nomi vengono ancora risolti)", "other": "Ritagliati {n} sprite non ritagliati ai loro limiti opachi — recuperati {area} px, VRAM {before:bytes} → {after:bytes} (tutti i nomi vengono ancora risolti)" },
+  "legend.heading": "legenda overlay",
+  "legend.empty": "vuoto",
+  "legend.transparent": "margine trasparente",
+  "legend.bleeding": "bleeding",
+  "legend.duplicateFrame": "fotogramma duplicato",
+  "film.alt": {
+    "$count": "regions",
+    "one": "Atlas {name}, {w}×{h} pixel, {regions} regione evidenziata",
+    "other": "Atlas {name}, {w}×{h} pixel, {regions} regioni evidenziate"
+  },
+  "film.altNoDims": {
+    "$count": "regions",
+    "one": "Atlas {name}, {regions} regione evidenziata",
+    "other": "Atlas {name}, {regions} regioni evidenziate"
+  }
 }

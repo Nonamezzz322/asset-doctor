@@ -1,15 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
-import type { AssetMetrics, Finding, OverlayZone } from '@asset-doctor/core';
+import { useEffect, useId, useRef, useState } from 'react';
+import type { AssetMetrics, Finding } from '@asset-doctor/core';
 import { fmtBytes, fmtSignedBytes } from '../lib/format';
 import { useI18n } from '../lib/i18n';
-
-// Overlay styles (§5): empty = red, transparent = yellow, bleeding = teal, duplicate-frame = teal.
-const ZONE_STYLE: Record<OverlayZone['kind'], { stroke: string; fill: string }> = {
-  empty: { stroke: '#e5484d', fill: 'rgba(229,72,77,0.18)' },
-  transparent: { stroke: '#d98a00', fill: 'rgba(217,138,0,0.14)' },
-  bleeding: { stroke: '#0e8c8c', fill: 'rgba(14,140,140,0.14)' },
-  'duplicate-frame': { stroke: '#0e8c8c', fill: 'rgba(14,140,140,0.18)' },
-};
+// ZONE_STYLE lives in film-legend-style.ts (single source of truth) so the paint loop here and the legend
+// swatches (film-legend.ts) read the SAME colors with no import cycle — the legend can never drift from paint.
+import { ZONE_STYLE } from '../lib/film-legend-style';
+import { filmAltText, legendItemsFor } from '../lib/film-legend';
 
 const MAX_W = 760;
 
@@ -38,6 +34,9 @@ export function FilmViewer({
   const { t } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  // Stable, unique id for the legend's accessible group name (aria-labelledby). `name` may carry odd chars,
+  // so useId is the safe source — never derived from the asset name. React 18-safe.
+  const legendHeadingId = useId();
 
   useEffect(() => {
     let cancelled = false;
@@ -106,6 +105,13 @@ export function FilmViewer({
   // Mip ceiling is a CONDITIONAL upper bound (+33%), shown only when it exceeds the base (nonzero size).
   const showMip = m !== undefined && m.vramBytesMipmapped > m.vramBytes;
 
+  // Accessible name for the canvas (otherwise an inaccessible painted blob) — MEASURED facts only: name,
+  // dims (omitted when not yet decoded), and the measured highlighted-region count. No disk/VRAM/savings.
+  const altText = filmAltText(t, name, dims, findings);
+  // Decode the overlay colors into honest words so color is no longer the sole signal. Empty (before-diff
+  // film, format/dimension-only findings) ⇒ render nothing — no stray empty strip.
+  const legendItems = legendItemsFor(findings);
+
   return (
     <div className="relative ad-clip ad-viewer-shadow rounded-2xl border border-film-border bg-film p-3.5">
       {/* top bar */}
@@ -119,8 +125,13 @@ export function FilmViewer({
 
       {/* x-ray stage */}
       <div className="ad-grid relative aspect-square w-full overflow-hidden rounded-[10px]">
-        <canvas ref={canvasRef} className="absolute inset-0 m-auto block max-h-full max-w-full" />
-        <div key={name} className="ad-scanline" />
+        <canvas
+          ref={canvasRef}
+          role="img"
+          aria-label={altText}
+          className="absolute inset-0 m-auto block max-h-full max-w-full"
+        />
+        <div key={name} className="ad-scanline" aria-hidden="true" />
       </div>
 
       {/* readout strip — when a render-probe reading exists, the static VRAM is relabelled "declared"
@@ -135,6 +146,34 @@ export function FilmViewer({
         <ReadCell label="OCC" value={occ === undefined ? '—' : `${Math.round(occ * 100)}%`} color={occColor} />
         <ReadCell label="FRAG" value={frag === undefined ? '—' : `${Math.round(frag * 100)}%`} color={fragColor} />
       </div>
+
+      {/* OVERLAY LEGEND — decodes the x-ray colors into words so color is no longer the sole signal (a11y).
+          Swatch fills come from ZONE_STYLE (same as paint, zero drift); the localized text carries the
+          meaning so each swatch is aria-hidden (the SR never reads "colored box"). Lists ONLY kinds genuinely
+          present; bleeding & duplicate-frame share the teal swatch but keep DISTINCT honest labels. Rendered
+          ONLY when items exist ⇒ the before/after-diff films (findings=[]) render NOTHING — no empty strip. */}
+      {legendItems.length > 0 ? (
+        <div className="mt-2.5">
+          <div
+            id={legendHeadingId}
+            className="mb-1.5 px-1 font-mono text-[9px] uppercase tracking-[0.08em] text-film-soft"
+          >
+            {t('legend.heading')}
+          </div>
+          <ul role="list" aria-labelledby={legendHeadingId} className="flex list-none flex-wrap gap-x-3 gap-y-1.5 px-1">
+            {legendItems.map((item) => (
+              <li key={item.kind} role="listitem" className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                <span
+                  aria-hidden="true"
+                  className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm border border-film-border"
+                  style={{ backgroundColor: item.fill }}
+                />
+                <span className="font-mono text-[10px] text-film-soft">{t(item.labelKey)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {/* MEASURED strip — additive, only when the render-probe ran (real offscreen-WebGL). These are
           a DIFFERENT quantity from the declared estimate above (real decoded footprint + issued draws),
