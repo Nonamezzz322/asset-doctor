@@ -72,6 +72,12 @@ export interface Atlas {
   /** e.g. 'RGBA8888' from meta.format, when present. */
   format?: string;
   scale?: number;
+  /** TexturePacker/Pixi multipack linkage: sibling **manifest** (`.json`) filenames Pixi auto-loads
+   *  from page-0 (meta.related_multi_packs). Carried VERBATIM from parse and re-emitted by
+   *  emitTexturePackerJson ONLY on a byte-stable passthrough/resize re-emit (page count + sibling
+   *  names unchanged). Spine has no equivalent (inline multi-page) ⇒ never emitted to .atlas.
+   *  Absent ⇒ NO meta key written ⇒ JSON byte-identical to today (single-page is the common case). */
+  relatedMultiPacks?: string[];
   sprites: Sprite[];
   source: { kind: AtlasSourceKind };
 }

@@ -138,12 +138,15 @@ interface TierResult {
   // (tier.scale===1 yet dst<src from clampToMaxEdge). srcW/srcH are the honest Node stand-in for the srcBmp
   // dims a well-formed source carries (= srcSize.w/h). Empty when resample is off (default path byte-identical).
   resampleCandidates: { ref: string; targetW: number; targetH: number }[];
+  // round28: the emitted per-tier TexturePacker JSON text, keyed by its suffixed sidecar path, so a test can
+  // assert the multipack strip (no related_multi_packs key) on the real emitter output.
+  tierManifestJson: Map<string, string>;
 }
 // maxEdge defaults to 1<<20 (no clamp — un-oversized fixtures); the resample tests parameterize it to drive
 // the REAL clampToMaxEdge so the oversize-clamped top tier (the r24#0 gap) is reproduced. resampleEnabled
 // defaults false so the off-path is provably empty (T16).
 function runTierLoop(b: Built, tiers: ScaleTier[], tierForce = false, resampleEnabled = false, maxEdge = 1 << 20): TierResult {
-  const res: TierResult = { out: [], dropped: new Set(), skipped: [], tieredAssets: 0, tierFilesEmitted: 0, tierVramBytes: tiers.map(() => 0), vramSaved: 0, resampleCandidates: [] };
+  const res: TierResult = { out: [], dropped: new Set(), skipped: [], tieredAssets: 0, tierFilesEmitted: 0, tierVramBytes: tiers.map(() => 0), vramSaved: 0, resampleCandidates: [], tierManifestJson: new Map() };
   const basename = (p: string): string => p.split('/').pop() ?? p;
 
   const tierRefusal = (ref: string): string | null => {
@@ -203,13 +206,16 @@ function runTierLoop(b: Built, tiers: ScaleTier[], tierForce = false, resampleEn
       if (scaled) {
         scaled.scale = tier.scale;
         scaled.imageRef = basename(tierImagePath);
+        // round28: mirror the worker's UNCONDITIONAL multipack strip on the tier path — tier sidecars are
+        // emitted under suffixed names, so a verbatim related_multi_packs would cross-mix resolutions.
+        scaled.relatedMultiPacks = undefined;
         if (isSpine && spineInfo) {
           // emit the per-tier .atlas (geometry round-trips through emitSpineAtlasText)
           emitSpineAtlasText(scaled);
           res.out.push({ path: tieredName(spineInfo.path, tier.suffix), isManifest: true });
           res.tierFilesEmitted++;
         } else if (manifestPath) {
-          emitTexturePackerJson(scaled);
+          res.tierManifestJson.set(tieredName(manifestPath, tier.suffix), emitTexturePackerJson(scaled));
           res.out.push({ path: tieredName(manifestPath, tier.suffix), isManifest: true });
           res.tierFilesEmitted++;
         }
@@ -356,6 +362,21 @@ describe('scale-tier worker loop (geometry + gates + VRAM honesty, design §5/§
     expect(bannerCands.some((c) => c.targetW === banner.w && c.targetH === banner.h)).toBe(false);
     // The two LOWER tiers (real downscales) DO produce candidates ⇒ count === 2 for banner.
     expect(bannerCands.length).toBe(2);
+  });
+
+  it('R28 — multipack related_multi_packs is STRIPPED on every tier sidecar (cross-resolution mix guard)', () => {
+    const b = buildWorkerState(loadRawFiles());
+    // Inject a multipack linkage onto the atlas-by-ref the tier loop reads (the worker carries it via the
+    // scaleAtlas spread); the tier strip must clear it before emitTexturePackerJson on EACH tier.
+    const atlasRef = [...b.atlasByRef.keys()].find((r) => r.includes('sheet') && !r.includes('meshed'))!;
+    b.atlasByRef.get(atlasRef)!.relatedMultiPacks = ['sheet-1.json', 'sheet-2.json'];
+
+    const res = runTierLoop(b, tiers.tiers);
+    const tierJsons = [...res.tierManifestJson.entries()].filter(([p]) => p.includes('sheet'));
+    expect(tierJsons.length).toBeGreaterThan(0); // at least one tier sidecar was emitted for the atlas
+    for (const [path, json] of tierJsons) {
+      expect(json, `${path} must not carry related_multi_packs (cross-tier mix)`).not.toContain('related_multi_packs');
+    }
   });
 
   it('T16 — resample gate OFF ⇒ zero candidates (default path byte-identical)', () => {

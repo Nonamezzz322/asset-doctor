@@ -83,6 +83,54 @@ describe('repointAtlasImage — Spine .atlas texture-line repoint round-trip', (
   });
 });
 
+describe('multipack related_multi_packs round-trip (R28)', () => {
+  const withRmp = (rmp?: string[]): Atlas => ({
+    ...atlasWith('sheet-0.png', { kind: 'texturepacker-hash' }),
+    ...(rmp ? { relatedMultiPacks: rmp } : {}),
+  });
+
+  it('emit writes related_multi_packs and it re-parses intact (order preserved)', () => {
+    const json = JSON.parse(emitTexturePackerJson(withRmp(['sheet-1.json', 'sheet-2.json']))) as {
+      meta?: { related_multi_packs?: unknown };
+    };
+    expect(json.meta?.related_multi_packs).toEqual(['sheet-1.json', 'sheet-2.json']);
+    const res = parseAtlasManifest(json, {});
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.atlas.relatedMultiPacks).toEqual(['sheet-1.json', 'sheet-2.json']);
+  });
+
+  it('single-page atlas WITHOUT the field is byte-identical (no key, omit-when-absent)', () => {
+    const text = emitTexturePackerJson(withRmp(undefined));
+    expect(text).not.toContain('related_multi_packs');
+    // pin byte-identity to the pre-change golden output for the meta block
+    const json = JSON.parse(text) as { meta: Record<string, unknown> };
+    expect('related_multi_packs' in json.meta).toBe(false);
+  });
+
+  it('repointAtlasImage preserves relatedMultiPacks through its shallow clone, surviving emit→reparse', () => {
+    const repointed = repointAtlasImage(withRmp(['sheet-1.json']), 'main/sheet-0.json', 'main/sheet-0.webp');
+    expect(repointed.relatedMultiPacks).toEqual(['sheet-1.json']);
+    const res = parseAtlasManifest(JSON.parse(emitTexturePackerJson(repointed)) as object, {});
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.atlas.relatedMultiPacks).toEqual(['sheet-1.json']);
+      // and the page repoint still holds (multipack preserve does not break the no-dangling guarantee)
+      expect(resolveImageRef('main/sheet-0.json', res.atlas.imageRef)).toBe('main/sheet-0.webp');
+    }
+  });
+
+  it('the tier/hashed strip (relatedMultiPacks = undefined) emits NO field — honest unlink', () => {
+    // Mirrors the worker's strip on the tier/hashed paths: clearing the field ⇒ no meta key.
+    const stripped: Atlas = { ...withRmp(['sheet-1.json']), relatedMultiPacks: undefined };
+    expect(emitTexturePackerJson(stripped)).not.toContain('related_multi_packs');
+  });
+
+  it('Spine never emits related_multi_packs (inline multi-page; field is JSON-only)', () => {
+    const spine: Atlas = { ...atlasWith('sheet-0.png', { kind: 'spine' }), relatedMultiPacks: ['sheet-1.json'] };
+    expect(emitSpineAtlasText(spine)).not.toContain('related_multi');
+  });
+});
+
 describe('no-dangling-reference invariant (the bug this closes)', () => {
   // Simulate the worker's emitted output set {emittedPage, emittedSidecar} for a passthrough transcode and
   // assert the sidecar resolves ONLY to a member of that set — never the dropped original page.

@@ -10,6 +10,35 @@ GitHub creds — user pushes); commit hashes below are over that base.
 
 ---
 
+## Round 28 — selection (2 deferred-item picks; multipacks shipped) — 2026-06-29
+Round 28 targeted the two strongest DEFERRED backlog items the round-27 judge flagged as deserving their own
+scoped rounds (both premise-verified, rejected from r27 only for scope): a skeptic-architect re-verified each
+against the real code and returned **PROCEED** for both. Designs in `docs/improvements/round28-*.md`.
+
+- **(parity/honesty) preserve `meta.related_multi_packs` on the verbatim passthrough/resize re-emit — multipack
+  round-trip safety on the PAID path** (`docs/improvements/round28-multipacks-preserve.md`)
+  — A TexturePacker multipack page-0 manifest carries `meta.related_multi_packs` (sibling `.json` names Pixi v8
+  auto-loads). Our parser dropped it, the core `Atlas` had no field, and `emitTexturePackerJson` rebuilt `meta`
+  from scratch — so the prebuilt-atlas **passthrough transcode** (and resize re-emit) silently stripped it,
+  breaking sibling auto-loading at runtime: `Assets.load('sheet-0.json')` stopped loading pages 1+ (every frame
+  on those pages becomes an undefined texture) while the receipt claimed a clean disk-only optimization and the
+  code comment falsely claimed "manifest round-trips" (invariant 3/5 honesty defect, on a common real-world
+  input). **Fix (low-risk verbatim-preserve slice only):** carry an optional `relatedMultiPacks?: string[]` on
+  the core `Atlas` (omit-when-absent ⇒ **byte-identical** for single-page atlases — the common case); a guarded
+  order-preserving `readStringArray` reads it in `parseAtlasManifest`; `emitTexturePackerJson` re-emits it
+  **verbatim, NO sort** (positional index is load-bearing) only when present+non-empty. It flows through the
+  existing `repointAtlasImage`/`scaleAtlas` spreads on the byte-stable default, and is **STRIPPED with an honest
+  skip note** on every path where sibling names change: unconditionally on the **tier** path (suffixed sidecars
+  would cross-mix resolutions), on the **KTX2** second-sidecar (a reviewer-caught BLOCKER — `.ktx2.json` would
+  else auto-link the RASTER sibling, cross-format mix), and under `hashFilenames` on passthrough+resize (renamed
+  siblings dangle). The false drop-in comment was corrected to the conditional truth. Repack/merge/packLoose are
+  scratch-built (no field) ⇒ status quo. **No ingest/finding/i18n/UI/backend change**, no golden/catalog drift.
+  — **Tests**: parsers +6 (parse order-preserved; absent/non-array/empty/garbage ⇒ undefined), fix manifest +5
+  (emit↔reparse intact, single-page byte-identical no-key guard, `repointAtlasImage` preserves it, Spine never
+  emits it), worker harnesses +3 (tier strip, passthrough preserve-vs-strip-under-hash, the new KTX2-sidecar
+  omits the field). Review verdict: **SHIP after one BLOCKER fixed** (the KTX2 cross-format mis-link). Gate:
+  typecheck + parsers (54) + fix (434) + full vitest (web 479) + lint green.
+
 ## Round 27 — selection (2 picks; all shipped) — 2026-06-29
 Selection (high bar, thin space): 4-lens brainstorm → 5 candidates → strict judge verified each premise and
 picked 2 contained correctness/honesty wins; dropped 3 (declared-vs-real atlas-dimension detector — real +

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   parseAtlas,
+  parseAtlasManifest,
   parseImage,
   readImageInfo,
   strippableMetadataBytes,
@@ -78,6 +79,49 @@ describe('parseAtlas — Pixi', () => {
     expect(res.asset.atlas.source.kind).toBe('pixi');
     expect(res.asset.atlas.sprites).toHaveLength(4);
     expect(res.asset.atlas.size).toEqual({ w: 1024, h: 1024 });
+  });
+});
+
+describe('parseAtlasManifest — multipack related_multi_packs (R28)', () => {
+  const base = (rmp: unknown) => ({
+    frames: { 'a.png': { frame: { x: 0, y: 0, w: 10, h: 10 } } },
+    meta: { image: 'sheet-0.png', size: { w: 64, h: 64 }, related_multi_packs: rmp },
+  });
+  const parse = (rmp: unknown) => {
+    const res = parseAtlasManifest(base(rmp));
+    if (!res.ok) throw new Error(res.error);
+    return res.atlas;
+  };
+
+  it('parses a single-entry related_multi_packs into relatedMultiPacks', () => {
+    expect(parse(['sheet-1.json']).relatedMultiPacks).toEqual(['sheet-1.json']);
+  });
+
+  it('preserves multi-entry order (no sort — positional index is load-bearing)', () => {
+    expect(parse(['a.json', 'b.json']).relatedMultiPacks).toEqual(['a.json', 'b.json']);
+    // reverse-ordered input stays reverse-ordered
+    expect(parse(['b.json', 'a.json']).relatedMultiPacks).toEqual(['b.json', 'a.json']);
+  });
+
+  it('absent ⇒ undefined (byte-identical)', () => {
+    const res = parseAtlasManifest({
+      frames: { 'a.png': { frame: { x: 0, y: 0, w: 10, h: 10 } } },
+      meta: { image: 'sheet-0.png', size: { w: 64, h: 64 } },
+    });
+    if (!res.ok) throw new Error(res.error);
+    expect(res.atlas.relatedMultiPacks).toBeUndefined();
+  });
+
+  it('non-array (a bare string) ⇒ undefined', () => {
+    expect(parse('sheet-1.json').relatedMultiPacks).toBeUndefined();
+  });
+
+  it('skips garbage entries (non-string / empty), keeps order', () => {
+    expect(parse(['a.json', 3, '', 'b.json']).relatedMultiPacks).toEqual(['a.json', 'b.json']);
+  });
+
+  it('empty array ⇒ undefined (omit)', () => {
+    expect(parse([]).relatedMultiPacks).toBeUndefined();
   });
 });
 

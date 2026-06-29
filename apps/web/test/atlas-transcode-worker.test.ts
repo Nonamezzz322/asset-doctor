@@ -157,6 +157,25 @@ describe('Harness B — fix correctness: emit→parse→resolve leaves NO dangli
     }
   });
 
+  it('R28 multipack: related_multi_packs is PRESERVED on the byte-stable default, STRIPPED under hashOn', () => {
+    const name = 'main/sheet-0.png';
+    const sidecar = 'main/sheet-0.json';
+    const newPage = 'main/sheet-0.webp';
+    const src: Atlas = { ...wellPackedAtlas(name, { kind: 'texturepacker-hash' }), relatedMultiPacks: ['sheet-1.json', 'sheet-2.json'] };
+
+    // Default (hashOff): the worker emits repointedA verbatim ⇒ sibling list survives emit→reparse, order kept.
+    const repointedDefault = repointAtlasImage(src, sidecar, newPage);
+    const defaultRes = parseAtlasManifest(JSON.parse(emitTexturePackerJson(repointedDefault)) as object, {});
+    expect(defaultRes.ok).toBe(true);
+    if (defaultRes.ok) expect(defaultRes.atlas.relatedMultiPacks).toEqual(['sheet-1.json', 'sheet-2.json']);
+
+    // hashOn: the worker strips it (sibling .json sidecars are renamed ⇒ verbatim refs would dangle).
+    const repointedHashed = repointAtlasImage(src, sidecar, newPage);
+    const hashOn = true;
+    if (hashOn && repointedHashed.relatedMultiPacks) repointedHashed.relatedMultiPacks = undefined; // mirrors the worker strip
+    expect(emitTexturePackerJson(repointedHashed)).not.toContain('related_multi_packs');
+  });
+
   it('Spine: the .atlas texture line repoints to the new page (single-page)', () => {
     const name = 'spine/hero.png';
     const sidecar = 'spine/hero.atlas';

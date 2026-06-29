@@ -31,6 +31,13 @@ export function emitTexturePackerJson(atlas: Atlas): string {
     size: { w: atlas.size.w, h: atlas.size.h },
     ...(atlas.format ? { format: atlas.format } : {}),
     ...(atlas.scale !== undefined ? { scale: String(atlas.scale) } : {}),
+    // Multipack linkage (round28): re-emit the sibling-JSON list ONLY when present and non-empty, at the END
+    // of meta, carried VERBATIM with NO sort (the positional index is load-bearing — Pixi caches sibling i at
+    // related_multi_packs[i], spritesheetAsset.mjs:39 — so re-sorting would corrupt the index↔sheet pairing).
+    // Absent ⇒ no key ⇒ byte-identical to the single-page manifest (the common case).
+    ...(atlas.relatedMultiPacks && atlas.relatedMultiPacks.length
+      ? { related_multi_packs: atlas.relatedMultiPacks }
+      : {}),
   };
   return JSON.stringify({ frames, meta }, null, 2);
 }

@@ -128,6 +128,10 @@ function runKtx2PostPass(
         if (c.atlasSidecar) {
           const sidecarDir = dirOf(c.atlasSidecar.path);
           const ktx2Atlas: Atlas = { ...c.atlasSidecar.atlas, imageRef: relativeImageRef(sidecarDir, ktx2Path) };
+          // Multipack (round28): the spread source atlas (the passthrough `repointedA`) carries
+          // related_multi_packs verbatim on hashOff; this RENAMED, format-changed `.ktx2.json`'s raster
+          // sibling list would cross-format mis-link (KTX2 page-0 → raster sheet-1.json) ⇒ strip it.
+          ktx2Atlas.relatedMultiPacks = undefined;
           const ktx2JsonPath = c.atlasSidecar.path.replace(/\.json$/i, '.ktx2.json');
           out.push({ path: ktx2JsonPath, bytes: te.encode(emitTexturePackerJson(ktx2Atlas)) });
           recordVariant(c.ref, 'atlas', ktx2Path, { scale: 1, suffix: '', src: ktx2JsonPath });
@@ -232,6 +236,36 @@ describe('KTX2 post-pass — success (claims b, d, e)', () => {
       meta: { image: string };
     };
     expect(sidecar.meta.image).toBe('hud.ktx2');
+  });
+
+  it('MULTIPACK page-0 (round28): the .ktx2.json sidecar OMITS related_multi_packs (no cross-format raster mis-link)', async () => {
+    // The passthrough transcode records `repointedA` as the candidate atlas. On the hashOff default that atlas
+    // carries related_multi_packs VERBATIM (sibling RASTER `.json` names). This second sidecar is a renamed,
+    // format-changed `<page>.ktx2.json` — listing raster `sheet-1.json` here would make Pixi load a raster
+    // page-1 for a KTX2 page-0 (silent cross-format mix). The strip must drop the field on the .ktx2 sidecar.
+    const enc = vi.fn(async () => ok(KTX2_BYTES));
+    const multipack: Ktx2Candidate = (() => {
+      const c = atlasCandidate();
+      c.atlasSidecar = {
+        path: 'ui/sheet-0.json',
+        atlas: { ...c.atlasSidecar!.atlas, name: 'ui/sheet-0.png', relatedMultiPacks: ['sheet-1.json', 'sheet-2.json'] },
+      };
+      c.imagePath = 'ui/sheet-0.webp';
+      c.ref = 'ui/sheet-0.png';
+      return c;
+    })();
+    const baseline: OutEntry[] = [
+      { path: 'ui/sheet-0.webp', bytes: PAGE_PNG },
+      { path: 'ui/sheet-0.json', bytes: te.encode('{"meta":{"image":"sheet-0.webp","related_multi_packs":["sheet-1.json","sheet-2.json"]}}') },
+    ];
+    const r = await runKtx2PostPass(baseline, [multipack], true, enc);
+    const ktx2SidecarBytes = r.out.find((e) => e.path === 'ui/sheet-0.ktx2.json')!.bytes;
+    const ktx2SidecarText = new TextDecoder().decode(ktx2SidecarBytes);
+    // The emitted .ktx2.json must NOT carry the raster sibling list at all (no cross-format dangling ref).
+    expect(ktx2SidecarText).not.toContain('related_multi_packs');
+    const ktx2Sidecar = JSON.parse(ktx2SidecarText) as { meta: { image: string; related_multi_packs?: unknown } };
+    expect(ktx2Sidecar.meta.related_multi_packs).toBeUndefined();
+    expect(ktx2Sidecar.meta.image).toBe('sheet-0.ktx2');
   });
 
   it('(d) ktx2VramBytesWorstCase is the Σ of ceilings and is COMPUTED SEPARATELY (never the raster sum)', async () => {

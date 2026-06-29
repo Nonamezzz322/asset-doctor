@@ -55,6 +55,16 @@ function parseScale(v: unknown): number | undefined {
   return undefined;
 }
 
+// Read an array of strings (the meta.related_multi_packs shape) order-preservingly. Non-array ⇒ undefined
+// (matches Pixi's Array.isArray gate, spritesheetAsset.mjs:121); non-string/empty entries are skipped (Pixi
+// skips non-strings :125); an empty result ⇒ undefined (omit ⇒ byte-identical). Total & deterministic.
+function readStringArray(v: unknown): string[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out: string[] = [];
+  for (const e of v) if (typeof e === 'string' && e.length > 0) out.push(e);
+  return out.length ? out : undefined;
+}
+
 // Read an array of [x,y] integer pairs (the emit shape) into Vec2[]. Returns null on any malformed
 // entry so a bad mesh degrades to a rectangle-only sprite rather than throwing.
 function readVec2Pairs(v: unknown): Vec2[] | null {
@@ -218,6 +228,10 @@ export function parseAtlasManifest(
   if (format) atlas.format = format;
   const scale = parseScale(meta.scale);
   if (scale !== undefined) atlas.scale = scale;
+  // Multipack linkage (round28): carry the sibling-JSON list VERBATIM (order-preserving). Absent/non-array/
+  // empty ⇒ field omitted ⇒ Atlas byte-identical to before. The emitter re-writes it only on byte-stable paths.
+  const relatedMultiPacks = readStringArray(meta.related_multi_packs);
+  if (relatedMultiPacks) atlas.relatedMultiPacks = relatedMultiPacks;
   return malformedFrames.length ? { ok: true, atlas, malformedFrames } : { ok: true, atlas };
 }
 

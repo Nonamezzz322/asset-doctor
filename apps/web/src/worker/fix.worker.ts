@@ -2273,6 +2273,17 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           } else {
             const mPath = manifestPathOf(ref);
             if (mPath) {
+              // Multipack (round28): `scaled` carries related_multi_packs verbatim (scaleAtlas spread) — correct
+              // on the byte-stable default (downscale keeps the sibling JSON names). Under hashOn the sibling
+              // `.json` sidecars are renamed ⇒ the verbatim refs would dangle ⇒ strip + honest skip.
+              if (hashOn && scaled.relatedMultiPacks) {
+                scaled.relatedMultiPacks = undefined;
+                skipped.push({
+                  assetRef: ref,
+                  reason:
+                    'multipack: related_multi_packs dropped under content-hashed filenames (sibling sidecars renamed) — load sibling packs explicitly',
+                });
+              }
               const jsonBytes = te.encode(emitTexturePackerJson(scaled));
               const emittedJson = await hashEmit(mPath, jsonBytes);
               out.push({ path: emittedJson, bytes: jsonBytes });
@@ -2406,7 +2417,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         // VERBATIM (no recompose — frame geometry/trim/pivot/mesh untouched) swaps its extension
         // (sheet.png → sheet.webp), so the sidecar's meta.image (TP) / Spine texture line MUST be repointed at
         // the new page AND the old page dropped — else the loader resolves a file that no longer exists
-        // (dangling-reference bug). DROP-IN: the sidecar still resolves every frame; manifest round-trips.
+        // (dangling-reference bug). DROP-IN: the sidecar still resolves every frame; multipack
+        // `related_multi_packs` is preserved verbatim on the byte-stable default (sibling JSON names unchanged);
+        // dropped (with an honest skip) under hashed filenames where siblings are renamed.
         // HONESTY (invariant 5): identical pixel dims ⇒ identical RGBA8888 VRAM ⇒ NO VRAM claim (disk-only).
         // The loose single-format path below is now reached ONLY for non-atlas refs (this block `continue`s).
         const atlasOfRef = atlasByRef.get(ref);
@@ -2482,6 +2495,18 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           // Repoint the sidecar at the new page (relative to the SIDECAR's own dir → resolves back through
           // parseAtlas) and re-serialize it deterministically (frames/trim/pivot/mesh carried verbatim).
           const repointedA = repointAtlasImage(atlasOfRef, sidecar, emittedPageA);
+          // Multipack (round28): the sibling-JSON list flows verbatim on the byte-stable default (sidecar keeps
+          // its name, siblings untouched). Under hashOn the sibling `.json` sidecars are renamed (hashEmit) ⇒ a
+          // verbatim ["sheet-1.json"] would dangle ⇒ strip it + surface an honest skip note (better an
+          // unlinked-but-valid page-0 than a dangling sibling reference; hash-aware regeneration is deferred).
+          if (hashOn && repointedA.relatedMultiPacks) {
+            repointedA.relatedMultiPacks = undefined;
+            skipped.push({
+              assetRef: ref,
+              reason:
+                'multipack: related_multi_packs dropped under content-hashed filenames (sibling sidecars renamed) — load sibling packs explicitly',
+            });
+          }
           const sidecarBytesA = te.encode(
             isSpinePage ? emitSpineAtlasText(repointedA) : emitTexturePackerJson(repointedA),
           );
@@ -3336,6 +3361,11 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
               // multi-format ⇒ the format token (`.webp`/`.avif`) disambiguates so the manifests never clobber.
               scaled.scale = tier.scale;
               scaled.imageRef = basename(emittedImage);
+              // Multipack (round28): tier sidecars are emitted under SUFFIXED names (variantManifestName, e.g.
+              // sheet-0_720p.json), so a verbatim ["sheet-1.json"] would mis-load the FULL-res sibling into a
+              // _720p sheet (cross-tier resolution mix). Strip UNCONDITIONALLY on the tier path (covers both the
+              // Spine and TP branches below); tier-aware sibling regeneration is deferred. Spine never emits it.
+              scaled.relatedMultiPacks = undefined;
               if (isSpine && spineInfo) {
                 const atlasBytes = te.encode(emitSpineAtlasText(scaled));
                 const emittedSidecar = await hashEmit(
@@ -3668,6 +3698,13 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
             ...c.atlasSidecar.atlas,
             imageRef: relativeImageRef(sidecarDir, ktx2Path),
           };
+          // Multipack (round28): the source atlas spread above (`c.atlasSidecar.atlas` = the passthrough
+          // `repointedA`) carries related_multi_packs VERBATIM on the hashOff default. This second sidecar is a
+          // RENAMED, format-changed `<page>.ktx2.json` whose siblings, if any, live under raster `sheet-N.json`
+          // names — a verbatim raster list would cross-format mis-link (Pixi would load a raster page-1 for a
+          // KTX2 page-0). Strip it unconditionally: a KTX2 multipack needs its own `.ktx2.json` sibling list
+          // (regeneration deferred), and an unlinked-but-valid page-0 beats a cross-format dangling reference.
+          ktx2Sidecar.relatedMultiPacks = undefined;
           const ktx2JsonPath = c.atlasSidecar.path.replace(/\.json$/i, '.ktx2.json');
           out.push({ path: ktx2JsonPath, bytes: te.encode(emitTexturePackerJson(ktx2Sidecar)) });
           // Pixi manifest: the .ktx2.json sidecar is the ktx2-first src candidate for this page's entry.
