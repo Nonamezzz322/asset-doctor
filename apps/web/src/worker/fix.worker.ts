@@ -2493,7 +2493,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           out.push({ path: emittedPageA, bytes: encA.bytes });
           replaced.add(path);
           // Repoint the sidecar at the new page (relative to the SIDECAR's own dir → resolves back through
-          // parseAtlas) and re-serialize it deterministically (frames/trim/pivot/mesh carried verbatim).
+          // parseAtlas) and re-serialize it deterministically (frames/trim/pivot/mesh AND the top-level
+          // `animations` map carried verbatim — `animations` refs frame keys, which this page rename leaves intact).
           const repointedA = repointAtlasImage(atlasOfRef, sidecar, emittedPageA);
           // Multipack (round28): the sibling-JSON list flows verbatim on the byte-stable default (sidecar keeps
           // its name, siblings untouched). Under hashOn the sibling `.json` sidecars are renamed (hashEmit) ⇒ a
@@ -3705,6 +3706,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           // KTX2 page-0). Strip it unconditionally: a KTX2 multipack needs its own `.ktx2.json` sibling list
           // (regeneration deferred), and an unlinked-but-valid page-0 beats a cross-format dangling reference.
           ktx2Sidecar.relatedMultiPacks = undefined;
+          // animations (round29) is NOT stripped here even though relatedMultiPacks IS: animations references
+          // frame KEYS (unchanged by the .ktx2 page rename) while relatedMultiPacks references sibling FILE names
+          // (broken by the format-changed `.ktx2.json` rename). So the spread above carries animations correctly.
           const ktx2JsonPath = c.atlasSidecar.path.replace(/\.json$/i, '.ktx2.json');
           out.push({ path: ktx2JsonPath, bytes: te.encode(emitTexturePackerJson(ktx2Sidecar)) });
           // Pixi manifest: the .ktx2.json sidecar is the ktx2-first src candidate for this page's entry.

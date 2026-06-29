@@ -65,6 +65,28 @@ function readStringArray(v: unknown): string[] | undefined {
   return out.length ? out : undefined;
 }
 
+// Read a verbatim, order-preserving frame-animation map (the top-level `animations` shape). Each value must
+// be a non-empty array of non-empty strings; coerce nothing, drop a WHOLE group only if its value is not such
+// an array (so a single malformed group cannot poison a valid neighbor). Returns undefined when no usable
+// group (⇒ field omitted ⇒ Atlas byte-identical). Insertion order of valid keys preserved (Object.entries order
+// = JSON source order); arrays copied verbatim, NO sort (array order + key order are play order). Total & deterministic.
+function readAnimations(v: unknown): Record<string, string[]> | undefined {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined;
+  const out: Record<string, string[]> = {};
+  for (const [group, val] of Object.entries(v as Record<string, unknown>)) {
+    if (!Array.isArray(val) || val.length === 0) continue;
+    let ok = true;
+    for (const e of val) {
+      if (typeof e !== 'string' || e.length === 0) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) out[group] = val as string[];
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 // Read an array of [x,y] integer pairs (the emit shape) into Vec2[]. Returns null on any malformed
 // entry so a bad mesh degrades to a rectangle-only sprite rather than throwing.
 function readVec2Pairs(v: unknown): Vec2[] | null {
@@ -232,6 +254,11 @@ export function parseAtlasManifest(
   // empty ⇒ field omitted ⇒ Atlas byte-identical to before. The emitter re-writes it only on byte-stable paths.
   const relatedMultiPacks = readStringArray(meta.related_multi_packs);
   if (relatedMultiPacks) atlas.relatedMultiPacks = relatedMultiPacks;
+  // Frame-animation map (round29): carry the TOP-LEVEL `animations` (NOT meta) VERBATIM, order-preserving. It
+  // references frame KEYS (not file names), so it stays valid under hashFilenames/cache-bust AND the KTX2 second
+  // sidecar (those rename FILES, not frame keys). Absent/non-object/empty/all-malformed ⇒ omitted ⇒ byte-identical.
+  const animations = readAnimations(j.animations);
+  if (animations) atlas.animations = animations;
   return malformedFrames.length ? { ok: true, atlas, malformedFrames } : { ok: true, atlas };
 }
 

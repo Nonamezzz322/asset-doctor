@@ -17,6 +17,8 @@ import {
   repointAtlasImage,
   emitTexturePackerJson,
   emitSpineAtlasText,
+  scaleAtlas,
+  repackAtlases,
 } from '../src/index';
 
 /** A minimal well-formed atlas (one frame); only imageRef is repointed on a passthrough transcode. */
@@ -128,6 +130,94 @@ describe('multipack related_multi_packs round-trip (R28)', () => {
   it('Spine never emits related_multi_packs (inline multi-page; field is JSON-only)', () => {
     const spine: Atlas = { ...atlasWith('sheet-0.png', { kind: 'spine' }), relatedMultiPacks: ['sheet-1.json'] };
     expect(emitSpineAtlasText(spine)).not.toContain('related_multi');
+  });
+});
+
+describe('top-level animations round-trip (round29)', () => {
+  // A ≥20-element group + ≥2 groups (trail-shaped), in reverse-alpha within-group order, to catch any sort.
+  const trail = Array.from({ length: 20 }, (_, i) => `trail_${19 - i}`);
+  const trailOutro = ['trail_outro_4', 'trail_outro_3', 'trail_outro_2', 'trail_outro_1', 'trail_outro_0'];
+  const anims = { trail, trail_outro: trailOutro };
+  const withAnims = (animations?: Record<string, string[]>): Atlas => ({
+    ...atlasWith('sheet.png', { kind: 'texturepacker-hash' }),
+    ...(animations ? { animations } : {}),
+  });
+
+  it('emit writes animations BETWEEN frames and meta (key order frames, animations, meta) and re-parses intact', () => {
+    const text = emitTexturePackerJson(withAnims(anims));
+    // positional: animations key sits after frames and before meta
+    const iFrames = text.indexOf('"frames"');
+    const iAnims = text.indexOf('"animations"');
+    const iMeta = text.indexOf('"meta"');
+    expect(iFrames).toBeGreaterThanOrEqual(0);
+    expect(iAnims).toBeGreaterThan(iFrames);
+    expect(iMeta).toBeGreaterThan(iAnims);
+    // re-parse: groups + within-group order preserved exactly (deep-equal, NOT a set)
+    const res = parseAtlasManifest(JSON.parse(text) as object, {});
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.atlas.animations).toEqual(anims);
+      expect(Object.keys(res.atlas.animations!)).toEqual(['trail', 'trail_outro']); // key order preserved
+      expect(res.atlas.animations!.trail).toEqual(trail); // 20-element array order preserved (no sort)
+    }
+  });
+
+  it('absent ⇒ NO animations key in output (omit-when-absent → byte-identical)', () => {
+    const text = emitTexturePackerJson(withAnims(undefined));
+    expect(text).not.toContain('"animations"');
+    const json = JSON.parse(text) as Record<string, unknown>;
+    expect('animations' in json).toBe(false);
+  });
+
+  it('empty {} ⇒ NO animations key (Object.keys length 0 → omitted)', () => {
+    expect(emitTexturePackerJson({ ...atlasWith('sheet.png', { kind: 'texturepacker-hash' }), animations: {} })).not.toContain(
+      '"animations"',
+    );
+  });
+
+  it('repointAtlasImage preserves animations through its shallow clone, surviving emit→reparse (passthrough path)', () => {
+    const repointed = repointAtlasImage(withAnims(anims), 'main/sheet.json', 'main/sheet.webp');
+    expect(repointed.animations).toEqual(anims);
+    const res = parseAtlasManifest(JSON.parse(emitTexturePackerJson(repointed)) as object, {});
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.atlas.animations).toEqual(anims);
+      // and the page repoint still holds (animations carry does not break no-dangling)
+      expect(resolveImageRef('main/sheet.json', res.atlas.imageRef)).toBe('main/sheet.webp');
+    }
+  });
+
+  it('scaleAtlas preserves animations (resize path — frame keys are stable)', () => {
+    const scaled = scaleAtlas(withAnims(anims), 0.5);
+    expect(scaled.animations).toEqual(anims);
+    const res = parseAtlasManifest(JSON.parse(emitTexturePackerJson(scaled)) as object, {});
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.atlas.animations).toEqual(anims);
+  });
+
+  it('a FRESH repackAtlases result has animations === undefined (strip-by-construction)', () => {
+    const src = withAnims(anims); // source atlas DOES carry animations
+    const result = repackAtlases([src], { allowRotation: false, padding: 0, maxSize: 2048 });
+    expect(result.atlases.length).toBeGreaterThan(0);
+    for (const a of result.atlases) expect(a.animations).toBeUndefined(); // fresh atlas never had it
+  });
+
+  it('PURE end-to-end parse → emit → reparse deep-equal round-trip (covers the real defect at the seam)', () => {
+    const srcJson = {
+      frames: { 'a.png': { frame: { x: 0, y: 0, w: 10, h: 10 }, rotated: false, trimmed: false, sourceSize: { w: 10, h: 10 } } },
+      animations: anims,
+      meta: { image: 'sheet.png', size: { w: 64, h: 64 } },
+    };
+    const parsed = parseAtlasManifest(srcJson, {});
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const reparsed = parseAtlasManifest(JSON.parse(emitTexturePackerJson(parsed.atlas)) as object, {});
+    expect(reparsed.ok).toBe(true);
+    if (reparsed.ok) {
+      // animations deep-equals the SOURCE map (groups + order) — verbatim through the whole seam
+      expect(reparsed.atlas.animations).toEqual(anims);
+      expect(reparsed.atlas.animations).toEqual(parsed.atlas.animations);
+    }
   });
 });
 

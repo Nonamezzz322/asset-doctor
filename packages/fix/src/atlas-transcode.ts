@@ -15,7 +15,8 @@ import { dirOf, relativeImageRef } from './dedup-repoint';
 
 /** Return a shallow clone of `atlas` with `imageRef` repointed at `newPagePath`, expressed RELATIVE to the
  *  sidecar's own directory (so it re-parses back to the new page). Only the extension changes on a passthrough
- *  transcode — frames/trim/pivot/mesh are carried verbatim. */
+ *  transcode — frames/trim/pivot/mesh AND the top-level `animations` map are carried verbatim (the shallow
+ *  spread keeps them; `animations` refs frame keys, which a page rename does not touch). */
 export function repointAtlasImage(atlas: Atlas, sidecarPath: string, newPagePath: string): Atlas {
   return { ...atlas, imageRef: relativeImageRef(dirOf(sidecarPath), newPagePath) };
 }

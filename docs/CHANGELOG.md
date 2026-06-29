@@ -10,6 +10,41 @@ GitHub creds — user pushes); commit hashes below are over that base.
 
 ---
 
+## Round 29 — selection (1 pick; shipped) — 2026-06-29
+Selection (very high bar, near-exhausted space): 4-lens brainstorm → 4 candidates → strict judge picked exactly
+**1** and rejected 3 (budget-config silent-no-op — the auto-drop from `resolveThresholds` is deliberate
+documented architecture, only the accept-then-discard of a few keys is a true but narrow validation cosmetic;
+trim-bounds `spriteSourceSize`-vs-`sourceSize` detector — verified gap but self-flagged marginal / fires only on
+corrupt/hand-edited manifests, broad new surface; FilmViewer overlay-scale on declared≠real atlases — visual-only,
+ambiguous remedy, correct headline numbers). One pick, no padding — the honest call. Design in
+`docs/improvements/round29-animations-preserve.md`.
+
+- **(parity/honesty) preserve the spritesheet `animations` map verbatim on byte-stable re-emit — the twin of the
+  r28 `related_multi_packs` fix** (`docs/improvements/round29-animations-preserve.md`)
+  — A Pixi v8 / TexturePacker spritesheet carries a top-level `animations` map (group-name → ordered FRAME-name
+  list = play order) that `Spritesheet.animations` / every `AnimatedSprite` is built from. Our parser never read
+  it, the core `Atlas` had no field, and `emitTexturePackerJson` re-emitted only `{frames, meta}` — so every Pro
+  re-emit (passthrough transcode, resize, KTX2 sidecar, dedup-repoint) silently dropped it, breaking every
+  animation at runtime while the code comment falsely claimed verbatim fidelity (18 real sheets in the user's own
+  sample data carry it). **Fix:** carry an optional `animations?: Record<string, string[]>` on the core `Atlas`
+  (omit-when-absent ⇒ **byte-identical**); a guarded `readAnimations` (each group must be a non-empty array of
+  non-empty strings; a malformed group is dropped while valid neighbors survive; order-preserving) reads the
+  **top-level** `j.animations`; `emitTexturePackerJson` re-emits it **verbatim, NO sort** (key order + within-group
+  array order are play order) between `frames` and `meta`, only when present+non-empty. It flows through the
+  existing `{...atlas}` spreads on every frame-name-stable path with **no worker strip code** — and, unlike
+  `related_multi_packs`, it is correctly **carried (not stripped) under `hashFilenames`/cache-bust and the KTX2
+  sidecar**, because it references frame KEYS (stable across FILE renames), not sibling file names. Repack/merge/
+  pack build fresh atlases ⇒ `animations` absent **by construction** (no synthesis — invariant 3). The false
+  verbatim comments were corrected (+ a KTX2 frame-key-vs-file-name rationale note). **No Spine `.atlas` change**
+  (no animations concept; Spine-skeleton frameless JSON never reaches the read), no finding/i18n/UI/backend change.
+  — **Tests**: parsers (single + multi-group key order + within-group ≥20-element array order preserved;
+  absent/non-object/empty/null/all-malformed ⇒ undefined; malformed-group-filtered; Spine-skeleton frameless ⇒
+  not-ok so the read is never reached), fix (emit between frames/meta + reparse intact; absent ⇒ no key;
+  `repointAtlasImage`/`scaleAtlas` preserve it; a fresh `repackAtlases` result has `animations` undefined; pure
+  parse→emit→reparse deep-equal). parsers 54→63, fix 434→441. Review verdict: **SHIP** (zero blockers/majors,
+  byte-identical + verbatim-no-sort). Gate: typecheck + parsers (63) + fix (441) + full vitest (web 479) + lint
+  green.
+
 ## Round 28 — selection (2 deferred-item picks; all shipped) — 2026-06-29
 Round 28 targeted the two strongest DEFERRED backlog items the round-27 judge flagged as deserving their own
 scoped rounds (both premise-verified, rejected from r27 only for scope): a skeptic-architect re-verified each

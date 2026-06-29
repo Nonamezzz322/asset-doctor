@@ -39,7 +39,14 @@ export function emitTexturePackerJson(atlas: Atlas): string {
       ? { related_multi_packs: atlas.relatedMultiPacks }
       : {}),
   };
-  return JSON.stringify({ frames, meta }, null, 2);
+  // Frame-animation map (round29): emit a TOP-LEVEL `animations` key BETWEEN frames and meta (the
+  // TexturePacker/Pixi key order is frames, animations, meta), ONLY when present and non-empty, carried
+  // VERBATIM with NO sort (array order + key order are play order; re-sorting would corrupt playback). Frame
+  // KEYS, so it survives file renames (hash/KTX2). Absent ⇒ no key ⇒ byte-identical to the non-animated case.
+  const out: Record<string, unknown> = { frames };
+  if (atlas.animations && Object.keys(atlas.animations).length) out.animations = atlas.animations;
+  out.meta = meta;
+  return JSON.stringify(out, null, 2);
 }
 
 /** Emit a Spine / libGDX `.atlas` text page (the inverse of parseSpineAtlasText). Deterministic:

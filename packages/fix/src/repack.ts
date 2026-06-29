@@ -46,7 +46,9 @@ export interface PolygonRepackOptions extends RepackOptions {
 }
 
 /** Uniformly downscale an atlas (image + every frame/source rect) by `scale` (0..1). Drop-in: same
- *  region names, the manifest just describes a smaller sheet. The caller scales the pixels to match. */
+ *  region names + the top-level `animations` map (both carried verbatim via the `{ ...atlas }` spread —
+ *  resize renames nothing, frame keys are stable), the manifest just describes a smaller sheet. The caller
+ *  scales the pixels to match. */
 export function scaleAtlas(atlas: Atlas, scale: number): Atlas {
   const px = (n: number): number => Math.max(1, Math.round(n * scale));
   const W = px(atlas.size.w);

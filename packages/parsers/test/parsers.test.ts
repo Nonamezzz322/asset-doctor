@@ -125,6 +125,94 @@ describe('parseAtlasManifest — multipack related_multi_packs (R28)', () => {
   });
 });
 
+describe('parseAtlasManifest — top-level animations (round-trip)', () => {
+  // animations is a TOP-LEVEL key (beside frames/meta), NOT inside meta. It maps group-name → ORDERED frame-name
+  // array (play order). Carried VERBATIM, never sorted. Absent/non-object/empty/all-malformed ⇒ undefined (omit).
+  const base = (animations: unknown) => ({
+    frames: { 'a.png': { frame: { x: 0, y: 0, w: 10, h: 10 } } },
+    animations,
+    meta: { image: 'sheet.png', size: { w: 64, h: 64 } },
+  });
+  const parse = (animations: unknown) => {
+    const res = parseAtlasManifest(base(animations));
+    if (!res.ok) throw new Error(res.error);
+    return res.atlas;
+  };
+
+  it('parses a single-group map into atlas.animations verbatim', () => {
+    expect(parse({ walk: ['walk_0', 'walk_1', 'walk_2'] }).animations).toEqual({
+      walk: ['walk_0', 'walk_1', 'walk_2'],
+    });
+  });
+
+  it('preserves MULTI-group KEY order (no sort — key order is which animation, array order is play order)', () => {
+    // trail-shaped: a 20-frame group followed by a 5-frame group, reverse-alpha to catch an accidental sort.
+    const trail = Array.from({ length: 20 }, (_, i) => `trail_${i}`);
+    const trailOutro = Array.from({ length: 5 }, (_, i) => `trail_outro_${i}`);
+    const atlas = parse({ trail, trail_outro: trailOutro });
+    expect(atlas.animations).toEqual({ trail, trail_outro: trailOutro });
+    expect(Object.keys(atlas.animations!)).toEqual(['trail', 'trail_outro']); // insertion order, unchanged
+    // a key order that would re-sort the OTHER way also survives verbatim (proves no sort either direction)
+    const rev = parse({ zeta: ['z0'], alpha: ['a0'] });
+    expect(Object.keys(rev.animations!)).toEqual(['zeta', 'alpha']);
+  });
+
+  it('preserves WITHIN-group array order verbatim, including a ≥20-element array', () => {
+    const frames = Array.from({ length: 24 }, (_, i) => `f_${23 - i}`); // descending, NOT sorted
+    const atlas = parse({ spin: frames });
+    expect(atlas.animations!.spin).toEqual(frames); // exact array, in source order (not a set, not sorted)
+    expect(atlas.animations!.spin).toHaveLength(24);
+  });
+
+  it('absent ⇒ animations undefined (field omitted)', () => {
+    const res = parseAtlasManifest({
+      frames: { 'a.png': { frame: { x: 0, y: 0, w: 10, h: 10 } } },
+      meta: { image: 'sheet.png', size: { w: 64, h: 64 } },
+    });
+    if (!res.ok) throw new Error(res.error);
+    expect(res.atlas.animations).toBeUndefined();
+  });
+
+  it('non-object / array / null animations ⇒ undefined', () => {
+    expect(parse('walk').animations).toBeUndefined();
+    expect(parse(42).animations).toBeUndefined();
+    expect(parse(['walk_0', 'walk_1']).animations).toBeUndefined(); // a bare array is not a group map
+    expect(parse(null).animations).toBeUndefined();
+  });
+
+  it('empty {} ⇒ undefined (omit)', () => {
+    expect(parse({}).animations).toBeUndefined();
+  });
+
+  it('malformed GROUP filtered (non-string / empty-array / empty-string element) — valid neighbor survives', () => {
+    const atlas = parse({
+      good: ['g0', 'g1'],
+      hasNonString: ['x', 3, 'y'], // dropped: a non-string element
+      empty: [], // dropped: empty array
+      hasEmptyString: ['ok', ''], // dropped: an empty-string frame name
+      alsoGood: ['z0'],
+    });
+    expect(atlas.animations).toEqual({ good: ['g0', 'g1'], alsoGood: ['z0'] });
+    expect(Object.keys(atlas.animations!)).toEqual(['good', 'alsoGood']); // order of survivors preserved
+  });
+
+  it('all-malformed map ⇒ undefined (omit, never invents data)', () => {
+    expect(parse({ a: [], b: [1, 2], c: 'nope' }).animations).toBeUndefined();
+  });
+
+  it('Spine-SKELETON-shaped JSON (animations present, NO frames) ⇒ not-ok so the read is never reached', () => {
+    // A Spine skeleton has top keys skeleton/bones/slots/skins/animations and NO `frames` — a DIFFERENT concept
+    // (timelines, not a frame-name map). parseAtlasManifest rejects frame-less JSON, so j.animations is never read.
+    const res = parseAtlasManifest({
+      skeleton: { spine: '4.0' },
+      bones: [{ name: 'root' }],
+      animations: { idle: { bones: {} } },
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toBe('manifest has no frames');
+  });
+});
+
 describe('parseImage — single images', () => {
   it('reads PNG dimensions from the header', () => {
     const hero = parseImage('hero.png', bytes('single-images/hero.png'));

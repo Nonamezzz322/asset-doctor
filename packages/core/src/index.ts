@@ -78,6 +78,14 @@ export interface Atlas {
    *  names unchanged). Spine has no equivalent (inline multi-page) ⇒ never emitted to .atlas.
    *  Absent ⇒ NO meta key written ⇒ JSON byte-identical to today (single-page is the common case). */
   relatedMultiPacks?: string[];
+  /** TexturePacker/Pixi frame-animation map (top-level `animations`): named ordered lists of FRAME
+   *  names = play order. Carried VERBATIM from parse, re-emitted by emitTexturePackerJson ONLY on a
+   *  frame-NAME-stable re-emit (passthrough transcode, resize, dedup-repoint, KTX2 sidecar, cache-bust
+   *  — these rename FILES not frame keys, so refs stay valid). Repack/merge/aggressive-dedup-alias build
+   *  a fresh Atlas (repack.ts) ⇒ field naturally absent. Array order + key order are load-bearing (play
+   *  order) ⇒ NEVER sorted. Spine has no equivalent ⇒ never emitted to .atlas. Absent ⇒ NO key written
+   *  ⇒ JSON byte-identical to today (single-/non-animated case is common). */
+  animations?: Record<string, string[]>;
   sprites: Sprite[];
   source: { kind: AtlasSourceKind };
 }
