@@ -5,7 +5,7 @@
 
 import type { Atlas, ImageAsset, Rect, Size, Sprite } from '@asset-doctor/core';
 import type { ParseResult } from './types';
-import { readImageInfo } from './image-size';
+import { readImageInfo, strippableMetadataBytes } from './image-size';
 
 export interface SpinePage {
   image: string;
@@ -181,12 +181,14 @@ export function parseSpinePage(
     source: { kind: 'spine' },
   };
   if (page.format) atlas.format = page.format;
+  const strippable = strippableMetadataBytes(image.bytes);
   const imageAsset: ImageAsset = {
     name: atlas.name,
     imageRef: image.ref,
     size: info.size,
     mime: info.mime,
     byteSize: image.bytes.byteLength,
+    ...(strippable > 0 ? { strippableBytes: strippable } : {}),
   };
   return { ok: true, asset: { kind: 'atlas', atlas, image: imageAsset } };
 }

@@ -218,6 +218,32 @@ export function formatAggregateFinding(formatFindings: Finding[]): Finding | nul
   };
 }
 
+/** Folder rollup of the per-asset strippable-metadata findings — pattern-identical to
+ *  `formatAggregateFinding`. Fires only with ≥2 findings; sums their EXACT `diskBytesSaved`; null when ≤0.
+ *  DISPLAY-ONLY: like format-aggregate, it is NOT folded into the aggregate `potentialDiskSaved` (the
+ *  per-asset findings already bumped it via the MAX-de-overlap helper in analyze.ts). DISK/DOWNLOAD only
+ *  (invariant 5) — the GPU still decodes to RGBA8888. Deterministic: relatedRefs sorted. */
+export function strippableMetadataAggregateFinding(metaFindings: Finding[]): Finding | null {
+  if (metaFindings.length < 2) return null;
+  const totalSaved = metaFindings.reduce((s, f) => s + (f.estimate?.diskBytesSaved ?? 0), 0);
+  if (totalSaved <= 0) return null;
+  const refs = metaFindings.map((f) => f.assetRef).sort();
+  return {
+    id: 'folder:strippable-metadata-aggregate',
+    rule: 'strippable-metadata',
+    severity: 'warn',
+    scope: 'folder',
+    assetRef: refs[0]!,
+    relatedRefs: refs,
+    title: `${metaFindings.length} images carry strippable metadata — ${fmtBytes(totalSaved)} total`,
+    detail: `Stripping ancillary metadata (ICC/EXIF/XMP + non-essential chunks) from ${metaFindings.length} images cuts ~${fmtBytes(totalSaved)} of download across the folder. DISK only — VRAM is unchanged.`,
+    fix: 'Batch-strip metadata on export (oxipng / re-encode).',
+    estimate: { diskBytesSaved: totalSaved },
+    messageKey: 'strippable-metadata-aggregate',
+    params: { n: metaFindings.length, saved: totalSaved },
+  };
+}
+
 /** Aggregate, CONDITIONAL mipmap-cost finding. Sums the per-asset "if mipmapped" overhead
  *  (vramBytesMipmapped − vramBytes) and fires a single `info` folder finding only when that total
  *  exceeds cfg.mipmap.warn. States a CEILING ("if mipmaps are enabled"), never asserts residency —

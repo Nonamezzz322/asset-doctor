@@ -1,0 +1,34 @@
+{
+  "kind": "strippable-metadata",
+  "feature": "strippable-metadata-detector",
+  "images": [
+    {
+      "name": "metadata.png",
+      "w": 4,
+      "h": 4,
+      "mime": "image/png",
+      "strippableBytes": 8347,
+      "chunks": {
+        "counted": {
+          "iCCP": 8227,
+          "tEXt": 101,
+          "tIME": 19
+        },
+        "notCounted": {
+          "pHYs": 21,
+          "IHDR": 25,
+          "IDAT": 30,
+          "IEND": 12
+        }
+      },
+      "finding": {
+        "rule": "strippable-metadata",
+        "severity": "info",
+        "diskBytesSaved": 8347,
+        "vramBytesSaved": null,
+        "why": "iCCP + tEXt + tIME are ancillary metadata the GPU never uses; 8347 >= minBytes 4096 (fires) and < warnBytes 65536 (info). pHYs is NOT counted (a re-encoder keeps it). DISK only — invariant 5."
+      }
+    }
+  ],
+  "note": "A hand-authored, REAL valid 4x4 RGBA8888 PNG with injected known-length ancillary chunks (iCCP 8227 + tEXt 101 + tIME 19 on-disk bytes = len+12 each, total 8347 strippable) plus a pHYs chunk that is DELIBERATELY NOT counted (a re-encoder keeps physical-pixel-density). strippableMetadataBytes(metadata.png) === 8347. parse -> analyze fires the strippable-metadata finding (info; diskBytesSaved=8347 EXACT; NEVER vramBytesSaved, invariant 5). The counted allow-set is a conservative TRUE LOWER BOUND of what the existing Pro fix removes (see README, Test D)."
+}

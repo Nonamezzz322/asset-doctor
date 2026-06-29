@@ -6,6 +6,7 @@ import {
   parseAtlas,
   parseImage,
   readImageInfo,
+  strippableMetadataBytes,
   parseSpineAtlasText,
   parseFntText,
   parseFntXml,
@@ -125,6 +126,118 @@ describe('readImageInfo — header readers', () => {
 
   it('returns null for unrecognized bytes', () => {
     expect(readImageInfo(new Uint8Array([1, 2, 3, 4]))).toBeNull();
+  });
+});
+
+// ── Test A: strippableMetadataBytes — pure header walk (no decode). Inline byte arrays in the style of the
+// readImageInfo header tests (:88-119): hand-build a minimal valid header + an injected known-length chunk and
+// assert the EXACT counted byte total. The counted allow-set is a conservative TRUE LOWER BOUND of what the fix
+// strips (see fixtures/sample-projects/strippable-metadata/README.md, Test D).
+describe('strippableMetadataBytes — strippable ancillary metadata', () => {
+  const PNG_SIG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  const u32be = (n: number): number[] => [(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff];
+  const ascii = (s: string): number[] => [...s].map((c) => c.charCodeAt(0));
+  // A PNG chunk = [len:u32be][type:4][data:len][crc:4] ⇒ on disk = len + 12. The CRC bytes are not validated
+  // by the pure walk (it never decodes), so any 4 filler bytes stand in.
+  const pngChunk = (type: string, dataLen: number): number[] => [
+    ...u32be(dataLen), ...ascii(type), ...new Array(dataLen).fill(0x41), 0, 0, 0, 0,
+  ];
+  // Minimal valid PNG: SIG + IHDR + the injected chunks + IEND. IHDR data = width:u32be height:u32be then
+  // 5 bytes (bitdepth/colortype/compress/filter/interlace) — set 64×64 so readImageInfo accepts the header.
+  const IHDR = [...u32be(13), ...ascii('IHDR'), ...u32be(64), ...u32be(64), 8, 6, 0, 0, 0, 0, 0, 0, 0];
+  const IEND = [...u32be(0), ...ascii('IEND'), 0, 0, 0, 0];
+  const png = (...chunks: number[][]): Uint8Array =>
+    new Uint8Array([...PNG_SIG, ...IHDR, ...chunks.flat(), ...IEND]);
+
+  it('counts PNG tEXt + iCCP at len + 12 each, stops at IEND', () => {
+    // tEXt data 100 ⇒ 112; iCCP data 5000 ⇒ 5012. Total 5124.
+    expect(strippableMetadataBytes(png(pngChunk('tEXt', 100), pngChunk('iCCP', 5000)))).toBe(112 + 5012);
+  });
+
+  it('does NOT count PNG tRNS (functional transparency) or pHYs (rendering)', () => {
+    // tRNS data 6 + pHYs data 9 — both excluded ⇒ 0 strippable.
+    expect(strippableMetadataBytes(png(pngChunk('tRNS', 6), pngChunk('pHYs', 9)))).toBe(0);
+  });
+
+  it('counts the full allow-set {iCCP,eXIf,tEXt,iTXt,zTXt,tIME} and nothing else', () => {
+    const allow = png(
+      pngChunk('iCCP', 10), pngChunk('eXIf', 10), pngChunk('tEXt', 10),
+      pngChunk('iTXt', 10), pngChunk('zTXt', 10), pngChunk('tIME', 10),
+      pngChunk('tRNS', 10), pngChunk('gAMA', 10), pngChunk('sRGB', 10), // excluded
+    );
+    expect(strippableMetadataBytes(allow)).toBe(6 * (10 + 12));
+  });
+
+  it('PNG truncated chunk length ⇒ bails to the accumulated partial (never throws / OOB)', () => {
+    // One countable tEXt (112), then a chunk claiming a huge length that overruns the buffer ⇒ stop, keep 112.
+    const good = pngChunk('tEXt', 50); // 50 + 12 = 62
+    const truncated = [...u32be(99999), ...ascii('iTXt'), 0x41, 0x41]; // claims 99999 data, only 2 bytes follow
+    const buf = new Uint8Array([...PNG_SIG, ...IHDR, ...good, ...truncated]);
+    expect(strippableMetadataBytes(buf)).toBe(62);
+  });
+
+  it('counts JPEG APP1 (2 + len), EXCLUDES APP0, stops at SOS', () => {
+    // FFD8 SOI; FFE0 APP0 len 16 (JFIF, excluded); FFE1 APP1 len 100 (EXIF, counted = 102); FFDA SOS (stop);
+    // then an FFE1 AFTER the scan must NOT be counted.
+    const u16be = (n: number): number[] => [(n >>> 8) & 0xff, n & 0xff];
+    const seg = (marker: number, len: number): number[] => [0xff, marker, ...u16be(len), ...new Array(len - 2).fill(0x00)];
+    const jpeg = new Uint8Array([
+      0xff, 0xd8,
+      ...seg(0xe0, 16), // APP0 JFIF — excluded
+      ...seg(0xe1, 100), // APP1 EXIF — counted (2 + 100 = 102)
+      ...seg(0xda, 12), // SOS — stop here
+      ...seg(0xe1, 500), // post-scan APP1 — must NOT be counted
+    ]);
+    expect(strippableMetadataBytes(jpeg)).toBe(102);
+  });
+
+  it('counts WebP VP8X EXIF chunk at size + 8; a simple VP8 file ⇒ 0', () => {
+    const u32le = (n: number): number[] => [n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff];
+    // RIFF [size] WEBP VP8X[10] EXIF[40] — the EXIF chunk counts 40 + 8 = 48.
+    const vp8xBody = [
+      ...ascii('VP8X'), ...u32le(10), ...new Array(10).fill(0x00),
+      ...ascii('EXIF'), ...u32le(40), ...new Array(40).fill(0x00),
+    ];
+    const webp = new Uint8Array([
+      ...ascii('RIFF'), ...u32le(4 + vp8xBody.length), ...ascii('WEBP'), ...vp8xBody,
+    ]);
+    expect(strippableMetadataBytes(webp)).toBe(48);
+
+    // Simple lossy VP8 (not VP8X) carries no ancillary chunks ⇒ 0.
+    const vp8 = new Uint8Array([
+      ...ascii('RIFF'), ...u32le(20), ...ascii('WEBP'), ...ascii('VP8 '), ...u32le(12), ...new Array(12).fill(0x00),
+    ]);
+    expect(strippableMetadataBytes(vp8)).toBe(0);
+  });
+
+  it('AVIF / unrecognized ⇒ 0', () => {
+    const avif = new Uint8Array([
+      0x00, 0x00, 0x00, 0x0c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66, // ftyp 'avif'
+    ]);
+    expect(strippableMetadataBytes(avif)).toBe(0);
+    expect(strippableMetadataBytes(new Uint8Array([1, 2, 3, 4]))).toBe(0);
+    expect(strippableMetadataBytes(new Uint8Array(0))).toBe(0);
+  });
+
+  it('parseImage plumbs strippableBytes onto the ImageAsset (omit-when-zero)', () => {
+    const withMeta = png(pngChunk('iCCP', 3000)); // 3012 strippable
+    const r = parseImage('meta.png', withMeta);
+    if (!r.ok || r.asset.kind !== 'image') throw new Error('expected image');
+    expect(r.asset.image.strippableBytes).toBe(3012);
+
+    const clean = png(pngChunk('tRNS', 6)); // nothing countable ⇒ field omitted
+    const r2 = parseImage('clean.png', clean);
+    if (!r2.ok || r2.asset.kind !== 'image') throw new Error('expected image');
+    expect(r2.asset.image.strippableBytes).toBeUndefined();
+  });
+
+  it('hand-authored on-disk fixture: metadata.png ⇒ strippableBytes === 8347 (matches expected.json)', () => {
+    const r = parseImage('metadata.png', bytes('strippable-metadata/metadata.png'));
+    if (!r.ok || r.asset.kind !== 'image') throw new Error('expected image');
+    const expected = json('strippable-metadata/expected.json') as { images: { strippableBytes: number }[] };
+    expect(r.asset.image.strippableBytes).toBe(expected.images[0]!.strippableBytes);
+    expect(r.asset.image.strippableBytes).toBe(8347);
+    expect(r.asset.image.size).toEqual({ w: 4, h: 4 }); // a real, valid PNG (header decodes)
   });
 });
 

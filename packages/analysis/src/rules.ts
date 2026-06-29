@@ -450,6 +450,44 @@ export async function wastedAlphaFinding(
   };
 }
 
+/** Strippable ancillary metadata (ICC / EXIF / XMP + non-essential chunks) the GPU never uses. The parser
+ *  MEASURES the EXACT strippable byte count (a pure header-only walk — invariant 1, no decode) onto
+ *  `image.strippableBytes`; this rule turns that into a verdict. HONESTY (invariant 5): the cost is DISK /
+ *  DOWNLOAD only — the GPU decodes to RGBA8888 regardless, so the estimate carries `diskBytesSaved` (EXACT)
+ *  and NEVER `vramBytesSaved`. We MEASURE; we generate nothing — the existing Pro fix (canvas re-encode /
+ *  oxipng) already strips it (invariant 3). The counted set is a conservative TRUE LOWER BOUND of what the fix
+ *  removes. severity info/warn by `warnBytes`. Returns null with no config, below `minBytes`, or with no
+ *  ancillary metadata (strippableBytes absent ⇒ 0). Loose images AND atlas page images (the manifest JSON is
+ *  not scanned). */
+export function strippableMetadataFinding(
+  ref: string,
+  image: ImageAsset,
+  cfg: ThresholdConfig,
+): Finding | null {
+  if (!cfg.strippableMetadata) return null;
+  const s = image.strippableBytes ?? 0;
+  if (s < cfg.strippableMetadata.minBytes) return null;
+  const severity: Severity = s >= cfg.strippableMetadata.warnBytes ? 'warn' : 'info';
+  const label = FORMAT_LABEL[image.mime];
+  return {
+    id: `${ref}:strippable-metadata`,
+    rule: 'strippable-metadata',
+    severity,
+    assetRef: ref,
+    title: `${label} carries ${fmtBytes(s)} of strippable metadata`,
+    detail:
+      `This ${label} stores ${fmtBytes(s)} of ancillary metadata (ICC/EXIF/XMP + non-essential chunks) ` +
+      `the GPU never uses. Stripping it (re-encode / oxipng) cuts ~${fmtBytes(s)} of DOWNLOAD. ` +
+      `DISK only — the GPU decodes to RGBA8888, so VRAM is unchanged.`,
+    fix: 'Strip metadata on export (oxipng / re-encode) — the Pro fix already does this.',
+    // DISK only: ancillary metadata costs download bytes; it costs NOTHING on the GPU (RGBA8888 regardless,
+    // invariant 5). NO vramBytesSaved — that would be a faked win. EXACT (header-measured), never an estimate.
+    estimate: { diskBytesSaved: s },
+    messageKey: 'strippable-metadata',
+    params: { label, bytes: s },
+  };
+}
+
 export function wastedRegions(
   atlas: Atlas,
   cfg: ThresholdConfig,

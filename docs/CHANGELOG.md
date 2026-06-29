@@ -10,12 +10,48 @@ GitHub creds — user pushes); commit hashes below are over that base.
 
 ---
 
-## Round 25 — selection (3 picks; #1 + #2 shipped) — 2026-06-29
+## Round 25 — selection (3 picks; all shipped) — 2026-06-29
 Selection (strict bar): from 10 candidates, picked 3 genuinely valuable + non-overlapping —
 **(#0)** strippable-metadata detector, **(#1)** BMFont XML+binary parsers, **(#2)** resample the
 oversize-clamped TOP tier — and dropped the rest (NPOT-fix net-negative on the default pipeline,
 lowercaseOutputNames footgun, two latent-only/no-round cleanups, two duplicates). Designs each
 went design→skeptic→adversarial-review before impl. Designs live in `docs/improvements/round25-*.md`.
+
+- **#0 strippable-metadata detector (ICC / EXIF / XMP / ancillary chunks) — closes a free-tier honesty gap**
+  (`docs/improvements/round25-strippable-metadata-detector.md`)
+  — The free diagnosis measured only mime+dims (`readImageInfo`), and `formatFinding` only fires for AVIF/WebP
+  at ≥25% — so a metadata-bloated but otherwise-efficient PNG earned **no verdict**, even though the Pro fix
+  (`transcode`/`recompressPng` → canvas re-encode / oxipng) already strips that metadata. **Fix:** a PURE,
+  header-only, no-decode `strippableMetadataBytes(bytes)` (`packages/parsers/src/image-size.ts`) that walks
+  chunk/marker headers and sums EXACT strippable ancillary bytes — PNG allow-set `{iCCP, eXIf, tEXt, iTXt,
+  zTXt, tIME}` (len+12; `tRNS/pHYs/gAMA/cHRM/sRGB/bKGD/sBIT` deliberately EXCLUDED as they can affect
+  rendering), JPEG `APP1..APP15`+`COM` (2+len; `APP0`/JFIF excluded; stop at SOS/EOI), WebP `VP8X`
+  `EXIF/XMP/ICCP` (size+8); AVIF/unknown → 0. Never throws, bounds-checked, bails to partial. Plumbed via an
+  omit-when-zero spread into **all four** `ImageAsset` literals (`parseImage`, `parseAtlas`, `spine-atlas`,
+  `fnt` — incl. the BMFont-refactored path). A `strippable-metadata` rule (loose + atlas page, default ≥4 KB,
+  info/warn by magnitude) carries **`diskBytesSaved` EXACT only, NEVER `vramBytesSaved`** (invariant 5 — the
+  GPU decodes to RGBA8888 regardless, so VRAM is unchanged) and names the EXISTING oxipng/re-encode fix
+  (invariant 3 — measure, generate nothing). Folder rollup mirrors `formatAggregateFinding`.
+  — **No over-claim (the central risk):** the counted set is a strict subset of ancillary, non-pixel chunks
+  that the fix definitively drops — traced through `fix.worker.ts`: every PNG emission is `convertToBlob` or
+  `oxipng.optimise(getImageData)` (pixels only) with NO raw-byte passthrough anywhere (even prebuilt-atlas
+  PASSTHROUGH re-decodes via `transcode`), so `strippableBytes` is a conservative TRUE LOWER BOUND. Test D
+  (allow-set validation) was satisfied as a documented strict-subset + traced-fix-path analysis (honest in the
+  fixture README that a faithful canvas PNG re-encode is unavailable in Vitest; oxipng `-strip` is the anchor).
+  — **De-overlap refactor:** the two ad-hoc `if (x > fmtSaved) potentialDiskSaved += x − fmtSaved` sites in
+  `analyze.ts` were replaced by ONE per-ref `bestSavedByRef` running-max (`bumpBest`) so format ∩ wasted-alpha ∩
+  strippable contributes **MAX, not SUM** (a ref with fmt=4000/alpha=6000/strip=5000 ⇒ 6000, not 7000); the
+  three pre-existing exact-`potentialDiskSaved` tests stay green. **CLI byte-identical** (`strippableMetadata`
+  is not in `resolveThresholds` ⇒ auto-dropped). **No worker/UI/backend change.**
+  — **Tests/i18n/fixture**: 8 new parser cases (inline byte arrays + truncation + the `parseImage` plumb) +
+  11 new analysis cases (warn/info, `diskBytesSaved` set & `vramBytesSaved` undefined, below-min/absent/no-config
+  → null, fires-through-`analyze`, the three-way MAX===6000, folder rollup); 6 new i18n keys ×9 catalogs with
+  identical placeholders (`render.test` drift + `catalogs.test` parity green; copy says DISK/DOWNLOAD only);
+  hand-authored `fixtures/sample-projects/strippable-metadata/metadata.png` (a real 8443-byte valid PNG with
+  injected `iCCP`+`tEXt`+`tIME`=8347 counted strippable bytes + an uncounted `pHYs`), golden-tested through
+  parse→analyze. Review verdict: **SHIP** (overClaimSafe; zero blockers/majors; reviewer re-ran the full gate
+  + independently traced the no-passthrough fix path). Gate: typecheck + parsers (46) + analysis (130) + i18n
+  (25) + budget (31) + full vitest + lint green.
 
 - **#1 BMFont XML + binary `.fnt` parsers — TEXT-format parity completion**
   (`docs/improvements/round25-bmfont-xml-binary-parsers.md`)

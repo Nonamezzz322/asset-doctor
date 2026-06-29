@@ -3,7 +3,7 @@
 // Everything here is pure and worker-safe — no DOM, no network. Errors are returned.
 
 export type { ParseResult } from './types';
-export { readImageInfo } from './image-size';
+export { readImageInfo, strippableMetadataBytes } from './image-size';
 export type { ImageInfo } from './image-size';
 export { parseAtlasManifest, parseAtlas, parseImage } from './atlas';
 export type { AtlasParseResult, MalformedFrame } from './atlas';

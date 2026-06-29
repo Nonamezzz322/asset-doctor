@@ -52,4 +52,10 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   // glyph-page occupancy at/below which the readout is `warn`, else `info`. The estimate carries ONLY
   // occupancyPct — the generic occupancy/oversize findings own the VRAM (w·h·4) on the SAME page; this rule
   // never double-counts (invariant 5). Browser-only — NOT in resolveThresholds (the CLI never opts in).
+  strippableMetadata: { minBytes: 4096, warnBytes: 65536 }, // CALIBRATE — strippable ancillary-metadata gate.
+  // A loose/atlas-page image carrying ICC/EXIF/XMP + non-essential chunks the GPU never uses. `minBytes`: the
+  // metadata must reach ≥ this (4 KB) before flagging (a tiny tIME chunk is noise). `warnBytes`: at/above this
+  // (64 KB — a fat embedded ICC profile) the finding is `warn`, else `info`. The estimate carries ONLY
+  // diskBytesSaved (EXACT, header-measured) — DISK/DOWNLOAD only (invariant 5: the GPU still allocates
+  // RGBA8888). Browser-only — NOT in resolveThresholds (the CLI never opts in; mirrors wastedAlpha).
 };

@@ -130,3 +130,104 @@ export function readImageInfo(bytes: Uint8Array): ImageInfo | null {
   if (jpeg) return { mime: 'image/jpeg', size: jpeg };
   return null;
 }
+
+/* ── Strippable ancillary-metadata measurement (pure header walk — no decode) ─────────────────────
+ * Sum the EXACT bytes a re-encode / oxipng strip would remove from an image: embedded ICC profiles,
+ * EXIF/XMP, text chunks and timestamps the GPU never uses. A PURE, header-only byte-walk (invariant 1 —
+ * no decode, no network); never throws; every read is bounds-checked and any out-of-bounds length bails
+ * to the accumulated partial. The counted set is a CONSERVATIVE TRUE LOWER BOUND of what the existing fix
+ * (canvas re-encode → IHDR/IDAT/IEND/pHYs only; oxipng -strip → all ancillary) actually drops — see
+ * fixtures/sample-projects/strippable-metadata/README.md (Test D). */
+
+const PNG_TYPE = (b: Uint8Array, o: number): string =>
+  String.fromCharCode(b[o]!, b[o + 1]!, b[o + 2]!, b[o + 3]!);
+
+// PNG allow-set: ancillary chunks safe to strip (carry NO pixel/rendering data). DELIBERATELY EXCLUDES
+// tRNS (functional transparency) and pHYs/gAMA/cHRM/sRGB/bKGD/sBIT (may alter rendering / a re-encoder
+// keeps pHYs). Each counted chunk costs len + 12 on disk (4 length + 4 type + len data + 4 CRC).
+const PNG_STRIPPABLE = new Set(['iCCP', 'eXIf', 'tEXt', 'iTXt', 'zTXt', 'tIME']);
+
+function pngStrippable(b: Uint8Array): number {
+  if (!startsWith(b, PNG_SIG)) return 0;
+  let total = 0;
+  let o = 8; // walk chunks from just past the 8-byte signature
+  while (o + 8 <= b.length) {
+    const len = u32be(b, o); // chunk data length
+    const type = PNG_TYPE(b, o + 4);
+    const chunkSize = len + 12; // length(4) + type(4) + data(len) + crc(4)
+    // Defensive bounds: a length that runs past the buffer is corrupt — bail to the accumulated partial.
+    if (o + chunkSize > b.length) break;
+    if (type === 'IEND') break; // end of the datastream
+    if (PNG_STRIPPABLE.has(type)) total += chunkSize;
+    o += chunkSize;
+  }
+  return total;
+}
+
+function jpegStrippable(b: Uint8Array): number {
+  if (b[0] !== 0xff || b[1] !== 0xd8) return 0; // SOI
+  let total = 0;
+  let o = 2;
+  while (o + 1 < b.length) {
+    if (b[o] !== 0xff) {
+      o++;
+      continue;
+    }
+    const marker = b[o + 1]!;
+    if (marker === 0xff || marker === 0x00) {
+      o++; // fill / padding byte
+      continue;
+    }
+    // Standalone markers carry no length segment.
+    if (marker === 0xd8 || marker === 0xd9 || (marker >= 0xd0 && marker <= 0xd7) || marker === 0x01) {
+      if (marker === 0xd9) break; // EOI — done
+      o += 2;
+      continue;
+    }
+    if (marker === 0xda) break; // SOS — entropy-coded scan begins, no more metadata segments
+    if (o + 4 > b.length) break; // length field must be present
+    const len = u16be(b, o + 2);
+    const segSize = 2 + len; // marker(2) + length-includes-itself(len)
+    if (o + segSize > b.length) break; // segment runs past the buffer — bail to partial
+    // APP1..APP15 (0xE1..0xEF) carry EXIF/XMP/ICC; COM (0xFE) carries a comment. EXCLUDE APP0 (0xE0, JFIF —
+    // an encoder keeps it). Each costs 2 + len on disk (the 0xFFxx marker + the length-prefixed payload).
+    if ((marker >= 0xe1 && marker <= 0xef) || marker === 0xfe) total += segSize;
+    o += segSize;
+  }
+  return total;
+}
+
+function webpStrippable(b: Uint8Array): number {
+  if (!startsWith(b, [0x52, 0x49, 0x46, 0x46]) || !startsWith(b, [0x57, 0x45, 0x42, 0x50], 8)) {
+    return 0; // not RIFF .... WEBP
+  }
+  // Only the extended (VP8X) container carries ancillary chunks; simple VP8/VP8L cannot.
+  if (b.length < 16 || PNG_TYPE(b, 12) !== 'VP8X') return 0;
+  let total = 0;
+  let o = 12; // first RIFF chunk (the VP8X header) starts at offset 12
+  while (o + 8 <= b.length) {
+    const fourcc = PNG_TYPE(b, o);
+    // RIFF chunk sizes are LITTLE-endian (4 bytes after the fourcc).
+    const size = (b[o + 4]! | (b[o + 5]! << 8) | (b[o + 6]! << 16) | (b[o + 7]! << 24)) >>> 0;
+    const padded = size + (size & 1); // chunks are padded to an even byte boundary
+    const chunkSpan = 8 + padded; // fourcc(4) + size(4) + payload(+pad)
+    if (o + 8 + size > b.length) break; // payload runs past the buffer — bail to partial
+    // EXIF / XMP (trailing space, "XMP ") / ICCP carry strippable metadata; cost size + 8 (fourcc + size hdr).
+    if (fourcc === 'EXIF' || fourcc === 'XMP ' || fourcc === 'ICCP') total += size + 8;
+    o += chunkSpan;
+  }
+  return total;
+}
+
+/** Sum the EXACT strippable ancillary-metadata bytes in an image header (PNG / JPEG / WebP). AVIF /
+ *  unrecognized ⇒ 0 (an ISOBMFF box-tree walk is too risky header-only, and AVIF is already the format
+ *  target). Pure & defensive: never throws, never decodes (invariant 1). A conservative TRUE LOWER BOUND
+ *  of what the existing canvas-re-encode / oxipng fix removes. */
+export function strippableMetadataBytes(bytes: Uint8Array): number {
+  if (startsWith(bytes, PNG_SIG)) return pngStrippable(bytes);
+  if (startsWith(bytes, [0x52, 0x49, 0x46, 0x46]) && startsWith(bytes, [0x57, 0x45, 0x42, 0x50], 8)) {
+    return webpStrippable(bytes);
+  }
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) return jpegStrippable(bytes);
+  return 0; // AVIF / unrecognized
+}

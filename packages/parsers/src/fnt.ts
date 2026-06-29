@@ -10,7 +10,7 @@
 
 import type { Atlas, ImageAsset, Size, Sprite } from '@asset-doctor/core';
 import type { ParseResult } from './types';
-import { readImageInfo } from './image-size';
+import { readImageInfo, strippableMetadataBytes } from './image-size';
 
 export interface FntPage {
   /** page `file` (surrounding quotes stripped). */
@@ -411,12 +411,14 @@ export function parseFntPage(
     sprites: page.sprites,
     source: { kind: 'bmfont' },
   };
+  const strippable = strippableMetadataBytes(image.bytes);
   const imageAsset: ImageAsset = {
     name: atlas.name,
     imageRef: image.ref,
     size: info.size,
     mime: info.mime,
     byteSize: image.bytes.byteLength,
+    ...(strippable > 0 ? { strippableBytes: strippable } : {}),
   };
   return { ok: true, asset: { kind: 'atlas', atlas, image: imageAsset } };
 }

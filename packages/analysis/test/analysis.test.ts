@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import type { Asset, Atlas, ImageAsset, ImageMime, Rect } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseFntText, parseFntPage, type FntPage } from '@asset-doctor/parsers';
 import { groupFiles, type RawFile } from '@asset-doctor/ingest';
-import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, frameRedundancyFinding, trimMarginFinding, wastedAlphaFinding, crossAtlasRedundancyFinding, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, frameRedundancyFinding, trimMarginFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, crossAtlasRedundancyFinding, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -448,6 +448,109 @@ describe('wasted-alpha (fully-opaque image carrying a dead alpha channel)', () =
       features: [{ assetRef: 'flat.png', contentHash: 'h', opaque: true }],
     });
     expect(noDep.findings.find((f) => f.rule === 'wasted-alpha')).toBeUndefined();
+  });
+});
+
+// ── Test B: strippable-metadata rule + folder rollup + the analyze de-overlap (three-way MAX). The rule is
+// pure over ImageAsset.strippableBytes; analyze plumbs it for loose images AND atlas pages.
+describe('strippable-metadata (ancillary ICC/EXIF/XMP + non-essential chunks)', () => {
+  const metaImg = (name: string, strippableBytes: number, byteSize = 200000, mime: ImageMime = 'image/png'): ImageAsset => ({
+    name, imageRef: name, size: { w: 512, h: 512 }, mime, byteSize, ...(strippableBytes > 0 ? { strippableBytes } : {}),
+  });
+  const looseMeta = (name: string, strippableBytes: number): Asset => ({ kind: 'image', image: metaImg(name, strippableBytes) });
+
+  it('warn at/above warnBytes, diskBytesSaved EXACT, NO vramBytesSaved (Inv 5)', () => {
+    const f = strippableMetadataFinding('a.png', metaImg('a.png', 80000), DEFAULT_THRESHOLDS)!;
+    expect(f.rule).toBe('strippable-metadata');
+    expect(f.messageKey).toBe('strippable-metadata');
+    expect(f.severity).toBe('warn'); // 80000 >= warnBytes 65536
+    expect(f.estimate?.diskBytesSaved).toBe(80000);
+    expect(f.estimate?.vramBytesSaved).toBeUndefined(); // disk-only — the GPU still allocates RGBA8888
+    expect(f.params).toEqual({ label: 'PNG', bytes: 80000 });
+  });
+
+  it('info below warnBytes but at/above minBytes', () => {
+    const f = strippableMetadataFinding('a.png', metaImg('a.png', 5000), DEFAULT_THRESHOLDS)!;
+    expect(f.severity).toBe('info'); // 4096 <= 5000 < 65536
+    expect(f.estimate?.diskBytesSaved).toBe(5000);
+  });
+
+  it('below minBytes ⇒ null', () => {
+    expect(strippableMetadataFinding('a.png', metaImg('a.png', 1000), DEFAULT_THRESHOLDS)).toBeNull();
+  });
+
+  it('absent strippableBytes ⇒ null', () => {
+    expect(strippableMetadataFinding('a.png', metaImg('a.png', 0), DEFAULT_THRESHOLDS)).toBeNull();
+  });
+
+  it('no strippableMetadata config ⇒ null (budget configs that don\'t opt in)', () => {
+    const cfg = { ...DEFAULT_THRESHOLDS };
+    delete cfg.strippableMetadata;
+    expect(strippableMetadataFinding('a.png', metaImg('a.png', 80000), cfg)).toBeNull();
+  });
+
+  it('analyze fires the finding for a LOOSE image and bumps potentialDiskSaved', async () => {
+    const report = await analyze([looseMeta('a.png', 50000)]);
+    const sm = report.findings.find((f) => f.rule === 'strippable-metadata' && f.scope !== 'folder');
+    expect(sm?.assetRef).toBe('a.png');
+    expect(report.totals.potentialDiskSaved).toBe(50000);
+  });
+
+  it('analyze fires the finding for an ATLAS PAGE image (strippableBytes on the page)', async () => {
+    const atlasAsset: Asset = {
+      kind: 'atlas',
+      atlas: { name: 'sheet.png', imageRef: 'sheet.png', size: { w: 1024, h: 1024 }, sprites: [{ name: 's0', frame: { x: 0, y: 0, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 32, h: 32 } }], source: { kind: 'pixi' } },
+      image: { name: 'sheet.png', imageRef: 'sheet.png', size: { w: 1024, h: 1024 }, mime: 'image/png', byteSize: 200000, strippableBytes: 50000 },
+    };
+    const report = await analyze([atlasAsset]);
+    expect(report.findings.find((f) => f.rule === 'strippable-metadata' && f.assetRef === 'sheet.png')).toBeTruthy();
+    expect(report.totals.potentialDiskSaved).toBe(50000);
+  });
+
+  it('THREE-WAY MAX: fmt=4000 + alpha=6000 + strip=5000 ⇒ potentialDiskSaved === 6000 (honest MAX, not 7000)', async () => {
+    // 10000-byte PNG. format → 6000 estimate (saved 4000); opaque → 4000 (saved 6000); strip → 5000.
+    // The three overlap on one re-encode; the aggregate must be MAX(4000,6000,5000) === 6000, NOT 7000.
+    const asset: Asset = { kind: 'image', image: { name: 'x.png', imageRef: 'x.png', size: { w: 512, h: 512 }, mime: 'image/png', byteSize: 10000, strippableBytes: 5000 } };
+    const report = await analyze([asset], undefined, {
+      encodeImage: async () => 6000,  // format saved = 10000 - 6000 = 4000
+      encodeOpaque: async () => 4000, // wasted-alpha saved = 10000 - 4000 = 6000
+      features: [{ assetRef: 'x.png', contentHash: 'h', contentClass: 'photographic', opaque: true }],
+    });
+    expect(report.findings.find((f) => f.rule === 'format')?.estimate?.diskBytesSaved).toBe(4000);
+    expect(report.findings.find((f) => f.rule === 'wasted-alpha')?.estimate?.diskBytesSaved).toBe(6000);
+    expect(report.findings.find((f) => f.rule === 'strippable-metadata' && f.scope !== 'folder')?.estimate?.diskBytesSaved).toBe(5000);
+    expect(report.totals.potentialDiskSaved).toBe(6000); // MAX, never 4000 + 2000 + 1000 = 7000
+  });
+
+  it('folder rollup: ≥2 per-asset findings ⇒ summed aggregate (display-only, NOT folded into totals)', () => {
+    const f1 = strippableMetadataFinding('a.png', metaImg('a.png', 10000), DEFAULT_THRESHOLDS)!;
+    const f2 = strippableMetadataFinding('b.png', metaImg('b.png', 20000), DEFAULT_THRESHOLDS)!;
+    const agg = strippableMetadataAggregateFinding([f1, f2])!;
+    expect(agg.scope).toBe('folder');
+    expect(agg.rule).toBe('strippable-metadata');
+    expect(agg.messageKey).toBe('strippable-metadata-aggregate');
+    expect(agg.estimate?.diskBytesSaved).toBe(30000);
+    expect(agg.relatedRefs).toEqual(['a.png', 'b.png']);
+    expect(strippableMetadataAggregateFinding([f1])).toBeNull(); // <2 ⇒ null
+  });
+
+  it('analyze emits the folder aggregate but does NOT double-count it into potentialDiskSaved', async () => {
+    const report = await analyze([looseMeta('a.png', 10000), looseMeta('b.png', 20000)]);
+    const agg = report.findings.find((f) => f.scope === 'folder' && f.messageKey === 'strippable-metadata-aggregate');
+    expect(agg?.estimate?.diskBytesSaved).toBe(30000);
+    // Aggregate is display-only: the per-asset findings already bumped potentialDiskSaved to 10000 + 20000.
+    expect(report.totals.potentialDiskSaved).toBe(30000);
+  });
+
+  it('golden fixture: parse(metadata.png) -> analyze fires info strippable-metadata, diskBytesSaved=8347', async () => {
+    const r = parseImage('metadata.png', readBytes('strippable-metadata/metadata.png'));
+    if (!r.ok) throw new Error('fixture parse failed');
+    const report = await analyze([r.asset]);
+    const sm = report.findings.find((f) => f.rule === 'strippable-metadata' && f.scope !== 'folder')!;
+    expect(sm.severity).toBe('info'); // 8347 in [minBytes 4096, warnBytes 65536)
+    expect(sm.estimate?.diskBytesSaved).toBe(8347);
+    expect(sm.estimate?.vramBytesSaved).toBeUndefined(); // invariant 5 — never a VRAM win
+    expect(report.totals.potentialDiskSaved).toBe(8347);
   });
 });
 

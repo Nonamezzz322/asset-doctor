@@ -90,6 +90,13 @@ export interface ImageAsset {
   mime: ImageMime;
   /** On-disk byte size. */
   byteSize: number;
+  /** Strippable ancillary-metadata bytes measured by a PURE header-only byte-walk (no decode — invariant 1):
+   *  PNG = Σ allow-set chunk (len + 12) over {iCCP,eXIf,tEXt,iTXt,zTXt,tIME}; JPEG = Σ (2 + len) over APP1..APP15
+   *  + COM; WebP = Σ (size + 8) over VP8X EXIF/XMP/ICCP. AVIF / headless / no ancillary ⇒ 0 (omitted). DISK-ONLY
+   *  (invariant 5): this metadata costs DOWNLOAD bytes only — the GPU decodes to RGBA8888 regardless, so it is
+   *  NEVER a VRAM win. Absent ⇒ none measured (byte-identical to before). A conservative TRUE LOWER BOUND of the
+   *  bytes the existing canvas-re-encode / oxipng fix actually removes (it strips ALL ancillary chunks). */
+  strippableBytes?: number;
 }
 
 export type Asset =
@@ -258,6 +265,8 @@ export type Rule =
   | 'dimensions-oversize'
   | 'solid-fill'
   | 'wasted-alpha'
+  // per-asset: strippable ancillary metadata (ICC/EXIF/XMP + non-essential chunks) the GPU never uses
+  | 'strippable-metadata'
   // whole-folder (scope: 'folder')
   | 'duplicate-exact'
   | 'duplicate-similar'
@@ -610,6 +619,15 @@ export interface ThresholdConfig {
    *  fabricates NO disk/VRAM-saved (invariant 5). Optional/additive: absent ⇒ readout suppressed (CLI/
    *  budget configs that don't opt in; NOT enumerated by resolveThresholds, mirrors frameRedundancy). */
   fontGlyphPage?: { minChars: number; occupancyWarn: number };
+  /** Strippable-metadata gate (browser + headless). A loose/atlas-page image carrying ancillary metadata
+   *  (ICC/EXIF/XMP + non-essential chunks the GPU never uses) measured by ImageAsset.strippableBytes.
+   *  `minBytes` — the metadata must reach ≥ this many bytes before the finding fires (a tiny tIME chunk is
+   *  noise). `warnBytes` — at/above this the finding is `warn`, else `info` (a fat embedded ICC profile is a
+   *  real download tax). The estimate carries ONLY diskBytesSaved (EXACT) — DISK/DOWNLOAD only (invariant 5):
+   *  the GPU still decodes to RGBA8888, so this is NEVER a VRAM win. Optional/additive: absent ⇒ the finding is
+   *  suppressed (CLI/budget configs that don't opt in). Browser-only — NOT enumerated by resolveThresholds (the
+   *  CLI never opts in), mirroring frameRedundancy/wastedAlpha. */
+  strippableMetadata?: { minBytes: number; warnBytes: number };
 }
 
 export interface AnalysisReport {

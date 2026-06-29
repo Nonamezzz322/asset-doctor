@@ -28,6 +28,7 @@ import {
   occupancyFinding,
   occupancyValue,
   solidFillFinding,
+  strippableMetadataFinding,
   trimMarginFinding,
   vramBytes,
   vramBytesMipmapped,
@@ -45,6 +46,7 @@ import {
   integrityFindings,
   mipmapCostFinding,
   shouldAtlasFinding,
+  strippableMetadataAggregateFinding,
 } from './folder';
 import { groupVariants, variantsFinding } from './variants';
 import { fontGlyphPageFinding } from './font';
@@ -143,21 +145,43 @@ export async function analyze(
   const frameTrimByRef = new Map<string, (TrimRect | null)[]>();
   for (const ft of deps.frameTrims ?? []) frameTrimByRef.set(ft.atlasRef, ft.bboxes);
 
-  // Per-loose-ref disk saving already counted by the FORMAT finding (transcode to AVIF/WebP). The
-  // wasted-alpha finding for the SAME ref overlaps it (re-encoding the format ALSO drops the dead alpha
-  // plane — most of the alpha saving is already inside the transcode estimate), so summing both would
-  // OVERSTATE the aggregate. We de-overlap below by contributing the MAX of the two per-ref savings, not
-  // their sum. Keyed by ref; cleared implicitly per-folder (one report = one map).
-  const formatSavedByRef = new Map<string, number>();
+  // Per-ref MAX-de-overlap of the disk savings that target the SAME bytes. The FORMAT finding (transcode to
+  // AVIF/WebP), the WASTED-ALPHA finding (re-encode opaque) and the STRIPPABLE-METADATA finding (re-encode /
+  // oxipng) all overlap on one ref: a single re-encode drops the dead alpha plane AND the ancillary metadata
+  // while transcoding, so SUMMING them would OVERSTATE the aggregate. We contribute the per-ref RUNNING MAX
+  // (not the sum) via `bumpBest`: addFormat seeds the best, and each later candidate adds only the EXCESS over
+  // the current best. Keyed by ref; one report = one map. `metaFindings` collects the per-asset strippable
+  // findings for the folder rollup. Frame-redundancy/trim-margin/cross-atlas disk numbers are AREA ESTIMATES
+  // and stay OUT of this entirely (invariant 5 — never summed onto measured savings).
+  const bestSavedByRef = new Map<string, number>();
+  const metaFindings: Finding[] = [];
+
+  const bumpBest = (ref: string, candidate: number): void => {
+    const prev = bestSavedByRef.get(ref) ?? 0;
+    if (candidate > prev) {
+      potentialDiskSaved += candidate - prev;
+      bestSavedByRef.set(ref, candidate);
+    }
+  };
 
   const addFormat = async (ref: string, image: ImageAsset, contentClass: ContentClass = 'unknown') => {
     const fmt = await formatFinding(ref, image, cfg, deps.encodeImage, contentClass);
     if (fmt) {
       findings.push(fmt);
       formatFindings.push(fmt);
-      const saved = fmt.estimate?.diskBytesSaved ?? 0;
-      formatSavedByRef.set(ref, saved);
-      potentialDiskSaved += saved;
+      bumpBest(ref, fmt.estimate?.diskBytesSaved ?? 0);
+    }
+  };
+
+  // Strippable ancillary metadata (ICC/EXIF/XMP + non-essential chunks) — fires for LOOSE images AND atlas
+  // page images (both carry `image.strippableBytes` from the parser). EXACT disk saving; de-overlapped with
+  // format/wasted-alpha via bumpBest (a re-encode that transcodes/drops-alpha ALSO strips this metadata).
+  const addStrippable = (ref: string, image: ImageAsset): void => {
+    const meta = strippableMetadataFinding(ref, image, cfg);
+    if (meta) {
+      findings.push(meta);
+      metaFindings.push(meta);
+      bumpBest(ref, meta.estimate?.diskBytesSaved ?? 0);
     }
   };
 
@@ -185,6 +209,9 @@ export async function analyze(
       if (waste) findings.push(waste);
       findings.push(...dimensionFindings(atlas.name, atlas.size, cfg));
       await addFormat(atlas.name, image, 'unknown'); // M1: atlases keep today's lossy verdict
+      // Strippable ancillary metadata on the atlas PAGE image (the manifest JSON is never scanned). De-overlapped
+      // with the page's format saving via bumpBest (one re-encode transcodes AND strips the metadata).
+      addStrippable(atlas.name, image);
       // Within-atlas frame redundancy: frames whose pixel REGIONS are byte-identical (host-hashed off the
       // already-decoded page). Only when the host supplied region hashes for THIS atlas (absent ⇒ no
       // finding ⇒ byte-identical). The recoverable disk number is an area-proportional ESTIMATE, so it is
@@ -240,15 +267,15 @@ export async function analyze(
         const wa = await wastedAlphaFinding(image.name, image, cfg, deps.encodeOpaque);
         if (wa) {
           findings.push(wa);
-          // De-overlap: the format finding (if any) for this ref already counted a transcode disk
-          // saving that SUBSUMES most of the dead-alpha drop (re-encoding the format also drops the
-          // alpha plane). Contribute only the EXCESS of the larger estimate so the aggregate never
-          // double-counts the same ref's overlapping savings — take MAX, not SUM.
-          const alphaSaved = wa.estimate?.diskBytesSaved ?? 0;
-          const fmtSaved = formatSavedByRef.get(image.name) ?? 0;
-          if (alphaSaved > fmtSaved) potentialDiskSaved += alphaSaved - fmtSaved;
+          // De-overlap: the format finding (if any) for this ref already counted a transcode disk saving that
+          // SUBSUMES most of the dead-alpha drop (re-encoding the format also drops the alpha plane). bumpBest
+          // contributes only the EXCESS over the running max so the aggregate never double-counts.
+          bumpBest(image.name, wa.estimate?.diskBytesSaved ?? 0);
         }
       }
+      // Strippable ancillary metadata on the loose image. De-overlapped with format/wasted-alpha via bumpBest
+      // (one re-encode transcodes / drops-alpha AND strips this metadata — three-way MAX, never the sum).
+      addStrippable(image.name, image);
     }
   }
 
@@ -275,6 +302,10 @@ export async function analyze(
   }
   const fa = formatAggregateFinding(formatFindings);
   if (fa) folder.push(fa);
+  // Folder rollup of the per-asset strippable-metadata findings (≥2). DISPLAY-ONLY — like format-aggregate it
+  // is NOT folded into potentialDiskSaved (the per-asset findings already bumped it via bumpBest).
+  const sma = strippableMetadataAggregateFinding(metaFindings);
+  if (sma) folder.push(sma);
   const variants = groupVariants(assets);
   const vf = variantsFinding(variants);
   if (vf) folder.push(vf);

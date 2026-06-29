@@ -17,6 +17,7 @@ export {
   frameRedundancyFinding,
   trimMarginFinding,
   wastedAlphaFinding,
+  strippableMetadataFinding,
   wastedRegions,
   formatFinding,
   fmtBytes,
@@ -30,6 +31,7 @@ export {
   crossAtlasRedundancyFinding,
   integrityFindings,
   formatAggregateFinding,
+  strippableMetadataAggregateFinding,
 } from './folder';
 export { fontGlyphPageFinding } from './font';
 export { defaultCell, buildCoverage, mergeEmptyRects, summarizeEmpty } from './grid';

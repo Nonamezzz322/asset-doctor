@@ -10,6 +10,8 @@ import {
   frameRedundancyFinding,
   trimMarginFinding,
   wastedAlphaFinding,
+  strippableMetadataFinding,
+  strippableMetadataAggregateFinding,
   wastedRegions,
   formatFinding,
   duplicateExactFindings,
@@ -61,6 +63,13 @@ async function realFindings(): Promise<Finding[]> {
   out.push(trimMarginFinding(tmAtlas, cfg, [{ x: 16, y: 16, w: 32, h: 32 }, { x: 16, y: 16, w: 32, h: 32 }], 8000)!);
   // wasted-alpha: a fully-opaque PNG re-encoded opaque saves bytes (sizer 7000 < byteSize 10000 = 30%)
   out.push((await wastedAlphaFinding('flat.png', img('flat.png', 256, 256, 10000).image, cfg, async () => 7000))!);
+  // strippable-metadata: a PNG carrying 80 KB of ICC/EXIF metadata ⇒ warn (≥ warnBytes 64 KB). DISK-only.
+  const metaImg = { ...img('meta.png', 256, 256, 200000).image, strippableBytes: 81920 };
+  out.push(strippableMetadataFinding('meta.png', metaImg, cfg)!);
+  // strippable-metadata-aggregate: ≥2 per-asset metadata findings rolled up (folder scope).
+  const m1 = strippableMetadataFinding('meta1.png', { ...img('meta1.png', 256, 256, 200000).image, strippableBytes: 10000 }, cfg)!;
+  const m2 = strippableMetadataFinding('meta2.png', { ...img('meta2.png', 256, 256, 200000).image, strippableBytes: 20000 }, cfg)!;
+  out.push(strippableMetadataAggregateFinding([m1, m2])!);
   out.push((await formatFinding('hero.png', img('hero.png', 256, 256, 10000).image, cfg, async () => 4000))!);
   // flat/alpha-art content class ⇒ messageKey 'format-lossless' (rule still 'format') — drift-check the
   // new key family + its baked EN strings exactly like every other finding.
@@ -100,7 +109,7 @@ describe('renderFinding — English catalog reproduces the baked strings (drift 
     const findings = await realFindings();
     const keys = new Set(findings.map((f) => f.messageKey));
     // sanity: we exercised every messageKey family the rules emit
-    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'frame-redundancy', 'trim-margin', 'cross-atlas-redundancy', 'font-glyph-page', 'wasted-alpha', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'integrity', 'format-aggregate', 'variants']));
+    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'frame-redundancy', 'trim-margin', 'cross-atlas-redundancy', 'font-glyph-page', 'wasted-alpha', 'strippable-metadata', 'strippable-metadata-aggregate', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'integrity', 'format-aggregate', 'variants']));
     for (const f of findings) {
       expect(f.messageKey, `${f.id} must carry a messageKey`).toBeTruthy();
       const r = renderFinding(f, 'en');
