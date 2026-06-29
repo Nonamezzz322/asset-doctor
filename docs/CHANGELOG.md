@@ -55,6 +55,29 @@ atlas findings it already trips.
   never rendered).
   - Gate: `pnpm typecheck && pnpm test && pnpm lint` green.
 
+- **#1 Re-sync the untrimmed-padding generator for idempotency (Case 20 repack block)**
+  (`docs/improvements/round23-re-sync-the-untrimmed-padding-gene.md`)
+  — `fixtures/_generator/generate.mjs` Case 20 (`untrimmed-padding`) built `regions`/`recoverableArea`/
+  `vramBytesSaved` but **no longer emitted the r20 `repack` block** the committed
+  `untrimmed-padding/expected.json` golden carries (`trimmedSprites`/`trimmedAreaReclaimed`/`perSprite`), so
+  a plain `node generate.mjs` re-run **silently dropped** it — latent generator non-idempotence that would
+  break the two `repack` readers (`packages/fix/test/fix.test.ts`, `apps/web/src/lib/perceptual.test.ts`
+  trim-on-repack e2e).
+  — Re-added the `repack` emission **DERIVED from the same `specs[]`** that build the regions:
+  `trimmedSprites = untrimmedSpecs.length`, `trimmedAreaReclaimed = recoverableArea` (the already-computed
+  Σ(frame−bbox) over untrimmed specs), `perSprite[].{packedSize=(bw,bh), sourceSize=(CELL,CELL),
+  spriteSourceSize=(mx,my,bw,bh)}` — computed, **never hand-copied numbers**; `trimmed_0` excluded via
+  `!s.trimmed`. Key order preserved (`repack` between `vramBytesSaved` and `findings`).
+  — Regenerated the golden so generator output **=== committed golden**: the only byte-change is the
+  `perSprite` block reformatting from hand-authored single-line to canonical `JSON.stringify(_,null,2)`
+  multi-line (semantically identical — verified whitespace-stripped equal; all 6 readers `JSON.parse`).
+  **GENERATOR/FIXTURE ONLY** — no source/behavior/contract change. **Idempotency VERIFIED:** after staging,
+  `node fixtures/_generator/generate.mjs` produces ZERO further git diff across all fixtures (deterministic:
+  static `specs[]`, `.filter/.reduce/.map` order-preserving, integer arithmetic, no randomness/time/FS-order).
+  Trim-margin e2e stays green.
+  - Gate: `pnpm typecheck && pnpm test && pnpm lint` green; `node fixtures/_generator/generate.mjs &&
+    git status --short` → no fixture diff.
+
 ---
 
 ## Round 22 — selection (#0 shipped) — 2026-06-29

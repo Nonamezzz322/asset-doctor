@@ -1925,6 +1925,29 @@ the cluster fires — the shared frame is textured-but-identical precisely so th
     .filter((s) => !s.trimmed)
     .reduce((sum, s) => sum + (CELL * CELL - s.bw * s.bh), 0);
 
+  // Trim-on-repack (round20) golden: DERIVED from the same specs[] that build the regions above — the Pro
+  // fix feeds the per-frame opaque bboxes into repackAtlases({trim}), tightening each UNtrimmed sprite to
+  // its bbox. trimmedSprites/trimmedAreaReclaimed/perSprite are computed, never hand-copied, so the
+  // generator output stays byte-identical to the committed golden (idempotent).
+  const untrimmedSpecs = specs.filter((s) => !s.trimmed);
+  const repack = {
+    note:
+      'Trim-on-repack (round20) golden: feeding the per-frame opaque bboxes into repackAtlases({trim}) '
+      + 'tightens every UNtrimmed sprite to its bbox extent and emits trimmed:true + sourceSize(full) + '
+      + 'spriteSourceSize(=bbox, TP top-left). The already-trimmed trimmed_0 is copied verbatim. '
+      + 'trimmedAreaReclaimed === Σ(frame−bbox) === the detector\'s recoverableArea (every shrinkable sprite '
+      + 'here also clears minMarginPx), but the FIX measures it directly (B1: reclaimed N px, never the '
+      + 'detector\'s N).',
+    trimmedSprites: untrimmedSpecs.length,
+    trimmedAreaReclaimed: recoverableArea, // identical Σ to the detector's recoverableArea for THIS fixture
+    perSprite: untrimmedSpecs.map((s) => ({
+      name: s.name,
+      packedSize: { w: s.bw, h: s.bh },
+      sourceSize: { w: CELL, h: CELL },
+      spriteSourceSize: { x: s.mx, y: s.my, w: s.bw, h: s.bh },
+    })),
+  };
+
   writeCase(
     'untrimmed-padding',
     {
@@ -1941,6 +1964,7 @@ the cluster fires — the shared frame is textured-but-identical precisely so th
         regions,
         recoverableArea,
         vramBytesSaved: recoverableArea * 4,
+        repack,
         findings: [{ rule: 'trim-margin', severity: 'warn' }],
         note:
           'One atlas of UNtrimmed sprites carrying transparent margins (opaque cores inset inside 64×64 frames, '
