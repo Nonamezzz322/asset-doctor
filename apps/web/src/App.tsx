@@ -11,6 +11,7 @@ import {
   type PickedFile,
 } from './lib/import';
 import { keyOf } from './lib/group';
+import { filmSelectionAction } from './lib/film-selection';
 import { readSourceBytes, sourceReaders } from './lib/source-bytes';
 import { attachProbeReadings } from './lib/probe-run';
 import { runAnalysis, type Progress } from './lib/worker-client';
@@ -214,17 +215,19 @@ export function App() {
   // a fabricated film. The re-read is byte-identical to the original ⇒ identical decode/overlay (Inv 3).
   const [selectedBytes, setSelectedBytes] = useState<ArrayBuffer | null>(null);
   useEffect(() => {
-    if (!debouncedSelected) {
+    // Pure decision (film-selection.ts) so the "never blank on a live re-selection" rule is Node-testable.
+    const action = filmSelectionAction(!!debouncedSelected, !!debouncedSelected && readers.has(debouncedSelected));
+    if (action === 'clear') {
+      // No selection OR no reader (folder moved/deleted, or a legacy producer with no `file`) → honest no-image.
       setSelectedBytes(null);
       return;
     }
     let cancelled = false;
-    const reader = readers.get(debouncedSelected);
-    if (!reader) {
-      setSelectedBytes(null);
-      return;
-    }
-    setSelectedBytes(null); // clear the prior film while the new one re-reads (no stale overlay)
+    const reader = readers.get(debouncedSelected!)!; // action==='read' ⇒ reader present (filmSelectionAction)
+    // Round 24: KEEP the prior film mounted while the new ref re-reads — no blank flash on row click / arrow-
+    // scrub. FilmViewer redraws atomically (clearRect→drawImage in one tick) so the canvas shows the PREVIOUS
+    // real atlas until the new bytes resolve, then the new one. The cancel flag still guarantees a rapid re-
+    // selection never lands stale bytes on a newer film (the newest read always wins).
     void reader().then((b) => {
       if (!cancelled) setSelectedBytes(b);
     });

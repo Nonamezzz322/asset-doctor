@@ -651,6 +651,22 @@ describe('cross-atlas-redundancy (frames byte-identical ACROSS ≥2 atlases)', (
     expect(f.params?.atlases).toBe('A.png, B.png');
   });
 
+  it('mixed-case anchor — output sets follow localeCompare (matches cluster/rep collation), not code-unit', () => {
+    // Round 24: code-unit and locale collation DISAGREE here — 'B' (0x42) < 'a' (0x61) by code unit, but
+    // localeCompare orders 'a.png' before 'B.png'. The output sets (assetRef, params.atlases, relatedRefs) now
+    // share the SAME localeCompare collation as the cluster ordering (345) and representative selection (375),
+    // so the anchor is 'a.png' (not 'B.png'). This locks the comparator unification.
+    const B = sheetAtlas('B.png', row(1));
+    const a = sheetAtlas('a.png', row(1));
+    const hashes = new Map([['B.png', ['sh']], ['a.png', ['sh']]]);
+    const bytes = new Map([['B.png', 8000], ['a.png', 8000]]);
+    const f = crossAtlasRedundancyFinding([B, a], hashes, bytes, DEFAULT_THRESHOLDS)!;
+    expect(f).not.toBeNull();
+    expect(f.assetRef).toBe('a.png'); // localeCompare anchor, NOT code-unit 'B.png'
+    expect(f.params?.atlases).toBe('a.png, B.png');
+    expect(f.relatedRefs).toEqual(['a.png_0', 'B.png_0']);
+  });
+
   it('a single-atlas cluster ⇒ null (frame-redundancy owns within-atlas; no double-report)', () => {
     const A = sheetAtlas('A.png', row(3));
     const hashes = new Map([['A.png', ['dup', 'dup', 'other']]]); // 2 copies but all on ONE sheet

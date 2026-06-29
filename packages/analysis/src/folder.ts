@@ -394,8 +394,13 @@ export function crossAtlasRedundancyFinding(
   if (dupes < 1) return null; // no cluster spanned ≥2 atlases AND reached the gate
   diskEstimate = Math.round(diskEstimate);
 
-  const sortedRefs = refs.sort();
-  const sortedAtlases = [...atlasSet].sort();
+  // Round 24: ONE collation across ALL four ordering sites in this function — cluster ordering (345),
+  // representative selection (375), and these two output sets — all use `localeCompare` (matching manifest.ts).
+  // A bare `.sort()` here is code-unit collation, which can DISAGREE with the localeCompare cluster/rep order on
+  // mixed-case or non-ASCII names; unifying removes that inconsistency. Deterministic for a fixed ICU build;
+  // output is unchanged on pure-ASCII inputs (where both collations agree).
+  const sortedRefs = refs.sort((a, b) => a.localeCompare(b));
+  const sortedAtlases = [...atlasSet].sort((a, b) => a.localeCompare(b));
   const sheets = sortedAtlases.length;
   const vram = recoverableArea * 4; // BYTES_PER_PX — EXACT duplicate-region area, mirrors frameRedundancy
 

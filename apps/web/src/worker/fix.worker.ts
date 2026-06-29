@@ -223,6 +223,9 @@ import { encodeRemote, KTX2_PROFILE_BAKES_MIPS } from '../lib/backend-client';
 // path: false ⇒ the existing OffscreenCanvas tier downscale runs ⇒ byte-identical output.
 import { resampleOn, resampleSkippedByHashFilenames } from '../lib/resample-collect';
 import { hfEnergy, aggregateHfEnergyDelta } from '../lib/resample-quality';
+// Round 24: gzip file-size helper extracted to a PURE, Node-testable module (the worker can't run headless);
+// 0-byte ⇒ 0 guard lives there. Call site unchanged.
+import { gzipLen } from './gzip-len';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 const post = (m: FixResponse): void => ctx.postMessage(m);
@@ -4428,18 +4431,6 @@ async function computeFeatures(bytesByRef: Map<string, ArrayBuffer>): Promise<Im
 async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-/** Gzip-compressed byte length of `bytes` via the standard Worker CompressionStream API (round23 #2,
- *  includeFileSizes='gzip'). NO network, NO native lib, NO backend — a browser/Worker primitive (invariant 1).
- *  Returns the REAL compressed length (the manifest's progressSize = this /1024), matching an HTTP gzip
- *  transport. Pure size, no IO. The gzip stream length is platform-stable for identical input (fixed zlib
- *  level/dictionary); golden tests assert raw exactly and gzip only as a bound (≤ raw, >0). */
-async function gzipLen(bytes: Uint8Array): Promise<number> {
-  // Copy into a fresh ArrayBuffer-backed view so the Blob/Response sees plain bytes (no SharedArrayBuffer issue).
-  const cs = new CompressionStream('gzip');
-  const compressed = await new Response(new Response(bytes.slice()).body!.pipeThrough(cs)).arrayBuffer();
-  return compressed.byteLength;
 }
 
 /** Frame-redundancy hashing + trim-margin bboxes in the fix path — the SAME pure-core split as

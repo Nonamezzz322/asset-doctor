@@ -48,6 +48,32 @@ dims ⇒ no VRAM, no disk saving); the receipt carries ONLY a MEASURED high-freq
   catalogs; `whyNoKernel` asserted unchanged). Review verdict: SALVAGEABLE → all 2 blockers + 2 majors fixed.
   Gate: typecheck + vitest + lint + `go build/vet/test` (encoder + api) green.
 
+- **#1 reviewer-MINOR cleanup batch — FilmViewer no-flicker · cross-atlas comparator · gzipLen 0-byte guard**
+  (`docs/improvements/round24-reviewer-minor-cleanup-batch-filmv.md`)
+  — Low-risk polish; each fix additive + honest + deterministic, NO measured-number change.
+  **(1) FilmViewer keep-last-frame:** the selected-film re-read effect (`App.tsx`) eagerly called
+  `setSelectedBytes(null)` on the SUCCESS path, unmounting FilmViewer (render gate → no-image) for one re-read
+  → a blank flash on every row click / arrow-scrub. The swap decision is now a PURE total function
+  `filmSelectionAction(hasSelection, hasReader) → 'clear'|'read'` (`apps/web/src/lib/film-selection.ts`,
+  Node-testable since apps/web has no React harness); the effect dispatches over it and DROPS the success-path
+  clear, so the prior real atlas stays mounted until the new bytes resolve. The cancel flag is preserved
+  (newest read always wins; rapid A→B→A never stale-locks). `'clear'` still fires on genuine no-selection /
+  no-reader (honest no-image, never a fabricated film). **(2) cross-atlas comparator unification:**
+  `crossAtlasRedundancyFinding` (`folder.ts`) ordered clusters + picked the representative under
+  `localeCompare` but sorted the OUTPUT sets (`relatedRefs`, `atlases`, the `assetRef` anchor) under bare
+  `.sort()` (code-unit) — these can DISAGREE on mixed-case / non-ASCII names. Both output sorts now use
+  `localeCompare`, so all four ordering sites share ONE collation (matching `manifest.ts`). Output unchanged on
+  pure-ASCII inputs (both collations agree). **(3) gzipLen 0-byte guard + extraction:** the inline `gzipLen`
+  (worker, includeFileSizes='gzip') is extracted to a PURE module (`apps/web/src/worker/gzip-len.ts`) with a
+  leading `bytes.length===0 ⇒ 0` guard — an empty file has no transported bytes, so the prior ~20-byte gzip
+  frame overhead overstated it (same class as the manifest's missing⇒0 rule). Call site byte-identical.
+  **(4) resample top-tier gate:** SKIPPED — out of scope for this design (not present; the resample work is
+  Round 24 #0). — **Tests**: `film-selection.test.ts` (the load-bearing `(true,true)==='read'` regression
+  lock + clear cases), `gzip-len.test.ts` (empty⇒0; compressible >0 and ≤ raw; single-byte >0; determinism,
+  real `CompressionStream` not mocked), `analysis.test.ts` cross-atlas mixed-case anchor (`B.png`/`a.png`:
+  anchor='a.png' under localeCompare, code-unit would pick 'B.png'); existing ASCII goldens unmoved.
+  Gate: typecheck + vitest + lint green.
+
 ## Round 23 — selection (#0 shipped) — 2026-06-29
 Pick: **(#0) bitmap-font (.fnt BMFont) parser + ingest grouping + glyph-page audit** — AngelCode BMFont
 glyph sheets were an unrecognized file type (silently dropped). A parsed `.fnt` page is structurally an
