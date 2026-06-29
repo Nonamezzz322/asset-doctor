@@ -170,6 +170,37 @@ function validateFormatList(formats: FormatTarget[], label: string, errors: stri
   }
 }
 
+/** Valid AVIF chroma subsample integers (the @jsquash/aom set): 0=4:2:0, 1=4:2:2, 2=4:4:0, 3=4:4:4. A
+ *  value outside this set is rejected fail-closed (it would reach the codec uncontrolled). */
+const AVIF_SUBSAMPLE_SET = new Set([0, 1, 2, 3]);
+
+/**
+ * Fail-closed validation of the PROFILE-GLOBAL encode knobs (round7-export-profile.md §4d). These are the
+ * profile-level twins of the override-level numeric guards in the override loop below — without this, a bad
+ * GLOBAL effort/subsample/png-level/quality-alpha would slip straight to the codec (the App.tsx memo + the
+ * worker read them off the top-level profile, not an override). Bounds + error-string style mirror the
+ * override guards EXACTLY so the two paths can't drift:
+ *   - effort:           [0,6] (matches override badEffort);
+ *   - pngRecompressLevel:[0,6] (the @jsquash/oxipng level range);
+ *   - avifSubsample:    an integer AND in AVIF_SUBSAMPLE_SET (matches override badSubsample, tighter on set);
+ *   - avifQualityAlpha: -1 (the @jsquash "track quality" sentinel) or [0,100].
+ * Pure; deterministic. Each violation is pushed into `errors` (no early return — surface them all at once).
+ */
+function validateGlobals(p: ExportProfile, errors: string[]): void {
+  if (p.effort !== undefined && (!Number.isFinite(p.effort) || p.effort < 0 || p.effort > 6)) {
+    errors.push(`badEffort: ${String(p.effort)} (must be in [0,6])`);
+  }
+  if (p.pngRecompressLevel !== undefined && (!Number.isFinite(p.pngRecompressLevel) || p.pngRecompressLevel < 0 || p.pngRecompressLevel > 6)) {
+    errors.push(`badPngRecompressLevel: ${String(p.pngRecompressLevel)} (must be in [0,6])`);
+  }
+  if (p.avifSubsample !== undefined && (!Number.isInteger(p.avifSubsample) || !AVIF_SUBSAMPLE_SET.has(p.avifSubsample))) {
+    errors.push(`badSubsample: ${String(p.avifSubsample)} (must be an integer in {0,1,2,3})`);
+  }
+  if (p.avifQualityAlpha !== undefined && (!Number.isFinite(p.avifQualityAlpha) || p.avifQualityAlpha < -1 || p.avifQualityAlpha > 100)) {
+    errors.push(`badQualityAlpha: ${String(p.avifQualityAlpha)} (must be -1 or in [0,100])`);
+  }
+}
+
 /**
  * Fail-closed validation of an export profile (design §4a). On success returns the formats in GIVEN
  * order plus the normalized (high→low, validateTiers) tier ladder; on failure the structured reason
@@ -181,6 +212,7 @@ function validateFormatList(formats: FormatTarget[], label: string, errors: stri
  *   - quality outside [0,100] (when present);
  *   - near outside [0,100] (when present);
  *   - DUPLICATE targets — same (format, lossless, quality, near) — which would clobber each other;
+ *   - a bad PROFILE-GLOBAL knob (effort/pngRecompressLevel/avifSubsample/avifQualityAlpha — validateGlobals);
  *   - every validateTiers rejection (delegated, errors prefixed so the source is clear).
  * Deterministic: formats kept in given order, tiers via validateTiers' stable high→low sort. Pure.
  */
@@ -189,6 +221,9 @@ export function validateProfile(p: ExportProfile): ProfileValidation {
 
   // ── Format axis (factored — shared with each override.formats so the rules can't drift) ──
   validateFormatList(p.formats, '', errors);
+
+  // ── Profile-global encode knobs (fail-closed twins of the override numeric guards below) ──
+  validateGlobals(p, errors);
 
   // ── Resolution axis (delegated to validateTiers — its errors are reused verbatim) ──
   const tv = validateTiers(tiersOf(p.tiers));

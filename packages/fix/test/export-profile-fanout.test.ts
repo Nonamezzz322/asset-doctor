@@ -127,6 +127,59 @@ describe('export-profile fan-out decision (T13)', () => {
     expect(formatEncode(v.formats[0]!, 0.5, { effort: 0, scaleAwareQuality: true }).quality).toBe(65);
   });
 
+  // ── round7 §4d: the profile-GLOBAL knobs reach the fan-out (the already-wired path, proven pure) ──
+  // The worker builds its FormatEncodeGlobal from the TOP-LEVEL profile (fix.worker.ts:531-537) and feeds it
+  // to formatEncode per (format × tier). Model that here: thread the profile's own globals (effort,
+  // avifSubsample) into formatEncode and assert they survive onto every fan-out entry (effort) / onto the
+  // AVIF entries only (avifSubsample). This is the pure proof that App.tsx populating these knobs is honored.
+  function fanoutGlobals(p: ExportProfile, imagePath: string) {
+    const v = validateProfile(p);
+    if (!v.ok) return { ok: false as const, errors: v.errors };
+    const g = { effort: p.effort ?? 0, scaleAwareQuality: p.scaleAwareQuality ?? false, avifSubsample: p.avifSubsample };
+    const rows = v.tiers.flatMap((tier) =>
+      v.formats.map((fmt) => {
+        const fe = formatEncode(fmt, tier.scale, g);
+        return { image: tieredName(imagePath, tier.suffix, fe.targetMime), mime: fe.targetMime, effort: fe.effort, subsample: fe.avifSubsample };
+      }),
+    );
+    return { ok: true as const, rows };
+  }
+
+  it('profile-global effort reaches ALL fan-out entries (png/webp/avif × every tier)', () => {
+    const p: ExportProfile = {
+      formats: [{ format: 'image/png' }, { format: 'image/webp', quality: 80 }, { format: 'image/avif', quality: 70 }],
+      tiers: [{ label: 'full', scale: 1, suffix: '_1080p' }, { label: 'half', scale: 0.5, suffix: '_540p' }],
+      effort: 6,
+    };
+    const d = fanoutGlobals(p, 'ui/btn.png');
+    expect(d.ok).toBe(true);
+    if (!d.ok) return;
+    expect(d.rows).toHaveLength(6); // 3 formats × 2 tiers
+    expect(d.rows.every((r) => r.effort === 6)).toBe(true); // global effort folded onto every target
+  });
+
+  it('profile-global avifSubsample reaches AVIF fan-out entries ONLY (never webp/png)', () => {
+    const p: ExportProfile = {
+      formats: [{ format: 'image/webp', quality: 85 }, { format: 'image/avif', quality: 70 }, { format: 'image/png' }],
+      tiers: [{ label: 'full', scale: 1, suffix: '_1080p' }],
+      avifSubsample: 3,
+    };
+    const d = fanoutGlobals(p, 'ui/btn.png');
+    expect(d.ok).toBe(true);
+    if (!d.ok) return;
+    const avif = d.rows.filter((r) => r.mime === 'image/avif');
+    const nonAvif = d.rows.filter((r) => r.mime !== 'image/avif');
+    expect(avif.length).toBeGreaterThan(0);
+    expect(avif.every((r) => r.subsample === 3)).toBe(true); // AVIF entries carry the 4:4:4 knob
+    expect(nonAvif.every((r) => r.subsample === undefined)).toBe(true); // webp/png never see it
+  });
+
+  it('absent profile-global avifSubsample ⇒ AVIF entries omit it (byte-identical default path)', () => {
+    const p: ExportProfile = { formats: [{ format: 'image/avif', quality: 70 }], tiers: [{ label: 'full', scale: 1, suffix: '_1080p' }] };
+    const d = fanoutGlobals(p, 'x.png');
+    expect(d.ok && d.rows.every((r) => r.subsample === undefined)).toBe(true);
+  });
+
   it('deterministic — same profile ⇒ same decision rows', () => {
     const p: ExportProfile = {
       formats: [{ format: 'image/avif', quality: 60 }, { format: 'image/webp' }],

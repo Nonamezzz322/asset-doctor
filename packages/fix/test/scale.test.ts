@@ -409,6 +409,54 @@ describe('validateProfile (export profile §4a)', () => {
     if (!r.ok) expect(r.errors.some((e) => e.startsWith('pngLossyNonPng'))).toBe(true);
   });
 
+  // ── round7 §4d: PROFILE-GLOBAL knob fail-closed validation (the twins of the override guards) ──
+  it('accepts valid profile-global knobs (effort 0-6, pngRecompressLevel 0-6, avifSubsample 0/1/2/3, avifQualityAlpha -1..100)', () => {
+    for (const sub of [0, 1, 2, 3]) {
+      const r = validateProfile({
+        formats: [{ format: 'image/avif', quality: 70 }],
+        tiers: [...okTiers],
+        effort: 6,
+        pngRecompressLevel: 0,
+        avifSubsample: sub,
+        avifQualityAlpha: -1,
+      });
+      expect(r.ok).toBe(true);
+    }
+    // the upper-bound alpha + a mid effort/png level also pass.
+    const r = validateProfile({ formats: [{ format: 'image/avif' }], tiers: [...okTiers], effort: 0, pngRecompressLevel: 6, avifQualityAlpha: 100 });
+    expect(r.ok).toBe(true);
+  });
+
+  it('REJECTS a non-integer profile-global avifSubsample (fail-closed — never reaches the codec)', () => {
+    const r = validateProfile({ formats: [{ format: 'image/avif' }], tiers: [...okTiers], avifSubsample: 3.5 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.some((e) => e.startsWith('badSubsample'))).toBe(true);
+  });
+
+  it('REJECTS an out-of-set profile-global avifSubsample (integer but not in {0,1,2,3})', () => {
+    const r = validateProfile({ formats: [{ format: 'image/avif' }], tiers: [...okTiers], avifSubsample: 4 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.some((e) => e.startsWith('badSubsample'))).toBe(true);
+  });
+
+  it('REJECTS a profile-global effort of 7 (out of [0,6])', () => {
+    const r = validateProfile({ formats: [{ format: 'image/webp' }], tiers: [...okTiers], effort: 7 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.some((e) => e.startsWith('badEffort'))).toBe(true);
+  });
+
+  it('REJECTS a profile-global pngRecompressLevel of -1 (out of [0,6])', () => {
+    const r = validateProfile({ formats: [{ format: 'image/png' }], tiers: [...okTiers], pngRecompressLevel: -1 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.some((e) => e.startsWith('badPngRecompressLevel'))).toBe(true);
+  });
+
+  it('REJECTS a profile-global avifQualityAlpha of 101 (out of -1..100)', () => {
+    const r = validateProfile({ formats: [{ format: 'image/avif' }], tiers: [...okTiers], avifQualityAlpha: 101 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.some((e) => e.startsWith('badQualityAlpha'))).toBe(true);
+  });
+
   it('delegates every tier rejection to validateTiers (prefixed "tier ...")', () => {
     // no scale=1 top tier ⇒ validateTiers noTopTier, surfaced as a "tier ..." error here.
     const r = validateProfile({

@@ -1200,6 +1200,8 @@ function ExportProfilePanel({
   setCustomTiers,
   overrides,
   setOverrides,
+  avifSubsample,
+  setAvifSubsample,
 }: {
   profileEnable: boolean;
   setProfileEnable: (b: boolean) => void;
@@ -1211,6 +1213,9 @@ function ExportProfilePanel({
   /** Per-folder/prefix override rules (round10). Empty ⇒ no `overrides` ⇒ additive (byte-identical). */
   overrides: UiOverride[];
   setOverrides: (o: UiOverride[]) => void;
+  /** Profile-wide AVIF chroma subsample (3=4:4:4, 1=4:2:2, 0=4:2:0). undefined ⇒ @jsquash default (omit). */
+  avifSubsample: number | undefined;
+  setAvifSubsample: (s: number | undefined) => void;
 }) {
   const { t } = useI18n();
   const patch = (mime: ExportFormat, p: Partial<ProfileFormatState>): void => setFormats({ ...formats, [mime]: { ...formats[mime], ...p } });
@@ -1291,6 +1296,25 @@ function ExportProfilePanel({
               })}
             </div>
           </div>
+
+          {/* ── AVIF chroma subsample (round7 §4d, Task 14) — profile-wide, AVIF-gated. DEFAULT ⇒ omit ⇒
+              @jsquash default ⇒ byte-identical. DISK-only (chroma subsample changes file bytes; the GPU still
+              decodes RGBA8888 — NO VRAM claim). 4:4:0(=2) deferred (only 0/1/3 verified). ── */}
+          {formats['image/avif'].enabled ? (
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft/70">{t('fix.profile.avifSubsample')}</p>
+              <select
+                value={avifSubsample === undefined ? 'default' : String(avifSubsample)}
+                onChange={(e) => setAvifSubsample(e.target.value === 'default' ? undefined : Number(e.target.value))}
+                className="mt-1 rounded border border-line bg-panel px-1 py-0.5 font-mono text-[10px] text-ink"
+              >
+                <option value="default">{t('fix.profile.avifSubsample.default')}</option>
+                <option value="3">{t('fix.profile.avifSubsample.444')}</option>
+                <option value="1">{t('fix.profile.avifSubsample.422')}</option>
+                <option value="0">{t('fix.profile.avifSubsample.420')}</option>
+              </select>
+            </div>
+          ) : null}
 
           {/* ── Resolutions: the default ladder is always available; custom rows add to it ── */}
           <div>
@@ -1489,6 +1513,13 @@ function FixCard({ files }: { files: PickedFile[] }) {
   // DEFAULT [] (opt-in only — a non-empty default would break byte-identity). Mapped to ProfileOverride[] in
   // the exportProfile memo; empty ⇒ no `overrides` field ⇒ additive (byte-identical to a no-override run).
   const [profileOverrides, setProfileOverrides] = useState<UiOverride[]>([]);
+  // Profile-wide AVIF chroma subsample picker (round7-export-profile.md §4d, Task 14). DEFAULT undefined ⇒
+  // the memo OMITS avifSubsample ⇒ @jsquash's own default ⇒ byte-identical to today. Maps to the verified
+  // @jsquash subsample integers (3=4:4:4, 1=4:2:2, 0=4:2:0); 4:4:0(=2) is deferred (only 0/1/3 verified per
+  // fix-protocol.ts:43). DISK-only (chroma subsample changes file bytes; the GPU still decodes RGBA8888 —
+  // invariant 5, NO VRAM claim). The picker is AVIF-gated in the panel; a stray value on a non-AVIF profile
+  // is inert (formatEncode only stamps avifSubsample onto AVIF targets).
+  const [profileAvifSubsample, setProfileAvifSubsample] = useState<number | undefined>(undefined);
   // PixiJS-v8 asset manifest (round8-pixi-manifest.md C6) — its OWN Pro opt-in, DEFAULT OFF. ON ⇒ the fix
   // output gains an additive `manifest.json` mapping every emitted image/sheet so a PixiJS game can load the
   // whole folder with one Assets.init({ manifest }). OFF ⇒ buildOptions omits it ⇒ zip byte-identical to today.
@@ -1579,8 +1610,22 @@ function FixCard({ files }: { files: PickedFile[] }) {
             ? { match: o.match, lossless: true }
             : { match: o.match, quality: o.quality ?? 85 },
       );
-    return { formats, tiers, ...(overrides.length > 0 ? { overrides } : {}) };
-  }, [profileEnable, profileFormats, customTiers, profileOverrides]);
+    // Profile-GLOBAL encode knobs (round7-export-profile.md §4d) — fold the SHARED SettingsPanel state into
+    // the profile so a profile run honors the SAME encode knobs as the legacy (profile-OFF) path: ONE source
+    // of truth (makes the comment above true). Each is OMITTED at its default with the EXACT legacy predicate
+    // (effort>0 ⇒ set; scaleAwareQuality ⇒ true; pngRecompress ⇒ 2) so a freshly-enabled, untouched profile
+    // stays byte-identical. AVIF chroma subsample is its own profile-local picker (profileAvifSubsample),
+    // set only when chosen ⇒ omitted by default ⇒ byte-identical. (avifQualityAlpha has no UI picker in v1.)
+    return {
+      formats,
+      tiers,
+      ...(effort > 0 ? { effort } : {}),
+      ...(scaleAwareQ ? { scaleAwareQuality: true } : {}),
+      ...(pngRecompress ? { pngRecompressLevel: 2 } : {}),
+      ...(profileAvifSubsample !== undefined ? { avifSubsample: profileAvifSubsample } : {}),
+      ...(overrides.length > 0 ? { overrides } : {}),
+    };
+  }, [profileEnable, profileFormats, customTiers, profileOverrides, effort, scaleAwareQ, pngRecompress, profileAvifSubsample]);
 
   // Top-level bundles with REAL folder structure: a ref with no "/" is its own singleton (a flat,
   // root-level loose file), which makes per-bundle marking meaningless noise. We collect only segments
@@ -1955,6 +2000,8 @@ function FixCard({ files }: { files: PickedFile[] }) {
             setCustomTiers={setCustomTiers}
             overrides={profileOverrides}
             setOverrides={setProfileOverrides}
+            avifSubsample={profileAvifSubsample}
+            setAvifSubsample={setProfileAvifSubsample}
           />
 
           {/* PixiJS-v8 asset manifest (round8-pixi-manifest.md C6) — additive, DEFAULT OFF. Off ⇒ no extra
