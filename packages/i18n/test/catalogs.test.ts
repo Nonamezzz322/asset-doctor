@@ -138,6 +138,30 @@ describe('catalog completeness (all 9 locales)', () => {
     expect(translate('en', 'readout.declared')).not.toBe(translate('en', 'metric.vram'));
   });
 
+  // AB-R5: the build-config save/load labels + fail-closed parse-error reasons exist in all 9 locales and
+  // render brace-free (they are static — no placeholder tokens). Key parity is already enforced by the
+  // `same keys as en` assertion above; this pins them as a deliberate, never-silently-dropped contract.
+  it('every locale renders the build-config keys (AB-R5) without leftover braces', () => {
+    const keys = [
+      'fix.config.save',
+      'fix.config.load',
+      'fix.config.hint',
+      'fix.config.loaded',
+      'fix.config.err.malformed',
+      'fix.config.err.notObject',
+      'fix.config.err.wrongKind',
+      'fix.config.err.version',
+      'fix.config.err.invalid',
+    ];
+    for (const loc of LOCALES) {
+      for (const k of keys) {
+        const v = CATALOGS[loc][k];
+        expect(typeof v === 'string' && v.length > 0, `${loc} "${k}" present`).toBe(true);
+        expect(translate(loc, k), `${loc} "${k}" brace-free`).not.toContain('{');
+      }
+    }
+  });
+
   it('whyNoKernel is left untouched (a separate resample key carries the tier hint — B2)', () => {
     expect(translate('en', 'fix.skipped.whyNoKernel')).toBe(
       "Downscale kernel isn't configurable in-browser — the browser's high-quality resampler is used.",

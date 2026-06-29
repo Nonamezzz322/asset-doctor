@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type SyntheticEvent } from 'react';
-import type { AnalysisReport, AssetMetrics, BundleAvailability, ExportFormat, ExportProfile, Finding, FormatTarget, LazyMarking, ProfileOverride, ResolutionTier, ScaleTier, Severity, SkinGuard } from '@asset-doctor/core';
+import type { AnalysisReport, AssetMetrics, BundleAvailability, ExportFormat, ExportProfile, Finding, LazyMarking, ResolutionTier, ScaleTier, Severity, SkinGuard } from '@asset-doctor/core';
 import type { PackMode, StaticGranularity } from '@asset-doctor/ingest';
 import { bundleOf, cmp } from '@asset-doctor/analysis';
 import { DEFAULT_SCALE_TIERS, isSafeSuffix } from '@asset-doctor/fix';
@@ -11,6 +11,8 @@ import {
   type PickedFile,
 } from './lib/import';
 import { keyOf } from './lib/group';
+import { FORMAT_KEYS, OVERRIDE_MODE_KEYS, type ProfileFormatState, type OverrideMode, type UiOverride } from './lib/profile-ui-types';
+import { serializeBuildConfig, parseBuildConfig, buildProfileFromState, type BuildConfigState } from './lib/build-config';
 import { filmSelectionAction } from './lib/film-selection';
 import { readSourceBytes, sourceReaders } from './lib/source-bytes';
 import { attachProbeReadings } from './lib/probe-run';
@@ -609,6 +611,17 @@ function downloadZip(zip: Blob): void {
   URL.revokeObjectURL(url);
 }
 
+// AB-R5: download an arbitrary text blob (the build-config JSON). Mirrors downloadZip's Blob → object-URL →
+// <a download> → click → revoke; the only NEW thing is the mime + name. Browser-only (no network).
+function downloadText(text: string, filename: string): void {
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // Per-bundle marking (aggressive dedup only). Marking changes ONLY which copy is chosen as the dedup
 // owner across folders — unmarked bundles stay 'isolated' (duplicates merged within the same bundle
 // only). Mark 'eager' (globally resident before everything) to let other bundles share its copies.
@@ -1175,46 +1188,11 @@ function TierPanel({
 // never affecting the hard VRAM gate (see docs/improvements/ab-r4-suffix-policy.md). The shared
 // effort/scaleAwareQuality knobs live in SettingsPanel and are folded into the profile's global knobs.
 
-/** Per-format UI settings (the format checkbox state lives in `enabled`). Honest browser subset only. */
-export interface ProfileFormatState {
-  enabled: boolean;
-  /** 0..100 lossy quality (ignored when lossless or for png). */
-  quality: number;
-  /** webp/png lossless (AVIF disabled in the UI — no honest path). */
-  lossless: boolean;
-  /** webp near-lossless toggle (maps to near=60 when on; off ⇒ omit ⇒ near off). */
-  near: boolean;
-  /** PNG ONLY (round13): route this PNG target through the OPT-IN pngquant backend (lossy-indexed
-   *  re-compression → smaller download). Maps to FormatTarget.pngLossy. Has effect ONLY when the pngquant
-   *  backend op is also enabled + consented; otherwise the worker emits a lossless PNG (honest fallback).
-   *  DISK-ONLY — no VRAM change. Off ⇒ ordinary native-lossless PNG (byte-identical to today). */
-  pngLossy?: boolean;
-}
-
-export const FORMAT_KEYS: { mime: ExportFormat; key: string }[] = [
-  { mime: 'image/png', key: 'fix.profile.format.png' },
-  { mime: 'image/webp', key: 'fix.profile.format.webp' },
-  { mime: 'image/avif', key: 'fix.profile.format.avif' },
-];
-
-/** One UI override rule (round10-profile-overrides.md §6). `match` is a dir-aware prefix / exact ref /
- *  `type:loose|pixi|spine` key; `mode` chooses the headline preset (Fonts→AVIF 4:4:4) or a quality/lossless
- *  overlay. Mapped to a core ProfileOverride in the exportProfile memo; blank `match` rows are dropped so a
- *  half-typed row never silently matches. DISTINCT from the legacy SettingsPanel per-folder overrides
- *  (opts.overrides) — these ride INSIDE the export profile and govern its per-ref fan-out. */
-export type OverrideMode = 'fonts444' | 'quality' | 'lossless';
-export interface UiOverride {
-  match: string;
-  mode: OverrideMode;
-  /** Lossy quality 0..100 for the 'quality' (and 'fonts444' AVIF) modes; ignored for 'lossless'. */
-  quality?: number;
-}
-
-export const OVERRIDE_MODE_KEYS: { mode: OverrideMode; key: string }[] = [
-  { mode: 'quality', key: 'fix.profile.overrideMode.quality' },
-  { mode: 'lossless', key: 'fix.profile.overrideMode.lossless' },
-  { mode: 'fonts444', key: 'fix.profile.overrideMode.fonts444' },
-];
+// The per-format UI settings + override-rule types live in ./lib/profile-ui-types so the pure
+// build-config module can reference them without a circular import (App ↔ build-config). Imported at
+// the top of this file (used in-module) and re-exported here so the public surface is byte-identical.
+export { FORMAT_KEYS, OVERRIDE_MODE_KEYS };
+export type { ProfileFormatState, OverrideMode, UiOverride };
 
 function ExportProfilePanel({
   profileEnable,
@@ -1227,6 +1205,9 @@ function ExportProfilePanel({
   setOverrides,
   avifSubsample,
   setAvifSubsample,
+  onSaveConfig,
+  onLoadConfig,
+  cfgStatus,
   open,
   onToggleOpen,
 }: {
@@ -1243,6 +1224,12 @@ function ExportProfilePanel({
   /** Profile-wide AVIF chroma subsample (3=4:4:4, 1=4:2:2, 0=4:2:0). undefined ⇒ @jsquash default (omit). */
   avifSubsample: number | undefined;
   setAvifSubsample: (s: number | undefined) => void;
+  /** AB-R5: download the current granular UI state as a versioned build-config JSON (browser-only). */
+  onSaveConfig: () => void;
+  /** AB-R5: load a build-config JSON file (fail-closed parse → apply setters, or surface a parse error). */
+  onLoadConfig: (file: File) => void;
+  /** AB-R5: the load status message (success or fail-closed reason). '' ⇒ nothing surfaced. */
+  cfgStatus: string;
   /** AB-R2 deep-link: when defined, the outer <details> becomes CONTROLLED so the results-aside anchor can
    *  open it. undefined ⇒ uncontrolled, default-collapsed (today's render is byte-identical). onToggleOpen
    *  fires on native disclosure clicks so a manual collapse keeps the lifted state in sync (no desync). */
@@ -1250,6 +1237,8 @@ function ExportProfilePanel({
   onToggleOpen?: () => void;
 }) {
   const { t } = useI18n();
+  // AB-R5: hidden file input for Load config — mirrors the folder <input> at the top of App (ref.click()).
+  const cfgInputRef = useRef<HTMLInputElement>(null);
   const patch = (mime: ExportFormat, p: Partial<ProfileFormatState>): void => setFormats({ ...formats, [mime]: { ...formats[mime], ...p } });
   const addTier = (): void => setCustomTiers([...customTiers, { label: '0.5×', scale: 0.5, suffix: '_540p' }]);
   const patchTier = (i: number, p: Partial<ResolutionTier>): void => setCustomTiers(customTiers.map((tt, j) => (j === i ? { ...tt, ...p } : tt)));
@@ -1281,6 +1270,47 @@ function ExportProfilePanel({
       <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">{t('fix.profile.title')}</summary>
 
       <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft/80">{t('fix.profile.hint')}</p>
+
+      {/* AB-R5: save/load the granular UI state as a versioned build-config JSON. Browser-only (zero asset
+          bytes, no network — invariant 1). Token-driven like the receipt download button (border-line →
+          hover:border-teal, font-mono text-[11px] text-teal). Load uses a hidden file input + ref.click(),
+          mirroring the folder <input> at the top of App. Errors surface via the live region (no alert/crash). */}
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={onSaveConfig}
+          className="rounded border border-line px-2 py-1 font-mono text-[11px] text-teal transition hover:border-teal"
+        >
+          ↓ {t('fix.config.save')}
+        </button>
+        <button
+          type="button"
+          onClick={() => cfgInputRef.current?.click()}
+          className="rounded border border-line px-2 py-1 font-mono text-[11px] text-teal transition hover:border-teal"
+        >
+          ↑ {t('fix.config.load')}
+        </button>
+        <input
+          ref={cfgInputRef}
+          type="file"
+          accept=".json,application/json"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onLoadConfig(f);
+            e.target.value = ''; // allow re-loading the SAME file (change fires only on a value change)
+          }}
+        />
+      </div>
+      <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-soft/70">{t('fix.config.hint')}</p>
+      {/* Polite live region: success ("loaded") OR a fail-closed parse-error reason. NO alert, NO crash. */}
+      {cfgStatus ? (
+        <p role="status" aria-live="polite" className="mt-1 font-mono text-[10px] leading-relaxed text-ink">
+          {cfgStatus}
+        </p>
+      ) : (
+        <p role="status" aria-live="polite" className="sr-only" />
+      )}
 
       <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
         <input type="checkbox" checked={profileEnable} onChange={(e) => setProfileEnable(e.target.checked)} className="accent-teal" />
@@ -1567,6 +1597,9 @@ function FixCard({ files, profilePanelOpen, setProfilePanelOpen }: { files: Pick
   // invariant 5, NO VRAM claim). The picker is AVIF-gated in the panel; a stray value on a non-AVIF profile
   // is inert (formatEncode only stamps avifSubsample onto AVIF targets).
   const [profileAvifSubsample, setProfileAvifSubsample] = useState<number | undefined>(undefined);
+  // AB-R5: the build-config load status (success message OR a fail-closed parse-error reason). Surfaced via a
+  // polite live region in the ExportProfilePanel — NO alert, NO crash. Empty ⇒ nothing announced (default).
+  const [cfgStatus, setCfgStatus] = useState('');
   // PixiJS-v8 asset manifest (round8-pixi-manifest.md C6) — its OWN Pro opt-in, DEFAULT OFF. ON ⇒ the fix
   // output gains an additive `manifest.json` mapping every emitted image/sheet so a PixiJS game can load the
   // whole folder with one Assets.init({ manifest }). OFF ⇒ buildOptions omits it ⇒ zip byte-identical to today.
@@ -1629,50 +1662,65 @@ function FixCard({ files, profilePanelOpen, setProfilePanelOpen }: { files: Pick
     refs.sort(cmp);
     return { count: refs.length, sample: refs.slice(0, 8) };
   }, [files, backendAnyEnable, ktx2Enable, pngquantEnable, resampleEnable]);
-  // Derive the ExportProfile the worker consumes. Formats kept in the canonical FORMAT_KEYS order (PNG,
-  // WebP, AVIF) — deterministic. Tiers = the implied scale-1 top (validateProfile requires it) + any custom
-  // rows. Per-format compression: PNG is native-lossless (no quality field); WebP/AVIF carry quality unless
-  // lossless; WebP `near` maps to 60 (matching the shared near-lossless preset). Undefined when disabled OR
-  // no format selected (the worker would reject an empty-formats profile — never send a known-bad one).
-  const exportProfile: ExportProfile | undefined = useMemo(() => {
-    if (!profileEnable) return undefined;
-    const formats: FormatTarget[] = FORMAT_KEYS.filter(({ mime }) => profileFormats[mime].enabled).map(({ mime }) => {
-      const f = profileFormats[mime];
-      if (mime === 'image/png') return { format: mime, ...(f.pngLossy ? { pngLossy: true } : {}) }; // native lossless unless pngLossy (round13 pngquant)
-      if (mime === 'image/webp') return { format: mime, ...(f.lossless ? { lossless: true } : { quality: f.quality, ...(f.near ? { near: 60 } : {}) }) };
-      return { format: mime, quality: f.quality }; // AVIF: lossy only (UI disables lossless)
+  // Derive the ExportProfile the worker consumes. AB-R5: the mapping body now lives in the PURE
+  // buildProfileFromState (./lib/build-config) so save/validate (the build-config file) and the live run
+  // share ONE mapping — no drift ("exactly what will be applied"). Formats kept in canonical FORMAT_KEYS
+  // order; tiers = implied scale-1 top + custom rows; WebP `near`→60; global knobs folded at their exact
+  // legacy predicate; undefined when disabled OR no format selected (never a known-bad empty-formats profile).
+  const exportProfile: ExportProfile | undefined = useMemo(
+    () =>
+      buildProfileFromState({
+        profileEnable,
+        profileFormats,
+        customTiers,
+        profileOverrides,
+        profileAvifSubsample,
+        effort,
+        scaleAwareQ,
+        pngRecompress,
+      }),
+    [profileEnable, profileFormats, customTiers, profileOverrides, effort, scaleAwareQ, pngRecompress, profileAvifSubsample],
+  );
+
+  // ── AB-R5: build-config save / load (browser-only; zero asset bytes — invariant 1) ─────────────────
+  // The current granular UI slice the build-config serializes (the SAME object buildProfileFromState +
+  // serializeBuildConfig consume — one source of truth, no save/run drift). Backend-op toggles +
+  // backendConsent are DELIBERATELY excluded (consent must be per-run); the separate Pro toggles are v1-out.
+  const buildConfigState: BuildConfigState = {
+    profileEnable,
+    profileFormats,
+    customTiers,
+    profileOverrides,
+    profileAvifSubsample,
+    effort,
+    scaleAwareQ,
+    pngRecompress,
+  };
+  const onSaveConfig = (): void => downloadText(serializeBuildConfig(buildConfigState), 'asset-doctor-build-config.json');
+  // Apply a VALID parse atomically (all-or-nothing): every setter fires, surfacing success via the live
+  // region. A fail-closed parse surfaces t(reasonKey) (+ detail) via the SAME live region — NO alert, NO
+  // crash. The file read is local (no network).
+  const applyBuildConfig = (s: BuildConfigState): void => {
+    setProfileEnable(s.profileEnable);
+    setProfileFormats(s.profileFormats);
+    setCustomTiers(s.customTiers);
+    setProfileOverrides(s.profileOverrides);
+    setProfileAvifSubsample(s.profileAvifSubsample);
+    setEffort(s.effort);
+    setScaleAwareQ(s.scaleAwareQ);
+    setPngRecompress(s.pngRecompress);
+  };
+  const onLoadConfig = (file: File): void => {
+    void file.text().then((text) => {
+      const res = parseBuildConfig(text);
+      if (res.ok) {
+        applyBuildConfig(res.state);
+        setCfgStatus(t('fix.config.loaded'));
+      } else {
+        setCfgStatus(res.detail ? `${t(res.reasonKey)} — ${res.detail}` : t(res.reasonKey));
+      }
     });
-    if (formats.length === 0) return undefined;
-    const tiers: ResolutionTier[] = [{ label: '1080p (full)', scale: 1, suffix: '_1080p' }, ...customTiers];
-    // round10-profile-overrides.md §6: map the UI rules → core ProfileOverride[]. Drop blank-match rows (a
-    // half-typed row must never silently match). fonts444 ⇒ REPLACE formats with one AVIF target + merge
-    // avifSubsample:3 (the headline 4:4:4); lossless ⇒ a lossless overlay; quality ⇒ a quality overlay.
-    // OMIT the `overrides` field entirely when empty ⇒ the worker resolver no-ops ⇒ byte-identical (additive).
-    const overrides: ProfileOverride[] = profileOverrides
-      .filter((o) => o.match.trim() !== '')
-      .map((o) =>
-        o.mode === 'fonts444'
-          ? { match: o.match, formats: [{ format: 'image/avif', quality: o.quality ?? 85 }], avifSubsample: 3 }
-          : o.mode === 'lossless'
-            ? { match: o.match, lossless: true }
-            : { match: o.match, quality: o.quality ?? 85 },
-      );
-    // Profile-GLOBAL encode knobs (round7-export-profile.md §4d) — fold the SHARED SettingsPanel state into
-    // the profile so a profile run honors the SAME encode knobs as the legacy (profile-OFF) path: ONE source
-    // of truth (makes the comment above true). Each is OMITTED at its default with the EXACT legacy predicate
-    // (effort>0 ⇒ set; scaleAwareQuality ⇒ true; pngRecompress ⇒ 2) so a freshly-enabled, untouched profile
-    // stays byte-identical. AVIF chroma subsample is its own profile-local picker (profileAvifSubsample),
-    // set only when chosen ⇒ omitted by default ⇒ byte-identical. (avifQualityAlpha has no UI picker in v1.)
-    return {
-      formats,
-      tiers,
-      ...(effort > 0 ? { effort } : {}),
-      ...(scaleAwareQ ? { scaleAwareQuality: true } : {}),
-      ...(pngRecompress ? { pngRecompressLevel: 2 } : {}),
-      ...(profileAvifSubsample !== undefined ? { avifSubsample: profileAvifSubsample } : {}),
-      ...(overrides.length > 0 ? { overrides } : {}),
-    };
-  }, [profileEnable, profileFormats, customTiers, profileOverrides, effort, scaleAwareQ, pngRecompress, profileAvifSubsample]);
+  };
 
   // Top-level bundles with REAL folder structure: a ref with no "/" is its own singleton (a flat,
   // root-level loose file), which makes per-bundle marking meaningless noise. We collect only segments
@@ -2055,6 +2103,9 @@ function FixCard({ files, profilePanelOpen, setProfilePanelOpen }: { files: Pick
             setOverrides={setProfileOverrides}
             avifSubsample={profileAvifSubsample}
             setAvifSubsample={setProfileAvifSubsample}
+            onSaveConfig={onSaveConfig}
+            onLoadConfig={onLoadConfig}
+            cfgStatus={cfgStatus}
             open={profilePanelOpen}
             onToggleOpen={() => setProfilePanelOpen(!profilePanelOpen)}
           />
