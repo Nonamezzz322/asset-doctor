@@ -1510,3 +1510,106 @@ describe('bmfont-sparse — BMFont .fnt glyph-page readout through the REAL path
     expect(report.findings.some((x) => x.rule === 'occupancy')).toBe(true);
   });
 });
+
+// ── Exact-dup de-overlap vs format/alpha/strippable (potentialDiskSaved cap). The dropped copies of an
+// exact-duplicate group VANISH on dedup, so their per-ref format/alpha/strippable bumps were phantom and
+// must be reverted from the headline total — while the dedup term (perDisk*(n-1)) and the KEPT copy's full
+// MAX contribution both stay. Each per-finding estimate stays honest standalone (Inv 5 over-claim removal).
+describe('exact-dup de-overlap vs format/alpha (potentialDiskSaved cap)', () => {
+  // Two byte-identical loose PNGs (same dims/mime/byteSize) so both clear the format/alpha gates identically.
+  const dupImg = (name: string, strippableBytes = 0): Asset => ({
+    kind: 'image',
+    image: {
+      name,
+      imageRef: name,
+      size: { w: 512, h: 512 },
+      mime: 'image/png',
+      byteSize: 10000,
+      ...(strippableBytes > 0 ? { strippableBytes } : {}),
+    },
+  });
+
+  it('dup + format: dropped copy format saving is phantom ⇒ 14000, NOT 18000', async () => {
+    const report = await analyze([dupImg('a.png'), dupImg('b.png')], undefined, {
+      encodeImage: async () => 6000, // each format-saving = 10000 - 6000 = 4000
+      features: [
+        { assetRef: 'a.png', contentHash: 'h', contentClass: 'photographic' },
+        { assetRef: 'b.png', contentHash: 'h', contentClass: 'photographic' },
+      ],
+    });
+    // dup saving = perDisk*(n-1) = 10000; kept (a.png === refs[0]) keeps its 4000 format; b.png's 4000 reverted.
+    expect(report.totals.potentialDiskSaved).toBe(14000); // NOT 18000
+    // Per-finding honesty preserved (each estimate unchanged standalone):
+    const fmtB = report.findings.find((f) => f.assetRef === 'b.png' && f.rule === 'format');
+    expect(fmtB?.estimate?.diskBytesSaved).toBe(4000); // dropped copy's finding still 4000 standalone
+    const fmtA = report.findings.find((f) => f.assetRef === 'a.png' && f.rule === 'format');
+    expect(fmtA?.estimate?.diskBytesSaved).toBe(4000); // kept copy's finding still 4000 standalone
+    const dup = report.findings.find((f) => f.rule === 'duplicate-exact');
+    expect(dup?.estimate?.diskBytesSaved).toBe(10000); // dedup term unchanged
+  });
+
+  it('regression — dup with NO format findings stays byte-identical (only the dedup term) ⇒ 10000', async () => {
+    const report = await analyze([dupImg('a.png'), dupImg('b.png')], undefined, {
+      features: [
+        { assetRef: 'a.png', contentHash: 'h' },
+        { assetRef: 'b.png', contentHash: 'h' },
+      ],
+    }); // no encodeImage/encodeOpaque ⇒ no per-ref bumps ⇒ nothing to revert
+    expect(report.totals.potentialDiskSaved).toBe(10000); // == today: only the dedup term
+  });
+
+  it('three-way MAX kept copy + dup: dup 10000 + kept MAX 6000 = 16000 (dropped MAX reverted)', async () => {
+    // a.png & b.png byte-identical, both opaque + strippable(5000) + AVIF-transcodable.
+    // format → 6000 (saved 4000); opaque → 4000 (saved 6000); strip → 5000. Per-ref MAX = 6000 each.
+    const report = await analyze([dupImg('a.png', 5000), dupImg('b.png', 5000)], undefined, {
+      encodeImage: async () => 6000, // format saved = 4000
+      encodeOpaque: async () => 4000, // wasted-alpha saved = 6000
+      features: [
+        { assetRef: 'a.png', contentHash: 'h', contentClass: 'photographic', opaque: true },
+        { assetRef: 'b.png', contentHash: 'h', contentClass: 'photographic', opaque: true },
+      ],
+    });
+    // dup 10000 + kept (a.png) MAX 6000, dropped (b.png) 6000 reverted ⇒ 16000 (NOT 10000 + 2×6000 = 22000).
+    expect(report.totals.potentialDiskSaved).toBe(16000);
+    // Per-finding estimates each honest standalone:
+    expect(report.findings.find((f) => f.assetRef === 'a.png' && f.rule === 'wasted-alpha')?.estimate?.diskBytesSaved).toBe(6000);
+    expect(report.findings.find((f) => f.assetRef === 'b.png' && f.rule === 'wasted-alpha')?.estimate?.diskBytesSaved).toBe(6000);
+    expect(report.findings.find((f) => f.rule === 'duplicate-exact')?.estimate?.diskBytesSaved).toBe(10000);
+  });
+
+  it('non-dup sanity — two DIFFERENT contentHashes ⇒ no dup finding, both format savings stand ⇒ 8000', async () => {
+    const report = await analyze([dupImg('a.png'), dupImg('b.png')], undefined, {
+      encodeImage: async () => 6000, // each format-saving = 4000
+      features: [
+        { assetRef: 'a.png', contentHash: 'h1', contentClass: 'photographic' },
+        { assetRef: 'b.png', contentHash: 'h2', contentClass: 'photographic' },
+      ],
+    });
+    expect(report.findings.some((f) => f.rule === 'duplicate-exact')).toBe(false);
+    expect(report.totals.potentialDiskSaved).toBe(8000); // 2×4000 — cap only fires on real dup groups
+  });
+
+  it('atlas-page dup: dropped page format saving reverted, dedup term kept ⇒ 14000', async () => {
+    const dupAtlas = (name: string): Asset => ({
+      kind: 'atlas',
+      atlas: {
+        name,
+        imageRef: name,
+        size: { w: 1024, h: 1024 },
+        sprites: [{ name: 's0', frame: { x: 0, y: 0, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 32, h: 32 } }],
+        source: { kind: 'pixi' },
+      },
+      image: { name, imageRef: name, size: { w: 1024, h: 1024 }, mime: 'image/png', byteSize: 10000 },
+    });
+    const report = await analyze([dupAtlas('p1.png'), dupAtlas('p2.png')], undefined, {
+      encodeImage: async () => 6000, // each page format-saving = 4000
+      features: [
+        { assetRef: 'p1.png', contentHash: 'h' },
+        { assetRef: 'p2.png', contentHash: 'h' },
+      ],
+    });
+    // dup 10000 + kept page (p1.png === refs[0]) 4000, dropped page (p2.png) 4000 reverted ⇒ 14000.
+    expect(report.totals.potentialDiskSaved).toBe(14000);
+    expect(report.findings.find((f) => f.rule === 'duplicate-exact')?.estimate?.diskBytesSaved).toBe(10000);
+  });
+});

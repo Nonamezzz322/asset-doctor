@@ -284,7 +284,25 @@ export async function analyze(
   if (deps.features && deps.features.length > 0) {
     const exact = duplicateExactFindings(assets, deps.features);
     folder.push(...exact);
-    potentialDiskSaved += exact.reduce((s, f) => s + (f.estimate?.diskBytesSaved ?? 0), 0);
+    // De-overlap each exact-dup group against its own format/alpha/strippable savings. The dedup term
+    // (perDisk*(n-1)) stays — but the DROPPED copies (relatedRefs ≠ assetRef) VANISH on dedup, so the
+    // per-ref MAX bumps they already contributed to potentialDiskSaved via bumpBest are PHANTOM and must
+    // be reverted. The KEPT copy (refs[0] === f.assetRef) STILL exists post-dedup and is still
+    // transcodable, so its full contribution is retained. Net group disk = perDisk*(n-1) − Σ
+    // bestSavedByRef[droppedRef]. The subtraction is EXACT: the running-max final value == the total
+    // contributed for that ref. Invariant 5: removes a real DISK over-claim from the headline; VRAM
+    // untouched. (CLI/headless DOES pass features with contentHash, so this block RUNS there too — it is
+    // not skipped. The CLI just passes no encodeImage/encodeOpaque, so format/wasted-alpha never bump;
+    // the only revertable per-ref saving on the CLI path is strippable-metadata, which addStrippable bumps
+    // unconditionally. So a dropped exact-dup copy carrying strippable metadata correctly reverts its
+    // phantom bump on the CLI too — byte-identical only when no dropped copy has any revertable bump.)
+    for (const f of exact) {
+      potentialDiskSaved += f.estimate?.diskBytesSaved ?? 0; // dedup term, unchanged
+      for (const ref of f.relatedRefs ?? []) {
+        if (ref === f.assetRef) continue; // keep the kept copy's (refs[0]) MAX contribution
+        potentialDiskSaved -= bestSavedByRef.get(ref) ?? 0; // revert the dropped copy's phantom bumps
+      }
+    }
     folder.push(...duplicateSimilarFindings(deps.features, cfg));
   }
   const sa = shouldAtlasFinding(assets, cfg);

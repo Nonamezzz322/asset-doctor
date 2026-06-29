@@ -10,6 +10,37 @@ GitHub creds — user pushes); commit hashes below are over that base.
 
 ---
 
+## Round 26 — selection (2 picks; #6 shipped) — 2026-06-29
+Selection (strict bar, thin space): 4-lens brainstorm → 11 candidates → a skeptical judge that VERIFIED each
+premise against code and picked only 2 honesty/correctness wins, dropping 9 (folder-keyed bundles = speculative
+new capability; minify-JSON = self-marginal; PNG bit-depth = unmeasurable estimate; MAX_TEXTURE_SIZE probe =
+rarely fires; wasted-alpha WebP confound = narrow + presentation-only; loose-transcode size guard = uncertain;
+correlateRuntimeDelta = the moat direction but too broad for a contained round; runtime regression tests + R1
+estimate labeling = no user-facing capability). Designs in `docs/improvements/round26-*.md`.
+
+- **#6 de-overlap exact-duplicate dropped copies vs their own format/alpha/strippable savings — removes a
+  headline disk over-claim** (`docs/improvements/round26-dedup-overclaim.md`)
+  — `analyze.ts` summed the exact-dedup term `perDisk*(n-1)` AND, via the per-ref `bestSavedByRef` running-max,
+  the format/alpha/strippable saving of EVERY loose image — **including the to-be-dropped duplicate copies**.
+  Those files vanish on dedup, so their per-ref bumps are **phantom**: a folder of 2 byte-identical
+  AVIF-transcodable PNGs reported dup(10k)+format-b(4k phantom)+format-a(4k)=18k when the achievable max is 14k.
+  This inflated `metric.saveable` — the FIRST number the user sees (invariant 5 over-claim). **Fix:** when adding
+  the exact-dup term, for each group revert `Σ bestSavedByRef[droppedRef]` (relatedRefs ≠ assetRef) while keeping
+  the dedup term and the KEPT copy's full MAX contribution. The subtraction is EXACT (the running-max final value
+  == total contributed for that ref); uses the SAME `duplicateExactFindings` grouping that charges the disk term
+  (not `buildDedupGroups`); generalizes to atlas-page dups with no branch. The corrected total is always ≤ the old
+  one (we only ever STOP over-claiming, never inflate), never negative. Per-finding estimates each stay honest
+  standalone; VRAM totals untouched (dup `vramBytesSaved` is display-only, never summed). **No core/contract/
+  worker/UI/backend change.** CLI: the dup block DOES run there (it passes `features` with `contentHash`) but the
+  only revertable per-ref saving on the CLI path is strippable-metadata, so it correctly reverts a phantom
+  strippable bump on a dropped dup copy too (the shipped comment is honest about this — a reviewer-caught false
+  "block is skipped" claim was corrected).
+  — **Tests** (`analysis.test.ts`, TDD): the new dup+format case asserts `potentialDiskSaved===14000` (was 18000),
+  the three-way MAX+dup case `===16000` (was 22000), an atlas-page dup `===14000`, plus a regression (dup with no
+  format ⇒ 10000, byte-identical) and a non-dup sanity (different hashes ⇒ 8000, no spurious subtraction); the
+  three over-claim cases were confirmed (via git-stash) to FAIL under the old code. Review verdict: SHIP after one
+  MAJOR fixed (the false CLI comment). Gate: typecheck + analysis (135) + full vitest green.
+
 ## Round 25 — selection (3 picks; all shipped) — 2026-06-29
 Selection (strict bar): from 10 candidates, picked 3 genuinely valuable + non-overlapping —
 **(#0)** strippable-metadata detector, **(#1)** BMFont XML+binary parsers, **(#2)** resample the
