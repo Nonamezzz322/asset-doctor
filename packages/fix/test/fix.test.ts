@@ -100,6 +100,187 @@ describe('repackAtlases (golden, on tp-hash-symbols)', () => {
   });
 });
 
+// ── Trim-on-repack (round20, BLOCKERS B1/B2 + honesty/drop-in/additivity proofs) ─────────────────────────
+// repackAtlases({trim}) must pack the TIGHTER opaque bbox for every UNtrimmed shrinkable sprite, blit the
+// inset sub-region, and emit trimmed:true + sourceSize(full) + spriteSourceSize/offset. Already-trimmed
+// sprites are verbatim; aliases of a trimmed rep INHERIT the rep's trim (B2). trim absent ⇒ byte-identical.
+describe('trim-on-repack (round20)', () => {
+  // A hand-built atlas: two UNtrimmed padded sprites (opaque core inset inside a 64² frame) + one already-
+  // trimmed sprite the repack must copy verbatim. Frame-relative bboxes mirror the untrimmed-padding fixture.
+  const padded = (name: string, fx: number): Atlas['sprites'][number] => ({
+    name, frame: { x: fx, y: 0, w: 64, h: 64 }, rotated: false, trimmed: false, sourceSize: { w: 64, h: 64 },
+  });
+  const untrimmedAtlas = (): Atlas => ({
+    name: 'sheet.png', imageRef: 'sheet.png', size: { w: 256, h: 256 },
+    sprites: [
+      padded('padded_0', 0),
+      padded('padded_1', 64),
+      { name: 'trimmed_0', frame: { x: 128, y: 0, w: 40, h: 48 }, rotated: false, trimmed: true, sourceSize: { w: 48, h: 56 }, spriteSourceSize: { x: 4, y: 4, w: 40, h: 48 } },
+    ],
+    source: { kind: 'texturepacker-hash' },
+  });
+  // FRAME-RELATIVE bboxes (the value alphaBBox returns), index-aligned to sprites. trimmed_0 ⇒ null (verbatim).
+  const trimArr = (): import('@asset-doctor/core').TrimRect[] | (import('@asset-doctor/core').TrimRect | null)[] => [
+    { x: 16, y: 16, w: 32, h: 32 }, // padded_0
+    { x: 12, y: 8, w: 40, h: 44 }, // padded_1
+    null, // trimmed_0 (already trimmed)
+  ];
+  const byName = (r: ReturnType<typeof repackAtlases>): Map<string, Atlas['sprites'][number]> =>
+    new Map(r.atlases.flatMap((a) => a.sprites).map((s) => [s.name, s]));
+
+  it('TP: packs the TIGHTER bbox + emits trimmed:true / sourceSize(full) / spriteSourceSize(=bbox inset)', () => {
+    const atlas = untrimmedAtlas();
+    const r = repackAtlases([atlas], { allowRotation: false, padding: 2, maxSize: 4096, trim: [trimArr()] });
+    expect(r.trimmedSprites).toBe(2);
+    expect(r.trimmedAreaReclaimed).toBe(64 * 64 - 32 * 32 + (64 * 64 - 40 * 44)); // 3072 + 2336 = 5408
+    const out = byName(r);
+    // padded_0 — packed at bbox extent, full sourceSize, TP top-left inset spriteSourceSize.
+    const p0 = out.get('padded_0')!;
+    expect({ w: p0.frame.w, h: p0.frame.h }).toEqual({ w: 32, h: 32 });
+    expect(p0.trimmed).toBe(true);
+    expect(p0.sourceSize).toEqual({ w: 64, h: 64 });
+    expect(p0.spriteSourceSize).toEqual({ x: 16, y: 16, w: 32, h: 32 });
+    const p1 = out.get('padded_1')!;
+    expect({ w: p1.frame.w, h: p1.frame.h }).toEqual({ w: 40, h: 44 });
+    expect(p1.spriteSourceSize).toEqual({ x: 12, y: 8, w: 40, h: 44 });
+    // The blit reads the INSET source sub-region (frame.xy + bbox.xy), writes the tight placement.
+    const b0 = r.blits.find((b) => b.name === 'padded_0')!;
+    expect(b0.from.rect).toEqual({ x: 0 + 16, y: 0 + 16, w: 32, h: 32 });
+    expect({ w: b0.to.w, h: b0.to.h }).toEqual({ w: 32, h: 32 });
+    // Already-trimmed sprite copied VERBATIM (byte-identical metadata, full frame blit).
+    const t0 = out.get('trimmed_0')!;
+    expect(t0.trimmed).toBe(true);
+    expect(t0.sourceSize).toEqual({ w: 48, h: 56 });
+    expect(t0.spriteSourceSize).toEqual({ x: 4, y: 4, w: 40, h: 48 });
+    expect({ w: t0.frame.w, h: t0.frame.h }).toEqual({ w: 40, h: 48 });
+    expect(r.blits.find((b) => b.name === 'trimmed_0')!.from.rect).toEqual({ x: 128, y: 0, w: 40, h: 48 });
+  });
+
+  it('Spine offset: trimAsSpineOffset writes spriteSourceSize.y as the BOTTOM-LEFT Y-flip', () => {
+    const atlas = untrimmedAtlas();
+    const r = repackAtlases([atlas], { allowRotation: false, padding: 2, maxSize: 4096, trim: [trimArr()], trimAsSpineOffset: true });
+    const p0 = byName(r).get('padded_0')!;
+    // padded_0: source 64×64, bbox {16,16,32,32} → offsetY = 64 - (16+32) = 16; offsetX = 16 (no flip on X).
+    expect(p0.spriteSourceSize).toEqual({ x: 16, y: 16, w: 32, h: 32 });
+    const p1 = byName(r).get('padded_1')!;
+    // padded_1: bbox {12,8,40,44} → offsetY = 64 - (8+44) = 12; offsetX = 12.
+    expect(p1.spriteSourceSize).toEqual({ x: 12, y: 12, w: 40, h: 44 });
+  });
+
+  it('manifest round-trips through the parser (TP) after trimming', () => {
+    const atlas = untrimmedAtlas();
+    const repacked = repackAtlases([atlas], { allowRotation: false, padding: 2, maxSize: 4096, trim: [trimArr()] }).atlases[0]!;
+    const json = emitTexturePackerJson(repacked);
+    const res = parseAtlasManifest(JSON.parse(json), { imageRef: repacked.imageRef, imageSize: repacked.size });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.atlas).toEqual(repacked);
+    // Every original name still resolves (drop-in).
+    expect(repacked.sprites.map((s) => s.name).sort()).toEqual(atlas.sprites.map((s) => s.name).sort());
+  });
+
+  it('B2: an UNtrimmed alias of a trimmed rep INHERITS the rep trim (never left untrimmed at a tight rect)', () => {
+    // Two byte-identical UNtrimmed padded sprites → one cluster. The rep is trimmed; the alias MUST inherit
+    // trimmed:true + sourceSize(full) + spriteSourceSize(=rep bbox) — a broken manifest otherwise.
+    const atlas: Atlas = {
+      name: 'sheet.png', imageRef: 'sheet.png', size: { w: 256, h: 256 },
+      sprites: [padded('dup_0', 0), padded('dup_1', 64)],
+      source: { kind: 'texturepacker-hash' },
+    };
+    const aliasMaps = new Map([[atlas.name, buildAtlasAliasMap(atlas.sprites, ['dup', 'dup'], 1)]]);
+    const bbox = { x: 16, y: 16, w: 32, h: 32 };
+    const r = repackAtlases([atlas], { allowRotation: false, padding: 2, maxSize: 4096, trim: [[bbox, bbox]] }, aliasMaps);
+    // ONE representative packed + trimmed; the alias is NOT re-counted.
+    expect(r.trimmedSprites).toBe(1);
+    expect(r.aliasedFrames).toBe(1);
+    expect(r.blits.length).toBe(1); // pixels written ONCE (the inset rep blit)
+    const out = byName(r);
+    for (const name of ['dup_0', 'dup_1']) {
+      const s = out.get(name)!;
+      expect(s.trimmed, `${name} must be trimmed`).toBe(true);
+      expect(s.sourceSize, `${name} sourceSize`).toEqual({ w: 64, h: 64 });
+      expect(s.spriteSourceSize, `${name} spriteSourceSize inherited from rep`).toEqual({ x: 16, y: 16, w: 32, h: 32 });
+      expect({ w: s.frame.w, h: s.frame.h }, `${name} tight frame`).toEqual({ w: 32, h: 32 });
+    }
+    // Both names land at the SAME tight rect (rect shared, pixels once).
+    expect(`${out.get('dup_0')!.frame.x},${out.get('dup_0')!.frame.y}`).toBe(`${out.get('dup_1')!.frame.x},${out.get('dup_1')!.frame.y}`);
+  });
+
+  it('verbatim: null bbox / full-frame bbox / already-trimmed sprite are NOT trimmed', () => {
+    const atlas = untrimmedAtlas();
+    // padded_0 null (un-measured), padded_1 full-frame bbox (no padding), trimmed_0 already trimmed.
+    const r = repackAtlases([atlas], {
+      allowRotation: false, padding: 2, maxSize: 4096,
+      trim: [[null, { x: 0, y: 0, w: 64, h: 64 }, null]],
+    });
+    expect(r.trimmedSprites).toBeUndefined(); // nothing shrinkable ⇒ field omitted
+    const out = byName(r);
+    expect(out.get('padded_0')!.trimmed).toBe(false);
+    expect(out.get('padded_0')!.spriteSourceSize).toBeUndefined();
+    expect({ w: out.get('padded_1')!.frame.w, h: out.get('padded_1')!.frame.h }).toEqual({ w: 64, h: 64 });
+    expect(out.get('padded_1')!.trimmed).toBe(false);
+  });
+
+  it('verbatim: a ROTATED untrimmed sprite is NEVER trimmed (finding [0] — rotated bbox ≠ source coords)', () => {
+    // A rotated:true untrimmed sprite stores ROTATED pixels on-page; alphaBBox would be in rotated coords but
+    // spriteSourceSizeFrom/spineOffsetFrom treat it as unrotated source coords ⇒ a BROKEN manifest. resolveTrim
+    // must bail on s.rotated and pack/emit it VERBATIM (v1 keeps source orientation; rotated packs verbatim).
+    const atlas: Atlas = {
+      name: 'sheet.png', imageRef: 'sheet.png', size: { w: 256, h: 256 },
+      sprites: [{ name: 'rot_0', frame: { x: 0, y: 0, w: 48, h: 64 }, rotated: true, trimmed: false, sourceSize: { w: 48, h: 64 } }],
+      source: { kind: 'texturepacker-hash' },
+    };
+    // A plausible (but coord-mismatched) measured bbox — must be IGNORED because the sprite is rotated.
+    const r = repackAtlases([atlas], { allowRotation: false, padding: 2, maxSize: 4096, trim: [[{ x: 8, y: 8, w: 32, h: 48 }]] });
+    expect(r.trimmedSprites).toBeUndefined(); // rotated ⇒ not trimmed ⇒ field omitted
+    const s = byName(r).get('rot_0')!;
+    expect(s.rotated).toBe(true);
+    expect(s.trimmed).toBe(false);
+    expect(s.spriteSourceSize).toBeUndefined();
+    expect({ w: s.frame.w, h: s.frame.h }).toEqual({ w: 48, h: 64 }); // full frame extent, untouched
+    expect(s.sourceSize).toEqual({ w: 48, h: 64 });
+    // The blit reads the FULL frame (no inset), preserving the rotated pixels verbatim.
+    expect(r.blits.find((b) => b.name === 'rot_0')!.from.rect).toEqual({ x: 0, y: 0, w: 48, h: 64 });
+    // Byte-identical to omitting trim entirely (additivity for rotated sprites).
+    const plain = emitTexturePackerJson(repackAtlases([atlas], { allowRotation: false, padding: 2, maxSize: 4096 }).atlases[0]!);
+    const withTrim = emitTexturePackerJson(r.atlases[0]!);
+    expect(withTrim).toBe(plain);
+  });
+
+  it('ADDITIVITY: trim absent ⇒ byte-identical to today (regression pin)', () => {
+    const atlas = untrimmedAtlas();
+    const plain = emitTexturePackerJson(repackAtlases([atlas], { allowRotation: false, padding: 2, maxSize: 4096 }).atlases[0]!);
+    // An all-null trim array is the same as omitting it (nothing shrinkable).
+    const nullTrim = emitTexturePackerJson(repackAtlases([atlas], { allowRotation: false, padding: 2, maxSize: 4096, trim: [[null, null, null]] }).atlases[0]!);
+    expect(nullTrim).toBe(plain);
+  });
+
+  it('golden: the untrimmed-padding fixture trim arithmetic + per-sprite packedSize/spriteSourceSize', () => {
+    interface RepackGolden { trimmedSprites: number; trimmedAreaReclaimed: number; perSprite: { name: string; packedSize: { w: number; h: number }; sourceSize: { w: number; h: number }; spriteSourceSize: { x: number; y: number; w: number; h: number } }[] }
+    const padDir = fileURLToPath(new URL('../../../fixtures/sample-projects/untrimmed-padding/', import.meta.url));
+    const expected = (JSON.parse(readFileSync(`${padDir}expected.json`, 'utf8')) as { repack: RepackGolden }).repack;
+    const manifest = JSON.parse(readFileSync(`${padDir}sheet.json`, 'utf8')) as unknown;
+    const res = parseAtlas(manifest, { ref: 'sheet.png', bytes: new Uint8Array(readFileSync(`${padDir}sheet.png`)) });
+    if (!res.ok || res.asset.kind !== 'atlas') throw new Error('untrimmed-padding fixture parse failed');
+    const atlas = res.asset.atlas;
+    // Build the trim array from the documented golden bboxes (the E2E test in apps/web decodes the PNG itself).
+    const golden = JSON.parse(readFileSync(`${padDir}expected.json`, 'utf8')) as { regions: { name: string; bbox: { x: number; y: number; w: number; h: number } | null; trimmed: boolean }[] };
+    const bboxByName = new Map(golden.regions.map((g) => [g.name, g.bbox]));
+    const trim = atlas.sprites.map((s) => (s.trimmed ? null : bboxByName.get(s.name) ?? null));
+    const r = repackAtlases([atlas], { allowRotation: false, padding: 2, maxSize: 4096, trim: [trim] });
+    expect(r.trimmedSprites).toBe(expected.trimmedSprites);
+    expect(r.trimmedAreaReclaimed).toBe(expected.trimmedAreaReclaimed);
+    const out = byName(r);
+    for (const ps of expected.perSprite) {
+      const s = out.get(ps.name)!;
+      expect({ w: s.frame.w, h: s.frame.h }, `${ps.name} packedSize`).toEqual(ps.packedSize);
+      expect(s.sourceSize, `${ps.name} sourceSize`).toEqual(ps.sourceSize);
+      expect(s.spriteSourceSize, `${ps.name} spriteSourceSize`).toEqual(ps.spriteSourceSize);
+    }
+    // Drop-in: every original name resolves.
+    expect(out.size).toBe(atlas.sprites.length);
+  });
+});
+
 describe('planFix', () => {
   it('plans a repack for the under-filled atlas', async () => {
     const report = await analyze([{ kind: 'atlas', atlas: loadAtlas(), image: { name: 'symbols.png', imageRef: 'symbols.png', size: { w: 512, h: 512 }, mime: 'image/png', byteSize: 1747 } }]);

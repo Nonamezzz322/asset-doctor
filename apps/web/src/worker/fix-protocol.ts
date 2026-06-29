@@ -387,6 +387,17 @@ export interface FixReceipt {
    *  VRAM win is ALREADY inside vramBytesBefore/After (exact, no estimate). Absent/0 ⇒ no frames were aliased
    *  (no frame-redundancy finding, or the toggle was off) ⇒ receipt byte-identical to today. */
   framesAliased?: number;
+  /** Trim-on-repack (round20): the total count of UNtrimmed sprites this run tightened to their opaque bounds
+   *  during a repack (Σ RepackResult.trimmedSprites — distinct packed rects; aliases inherit the rep's trim but
+   *  are not re-counted). Each tightened sprite renders identically in-engine from a smaller sheet (drop-in:
+   *  every name still resolves; the manifest carries `trimmed:true` + `sourceSize` + `spriteSourceSize`). The
+   *  VRAM win is ALREADY inside vramBytesBefore/After (exact). Absent/0 ⇒ nothing was trimmed (no shrinkable
+   *  untrimmed sprite, or no repack ran) ⇒ receipt byte-identical to today. */
+  trimmedSprites?: number;
+  /** Trim-on-repack (round20): Σ atlas px MEASURED-reclaimed by tightening untrimmed frames (Σ over trimmed
+   *  reps of frame area − opaque-bbox area). This is the MEASURED reclaim, never the detector's "up to" promise
+   *  (the receipt says "reclaimed N px"). Absent/0 ⇒ nothing was trimmed ⇒ receipt byte-identical to today. */
+  trimmedAreaReclaimed?: number;
   /** Before/after X-ray of the repacked/merged/packed/Spine-repacked sheets, capped at the first N=6
    *  composed (≤8 MB/side). `sheetDiffsTotal` = how many were composed in all, so the UI can say
    *  "showing N of M". The bytes are transferred to the main thread. Additive: empty ⇒ both omitted ⇒

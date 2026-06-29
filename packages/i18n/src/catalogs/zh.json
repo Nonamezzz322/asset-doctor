@@ -439,5 +439,6 @@
   "license.err.generic": "激活失败",
   "fix.settings.frameRedundancy": "别名化重复的动画帧",
   "fix.settings.frameRedundancyHint": "将逐字节相同的动画帧只打包一次，并让每个重复名称指向共享区域——更小的图集、更少的显存。直接替换：每个帧名称仍可解析。精确显存，非估算。",
-  "fix.framesAliased": { "$count": "n", "one": "已将 {n} 个重复帧别名化到共享区域 — 显存 {before:bytes} → {after:bytes}（所有帧名称仍可解析）", "other": "已将 {n} 个重复帧别名化到共享区域 — 显存 {before:bytes} → {after:bytes}（所有帧名称仍可解析）" }
+  "fix.framesAliased": { "$count": "n", "one": "已将 {n} 个重复帧别名化到共享区域 — 显存 {before:bytes} → {after:bytes}（所有帧名称仍可解析）", "other": "已将 {n} 个重复帧别名化到共享区域 — 显存 {before:bytes} → {after:bytes}（所有帧名称仍可解析）" },
+  "fix.trimmedOnRepack": { "$count": "n", "one": "已将 {n} 个未裁剪精灵裁剪到其不透明边界 — 回收 {area} px，显存 {before:bytes} → {after:bytes}（所有名称仍可解析）", "other": "已将 {n} 个未裁剪精灵裁剪到其不透明边界 — 回收 {area} px，显存 {before:bytes} → {after:bytes}（所有名称仍可解析）" }
 }

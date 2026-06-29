@@ -1382,7 +1382,59 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       return mask;
     };
 
+    // Trim-on-repack (round20): build an index-aligned (TrimRect|null)[] per atlas for the repack `trim` arg.
+    // For each UNtrimmed sprite (trimmed===false && no spriteSourceSize) compute the FRAME-RELATIVE opaque
+    // bbox via the SAME pure alphaBBox the analyze pass / detector use, off the decoded atlas page. Already-
+    // trimmed sprites ⇒ null WITHOUT a decode (repack.ts copies them verbatim). The page is decoded ONCE per
+    // atlas (bitmapOf is LRU-cached + pinned); each frame region is read with ONE getImageData. Cached by the
+    // dir-aware id `${atlas.name} ${sprite.name}` in the shared trimCache (teardownPrevOp drops it cross-op).
+    // Returns null when ANY source page is unavailable (the caller then omits `trim` ⇒ verbatim repack, the
+    // op's own bitmap-missing skip fires below). The OUTER array index matches the group/atlas order given.
+    const buildTrimArrays = async (group: Atlas[]): Promise<((TrimRect | null)[])[] | null> => {
+      const out: ((TrimRect | null)[])[] = [];
+      for (const a of group) {
+        let bmp: ImageBitmap | null = null;
+        let c2d: OffscreenCanvasRenderingContext2D | null = null;
+        let imageData: ImageData | null = null;
+        const arr: (TrimRect | null)[] = [];
+        for (const s of a.sprites) {
+          // Already trimmed (or 0-area) ⇒ verbatim, no decode needed.
+          if (s.trimmed !== false || s.spriteSourceSize !== undefined || s.frame.w <= 0 || s.frame.h <= 0) {
+            arr.push(null);
+            continue;
+          }
+          const id = `${a.name} ${s.name}`;
+          if (trimCache.has(id)) {
+            arr.push(trimCache.get(id)!);
+            continue;
+          }
+          // Lazily decode the page ONCE for this atlas (only when an untrimmed sprite forces it).
+          if (!imageData) {
+            bmp = await bitmapOf(a.name);
+            if (!bmp) return null; // source page unavailable ⇒ caller omits trim (op handles the skip)
+            const c = new OffscreenCanvas(bmp.width, bmp.height);
+            c2d = c.getContext('2d');
+            if (!c2d) return null;
+            c2d.drawImage(bmp, 0, 0);
+            imageData = c2d.getImageData(0, 0, bmp.width, bmp.height);
+          }
+          // alphaBBox returns a FRAME-RELATIVE top-left bbox (x/y relative to the frame) — exactly what the
+          // repack `trim` arg + the detector expect.
+          const bbox = alphaBBox(
+            { data: imageData.data, width: imageData.width },
+            { x: s.frame.x, y: s.frame.y, w: s.frame.w, h: s.frame.h },
+          );
+          trimCache.set(id, bbox);
+          arr.push(bbox);
+        }
+        out.push(arr);
+      }
+      return out;
+    };
+
     let vramSaved = 0;
+    let trimmedSpritesTotal = 0; // round20: Σ untrimmed sprites tightened to their opaque bounds across repacks
+    let trimmedAreaTotal = 0; // round20: Σ MEASURED atlas px reclaimed by those trims (frame − bbox, exact)
     let framesAliasedTotal = 0; // round19: Σ byte-identical frames aliased onto a shared region across repacks
     let meshSpritesTotal = 0; // Σ sprites carrying a mesh in the SELECTED polygon results (0 on fallback)
     let polyVramBefore = 0; // Σ vramBytesBefore of polygon-WON ops (basis for the honest saved-% figure)
@@ -1592,6 +1644,11 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
             });
           // Edge-extrude: reserve a symmetric gutter so the bleed has room. gutter=0 ⇒ today's repack exactly.
           const { gutter, eff } = extrudeOf(op);
+          // Trim-on-repack (round20): tighten any UNtrimmed Spine region to its opaque bounds. The bbox is the
+          // libGDX BOTTOM-LEFT offset (trimAsSpineOffset) so emitSpineAtlasText writes it verbatim. null ⇒ a
+          // page was unavailable ⇒ omit trim (verbatim repack; the op's own missing-source skip fires below).
+          const trim = await buildTrimArrays([atlas]);
+          const trimOpt = trim ? { trim, trimAsSpineOffset: true } : {};
           const r = repackAtlases(
             [atlas],
             {
@@ -1599,6 +1656,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
               padding: op.padding,
               maxSize: op.maxSize,
               ...(gutter ? { gutter } : {}),
+              ...trimOpt,
             },
             aliasMaps,
           );
@@ -1648,21 +1706,27 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           vramSaved += r.vramBytesBefore - r.vramBytesAfter;
           // HONESTY (invariant 5): if the gutter grew this sheet's POT, the .atlas `size:` line + PNG dims
           // changed — surface the VRAM growth (no "identical round-trip" claim when the bin grew). The delta
-          // is the gutter pack's footprint minus the SAME pack with no gutter.
+          // is the gutter pack's footprint minus the SAME pack with no gutter. B3: the baseline MUST carry the
+          // IDENTICAL trim so the delta isolates ONLY the gutter (else trim shrinks the main pack below an
+          // untrimmed baseline ⇒ the sign flips and the readout lies).
           if (gutter > 0)
             extrudeVramDelta +=
               r.vramBytesAfter -
               repackAtlases(
                 [atlas],
-                { allowRotation: false, padding: op.padding, maxSize: op.maxSize },
+                { allowRotation: false, padding: op.padding, maxSize: op.maxSize, ...trimOpt },
                 aliasMaps,
               ).vramBytesAfter;
           if (tieringOn) tierTransformed.add(ref); // repacked → tier loop surfaces an honest skip (§7 v1 scope)
           // Frame-redundancy (round19): count + surface the byte-identical frames this repack aliased onto a
           // shared region (the smaller-sheet VRAM win is ALREADY inside vramSaved). 0/absent ⇒ today's string.
           framesAliasedTotal += r.aliasedFrames ?? 0;
+          // Trim-on-repack (round20): count + measure the untrimmed regions this repack tightened (the VRAM win
+          // is ALREADY inside vramSaved). 0/absent ⇒ today's string + no receipt field.
+          trimmedSpritesTotal += r.trimmedSprites ?? 0;
+          trimmedAreaTotal += r.trimmedAreaReclaimed ?? 0;
           operations.push(
-            `repack ${basename(ref)} (spine) → ${na.size.w}×${na.size.h}${r.aliasedFrames ? ` (${r.aliasedFrames} frames aliased)` : ''}`,
+            `repack ${basename(ref)} (spine) → ${na.size.w}×${na.size.h}${r.aliasedFrames ? ` (${r.aliasedFrames} frames aliased)` : ''}${r.trimmedSprites ? ` (${r.trimmedSprites} sprites trimmed, ${r.trimmedAreaReclaimed}px reclaimed)` : ''}`,
           );
           continue;
         }
@@ -1687,6 +1751,14 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         // meshed blits that are never extruded (the design's rectangle-only scope), so its nester takes no
         // gutter; `eff` is only fed to compose when the selected result is the rectangle path (below).
         const { gutter, eff } = extrudeOf(op);
+
+        // Trim-on-repack (round20): tighten any UNtrimmed sprite to its opaque bounds (TexturePacker top-left
+        // inset). Index-aligned per group atlas. null ⇒ a source page was unavailable ⇒ omit trim (verbatim
+        // repack; the op's own missing-source skip fires below). Fed into the RECTANGLE paths only — the
+        // polygon nester is untouched, but the rect baseline below carries the SAME trim so polygonWins
+        // compares against a TRIMMED rect (honest gate: polygon must beat the tighter rectangle).
+        const trim = await buildTrimArrays(group);
+        const trimOpt = trim ? { trim } : {};
 
         // Polygon mode: nest by silhouette and keep it only when it is a MEASURABLE VRAM win; otherwise
         // fall back to today's rectangle repack (honest no-op, surfaced in skipped[]). When opts.polygon
@@ -1732,6 +1804,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
               padding: op.padding,
               maxSize: op.maxSize,
               ...(gutter ? { gutter } : {}),
+              ...trimOpt,
             },
             aliasMaps,
           );
@@ -1754,6 +1827,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
               padding: op.padding,
               maxSize: op.maxSize,
               ...(gutter ? { gutter } : {}),
+              ...trimOpt,
             },
             aliasMaps,
           );
@@ -1895,7 +1969,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
               }
             }
             operations.push(
-              `repack ${basename(ref)}${polySelected ? ' (polygon)' : ''} → ${na.size.w}×${na.size.h} ${sheet!.mime.replace('image/', '')}${r.aliasedFrames ? ` (${r.aliasedFrames} frames aliased)` : ''}`,
+              `repack ${basename(ref)}${polySelected ? ' (polygon)' : ''} → ${na.size.w}×${na.size.h} ${sheet!.mime.replace('image/', '')}${r.aliasedFrames ? ` (${r.aliasedFrames} frames aliased)` : ''}${r.trimmedSprites ? ` (${r.trimmedSprites} sprites trimmed, ${r.trimmedAreaReclaimed}px reclaimed)` : ''}`,
             );
           }
         }
@@ -1914,7 +1988,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           }
           referencesChanged = true;
           operations.push(
-            `merge ${refs.length} atlases → ${r.atlases.length} sheet${r.atlases.length === 1 ? '' : 's'}${r.aliasedFrames ? ` (${r.aliasedFrames} frames aliased)` : ''}`,
+            `merge ${refs.length} atlases → ${r.atlases.length} sheet${r.atlases.length === 1 ? '' : 's'}${r.aliasedFrames ? ` (${r.aliasedFrames} frames aliased)` : ''}${r.trimmedSprites ? ` (${r.trimmedSprites} sprites trimmed, ${r.trimmedAreaReclaimed}px reclaimed)` : ''}`,
           );
           // Loader-migration (SET→SET): each OLD atlas manifest the game loaded → the merged manifest set.
           changeRows.push(
@@ -1929,15 +2003,22 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         // Frame-redundancy (round19): count the byte-identical frames this repack/merge aliased (the
         // smaller-sheet VRAM win is ALREADY inside vramSaved). 0/absent ⇒ no change to the receipt.
         framesAliasedTotal += r.aliasedFrames ?? 0;
+        // Trim-on-repack (round20): count + measure the untrimmed sprites this repack/merge tightened (the VRAM
+        // win is ALREADY inside vramSaved). A SELECTED polygon result carries no trim fields ⇒ 0 (polygon path
+        // is never trimmed). 0/absent ⇒ no receipt field.
+        trimmedSpritesTotal += r.trimmedSprites ?? 0;
+        trimmedAreaTotal += r.trimmedAreaReclaimed ?? 0;
         // HONESTY (invariant 5): a symmetric gutter CAN grow a sheet to the next POT ⇒ MORE VRAM. When the
         // rectangle path shipped WITH a gutter, surface the truthful delta (gutter pack footprint − the SAME
         // pack with no gutter). The growth is ALSO already inside vramSaved/vramBytes* — never claimed free.
+        // B3: the baseline MUST carry the IDENTICAL trim so the delta isolates ONLY the gutter (else a trimmed
+        // main pack vs an untrimmed baseline flips the sign and the readout lies).
         if (composeExtrude > 0 && gutter > 0)
           extrudeVramDelta +=
             r.vramBytesAfter -
             repackAtlases(
               group,
-              { allowRotation: false, padding: op.padding, maxSize: op.maxSize },
+              { allowRotation: false, padding: op.padding, maxSize: op.maxSize, ...trimOpt },
               aliasMaps,
             ).vramBytesAfter;
         // Accrue polygon receipt stats only now that the op has fully composed (skips above never reach here),
@@ -3491,6 +3572,12 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       // shared region. The smaller-sheet VRAM win is ALREADY inside vramBytesBefore/After (exact). 0 ⇒ omitted
       // ⇒ receipt byte-identical to today (no frame-redundancy finding, or the toggle was off).
       ...(framesAliasedTotal > 0 ? { framesAliased: framesAliasedTotal } : {}),
+      // Trim-on-repack (round20, additive/optional): the count of UNtrimmed sprites tightened to their opaque
+      // bounds across every repack this run + the MEASURED atlas px reclaimed (Σ frame − bbox). Every tightened
+      // sprite renders identically in-engine from a smaller sheet (drop-in: name resolves; manifest carries
+      // trimmed:true + sourceSize + spriteSourceSize). The VRAM win is ALREADY inside vramBytesBefore/After
+      // (exact). 0 ⇒ omitted ⇒ receipt byte-identical to today (no shrinkable untrimmed sprite / no repack ran).
+      ...(trimmedSpritesTotal > 0 ? { trimmedSprites: trimmedSpritesTotal, trimmedAreaReclaimed: trimmedAreaTotal } : {}),
       // Sheet-diff X-ray (round6-f1-sheet-diff.md, additive/optional): before/after FilmViewer pairs for the
       // first SHEET_DIFF_MAX composed sheets; sheetDiffsTotal counts ALL composed ("showing N of M"). Empty
       // ⇒ both omitted ⇒ receipt byte-identical to today.

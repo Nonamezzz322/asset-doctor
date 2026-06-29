@@ -10,6 +10,35 @@ GitHub creds — user pushes); commit hashes below are over that base.
 
 ---
 
+## Round 20 — selection (#0 shipped) — 2026-06-29
+Pick: **(#0) trim-on-repack FIX** (shipped below) — turns the r19 trim-margin DETECTOR into a Pro fix.
+
+- **#0 Trim-on-repack FIX** (`docs/improvements/round20-trim-on-repack-fix-auto-trim-untri.md`) — when a repack
+  runs, every UNtrimmed sprite carrying reclaimable transparent padding is now tightened to its opaque bounds.
+  Rides the EXISTING repack op (free-rider boundary — occupancy/frame-redundancy/merge-scheduled repacks also
+  trim; no separate trim-margin→repack scheduling in v1). `repackAtlases` gained `RepackOptions.trim?`
+  (per-atlas, index-aligned frame-relative bboxes from `alphaBBox`) + `trimAsSpineOffset?`: a shrinkable
+  untrimmed sprite is packed at the TIGHTER `{bbox.w,bbox.h}`, the Blit reads the INSET source sub-region, and
+  the emitted Sprite carries `trimmed:true` + `sourceSize`(full) + `spriteSourceSize`/offset (TP top-left or
+  Spine bottom-left Y-flip via `spineOffsetFrom`) — a correct NON-destructive shrink (renders identically
+  in-engine from a smaller sheet). Three skeptic BLOCKERS folded in: **B1** no `minMarginPx` gate in the fix
+  (trimming any shrinkable sprite is always correct) and the receipt reports the MEASURED reclaim ("reclaimed N
+  px"), never the detector's "up to" promise; **B2** an UNtrimmed ALIAS of a trimmed representative INHERITS the
+  rep's trim (byte-identical pixels ⇒ same bbox) — emitting a tight rect with the alias still marked untrimmed
+  would be a BROKEN manifest; **B3** the no-gutter `extrudeVramDelta` baseline repack calls (Spine + rect/merge)
+  receive the IDENTICAL trim so the delta isolates ONLY the gutter (else the sign flips). Worker `buildTrimArrays`
+  decodes each atlas page once (LRU-cached/pinned) and computes the bbox per untrimmed frame via the SAME pure
+  `alphaBBox` the analyze pass uses; fed into all 5 `repackAtlases` calls. New `RepackResult.trimmedSprites`/
+  `trimmedAreaReclaimed` + `FixReceipt` fields + App receipt line + `fix.trimmedOnRepack` i18n ×9 (mirrors
+  `framesAliased`). Additive: no shrinkable untrimmed sprite / trim absent ⇒ byte-identical. Tests: pure
+  `fix.test.ts` (TP tighter-pack + emitted metadata, Spine Y-flip, B2 alias-inherits-trim, null/full/already-
+  trimmed verbatim, additivity pin, fixture golden) + E2E `perceptual.test.ts` (decode→alphaBBox→repack realizes
+  the defect: reclaimed ≥ recoverableArea, exact per-sprite packedSize===bbox, parser+pixel round-trip) + worker
+  control-flow `trim-on-repack-worker.test.ts`; fixture `untrimmed-padding/expected.json` extended with the
+  additive `repack` golden. Gate: typecheck + test + lint green.
+
+---
+
 ## Round 19 — selection (3 picks; #0 shipped) — 2026-06-29
 Picks: **(a) frame-redundancy FIX** (shipped, #0 below); **(b) fix-worker memory bounds**; **(c) trim-margin
 detector**. Designs for (b)/(c) pending.

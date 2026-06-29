@@ -1852,6 +1852,15 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
           {t('fix.framesAliased', { n: receipt.framesAliased ?? 0, before: receipt.vramBytesBefore, after: receipt.vramBytesAfter })}
         </p>
       ) : null}
+      {/* Trim-on-repack (round20): untrimmed sprites tightened to their opaque bounds during a repack. The
+          reclaimed px is MEASURED (Σ frame − bbox), not the detector's "up to" estimate; the VRAM win is EXACT
+          (already inside vramBytesBefore→After — invariant 5). Every name still resolves (drop-in). Present
+          ONLY when ≥1 sprite was trimmed. */}
+      {(receipt.trimmedSprites ?? 0) > 0 ? (
+        <p className="font-mono text-[10px] text-ink-soft">
+          {t('fix.trimmedOnRepack', { n: receipt.trimmedSprites ?? 0, area: receipt.trimmedAreaReclaimed ?? 0, before: receipt.vramBytesBefore, after: receipt.vramBytesAfter })}
+        </p>
+      ) : null}
       {/* Export-profile summary: variant files emitted (formats × resolutions × assets). DISK-only fan-out —
           the device loads ONE variant, so this is a count, never a saving (invariant 5). */}
       {receipt.exportProfile ? (

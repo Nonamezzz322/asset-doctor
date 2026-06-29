@@ -711,6 +711,17 @@ export interface RepackResult {
    *  sprites BEYOND the one kept per byte-identical cluster (Σ over clusters of distinctRects − 1 ⇒ matches the
    *  frame-redundancy finding's `dupes`). Absent/0 ⇒ no aliasMaps were supplied ⇒ byte-identical to today. */
   aliasedFrames?: number;
+  /** Trim-on-repack (round20): the count of DISTINCT packed rects (representatives) that were tightened to
+   *  their opaque bounds during this repack — every untrimmed sprite carrying reclaimable transparent padding
+   *  is packed at its bbox extent (smaller), with `trimmed:true` + `sourceSize` (full) + `spriteSourceSize`
+   *  emitted so it renders identically in-engine. Aliases sharing a trimmed rep's rect INHERIT the rep's trim
+   *  (byte-identical pixels ⇒ same bbox) but are NOT re-counted here. Absent/0 ⇒ no `trim` array was supplied
+   *  or nothing was shrinkable ⇒ byte-identical to today. */
+  trimmedSprites?: number;
+  /** Trim-on-repack (round20): Σ over the trimmed representatives of (frame area − opaque-bbox area) — the
+   *  MEASURED atlas px reclaimed by tightening untrimmed frames (exact, never the detector's "up to" estimate).
+   *  Absent/0 ⇒ nothing was trimmed ⇒ byte-identical to today. */
+  trimmedAreaReclaimed?: number;
 }
 
 /** One emitted file in the optimized download. `originalPath` drives the zip tree; `bytes` is the new

@@ -430,5 +430,6 @@
   "license.err.generic": "Activation failed",
   "fix.settings.frameRedundancy": "Alias duplicate animation frames",
   "fix.settings.frameRedundancyHint": "Pack byte-identical animation frames once and point every duplicate name at the shared region — a smaller sheet and less VRAM. Drop-in: every frame name still resolves. Exact VRAM, no estimate.",
-  "fix.framesAliased": { "$count": "n", "one": "Aliased {n} duplicate frame onto a shared region — VRAM {before:bytes} → {after:bytes} (all frame names still resolve)", "other": "Aliased {n} duplicate frames onto a shared region — VRAM {before:bytes} → {after:bytes} (all frame names still resolve)" }
+  "fix.framesAliased": { "$count": "n", "one": "Aliased {n} duplicate frame onto a shared region — VRAM {before:bytes} → {after:bytes} (all frame names still resolve)", "other": "Aliased {n} duplicate frames onto a shared region — VRAM {before:bytes} → {after:bytes} (all frame names still resolve)" },
+  "fix.trimmedOnRepack": { "$count": "n", "one": "Trimmed {n} untrimmed sprite to its opaque bounds — reclaimed {area} px, VRAM {before:bytes} → {after:bytes} (all names still resolve)", "other": "Trimmed {n} untrimmed sprites to their opaque bounds — reclaimed {area} px, VRAM {before:bytes} → {after:bytes} (all names still resolve)" }
 }

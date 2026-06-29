@@ -3,12 +3,13 @@
 // v1 preserves source orientation (rotate90 always false); trim/source/pivot copied VERBATIM so the
 // repack is non-destructive (a sprite renders identically in-engine, just from a smaller sheet).
 
-import type { Atlas, Blit, RepackResult, Sprite, SpriteMesh } from '@asset-doctor/core';
+import type { Atlas, Blit, Rect, RepackResult, Sprite, SpriteMesh, TrimRect } from '@asset-doctor/core';
 import { pack, type PackItem } from './pack';
 import type { MaskItem } from './mask';
 import type { RawMesh } from './mesh';
 import { nestMasks } from './polygon-pack';
 import type { AtlasAliasMap } from './alias';
+import { spineOffsetFrom, spriteSourceSizeFrom } from './trim';
 
 const vram = (w: number, h: number): number => w * h * 4;
 
@@ -21,6 +22,20 @@ export interface RepackOptions {
    *  ⇒ placements byte-identical to today. `PolygonRepackOptions` inherits this but the polygon nester
    *  IGNORES it — meshed sprites are never extruded (design: rectangle blits only). */
   gutter?: number;
+  /** Trim-on-repack (round20): per-atlas, index-aligned to `atlas.sprites`, the FRAME-RELATIVE opaque bbox
+   *  (top-left origin, the value `alphaBBox` returns) for each UNtrimmed sprite the caller measured — `null`
+   *  for already-trimmed / non-shrinkable / un-measured sprites. The OUTER index matches `atlases[i]`. When a
+   *  sprite has a strictly-smaller bbox AND is currently untrimmed (no `spriteSourceSize`), the repack packs
+   *  the TIGHTER {bbox.w,bbox.h}, blits the inset sub-region, and emits `trimmed:true` + `sourceSize` (full)
+   *  + `spriteSourceSize`/offset — a correct NON-destructive shrink (the sprite renders identically in-engine
+   *  from a smaller sheet). Aliases sharing a trimmed rep's rect INHERIT the rep's trim (byte-identical pixels
+   *  ⇒ same bbox). Absent ⇒ every sprite packs at its frame extent ⇒ byte-identical to today. */
+  trim?: ((TrimRect | null)[])[];
+  /** Trim-on-repack (round20): when TRUE, the trimmed sprite's `spriteSourceSize.x/y` is the libGDX
+   *  BOTTOM-LEFT Spine `offset` (`spineOffsetFrom`) so `emitSpineAtlasText` writes it verbatim; FALSE/absent
+   *  ⇒ the TexturePacker TOP-LEFT inset (`spriteSourceSizeFrom`). The ONLY axis that differs between the two
+   *  emit paths — geometry/packing are identical. Ignored when `trim` is absent. */
+  trimAsSpineOffset?: boolean;
 }
 
 /** Polygon-mode repack tuning. `emitMesh` controls whether meshed sprites carry their `Sprite.mesh`
@@ -55,6 +70,69 @@ export function scaleAtlas(atlas: Atlas, scale: number): Atlas {
   return { ...atlas, size: { w: W, h: H }, sprites };
 }
 
+/** The resolved trim for ONE sprite: the inset sub-region of its SOURCE frame to blit (atlas px), the tight
+ *  packed size, the emitted `sourceSize` (the sprite's ORIGINAL full size) + `spriteSourceSize` (TP top-left
+ *  inset OR Spine bottom-left offset per `trimAsSpineOffset`), and the MEASURED reclaimed px (frame − bbox).
+ *  `reclaimed` is accounted ONCE per representative; aliases inherit `sourceSize`/`spriteSourceSize` but add 0. */
+interface ResolvedTrim {
+  /** Inset source sub-region in ATLAS px (frame.xy + frame-relative bbox.xy). */
+  fromRect: Rect;
+  /** Tight packed extent (= bbox.w × bbox.h). */
+  packW: number;
+  packH: number;
+  sourceSize: { w: number; h: number };
+  spriteSourceSize: Rect;
+  reclaimed: number;
+}
+
+/**
+ * Resolve the trim metadata for sprite `s` (frame `s.frame`) given its FRAME-RELATIVE opaque `bbox` (or null).
+ * Returns null (⇒ pack/emit verbatim, byte-identical to today) UNLESS the sprite is currently UNtrimmed
+ * (`trimmed===false && spriteSourceSize===undefined`), NOT rotated, the bbox is non-null with positive extent,
+ * AND the bbox is strictly tighter than the frame (smaller OR offset). NO `minMarginPx` gate (B1): trimming any
+ * shrinkable untrimmed sprite is a correct non-destructive shrink — the receipt reports the MEASURED reclaim,
+ * not the detector's "up to" promise. `spriteSourceSize.x/y` is the Spine bottom-left offset when `asSpineOffset`,
+ * else the TP top-left inset (the ONLY axis that differs). Pure, integer-only, deterministic.
+ *
+ * ROTATED GUARD (finding [0]): a `rotated:true` sprite stores its pixels on-page in ROTATED orientation (its
+ * `frame.w/h` are swapped relative to `sourceSize.w/h`), while `sourceSize` stays in UNrotated source space. The
+ * caller's `bbox` is measured over the rotated on-page frame, so it is in ROTATED coords — but `spriteSourceSizeFrom`
+ * /`spineOffsetFrom` treat it as UNrotated source coords (the Spine offset = `sourceSize.h − (bbox.y+bbox.h)`
+ * mixes rotated bbox.y/h with the unrotated source height). The emitted inset/offset would be wrong ⇒ a BROKEN
+ * manifest (the sprite renders at the wrong size/position). v1 keeps source orientation (rotate90 always false),
+ * so a rotated sprite already packs verbatim; trimming it is out of scope. Bail ⇒ pack verbatim, the receipt
+ * honestly reports the smaller reclaim. (The detector mirrors this carve-out; see rules.ts trim-margin gate.)
+ */
+function resolveTrim(s: Sprite, bbox: TrimRect | null, asSpineOffset: boolean): ResolvedTrim | null {
+  if (s.trimmed !== false || s.spriteSourceSize !== undefined) return null; // already trimmed ⇒ verbatim
+  if (s.rotated) return null; // rotated on-page bbox ≠ unrotated source coords ⇒ verbatim (finding [0])
+  // bbox===null ⇒ a fully-transparent UNtrimmed frame: pack VERBATIM at the full frame (the repack must keep
+  // every region resolvable — collapsing to a 1×1 sentinel here would change geometry / break drop-in). The
+  // detector counts such a frame as recoverableArea += FULL frameArea (the per-side gate is bypassed,
+  // rules.ts), so this fix's MEASURED reclaim is BELOW the detector's number for that frame — an explicit
+  // documented carve-out from the ">= recoverableArea" claim (finding [1]). It is still HONEST: the receipt
+  // reports only the measured reclaim, never the detector's "up to" promise, and a fully-transparent frame is
+  // a degenerate case (zero visible art). bbox.w/h<=0 cannot occur (alphaBBox returns ≥1 extent or null) but
+  // is gated defensively for hand-built callers. Either ⇒ verbatim.
+  if (!bbox || bbox.w <= 0 || bbox.h <= 0) return null; // no opaque core / un-measured ⇒ verbatim
+  const frame = s.frame;
+  // Strictly tighter than the frame in SOME dimension (offset counts: a top-left-flush smaller bbox still
+  // reclaims). bbox is frame-relative, so its max extent is frame.w/h at offset 0.
+  if (bbox.x <= 0 && bbox.y <= 0 && bbox.w >= frame.w && bbox.h >= frame.h) return null;
+  const sourceSize = { w: s.sourceSize.w, h: s.sourceSize.h }; // ORIGINAL full size (untrimmed: == frame)
+  const sss = asSpineOffset
+    ? { ...spineOffsetFrom(sourceSize, bbox), w: bbox.w, h: bbox.h }
+    : spriteSourceSizeFrom(sourceSize, bbox);
+  return {
+    fromRect: { x: frame.x + bbox.x, y: frame.y + bbox.y, w: bbox.w, h: bbox.h },
+    packW: bbox.w,
+    packH: bbox.h,
+    sourceSize,
+    spriteSourceSize: sss,
+    reclaimed: frame.w * frame.h - bbox.w * bbox.h,
+  };
+}
+
 /**
  * `aliasMaps` (round19 frame-redundancy): an OPTIONAL per-atlas decision (keyed by Atlas.name) that
  * byte-identical frames should SHARE one packed region. When supplied for an atlas, only ONE representative
@@ -82,7 +160,15 @@ export function repackAtlases(atlases: Atlas[], opts: RepackOptions, aliasMaps?:
   let coveredAreaSource = 0;
   let coveredAreaPacked = 0;
   let aliasedFrames = 0;
-  for (const a of atlases) {
+  // Trim-on-repack (round20): the resolved trim per representative id (only for sprites being tightened). The
+  // alias emit branch reads `trimOf.get(repId)` to INHERIT the rep's trim (B2). `trimmedSprites`/`trimmedArea`
+  // are accounted ONCE per representative; aliases inherit metadata but add 0 to either tally.
+  const trimOf = new Map<string, ResolvedTrim>();
+  let trimmedSprites = 0;
+  let trimmedAreaReclaimed = 0;
+  for (let ai = 0; ai < atlases.length; ai++) {
+    const a = atlases[ai]!;
+    const atlasTrim = opts.trim?.[ai];
     vramBefore += vram(a.size.w, a.size.h);
     areaBefore += a.size.w * a.size.h;
     const am = aliasMaps?.get(a.name);
@@ -101,9 +187,20 @@ export function repackAtlases(atlases: Atlas[], opts: RepackOptions, aliasMaps?:
       coveredAreaSource += s.frame.w * s.frame.h;
       const rep = am ? am.repOf[idx]! : idx;
       if (rep === idx) {
-        // Representative (or no aliasing for this atlas): pack a real item, count its area as packed.
-        items.push({ id, w: s.frame.w, h: s.frame.h });
-        coveredAreaPacked += s.frame.w * s.frame.h;
+        // Representative (or no aliasing for this atlas): pack a real item, count its area as packed. When this
+        // sprite carries reclaimable padding (resolveTrim ⇒ non-null), pack the TIGHTER bbox extent + record
+        // the resolved trim so the emit branch can tighten this rep AND every alias sharing its rect (B2).
+        const tr = atlasTrim ? resolveTrim(s, atlasTrim[idx] ?? null, !!opts.trimAsSpineOffset) : null;
+        if (tr) {
+          trimOf.set(id, tr);
+          trimmedSprites++;
+          trimmedAreaReclaimed += tr.reclaimed;
+          items.push({ id, w: tr.packW, h: tr.packH });
+          coveredAreaPacked += tr.packW * tr.packH;
+        } else {
+          items.push({ id, w: s.frame.w, h: s.frame.h });
+          coveredAreaPacked += s.frame.w * s.frame.h;
+        }
       } else {
         // Aliased duplicate: do NOT pack - record it under its representative's id for post-pack emit.
         const repId = `${a.name} ${a.sprites[rep]!.name}`;
@@ -131,23 +228,32 @@ export function repackAtlases(atlases: Atlas[], opts: RepackOptions, aliasMaps?:
     const sprites: Sprite[] = [];
     bin.placements.forEach((p) => {
       const { sprite: s, atlasRef } = srcOf.get(p.id)!;
+      // Trim-on-repack (round20): when this rep was tightened, blit the INSET source sub-region (its opaque
+      // core) into the tight placement `p` (= bbox extent), and emit `trimmed:true` + `sourceSize` (full) +
+      // `spriteSourceSize`/offset. `tr.fromRect` is the source-frame inset; absent ⇒ today's full-frame blit.
+      const tr = trimOf.get(p.id);
       // ONE Blit per representative - the pixels of an aliased cluster are written exactly once.
       blits.push({
         name: s.name,
-        from: { atlasRef, rect: s.frame, rotated: s.rotated },
+        from: { atlasRef, rect: tr ? tr.fromRect : s.frame, rotated: s.rotated },
         to: { x: p.x, y: p.y, w: p.w, h: p.h },
         rotate90: false,
       });
-      const out: Sprite = { name: s.name, frame: { x: p.x, y: p.y, w: p.w, h: p.h }, rotated: s.rotated, trimmed: s.trimmed, sourceSize: s.sourceSize };
-      if (s.spriteSourceSize) out.spriteSourceSize = s.spriteSourceSize;
+      const out: Sprite = { name: s.name, frame: { x: p.x, y: p.y, w: p.w, h: p.h }, rotated: s.rotated, trimmed: tr ? true : s.trimmed, sourceSize: tr ? tr.sourceSize : s.sourceSize };
+      if (tr) out.spriteSourceSize = { ...tr.spriteSourceSize };
+      else if (s.spriteSourceSize) out.spriteSourceSize = s.spriteSourceSize;
       if (s.pivot) out.pivot = s.pivot;
       sprites.push(out);
-      // Alias sprites: every byte-identical duplicate name lands at the representative's FINAL rect but keeps
-      // its OWN trim/pivot/sourceSize/spriteSourceSize/rotated (per-name geometry correct; only the RECT
-      // shared). No Blit - the pixels are already written by the representative above.
+      // Alias sprites: every byte-identical duplicate name lands at the representative's FINAL rect. When the
+      // rep was TRIMMED, each alias MUST INHERIT the rep's trim (B2): the pixels are byte-identical, so the
+      // rep's bbox IS the alias's correct trim — emitting a trimmed rect with an alias still marked untrimmed
+      // (no spriteSourceSize, sourceSize=full frame) is a BROKEN manifest (engine renders the wrong size). When
+      // the rep was NOT trimmed the alias keeps its OWN trim/source/pivot/rotated (per-name geometry correct;
+      // only the RECT shared). No Blit either way — the pixels are already written by the representative above.
       for (const { sprite: alias } of aliasesOf.get(p.id) ?? []) {
-        const aout: Sprite = { name: alias.name, frame: { x: p.x, y: p.y, w: p.w, h: p.h }, rotated: alias.rotated, trimmed: alias.trimmed, sourceSize: alias.sourceSize };
-        if (alias.spriteSourceSize) aout.spriteSourceSize = alias.spriteSourceSize;
+        const aout: Sprite = { name: alias.name, frame: { x: p.x, y: p.y, w: p.w, h: p.h }, rotated: alias.rotated, trimmed: tr ? true : alias.trimmed, sourceSize: tr ? tr.sourceSize : alias.sourceSize };
+        if (tr) aout.spriteSourceSize = { ...tr.spriteSourceSize };
+        else if (alias.spriteSourceSize) aout.spriteSourceSize = alias.spriteSourceSize;
         if (alias.pivot) aout.pivot = alias.pivot;
         sprites.push(aout);
       }
@@ -165,6 +271,7 @@ export function repackAtlases(atlases: Atlas[], opts: RepackOptions, aliasMaps?:
     vramBytesBefore: vramBefore,
     vramBytesAfter: vramAfter,
     ...(aliasedFrames > 0 ? { aliasedFrames } : {}),
+    ...(trimmedSprites > 0 ? { trimmedSprites, trimmedAreaReclaimed } : {}),
   };
 }
 

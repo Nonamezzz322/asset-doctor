@@ -6,8 +6,8 @@ import { PNG, type PNGImage } from 'pngjs';
 import { describe, expect, it } from 'vitest';
 import type { ContentClass } from '@asset-doctor/core';
 import { frameRedundancyFinding, trimMarginFinding, DEFAULT_THRESHOLDS } from '@asset-doctor/analysis';
-import { alphaBBox } from '@asset-doctor/fix';
-import { parseAtlas } from '@asset-doctor/parsers';
+import { alphaBBox, emitTexturePackerJson, repackAtlases } from '@asset-doctor/fix';
+import { parseAtlas, parseAtlasManifest } from '@asset-doctor/parsers';
 import {
   alphaFullyOpaque,
   classifyContent,
@@ -579,5 +579,75 @@ describe('trim-margin END-TO-END: fixture reproduces the defect through the real
     expect(finding!.estimate?.vramBytesSaved).toBe(expected.vramBytesSaved);
     expect(finding!.params?.area).toBe(expected.recoverableArea);
     expect(finding!.relatedRefs).toEqual([...expected.qualifying].sort());
+  });
+
+  // Round20 trim-on-repack: the FIX realizes the detector's promise through the REAL decode→bbox→pack→compose
+  // path. We decode the fixture PNG, compute each untrimmed sprite's bbox via the SAME alphaBBox, feed it into
+  // repackAtlases({trim}), and assert: reclaimed >= detector.recoverableArea (B1: the fix reclaims AT LEAST
+  // what was promised) + EXACT per-sprite packedSize===bbox + every name resolves + parser round-trip + a
+  // PIXEL round-trip (the inset blit over the decoded buffer recovers the sprite's opaque core).
+  it('trim-on-repack REALIZES the defect: reclaimed >= recoverableArea, exact per-sprite, round-trips', () => {
+    const png = PNG.sync.read(readFileSync(join(FIXTURES, 'sheet.png')));
+    const expected = JSON.parse(readFileSync(join(FIXTURES, 'expected.json'), 'utf8')) as {
+      recoverableArea: number;
+      repack: { trimmedSprites: number; trimmedAreaReclaimed: number; perSprite: { name: string; packedSize: { w: number; h: number }; spriteSourceSize: { x: number; y: number; w: number; h: number } }[] };
+    };
+    const parsed = parseAtlas(JSON.parse(readFileSync(join(FIXTURES, 'sheet.json'), 'utf8')), {
+      ref: 'sheet.png',
+      bytes: new Uint8Array(readFileSync(join(FIXTURES, 'sheet.png'))),
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok || parsed.asset.kind !== 'atlas') return;
+    const atlas = parsed.asset.atlas;
+
+    // The SAME frame-relative bboxes the worker computes (alphaBBox over the decoded page), null for trimmed.
+    const src = { data: new Uint8ClampedArray(png.data), width: png.width };
+    const trim = atlas.sprites.map((s) =>
+      s.trimmed ? null : alphaBBox(src, { x: s.frame.x, y: s.frame.y, w: s.frame.w, h: s.frame.h }),
+    );
+
+    const before = repackAtlases([atlas], { allowRotation: false, padding: 0, maxSize: 4096 });
+    const r = repackAtlases([atlas], { allowRotation: false, padding: 0, maxSize: 4096, trim: [trim] });
+
+    // B1: the fix reclaims AT LEAST the detector's promised area (MEASURED, not the detector's number).
+    expect(r.trimmedAreaReclaimed!).toBeGreaterThanOrEqual(expected.recoverableArea);
+    expect(r.trimmedSprites).toBe(expected.repack.trimmedSprites);
+    expect(r.trimmedAreaReclaimed).toBe(expected.repack.trimmedAreaReclaimed);
+    // Trimming a sheet to tighter cores can only LOWER (or hold) VRAM.
+    expect(r.vramBytesAfter).toBeLessThanOrEqual(before.vramBytesAfter);
+
+    const out = new Map(r.atlases.flatMap((a) => a.sprites).map((s) => [s.name, s]));
+    // EXACT per-sprite: packed at the bbox extent + spriteSourceSize === the recovered bbox.
+    for (const ps of expected.repack.perSprite) {
+      const sp = out.get(ps.name)!;
+      const bbox = trim[atlas.sprites.findIndex((s) => s.name === ps.name)]!;
+      expect({ w: sp.frame.w, h: sp.frame.h }, `${ps.name} packedSize===bbox`).toEqual({ w: bbox.w, h: bbox.h });
+      expect({ w: sp.frame.w, h: sp.frame.h }).toEqual(ps.packedSize);
+      expect(sp.spriteSourceSize).toEqual(ps.spriteSourceSize);
+      expect(sp.trimmed).toBe(true);
+      // sourceSize stays the ORIGINAL full frame (the untrimmed source size the parser recorded).
+      expect(sp.sourceSize).toEqual(atlas.sprites.find((s) => s.name === ps.name)!.sourceSize);
+    }
+    // Drop-in: every original name resolves + parser round-trip.
+    expect(out.size).toBe(atlas.sprites.length);
+    const repacked = r.atlases[0]!;
+    const round = parseAtlasManifest(JSON.parse(emitTexturePackerJson(repacked)), { imageRef: repacked.imageRef, imageSize: repacked.size });
+    expect(round.ok).toBe(true);
+    if (round.ok) expect(round.atlas).toEqual(repacked);
+
+    // PIXEL round-trip: a trimmed sprite's blit reads the INSET source sub-region; reading that region off the
+    // decoded page must be FULLY OPAQUE (the opaque core, no transparent margin) — proves the inset is correct.
+    const alphaAt = (px: number, py: number): number => png.data[(py * png.width + px) * 4 + 3]!;
+    for (const ps of expected.repack.perSprite) {
+      const blit = r.blits.find((b) => b.name === ps.name)!;
+      const { x, y, w, h } = blit.from.rect;
+      // Every corner of the inset is opaque (the bbox is the opaque extent by construction of alphaBBox).
+      for (const [cx, cy] of [[x, y], [x + w - 1, y], [x, y + h - 1], [x + w - 1, y + h - 1]] as const) {
+        expect(alphaAt(cx, cy), `${ps.name} inset corner (${cx},${cy}) opaque`).toBeGreaterThanOrEqual(1);
+      }
+      // Just OUTSIDE the inset (one row above the top edge, when inside the frame) is transparent margin.
+      const srcSprite = atlas.sprites.find((s) => s.name === ps.name)!;
+      if (y - 1 >= srcSprite.frame.y) expect(alphaAt(x, y - 1), `${ps.name} above-inset transparent`).toBe(0);
+    }
   });
 });

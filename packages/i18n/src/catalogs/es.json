@@ -453,5 +453,6 @@
   "license.err.generic": "Error al activar",
   "fix.settings.frameRedundancy": "Vincular fotogramas de animación duplicados",
   "fix.settings.frameRedundancyHint": "Empaqueta una sola vez los fotogramas de animación idénticos byte a byte y apunta cada nombre duplicado a la región compartida: hoja más pequeña y menos VRAM. Sin cambios de carga: cada nombre de fotograma sigue resolviéndose. VRAM exacta, sin estimación.",
-  "fix.framesAliased": { "$count": "n", "one": "Se vinculó {n} fotograma duplicado a una región compartida — VRAM {before:bytes} → {after:bytes} (todos los nombres de fotograma siguen resolviéndose)", "other": "Se vincularon {n} fotogramas duplicados a una región compartida — VRAM {before:bytes} → {after:bytes} (todos los nombres de fotograma siguen resolviéndose)" }
+  "fix.framesAliased": { "$count": "n", "one": "Se vinculó {n} fotograma duplicado a una región compartida — VRAM {before:bytes} → {after:bytes} (todos los nombres de fotograma siguen resolviéndose)", "other": "Se vincularon {n} fotogramas duplicados a una región compartida — VRAM {before:bytes} → {after:bytes} (todos los nombres de fotograma siguen resolviéndose)" },
+  "fix.trimmedOnRepack": { "$count": "n", "one": "Se recortó {n} sprite sin recortar a sus límites opacos — se recuperaron {area} px, VRAM {before:bytes} → {after:bytes} (todos los nombres siguen resolviéndose)", "other": "Se recortaron {n} sprites sin recortar a sus límites opacos — se recuperaron {area} px, VRAM {before:bytes} → {after:bytes} (todos los nombres siguen resolviéndose)" }
 }

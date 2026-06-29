@@ -80,6 +80,16 @@
   ],
   "recoverableArea": 7200,
   "vramBytesSaved": 28800,
+  "repack": {
+    "note": "Trim-on-repack (round20) golden: feeding the per-frame opaque bboxes into repackAtlases({trim}) tightens every UNtrimmed sprite to its bbox extent and emits trimmed:true + sourceSize(full) + spriteSourceSize(=bbox, TP top-left). The already-trimmed trimmed_0 is copied verbatim. trimmedAreaReclaimed === Σ(frame−bbox) === the detector's recoverableArea (every shrinkable sprite here also clears minMarginPx), but the FIX measures it directly (B1: reclaimed N px, never the detector's N).",
+    "trimmedSprites": 3,
+    "trimmedAreaReclaimed": 7200,
+    "perSprite": [
+      { "name": "padded_0", "packedSize": { "w": 32, "h": 32 }, "sourceSize": { "w": 64, "h": 64 }, "spriteSourceSize": { "x": 16, "y": 16, "w": 32, "h": 32 } },
+      { "name": "padded_1", "packedSize": { "w": 40, "h": 44 }, "sourceSize": { "w": 64, "h": 64 }, "spriteSourceSize": { "x": 12, "y": 8, "w": 40, "h": 44 } },
+      { "name": "padded_2", "packedSize": { "w": 48, "h": 48 }, "sourceSize": { "w": 64, "h": 64 }, "spriteSourceSize": { "x": 8, "y": 8, "w": 48, "h": 48 } }
+    ]
+  },
   "findings": [
     {
       "rule": "trim-margin",
