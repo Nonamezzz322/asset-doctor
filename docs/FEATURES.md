@@ -1,108 +1,108 @@
-# Asset Doctor — feature catalog
+# Asset Doctor — каталог возможностей
 
-Browser-side asset audit for HTML5 games (PixiJS/Phaser) + a Pro fix engine, with an opt-in
-native backend. Free diagnosis runs 100% in the browser (assets never leave the device);
-the Pro fix generates optimized output; native-only ops run on an opt-in backend (with consent).
+Браузерный аудит ассетов для HTML5-игр (PixiJS/Phaser) + Pro-движок фикса, с opt-in
+нативным бэкендом. Бесплатный диагноз работает на 100% в браузере (ассеты не покидают устройство);
+Pro-фикс генерирует оптимизированный вывод; нативные-only операции выполняются на opt-in бэкенде (с согласием).
 
 ---
 
-## 1. Diagnosis — the free audit (in-browser, objective, ≤10s)
+## 1. Диагноз — бесплатный аудит (в браузере, объективно, ≤10s)
 
-- **Whole-folder import** — File System Access API + `webkitdirectory` fallback + drag-drop; dir-aware grouping (manifest/spine + image) into a normalized `Asset` model.
-- **Parsers** — TexturePacker JSON (Hash + Array), PixiJS atlas, single PNG/WebP/JPG/AVIF (header-based dims), Spine/libGDX `.atlas` (legacy + modern, multi-page, rotation/trim), and BMFont `.fnt` in **all three serializations — TEXT, XML, and binary** (byte-identical `FntPage[]`; binary is the BMFont.exe/libGDX default). Pure & worker-safe.
-- **Occupancy + wasted-region map** — grid coverage map per atlas; highlights empty space (the film-viewer overlay).
-- **Dimensions audit** — NPOT (gated on real POT-padding-waste) + oversize (calibrated edge threshold).
-- **Format audit** — tries a real AVIF/WebP encode and only reports a saving it actually measured.
-- **Content-class** — flat/alpha-art images get a lossless verdict (Invariant-4-safe, reuses a cheap sample).
-- **VRAM honesty** — disk ≠ VRAM: PNG 2048² = 16 MB GPU (w·h·4), +33% with mipmaps; shown explicitly.
-- **Mipmap-cost VRAM** — base + ceiling accounting (`vramBytesMipmapped`).
-- **Folder rules** — duplicate-exact (SHA-256), duplicate-similar (dHash, flat-guarded), should-atlas, atlas-merge, integrity (missing image), format-aggregate.
-- **Shared-page merge** — atlases resolving to the same image are unioned + counted once (kills phantom VRAM double-count).
-- **Variant-aware VRAM** — clusters `name_res[_fmt]` variants; one logical asset loads once → `loadedVramBytes` (worst-case tier).
-- **Atlas fragmentation** — dispersion score of used vs free space.
-- **Solid-fill detector** — single-color images pinning VRAM for one color (reuses the decoded 9×8 sample).
-- **Wasted-alpha detector** — fully-opaque images carrying an alpha channel (full-frame opaque pass, short-circuit, instant-wow safe); disk-only saving.
-- **Frame-redundancy detector** — byte-identical duplicate frames *within* an atlas (per-region SHA, flat-guarded, instant-wow caps); exact wasted atlas-area/VRAM.
-- **Strippable-metadata detector** — pure header-only byte-walk (no decode) summing EXACT strippable ancillary bytes (PNG `iCCP/eXIf/tEXt/iTXt/zTXt/tIME`, JPEG `APP1..15`+`COM`, WebP `EXIF/XMP/ICCP`; render-affecting chunks excluded); **disk-only** saving (the GPU decodes to RGBA8888 regardless), MAX-de-overlapped vs the format/wasted-alpha findings, names the existing oxipng/re-encode fix. Conservative true lower bound (never over-claims).
-- **Texture-bleeding detector** — pure integer frame-adjacency (no decode): flags atlas frame pairs packed with a 0px gutter (shared edge + perpendicular overlap; corner-touches & rotated/aliased frames excluded) that can bleed 1px seams under linear/mipmap sampling. A **correctness** finding carrying NO saving (edge-extrude can grow the sheet — invariant 5), with a conditional honest hedge; lights the teal `bleeding` film overlay and points at the existing edge-extrude fix.
-- **Declared-vs-real dimension-mismatch detector** — the always-on static sibling of the render-probe label: compares the manifest's declared `meta.size` (Spine page `size:`) against the REAL decoded pixel header (zero decode), beyond a small absolute tolerance. Direction-aware (real<declared with a frame off the real edge = crit; in-bounds = warn; real>declared = info). A **correctness** finding carrying NO estimate — states two measurements (declared vs real), and discloses that the static VRAM estimate is charged on the declared size (never a fix-saving claim).
-- **Unparsed-file surfacing** — files that look like a manifest but can't be parsed are shown honestly (never silently dropped) + hardened frame/Spine parsers (reject neg/zero/OOB rects; Spine `numsRaw` per-region recovery).
+- **Импорт целой папки** — File System Access API + фолбэк `webkitdirectory` + drag-drop; dir-aware группировка (manifest/spine + image) в нормализованную модель `Asset`.
+- **Парсеры** — TexturePacker JSON (Hash + Array), PixiJS atlas, одиночные PNG/WebP/JPG/AVIF (размеры из заголовка), Spine/libGDX `.atlas` (legacy + modern, multi-page, rotation/trim) и BMFont `.fnt` во **всех трёх сериализациях — TEXT, XML и binary** (байт-в-байт `FntPage[]`; binary — дефолт BMFont.exe/libGDX). Pure и worker-safe.
+- **Карта occupancy + wasted-region** — грид-карта покрытия по каждому атласу; подсвечивает пустое пространство (оверлей film-viewer).
+- **Аудит размеров** — NPOT (гейт на реальном POT-padding-waste) + oversize (откалиброванный краевой порог).
+- **Аудит форматов** — пробует реальный энкод AVIF/WebP и сообщает только об экономии, которую фактически измерил.
+- **Content-class** — flat/alpha-арт получает lossless-вердикт (безопасно для инварианта 4, переиспользует дешёвый сэмпл).
+- **Честность VRAM** — вес на диске ≠ VRAM: PNG 2048² = 16 MB на GPU (w·h·4), +33% с мипмапами; показывается явно.
+- **VRAM с учётом мипмапов** — учёт base + ceiling (`vramBytesMipmapped`).
+- **Folder rules** — duplicate-exact (SHA-256), duplicate-similar (dHash, flat-guarded), should-atlas, atlas-merge, integrity (отсутствующее изображение), format-aggregate.
+- **Shared-page merge** — атласы, разрешающиеся в одно изображение, объединяются + считаются один раз (убивает фантомный двойной учёт VRAM).
+- **Variant-aware VRAM** — кластеризует варианты `name_res[_fmt]`; один логический ассет грузится один раз → `loadedVramBytes` (worst-case tier).
+- **Фрагментация атласа** — оценка разброса используемого vs свободного пространства.
+- **Детектор сплошной заливки** — одноцветные изображения, держащие VRAM ради одного цвета (переиспользует декодированный сэмпл 9×8).
+- **Детектор wasted-alpha** — полностью непрозрачные изображения, несущие альфа-канал (полнокадровый проход на непрозрачность, short-circuit, безопасно для instant-wow); экономия только на диске.
+- **Детектор frame-redundancy** — байт-в-байт дубликаты кадров *внутри* атласа (per-region SHA, flat-guarded, instant-wow капы); точная wasted atlas-area/VRAM.
+- **Детектор strippable-metadata** — чистый header-only байт-проход (без декода), суммирующий ТОЧНОЕ число вырезаемых вспомогательных байтов (PNG `iCCP/eXIf/tEXt/iTXt/zTXt/tIME`, JPEG `APP1..15`+`COM`, WebP `EXIF/XMP/ICCP`; чанки, влияющие на рендер, исключены); экономия **только на диске** (GPU всё равно декодирует в RGBA8888), MAX-де-оверлап против находок format/wasted-alpha, называет существующий фикс oxipng/re-encode. Консервативная истинная нижняя граница (никогда не завышает).
+- **Детектор texture-bleeding** — чистая целочисленная смежность кадров (без декода): помечает пары кадров атласа, упакованные с 0px gutter (общая грань + перпендикулярное перекрытие; угловые касания и rotated/aliased кадры исключены), которые могут давать 1px-швы при linear/mipmap-сэмплинге. Это находка **корректности** БЕЗ экономии (edge-extrude может увеличить лист — инвариант 5), с условной честной оговоркой; зажигает бирюзовый оверлей `bleeding` и указывает на существующий фикс edge-extrude.
+- **Детектор declared-vs-real dimension-mismatch** — всегда включённый статический собрат метки render-probe: сравнивает объявленный в манифесте `meta.size` (Spine page `size:`) с РЕАЛЬНЫМ декодированным заголовком пикселей (без декода), за пределами небольшого абсолютного допуска. Direction-aware (real<declared с кадром за реальной гранью = crit; в пределах границ = warn; real>declared = info). Это находка **корректности** БЕЗ оценки — приводит два измерения (declared vs real) и раскрывает, что статическая оценка VRAM считается по объявленному размеру (никогда не заявка на экономию от фикса).
+- **Surfacing неразобранных файлов** — файлы, выглядящие как манифест, но не поддающиеся парсингу, показываются честно (никогда не отбрасываются молча) + усиленные парсеры кадров/Spine (отвергают neg/zero/OOB rect; Spine `numsRaw` per-region recovery).
 
-## 2. Render-probe & runtime profiler (the moat)
+## 2. Render-probe и рантайм-профайлер (moat)
 
-- **Render-probe** — loads an atlas into offscreen PixiJS v8 WebGL, instruments the GL context, and reads **measured** draw calls + VRAM (Σ baseTexture w·h·4).
-- **Runtime profiler SDK** — patches `getContext` + wraps RAF; per-frame draw calls, redundant binds, uploads/shader-compiles (hitches), live textures, VRAM, fps.
-- **MV3 Chrome extension** — injects the profiler into a live game (MAIN world) + on-page HUD + "load folder & correlate" in the overlay.
-- **Correlate layer** — `correlate(static, runtime)` → one verdict (static fragmentation × live draw calls/binds, VRAM residency, upload/shader hitches, redundant state).
-- **Probe-into-verdict** — the diagnosis can show the measured GPU footprint (declared vs measured).
-- **Per-texture VRAM/probe breakdown** card.
+- **Render-probe** — загружает атлас в offscreen PixiJS v8 WebGL, инструментирует GL-контекст и считывает **измеренные** draw calls + VRAM (Σ baseTexture w·h·4).
+- **Runtime profiler SDK** — патчит `getContext` + оборачивает RAF; per-frame draw calls, избыточные binds, uploads/shader-compiles (hitches), live textures, VRAM, fps.
+- **MV3 Chrome-расширение** — инжектит профайлер в живую игру (MAIN world) + on-page HUD + «load folder & correlate» в оверлее.
+- **Слой correlate** — `correlate(static, runtime)` → один вердикт (статическая фрагментация × живые draw calls/binds, резидентность VRAM, upload/shader hitches, избыточный state).
+- **Probe-в-вердикт** — диагноз может показать измеренный GPU-футпринт (declared vs measured).
+- **Карта per-texture VRAM/probe breakdown**.
 
-## 3. Pro fix engine (browser — generates optimized output)
+## 3. Pro-движок фикса (браузер — генерирует оптимизированный вывод)
 
-- **Atlas repack** — roll-our-own MaxRects/BSSF, smallest-area POT bin, rotation/padding/spill; tighter sheet, re-emitted manifest (drop-in).
-- **Binary polygon packer** — bitmap-mask occupancy nesting (trace alpha → conservative RDP → ear-clip → bitmap nesting + mesh-clip compose); TexturePacker-compatible mesh manifest (`vertices/verticesUV/triangles`); honest VRAM gate, rect fallback; content-extent trim (no empty bottom).
-- **Resize** — downscale oversized loose images + atlases (frames clamped); drop-in.
-- **Transcode** — WebP/PNG (native `convertToBlob`) + AVIF + lossless-WebP + oxipng (via `@jsquash`, honest fallback).
-- **Spine repack** — tighter single-page Spine sheet + re-emitted `.atlas`.
-- **Aggressive dedup** — owner/consumer model (pools/skin, lazy-aware), drop exact + near dupes, reference repointing.
-- **Edge-extrude (bleed)** — symmetric gutter to kill bilinear seams.
-- **Per-image measured best-format pick** — carries the diagnosis's measured smallest-encode winner into the fix.
-- **Opaque-encode** — re-encode wasted-alpha images without alpha (disk-only; keep-original-on-size-loss guard).
-- **Selective fix** — choose which findings to fix (masked preview).
-- **Dry-run plan preview** — see the plan before downloading.
-- **Receipt + per-file change manifest** — disk/VRAM before→after, op trail, honest "references changed" warnings.
-- **Engine-aware loader-migration guide** — copy-paste Pixi/Phaser snippets when a fix rewrites loader calls (incl. the KTX2 `import 'pixi.js/ktx2'` snippet).
-- **Before/after FilmViewer sheet-diff** — two side-by-side x-ray films per repacked sheet + empty-space overlay (visual proof, not a saving).
-- **Render-probe the produced fix** — measured before→after draw calls + decoded VRAM per sheet (3rd probe sibling).
-- **correlateFix** — turns the measured fix probe into a localized doctor's verdict.
-- **Own zero-dep store-only ZIP** (CRC32, UTF-8 flag, overflow guards). Output downloaded as `optimized-folder.zip`.
+- **Atlas repack** — собственный MaxRects/BSSF, smallest-area POT bin, rotation/padding/spill; более плотный лист, переэмитированный манифест (drop-in).
+- **Binary polygon packer** — nesting по occupancy через bitmap-mask (trace alpha → conservative RDP → ear-clip → bitmap nesting + mesh-clip compose); TexturePacker-совместимый mesh-манифест (`vertices/verticesUV/triangles`); честный VRAM-гейт, rect-фолбэк; trim по content-extent (без пустого низа).
+- **Resize** — даунскейл оверсайз loose-изображений + атласов (кадры clamped); drop-in.
+- **Transcode** — WebP/PNG (нативный `convertToBlob`) + AVIF + lossless-WebP + oxipng (через `@jsquash`, честный фолбэк).
+- **Spine repack** — более плотный single-page Spine-лист + переэмитированный `.atlas`.
+- **Aggressive dedup** — модель owner/consumer (pools/skin, lazy-aware), отбрасывает exact + near-дубликаты, перепривязка ссылок.
+- **Edge-extrude (bleed)** — симметричный gutter для устранения bilinear-швов.
+- **Per-image выбор измеренного лучшего формата** — переносит в фикс измеренного в диагнозе победителя по наименьшему энкоду.
+- **Opaque-encode** — переэнкод wasted-alpha изображений без альфы (только диск; guard keep-original-on-size-loss).
+- **Selective fix** — выбор, какие находки фиксить (masked preview).
+- **Dry-run превью плана** — увидеть план перед скачиванием.
+- **Receipt + per-file манифест изменений** — disk/VRAM before→after, трейл операций, честные предупреждения «references changed».
+- **Engine-aware гид по миграции лоадера** — copy-paste сниппеты Pixi/Phaser, когда фикс переписывает вызовы лоадера (включая сниппет KTX2 `import 'pixi.js/ktx2'`).
+- **Before/after FilmViewer sheet-diff** — две side-by-side рентген-плёнки на каждый перепакованный лист + оверлей пустого пространства (визуальное доказательство, не экономия).
+- **Render-probe произведённого фикса** — измеренные before→after draw calls + декодированный VRAM на лист (3-й собрат probe).
+- **correlateFix** — превращает измеренный probe фикса в локализованный вердикт доктора.
+- **Собственный zero-dep store-only ZIP** (CRC32, UTF-8 flag, overflow guards). Вывод скачивается как `optimized-folder.zip`.
 
-## 4. AssetPack arc — config-driven export pipeline
+## 4. AssetPack-дуга — config-driven пайплайн экспорта
 
-- **Config-driven export profile** — arbitrary resolutions × formats (png/webp/avif, lossless+lossy) × per-format compression (quality/near/effort); replaces the fixed 3-tier ladder. Additive (off ⇒ byte-identical).
-- **Per-folder/prefix overrides** — match an asset by path and override formats/quality/lossless/AVIF-4:4:4 (e.g. `fonts → 4:4:4`); asset-builder parity in the honest browser subset.
-- **Multi-resolution scale tiers** — `_1080p/_720p/_540p` (now config-driven) with honest disk-only fan-out.
-- **PixiJS manifest.json emitter** — a real Pixi v8 `AssetsManifest` so the whole optimized output loads with one `Assets.init({ manifest })` (one alias-suffixed entry per resolution tier; sheets point at the `.json`/`.atlas` sidecar).
-- **Content-hash cache-busting** — append a content hash to emitted filenames, chained through atlas `meta.image`, the Spine `.atlas` line, the Pixi manifest, dedup consumer images, and loader-migration rows.
-- **Pack loose assets into spritesheets** — from scratch: static TexturePacker JSON + correct Spine `.atlas` composition, multi-page spill.
-- **Multipack round-trip safety** — TexturePacker `meta.related_multi_packs` (the sibling-`.json` linkage Pixi v8 auto-loads) is carried verbatim through the byte-stable passthrough/resize re-emit, and honestly stripped (with a skip note) on every path that renames siblings (tier suffixes, KTX2, content-hashed filenames) — so a multipack page-0 keeps loading pages 1+ instead of silently dropping them.
-- **Animation-map round-trip** — the spritesheet top-level `animations` map (group → ordered frame-name list = play order, what `AnimatedSprite` is built from) is carried verbatim (never sorted) through every Pro re-emit; because it references frame KEYS (not file names) it survives cache-bust/KTX2 renames intact, and it is absent by construction on repack/merge (no synthesis). Stops the fix from silently breaking animations.
+- **Config-driven профиль экспорта** — произвольные разрешения × форматы (png/webp/avif, lossless+lossy) × per-format компрессия (quality/near/effort); заменяет фиксированную 3-tier лестницу. Аддитивно (off ⇒ байт-в-байт).
+- **Per-folder/prefix оверрайды** — матч ассета по пути и оверрайд forматов/quality/lossless/AVIF-4:4:4 (например, `fonts → 4:4:4`); паритет с asset-builder в честном браузерном подмножестве.
+- **Multi-resolution scale-tiers** — `_1080p/_720p/_540p` (теперь config-driven) с честным disk-only fan-out.
+- **Эмиттер PixiJS manifest.json** — настоящий Pixi v8 `AssetsManifest`, чтобы весь оптимизированный вывод грузился одним `Assets.init({ manifest })` (одна alias-suffixed запись на каждый tier разрешения; листы указывают на сайдкар `.json`/`.atlas`).
+- **Content-hash cache-busting** — добавляет content-хеш к эмитируемым именам файлов, прокинутый через atlas `meta.image`, строку Spine `.atlas`, манифест Pixi, dedup-consumer изображения и строки миграции лоадера.
+- **Упаковка loose-ассетов в спрайтшиты** — с нуля: статический TexturePacker JSON + корректная композиция Spine `.atlas`, multi-page spill.
+- **Multipack round-trip safety** — `meta.related_multi_packs` TexturePacker (связка sibling-`.json`, которую Pixi v8 авто-загружает) проносится дословно через байт-стабильный passthrough/resize re-emit и честно вырезается (со skip-нотой) на каждом пути, переименовывающем siblings (tier-суффиксы, KTX2, content-hashed имена) — так что page-0 мультипака продолжает грузить страницы 1+ вместо их молчаливого отбрасывания.
+- **Animation-map round-trip** — top-level карта `animations` спрайтшита (group → упорядоченный список имён кадров = порядок воспроизведения, из которого строится `AnimatedSprite`) проносится дословно (никогда не сортируется) через каждый Pro re-emit; поскольку она ссылается на КЛЮЧИ кадров (не имена файлов), она переживает cache-bust/KTX2 переименования нетронутой и по построению отсутствует при repack/merge (без синтеза). Не даёт фиксу молча сломать анимации.
 
-## 5. UI — the x-ray cabinet
+## 5. UI — рентген-кабинет
 
-- **Film-viewer** — the hero: atlas snapshot with highlighted anomalies (empty = red, transparent = yellow, bleeding = teal, duplicate-frame = per-cluster hue), 4-cell VRAM/DISK/SIZE/OCC readout.
-- **Triage-first scalable results view** — summary VerdictBar (severity tally) + a **virtualized** TriageLedger (search / sort by severity·wasted-disk·VRAM·occupancy / problems-only / show-clean / group-by-folder with honest declared-only rollups), replacing the flat chip wall. Stays responsive at 1000+ assets; sticky film detail with debounced decode.
-- **Brand system** — Space Grotesk / IBM Plex Sans / IBM Plex Mono; severity palette; reduced-motion aware.
-- **i18n** — 9 languages (en/ru/de/es/pt/fr/it/zh/hi); findings localized via `messageKey`+params without breaking objectivity; byte-exact drift guard + 9-locale parity tests.
+- **Film-viewer** — герой: снимок атласа с подсвеченными аномалиями (пустота = красный, прозрачность = жёлтый, bleeding = бирюзовый, duplicate-frame = оттенок на кластер), readout из 4 ячеек VRAM/DISK/SIZE/OCC.
+- **Triage-first масштабируемое представление результатов** — сводный VerdictBar (тэлли по severity) + **виртуализированный** TriageLedger (поиск / сортировка по severity·wasted-disk·VRAM·occupancy / только-проблемы / show-clean / group-by-folder с честными declared-only роллапами), заменяющий плоскую стену чипов. Остаётся отзывчивым при 1000+ ассетах; sticky film-деталь с debounced-декодом.
+- **Бренд-система** — Space Grotesk / IBM Plex Sans / IBM Plex Mono; палитра severity; учёт reduced-motion.
+- **i18n** — 9 языков (en/ru/de/es/pt/fr/it/zh/hi); находки локализуются через `messageKey`+params без нарушения объективности; байт-точный drift-guard + 9-locale тесты паритета.
 
-## 6. Native → backend (opt-in, default OFF, consent, entitlement-gated)
+## 6. Нативное → бэкенд (opt-in, по умолчанию OFF, согласие, entitlement-gated)
 
-- **KTX2 GPU-compressed textures** — a Go `toktx` sidecar (`apps/encoder`) encodes `.ktx2` (UASTC + zstd + mips); the only fix that cuts real **GPU VRAM 4–8×** (browser-impossible). Reached through `apps/api` as an entitlement-gated reverse proxy (keeps the billing backend thin). Hardened sidecar (non-root, RO-FS, caps, no persistence, no image-byte logging).
-- **Measured KTX2 VRAM probe** — transcodes the produced `.ktx2` on the probing GPU and reads real compressed residency (`compressedTexImage2D` instrument); shown beside the worst-case ceiling, device-local. Transcoder is self-hosted (no CDN fetch).
-- **pngquant lossy-PNG** — a 2nd sidecar op (256-color quantization, browser-impossible); disk-only (never a VRAM claim); quality-floor decline kept-not-failed.
-- **libvips lanczos3 resample** — a 3rd sidecar op that downscales a scale-tier with a high-quality kernel the browser canvas can't be steered to, replacing the browser tile at the SAME dims/format; carries ONLY a MEASURED high-frequency-energy retention delta (a fact, never a "sharper" verdict — invariant 3) and NO VRAM/disk claim (invariant 5). Fires on **every genuinely downscaled tier including the oversize-clamped TOP tier** (`dst < src`, not just `tier.scale < 1`), with an honest skip note when suppressed by content-hash filenames.
-- **Privacy model** — assets leave the device ONLY on explicit per-run opt-in + consent (with an upload count/preview); default OFF ⇒ everything stays local and byte-identical.
+- **KTX2 GPU-compressed текстуры** — Go-сайдкар `toktx` (`apps/encoder`) энкодит `.ktx2` (UASTC + zstd + mips); единственный фикс, режущий реальный **GPU VRAM 4–8×** (невозможно в браузере). Достигается через `apps/api` как entitlement-gated reverse-proxy (держит биллинг-бэкенд тонким). Усиленный сайдкар (non-root, RO-FS, caps, без персистентности, без логирования байт картинок).
+- **Измеренный probe VRAM для KTX2** — транскодит произведённый `.ktx2` на пробирующем GPU и считывает реальную сжатую резидентность (инструмент `compressedTexImage2D`); показывается рядом с worst-case ceiling, device-local. Транскодер self-hosted (без CDN-фетча).
+- **pngquant lossy-PNG** — 2-я операция сайдкара (256-color квантизация, невозможно в браузере); только диск (никогда заявка на VRAM); decline по quality-floor — kept-not-failed.
+- **libvips lanczos3 ресэмпл** — 3-я операция сайдкара, даунскейлящая scale-tier высококачественным ядром, на которое нельзя направить браузерный canvas, заменяя браузерный тайл при ТЕХ ЖЕ размерах/формате; несёт ТОЛЬКО ИЗМЕРЕННУЮ дельту удержания высокочастотной энергии (факт, а не вердикт «резче» — инвариант 3) и НИКАКОЙ заявки на VRAM/диск (инвариант 5). Срабатывает на **каждом реально даунскейленном tier, включая oversize-clamped ВЕРХНИЙ tier** (`dst < src`, не только `tier.scale < 1`), с честной skip-нотой при подавлении content-hash именами.
+- **Модель приватности** — ассеты покидают устройство ТОЛЬКО при явном per-run opt-in + согласии (с count/preview загрузки); по умолчанию OFF ⇒ всё остаётся локальным и байт-в-байт.
 
-## 7. Backend — Slice B (thin Go billing/license)
+## 7. Бэкенд — Slice B (тонкий Go биллинг/лицензии)
 
-- **apps/api** — Go (chi · pure-Go SQLite · stripe-go · ed25519). Stripe webhook → mint, `/v1/{activate,refresh,deactivate}` (seat limits, refund kill-switch), `/v1/key`.
-- **License = opaque key; entitlement = ed25519 token** verified **offline** in the browser (WebCrypto); device-bound. Cross-language byte-contract fixture (Go ↔ WebCrypto).
-- **Pro gate OFF by default** (`VITE_PRO_GATE`) — fix is free in beta.
-- **Local deploy** — runs in Docker on this PC (`:8088`), reachable on Tailscale; wired into the web app (verified live: activate → sign → offline-verify). Dev-license tool (`devmint`) + connection verifier.
+- **apps/api** — Go (chi · pure-Go SQLite · stripe-go · ed25519). Stripe-вебхук → mint, `/v1/{activate,refresh,deactivate}` (лимиты сидов, refund kill-switch), `/v1/key`.
+- **License = опак-ключ; entitlement = ed25519-токен**, верифицируемый **офлайн** в браузере (WebCrypto); device-bound. Кросс-язык байт-контракт fixture (Go ↔ WebCrypto).
+- **Pro-гейт по умолчанию OFF** (`VITE_PRO_GATE`) — фикс бесплатен в бете.
+- **Локальный деплой** — работает в Docker на этом PC (`:8088`), доступен по Tailscale; подключён к веб-приложению (проверено вживую: activate → sign → offline-verify). Dev-license инструмент (`devmint`) + верификатор подключения.
 
 ## 8. CLI + CI
 
-- **`asset-doctor` CLI** — `audit | budget | init` reuses the core in Node (assets never leave the machine); exact-dup via `node:crypto`; VRAM = Σ w·h·4.
-- **GitHub Action budget-gate** — composite `action.yml` with before/after via git worktree; fail-closed JSON config on browser-only metrics; SARIF/markdown/summary output.
+- **CLI `asset-doctor`** — `audit | budget | init` переиспользует ядро в Node (ассеты не покидают машину); exact-dup через `node:crypto`; VRAM = Σ w·h·4.
+- **GitHub Action budget-gate** — composite `action.yml` с before/after через git worktree; fail-closed JSON-конфиг на browser-only метриках; SARIF/markdown/summary вывод.
 
-## 9. Robustness
+## 9. Устойчивость
 
-- **Abortable workers** — an `AbortSignal` seam through the analyze + fix workers so a superseded drop stops competing (additive, default-off).
-- **Honest skips everywhere** — unparseable inputs, encode failures, quality-floor declines, GPU-format unavailability all surfaced (never silent), never shipping a larger "optimized" file.
-- **De-overlapped headline savings** — the `potentialDiskSaved` headline never double-counts: format ∩ wasted-alpha ∩ strippable-metadata collapse to a per-ref MAX, and exact-duplicate dropped copies don't also charge their own format/alpha/strippable saving (phantom bytes for files that vanish on dedup). Always ≤ the achievable total — the product under-promises rather than over-claims.
-- **Partitioned duplicate reclaim** — within-atlas frame-redundancy and cross-atlas redundancy count DISJOINT pixel sets: an atlas's own intra-atlas dupes are reclaimed once (per-rect), and cross-atlas only counts the (distinct-sheets − 1) freed copies, so the two readouts are honestly additive (each reported count equals what the corresponding fix actually delivers).
-- **Robust multi-page Spine parsing** — the `.atlas` page-boundary lookahead tolerates modern Spine 4.x indented page headers, so a second/Nth texture page is never silently dropped (no phantom full-page sprite, no false-orphan image).
+- **Abortable воркеры** — шов `AbortSignal` через воркеры analyze + fix, чтобы вытесненный drop прекращал конкурировать (аддитивно, по умолчанию off).
+- **Честные skip везде** — неразбираемые входы, ошибки энкода, decline по quality-floor, недоступность GPU-формата — всё surfaced (никогда молча), никогда не отгружается больший «оптимизированный» файл.
+- **Де-оверлапнутая headline-экономия** — заголовок `potentialDiskSaved` никогда не дважды-считает: format ∩ wasted-alpha ∩ strippable-metadata схлопываются в per-ref MAX, а отброшенные копии exact-duplicate не заявляют ещё и свою format/alpha/strippable-экономию (фантомные байты для файлов, исчезающих при dedup). Всегда ≤ достижимого итога — продукт недообещает, а не завышает.
+- **Партиционированный возврат дубликатов** — внутри-атласная frame-redundancy и кросс-атласная redundancy считают НЕПЕРЕСЕКАЮЩИЕСЯ наборы пикселей: собственные внутри-атласные дубли атласа возвращаются один раз (per-rect), а кросс-атласная считает только (distinct-sheets − 1) освобождённых копий, так что оба readout честно аддитивны (каждое сообщённое число равно тому, что соответствующий фикс реально даёт).
+- **Устойчивый парсинг multi-page Spine** — lookahead границ страниц `.atlas` терпит indented page-заголовки modern Spine 4.x, так что вторая/N-я текстурная страница никогда не отбрасывается молча (без фантомного полностраничного спрайта, без false-orphan изображения).
 
 ---
 
-*Updated 2026-06-29 (through round 29). Branch `feat/asset-pipeline` (= local `main`), ~63 commits over `origin/main`, all green. Deploy (GH Pages) awaits the user's `git push origin main`; live backend ops need the toktx/pngquant/vips binaries in the deployed sidecar.*
+*Обновлено 2026-06-29 (по round 29). Ветка `feat/asset-pipeline` (= локальный `main`), ~63 коммита поверх `origin/main`, всё зелёное. Деплой (GH Pages) ждёт пользовательского `git push origin main`; живые бэкенд-операции требуют бинарей toktx/pngquant/vips в задеплоенном сайдкаре.*

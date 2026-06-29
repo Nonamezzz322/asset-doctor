@@ -1,857 +1,856 @@
-# Asset Doctor — changelog (per round)
+# Asset Doctor — журнал изменений (по раундам)
 
-Living log of the autonomous improvement loop. One entry per round; each round = a
-design→skeptic→impl→adversarial-review→fix cycle, independently verified green and committed
-small on branch `feat/asset-pipeline` (= local `main`). Newest first.
-**Each new round MUST append its entry here.** `origin/main` is at `54c1a3a` (deploy blocked: no
-GitHub creds — user pushes); commit hashes below are over that base.
+Живой лог автономного цикла улучшений. Одна запись на раунд; каждый раунд = цикл
+design→skeptic→impl→adversarial-review→fix, независимо проверенный «зелёным» и закоммиченный
+мелко в ветке `feat/asset-pipeline` (= локальный `main`). Новые сверху.
+**Каждый новый раунд ОБЯЗАН дописать свою запись сюда.** `origin/main` находится на `54c1a3a` (деплой заблокирован: нет
+GitHub-кредов — пушит пользователь); хэши коммитов ниже отсчитываются от этой базы.
 
-> Convention: `commit` · what shipped · review verdict · gate. Designs live in `docs/improvements/round*.md`.
+> Convention: `commit` · что отгружено · вердикт ревью · gate. Дизайны лежат в `docs/improvements/round*.md`.
 
 ---
 
-## Round 29 — selection (1 pick; shipped) — 2026-06-29
-Selection (very high bar, near-exhausted space): 4-lens brainstorm → 4 candidates → strict judge picked exactly
-**1** and rejected 3 (budget-config silent-no-op — the auto-drop from `resolveThresholds` is deliberate
-documented architecture, only the accept-then-discard of a few keys is a true but narrow validation cosmetic;
-trim-bounds `spriteSourceSize`-vs-`sourceSize` detector — verified gap but self-flagged marginal / fires only on
-corrupt/hand-edited manifests, broad new surface; FilmViewer overlay-scale on declared≠real atlases — visual-only,
-ambiguous remedy, correct headline numbers). One pick, no padding — the honest call. Design in
-`docs/improvements/round29-animations-preserve.md`.
+## Раунд 29 — отбор (1 pick; отгружено) — 2026-06-29
+Отбор (очень высокая планка, пространство почти исчерпано): brainstorm в 4 линзы → 4 кандидата → строгий судья выбрал ровно
+**1** и отклонил 3 (budget-config silent-no-op — авто-сброс из `resolveThresholds` это намеренная задокументированная
+архитектура, истинной но узкой косметикой валидации остаётся только accept-then-discard нескольких ключей;
+trim-bounds детектор `spriteSourceSize`-vs-`sourceSize` — подтверждённый пробел, но самопомеченный как маргинальный / срабатывает только на
+повреждённых/руками-правленных манифестах, широкая новая поверхность; масштаб оверлея FilmViewer на атласах declared≠real — только визуальный,
+неоднозначное лечение, корректные числа в заголовке). Один pick, без наполнителя —
+честное решение. Дизайн в `docs/improvements/round29-animations-preserve.md`.
 
-- **(parity/honesty) preserve the spritesheet `animations` map verbatim on byte-stable re-emit — the twin of the
-  r28 `related_multi_packs` fix** (`docs/improvements/round29-animations-preserve.md`)
-  — A Pixi v8 / TexturePacker spritesheet carries a top-level `animations` map (group-name → ordered FRAME-name
-  list = play order) that `Spritesheet.animations` / every `AnimatedSprite` is built from. Our parser never read
-  it, the core `Atlas` had no field, and `emitTexturePackerJson` re-emitted only `{frames, meta}` — so every Pro
-  re-emit (passthrough transcode, resize, KTX2 sidecar, dedup-repoint) silently dropped it, breaking every
-  animation at runtime while the code comment falsely claimed verbatim fidelity (18 real sheets in the user's own
-  sample data carry it). **Fix:** carry an optional `animations?: Record<string, string[]>` on the core `Atlas`
-  (omit-when-absent ⇒ **byte-identical**); a guarded `readAnimations` (each group must be a non-empty array of
-  non-empty strings; a malformed group is dropped while valid neighbors survive; order-preserving) reads the
-  **top-level** `j.animations`; `emitTexturePackerJson` re-emits it **verbatim, NO sort** (key order + within-group
-  array order are play order) between `frames` and `meta`, only when present+non-empty. It flows through the
-  existing `{...atlas}` spreads on every frame-name-stable path with **no worker strip code** — and, unlike
-  `related_multi_packs`, it is correctly **carried (not stripped) under `hashFilenames`/cache-bust and the KTX2
-  sidecar**, because it references frame KEYS (stable across FILE renames), not sibling file names. Repack/merge/
-  pack build fresh atlases ⇒ `animations` absent **by construction** (no synthesis — invariant 3). The false
-  verbatim comments were corrected (+ a KTX2 frame-key-vs-file-name rationale note). **No Spine `.atlas` change**
-  (no animations concept; Spine-skeleton frameless JSON never reaches the read), no finding/i18n/UI/backend change.
-  — **Tests**: parsers (single + multi-group key order + within-group ≥20-element array order preserved;
+- **(parity/honesty) сохранять карту `animations` спрайтшита дословно при byte-stable повторной эмиссии — близнец
+  r28-фикса `related_multi_packs`** (`docs/improvements/round29-animations-preserve.md`)
+  — Спрайтшит Pixi v8 / TexturePacker несёт верхнеуровневую карту `animations` (имя-группы → упорядоченный список имён FRAME
+  = порядок воспроизведения), из которой строятся `Spritesheet.animations` / каждый `AnimatedSprite`. Наш парсер её никогда не читал,
+  у ядрового `Atlas` не было поля, а `emitTexturePackerJson` повторно эмитил только `{frames, meta}` — так что каждая Pro
+  повторная эмиссия (passthrough-транскод, resize, KTX2-sidecar, dedup-repoint) молча её роняла, ломая каждую
+  анимацию в рантайме, при том что комментарий в коде ложно заявлял дословную точность (18 реальных шитов в собственных
+  данных пользователя её несут). **Фикс:** нести опциональный `animations?: Record<string, string[]>` на ядровом `Atlas`
+  (omit-when-absent ⇒ **байт-в-байт**); защищённый `readAnimations` (каждая группа должна быть непустым массивом
+  непустых строк; невалидная группа отбрасывается, валидные соседи выживают; порядок сохраняется) читает
+  **верхнеуровневый** `j.animations`; `emitTexturePackerJson` повторно эмитит её **дословно, БЕЗ sort** (порядок ключей + порядок
+  массива внутри группы это порядок воспроизведения) между `frames` и `meta`, только когда присутствует+непуста. Она протекает через
+  существующие spread-ы `{...atlas}` на каждом frame-name-stable пути **без strip-кода в воркере** — и, в отличие от
+  `related_multi_packs`, она корректно **переносится (не stripped) при `hashFilenames`/cache-bust и в KTX2-
+  sidecar**, потому что ссылается на КЛЮЧИ фреймов (стабильны при переименовании ФАЙЛОВ), а не на имена соседних файлов.
+  Repack/merge/pack строят свежие атласы ⇒ `animations` отсутствует **по построению** (без синтеза — инвариант 3). Ложные
+  «дословные» комментарии исправлены (+ заметка с обоснованием frame-key-vs-file-name для KTX2). **Без изменения Spine `.atlas`**
+  (нет концепции анимаций; frameless Spine-skeleton JSON никогда не доходит до чтения), без изменений finding/i18n/UI/бэкенда.
+  — **Тесты**: parsers (single + порядок ключей multi-group + порядок массива внутри группы ≥20 элементов сохранён;
   absent/non-object/empty/null/all-malformed ⇒ undefined; malformed-group-filtered; Spine-skeleton frameless ⇒
-  not-ok so the read is never reached), fix (emit between frames/meta + reparse intact; absent ⇒ no key;
-  `repointAtlasImage`/`scaleAtlas` preserve it; a fresh `repackAtlases` result has `animations` undefined; pure
-  parse→emit→reparse deep-equal). parsers 54→63, fix 434→441. Review verdict: **SHIP** (zero blockers/majors,
-  byte-identical + verbatim-no-sort). Gate: typecheck + parsers (63) + fix (441) + full vitest (web 479) + lint
-  green.
+  not-ok так что чтение никогда не достигается), fix (emit между frames/meta + reparse целым; absent ⇒ нет ключа;
+  `repointAtlasImage`/`scaleAtlas` его сохраняют; свежий результат `repackAtlases` имеет `animations` undefined; чистый
+  parse→emit→reparse deep-equal). parsers 54→63, fix 434→441. Вердикт ревью: **SHIP** (ноль блокеров/мажоров,
+  байт-в-байт + дословно-без-sort). Gate: typecheck + parsers (63) + fix (441) + полный vitest (web 479) + lint
+  зелёные.
 
-## Round 28 — selection (2 deferred-item picks; all shipped) — 2026-06-29
-Round 28 targeted the two strongest DEFERRED backlog items the round-27 judge flagged as deserving their own
-scoped rounds (both premise-verified, rejected from r27 only for scope): a skeptic-architect re-verified each
-against the real code and returned **PROCEED** for both. Designs in `docs/improvements/round28-*.md`.
+## Раунд 28 — отбор (2 pick-а отложенных пунктов; все отгружены) — 2026-06-29
+Раунд 28 целился в два сильнейших ОТЛОЖЕННЫХ пункта бэклога, которые судья раунда 27 пометил как заслуживающие собственных
+ограниченных раундов (оба с подтверждённой посылкой, отклонены из r27 только по объёму): skeptic-architect перепроверил каждый
+против реального кода и вернул **PROCEED** по обоим. Дизайны в `docs/improvements/round28-*.md`.
 
-- **(gamedev/honesty) declared-vs-real atlas dimension-mismatch detector — the always-on static sibling of the
-  render-probe label** (`docs/improvements/round28-dimension-mismatch.md`)
-  — For an atlas, `atlas.size` is the DECLARED manifest size (`meta.size` / Spine page `size:`) while
-  `image.size` is the REAL decoded pixel header — yet `analyze.ts` charges VRAM + runs `dimensionFindings` on the
-  DECLARED value and **never compares the two** for atlases, so a stale/downscaled/POT-rounded manifest (frames
-  sampling off a smaller real texture, UVs shifted) was invisible in the free audit (surfaced only by the
-  optional WebGL render-probe label). Worse, the parser's own out-of-bounds frame pass tests the DECLARED size,
-  so a frame can pass it yet sample outside the smaller real texture. **New pure rule**
-  `dimensionMismatchFinding(atlas, image, cfg)` (zero decode, integer compare of two numbers the parser already
-  holds) with a calibrated **absolute tolerance** (`tolerancePx: 2` — benign odd-trim/rounding stays SILENT;
-  healthy trimmed/POT atlases have declared==real and never fire) and **direction handling**: real<declared with
-  a placed frame past the real bounds ⇒ `crit` (frames sample off the real edge — the bug the OOB pass misses);
-  real<declared all in-bounds ⇒ `warn`; real>declared (extra border) ⇒ `info`. **Invariant-5 honest:** carries
-  **NO estimate at all** — it states TWO MEASUREMENTS (declared W×H vs real W×H), never a delta-saving, and
-  factually discloses that the static VRAM estimate is charged on the declared size so it over-/under-states the
-  real footprint (a disclosure of the existing accounting, never a fix-saving claim); no overlay. Fires
-  in-browser + on CLI `audit`/`init` via `DEFAULT_THRESHOLDS`; suppressed when a budget config omits the key
-  (not in `resolveThresholds`, same posture as bleeding). **Contained — DETECT only:** no VRAM-basis change, no
-  parser OOB change, no fix-engine, no worker/backend change.
-  — **i18n**: three flat per-direction messageKeys under the one `dimension-mismatch` Rule (the proven
-  `format`/`format-lossless` routing — no renderer change), across all 9 locales with identical `{dw}{dh}{rw}{rh}`
-  (+`{off}`) placeholders; render-drift + catalogs parity green. **Golden**: a hand-authored
-  `fixtures/sample-projects/dimension-mismatch/` (declared 1024² + real 512² PNG + one off-edge frame),
-  expected.json reconciled honestly through the real parse→analyze path; the **3 existing ATLAS_CASES goldens
-  stay green with NO expected.json edits** (verified zero existing fixtures diverge). CLI test asserts it fires
-  via `auditDir` and is suppressed by a budget config. Review verdict: **SHIP** (zero blockers/majors; honestyOk
-  + noFalsePositive). Gate: typecheck + analysis (161) + i18n (25) + budget (31) + cli (15) + full vitest + lint
-  green.
+- **(gamedev/honesty) детектор рассогласования declared-vs-real размеров атласа — всегда-включённый статический сиблинг
+  лейбла render-probe** (`docs/improvements/round28-dimension-mismatch.md`)
+  — Для атласа `atlas.size` это ЗАЯВЛЕННЫЙ размер манифеста (`meta.size` / Spine page `size:`), тогда как
+  `image.size` это РЕАЛЬНЫЙ декодированный заголовок в пикселях — однако `analyze.ts` начисляет VRAM + запускает `dimensionFindings` на
+  ЗАЯВЛЕННОМ значении и **никогда не сравнивает их** для атласов, так что устаревший/уменьшенный/POT-округлённый манифест (фреймы
+  семплят с меньшей реальной текстуры, UV-ы сдвинуты) был невидим в бесплатном аудите (всплывал только из
+  опционального лейбла WebGL render-probe). Хуже того, парсерный проход out-of-bounds по фреймам тестирует ЗАЯВЛЕННЫЙ размер,
+  так что фрейм может его пройти, но семплить за пределами меньшей реальной текстуры. **Новое чистое правило**
+  `dimensionMismatchFinding(atlas, image, cfg)` (ноль декода, integer-сравнение двух чисел, которые парсер уже
+  держит) с откалиброванной **абсолютной толерантностью** (`tolerancePx: 2` — безобидный нечётный trim/округление остаётся ТИХИМ;
+  здоровые trimmed/POT атласы имеют declared==real и никогда не срабатывают) и **обработкой направления**: real<declared с
+  размещённым фреймом за реальными границами ⇒ `crit` (фреймы семплят за реальным краем — баг, который пропускает OOB-проход);
+  real<declared всё в границах ⇒ `warn`; real>declared (лишняя рамка) ⇒ `info`. **Честно по инварианту 5:** не несёт
+  **НИКАКОЙ оценки вообще** — он сообщает ДВА ИЗМЕРЕНИЯ (declared W×H vs real W×H), никогда delta-saving, и
+  фактически раскрывает, что статическая VRAM-оценка начислена на declared-размер, так что она пере-/недо-заявляет
+  реальный футпринт (раскрытие существующего учёта, никогда не заявка о fix-saving); без оверлея. Срабатывает
+  в браузере + на CLI `audit`/`init` через `DEFAULT_THRESHOLDS`; подавляется, когда budget-config опускает ключ
+  (нет в `resolveThresholds`, та же поза, что у bleeding). **Замкнуто — только DETECT:** без изменения VRAM-базиса, без
+  изменения парсерного OOB, без fix-движка, без изменений воркера/бэкенда.
+  — **i18n**: три плоских per-direction messageKey-а под одним Rule `dimension-mismatch` (проверенная
+  маршрутизация `format`/`format-lossless` — без изменения рендерера), во всех 9 локалях с одинаковыми `{dw}{dh}{rw}{rh}`
+  (+`{off}`) плейсхолдерами; render-drift + catalogs parity зелёные. **Golden**: вручную написанный
+  `fixtures/sample-projects/dimension-mismatch/` (declared 1024² + real 512² PNG + один off-edge фрейм),
+  expected.json честно сверён через реальный путь parse→analyze; **3 существующих ATLAS_CASES golden-а
+  остаются зелёными БЕЗ правок expected.json** (проверено, что ноль существующих фикстур расходится). CLI-тест утверждает, что оно срабатывает
+  через `auditDir` и подавляется budget-config-ом. Вердикт ревью: **SHIP** (ноль блокеров/мажоров; honestyOk
+  + noFalsePositive). Gate: typecheck + analysis (161) + i18n (25) + budget (31) + cli (15) + полный vitest + lint
+  зелёные.
 
-- **(parity/honesty) preserve `meta.related_multi_packs` on the verbatim passthrough/resize re-emit — multipack
-  round-trip safety on the PAID path** (`docs/improvements/round28-multipacks-preserve.md`)
-  — A TexturePacker multipack page-0 manifest carries `meta.related_multi_packs` (sibling `.json` names Pixi v8
-  auto-loads). Our parser dropped it, the core `Atlas` had no field, and `emitTexturePackerJson` rebuilt `meta`
-  from scratch — so the prebuilt-atlas **passthrough transcode** (and resize re-emit) silently stripped it,
-  breaking sibling auto-loading at runtime: `Assets.load('sheet-0.json')` stopped loading pages 1+ (every frame
-  on those pages becomes an undefined texture) while the receipt claimed a clean disk-only optimization and the
-  code comment falsely claimed "manifest round-trips" (invariant 3/5 honesty defect, on a common real-world
-  input). **Fix (low-risk verbatim-preserve slice only):** carry an optional `relatedMultiPacks?: string[]` on
-  the core `Atlas` (omit-when-absent ⇒ **byte-identical** for single-page atlases — the common case); a guarded
-  order-preserving `readStringArray` reads it in `parseAtlasManifest`; `emitTexturePackerJson` re-emits it
-  **verbatim, NO sort** (positional index is load-bearing) only when present+non-empty. It flows through the
-  existing `repointAtlasImage`/`scaleAtlas` spreads on the byte-stable default, and is **STRIPPED with an honest
-  skip note** on every path where sibling names change: unconditionally on the **tier** path (suffixed sidecars
-  would cross-mix resolutions), on the **KTX2** second-sidecar (a reviewer-caught BLOCKER — `.ktx2.json` would
-  else auto-link the RASTER sibling, cross-format mix), and under `hashFilenames` on passthrough+resize (renamed
-  siblings dangle). The false drop-in comment was corrected to the conditional truth. Repack/merge/packLoose are
-  scratch-built (no field) ⇒ status quo. **No ingest/finding/i18n/UI/backend change**, no golden/catalog drift.
-  — **Tests**: parsers +6 (parse order-preserved; absent/non-array/empty/garbage ⇒ undefined), fix manifest +5
-  (emit↔reparse intact, single-page byte-identical no-key guard, `repointAtlasImage` preserves it, Spine never
-  emits it), worker harnesses +3 (tier strip, passthrough preserve-vs-strip-under-hash, the new KTX2-sidecar
-  omits the field). Review verdict: **SHIP after one BLOCKER fixed** (the KTX2 cross-format mis-link). Gate:
-  typecheck + parsers (54) + fix (434) + full vitest (web 479) + lint green.
+- **(parity/honesty) сохранять `meta.related_multi_packs` при дословной passthrough/resize повторной эмиссии — round-trip
+  безопасность multipack-а на ПЛАТНОМ пути** (`docs/improvements/round28-multipacks-preserve.md`)
+  — Манифест страницы-0 multipack-а TexturePacker несёт `meta.related_multi_packs` (имена соседних `.json`, которые Pixi v8
+  авто-загружает). Наш парсер его ронял, у ядрового `Atlas` не было поля, а `emitTexturePackerJson` пересобирал `meta`
+  с нуля — так что **passthrough-транскод** готового атласа (и resize-эмиссия) молча его срезали,
+  ломая авто-загрузку соседей в рантайме: `Assets.load('sheet-0.json')` переставал грузить страницы 1+ (каждый фрейм
+  на тех страницах становится undefined-текстурой), при том что чек заявлял чистую disk-only оптимизацию, а
+  комментарий в коде ложно заявлял «manifest round-trips» (дефект честности по инварианту 3/5, на распространённом реальном
+  входе). **Фикс (низкорисковый срез только дословного-сохранения):** нести опциональный `relatedMultiPacks?: string[]` на
+  ядровом `Atlas` (omit-when-absent ⇒ **байт-в-байт** для одностраничных атласов — частый случай); защищённый
+  порядко-сохраняющий `readStringArray` читает его в `parseAtlasManifest`; `emitTexturePackerJson` повторно эмитит его
+  **дословно, БЕЗ sort** (позиционный индекс нагружен) только когда присутствует+непуст. Он протекает через
+  существующие spread-ы `repointAtlasImage`/`scaleAtlas` на byte-stable дефолте и **СРЕЗАЕТСЯ с честной
+  skip-заметкой** на каждом пути, где имена соседей меняются: безусловно на пути **tier** (суффиксированные sidecar-ы
+  кросс-смешали бы разрешения), на **KTX2** втором sidecar-е (BLOCKER, пойманный ревьюером — `.ktx2.json` иначе
+  авто-слинковал бы РАСТРОВОГО соседа, кросс-форматное смешение), и при `hashFilenames` на passthrough+resize (переименованные
+  соседи повисают). Ложный drop-in комментарий исправлен на условную правду. Repack/merge/packLoose
+  собираются с нуля (нет поля) ⇒ статус-кво. **Без изменений ingest/finding/i18n/UI/бэкенда**, без дрейфа golden/каталога.
+  — **Тесты**: parsers +6 (порядок при разборе сохранён; absent/non-array/empty/garbage ⇒ undefined), fix manifest +5
+  (emit↔reparse целым, single-page байт-в-байт no-key guard, `repointAtlasImage` его сохраняет, Spine никогда
+  его не эмитит), worker harness-ы +3 (tier strip, passthrough preserve-vs-strip-under-hash, новый KTX2-sidecar
+  опускает поле). Вердикт ревью: **SHIP after one BLOCKER fixed** (KTX2 кросс-форматный mis-link). Gate:
+  typecheck + parsers (54) + fix (434) + полный vitest (web 479) + lint зелёные.
 
-## Round 27 — selection (2 picks; all shipped) — 2026-06-29
-Selection (high bar, thin space): 4-lens brainstorm → 5 candidates → strict judge verified each premise and
-picked 2 contained correctness/honesty wins; dropped 3 (declared-vs-real atlas-dimension detector — real +
-relevant but needs a calibrated false-positive tolerance + 9-locale catalog, a capability not a contained fix,
-reconsider as its own round; RGBA4444/RGB565 format note — speculative about loader behavior, can't honestly
-move VRAM, invariant-3 risk; preserve `meta.related_multi_packs` on multipack passthrough — verified real
-PAID-path break but spans 3 packages with sibling-list-regen scope creep, deserves its own scoped round).
-Designs in `docs/improvements/round27-*.md`.
+## Раунд 27 — отбор (2 pick-а; все отгружены) — 2026-06-29
+Отбор (высокая планка, тонкое пространство): brainstorm в 4 линзы → 5 кандидатов → строгий судья проверил каждую посылку и
+выбрал 2 замкнутых выигрыша корректности/честности; отбросил 3 (детектор declared-vs-real размеров атласа — реальный +
+релевантный, но нужна откалиброванная толерантность к ложным срабатываниям + 9-локальный каталог, это способность а не замкнутый фикс,
+пересмотреть как собственный раунд; format-заметка RGBA4444/RGB565 — спекулятивно про поведение лоадера, нельзя честно
+двигать VRAM, риск инварианта 3; сохранять `meta.related_multi_packs` при multipack-passthrough — подтверждённый реальный
+слом на ПЛАТНОМ пути, но охватывает 3 пакета со scope-creep-ом регенерации sibling-списка, заслуживает собственного ограниченного раунда).
+Дизайны в `docs/improvements/round27-*.md`.
 
-- **cross-atlas-redundancy: collapse each atlas to ONE representative unit — stop double-counting an atlas's own
-  intra-atlas dupes as cross-sheet freed copies** (`docs/improvements/round27-crossatlas-deoverlap.md`)
-  — `crossAtlasRedundancyFinding` (`folder.ts`) keyed its per-cluster distinct-unit guard by `${atlas}|${rect}`,
-  so an atlas packing the same frame at N distinct rects that ALSO recurs on another sheet contributed N units
-  → `freed` re-counted the N−1 intra-atlas dupes that `frameRedundancyFinding` already reclaims per-rect. The two
-  findings double-counted the same pixels in their `dupes`/`recoverableArea`/`vram`/`diskEstimate` readouts
-  (shown side-by-side as if additive), violating the code's own orthogonality + HONESTY-PIN comments (invariant
-  3+5: the reported count must equal what a fix delivers). **Fix:** key the guard by **atlas name alone** (one
-  lowest-index representative per atlas), so `distinctUnits` = one per atlas and `freed` = (distinct atlases − 1)
-  = the honest cross-sheet reclaim (B's single copy aliases A's shared copy; A's internal dupes stay
-  frame-redundancy's). The two findings now **partition** the duplicate set with zero overlap; the HONESTY-PIN
-  (`dupes` == what a cross-atlas alias fix delivers) is now TRUE. The unused `rectKey` helper was removed; the
-  cluster-wide sort / `freed=slice(1)` / disk loop / full-cluster `relatedRefs` kept verbatim. Corrected numbers
-  are ≤ old for the overlap case and byte-identical for the common case (≤1 distinct rect per atlas). VRAM stays
-  `recoverableArea*4` (honest), disk stays finding-local (never folded into `potentialDiskSaved`). Stale comments
-  (folder.ts docstring/HONESTY-PIN/orthogonality, config.ts, core/src/index.ts) corrected to per-sheet semantics.
-  **No new config/core type, no worker/UI/backend change, no i18n catalog edit** (the drift fixture uses one
-  shared frame per atlas ⇒ the collapse is a no-op ⇒ baked-English byte-match unchanged).
-  — **Tests** (`analysis.test.ts`, TDD): the overlap regression (A with 3 distinct `z` rects + B with 1 ⇒
-  cross-atlas `dupes===1`, sheets 2, area one cell — confirmed to FAIL at 3 under the old keying) + a
-  partition-proof (frame-redundancy reports A's intra `dupes=2`/`2×cell`, cross-atlas `dupes=1`/`1×cell`,
-  disjoint, summing to `3×cell`); all 11 pre-existing cross-atlas tests stay green. Review verdict: **SHIP**
-  (zero blockers/majors; over-claim removed, partition clean). Gate: typecheck + analysis (150) + i18n (25) +
-  full vitest + lint green.
+- **cross-atlas-redundancy: схлопнуть каждый атлас в ОДНУ репрезентативную единицу — прекратить двойной учёт собственных
+  внутри-атласных дублей атласа как cross-sheet освобождённых копий** (`docs/improvements/round27-crossatlas-deoverlap.md`)
+  — `crossAtlasRedundancyFinding` (`folder.ts`) ключевал свой per-cluster distinct-unit guard по `${atlas}|${rect}`,
+  так что атлас, упаковавший один и тот же фрейм в N различных rect-ов, которые ТАКЖЕ повторяются на другом шите, вносил N единиц
+  → `freed` пере-считывал N−1 внутри-атласных дублей, которые `frameRedundancyFinding` уже возвращает per-rect. Два
+  finding-а дважды считали одни и те же пиксели в своих показаниях `dupes`/`recoverableArea`/`vram`/`diskEstimate`
+  (показанных бок-о-бок как будто аддитивных), нарушая собственные комментарии orthogonality + HONESTY-PIN кода (инвариант
+  3+5: заявленное число должно равняться тому, что доставляет фикс). **Фикс:** ключевать guard по **только имени атласа**
+  (один представитель с наименьшим индексом на атлас), так что `distinctUnits` = один на атлас и `freed` = (различных атласов − 1)
+  = честный cross-sheet возврат (единственная копия B алиасит общую копию A; внутренние дубли A остаются за
+  frame-redundancy). Два finding-а теперь **разбивают** множество дублей с нулевым перекрытием; HONESTY-PIN
+  (`dupes` == то, что доставляет cross-atlas alias-фикс) теперь ИСТИНЕН. Неиспользуемый хелпер `rectKey` удалён; сортировка
+  по всему кластеру / `freed=slice(1)` / disk-цикл / `relatedRefs` по всему кластеру сохранены дословно. Исправленные числа
+  ≤ старых для случая перекрытия и байт-в-байт для частого случая (≤1 различный rect на атлас). VRAM остаётся
+  `recoverableArea*4` (честно), disk остаётся finding-локальным (никогда не сворачивается в `potentialDiskSaved`).
+  Устаревшие комментарии (folder.ts docstring/HONESTY-PIN/orthogonality, config.ts, core/src/index.ts) исправлены на per-sheet семантику.
+  **Без нового config/core-типа, без изменений воркера/UI/бэкенда, без правок i18n-каталога** (drift-фикстура использует один
+  общий фрейм на атлас ⇒ схлопывание это no-op ⇒ baked-English byte-match без изменений).
+  — **Тесты** (`analysis.test.ts`, TDD): регрессия перекрытия (A с 3 различными `z` rect-ами + B с 1 ⇒
+  cross-atlas `dupes===1`, sheets 2, area одна ячейка — подтверждено, что FAIL-ит на 3 при старом ключевании) +
+  partition-доказательство (frame-redundancy сообщает внутри-A `dupes=2`/`2×cell`, cross-atlas `dupes=1`/`1×cell`,
+  непересекающиеся, суммируются в `3×cell`); все 11 ранее существующих cross-atlas тестов остаются зелёными. Вердикт ревью: **SHIP**
+  (ноль блокеров/мажоров; over-claim убран, partition чистый). Gate: typecheck + analysis (150) + i18n (25) +
+  полный vitest + lint зелёные.
 
-- **(Spine) multi-page `.atlas` page-boundary lookahead — trim before the regex so an indented page `size:`
-  header on page 2+ is not swallowed** (`docs/improvements/round27-spine-pageheader.md`)
-  — `parseSpineAtlasText`'s page-start lookahead tested `/^size\s*:/` against the RAW un-trimmed looked-ahead
-  line, while every other classification in the loop uses the trimmed line. The first page is masked by a
-  `!page` short-circuit, but on **page 2+** a modern Spine 4.x **indented** page `size:` header failed the
-  regex → the second texture page was **silently dropped**, a phantom full-page sprite poisoned page 1's
-  occupancy/wasted-region analysis, and the real page-2 image was mis-flagged as an orphan — an invariant-3
-  honesty break (fabrication + false negative + false positive), none of it surfaced. **Fix:** one line —
-  `/^size\s*:/.test((lines[j] ?? '').trim())` (trim mirrors the loop convention; `?? ''` keeps it bounds-safe
-  and never-throwing). No type/contract/worker/UI/backend change. **No-op for every existing fixture** (an awk
-  scan of all 527 repo `.atlas` files found ZERO indented page-level `size:` headers; indented REGION `size:`
-  lines follow a name line and are key-matched, never reaching the bare-line lookahead) ⇒ zero golden drift.
-  — **Tests**: a parser unit test over BOTH tab- and space-indented multi-page variants (pages===2, correct
-  per-page images/sizes/sprite attribution, `malformedRegions` undefined ⇒ no phantom), a column-0
-  regression-guard, and a new ingest integration test (`group-spine-multipage.test.ts`) asserting both page
-  images are referenced and neither is mis-flagged orphan (locks the honesty fix end-to-end). parsers 46→48,
-  ingest 28→29. Review verdict: **SHIP** (zero blockers/majors; reviewer re-ran the gate + re-reproduced the
-  bug). Gate: typecheck + parsers (48) + ingest (29) + analysis (148) + full vitest + lint green.
+- **(Spine) lookahead границы страниц multi-page `.atlas` — trim перед regex-ом, чтобы заголовок отступленной страницы `size:`
+  на странице 2+ не был проглочен** (`docs/improvements/round27-spine-pageheader.md`)
+  — page-start lookahead в `parseSpineAtlasText` тестировал `/^size\s*:/` против СЫРОЙ не-trimmed заглядываемой
+  строки, тогда как каждая другая классификация в цикле использует trimmed-строку. Первая страница маскируется
+  `!page` short-circuit-ом, но на **странице 2+** современный indented page-заголовок `size:` Spine 4.x проваливал
+  regex → вторая текстурная страница **молча роняласьl**, фантомный full-page спрайт отравлял анализ occupancy/wasted-region
+  страницы 1, а реальное изображение page-2 ошибочно помечалось как orphan — слом честности по инварианту 3
+  (фабрикация + ложный негатив + ложный позитив), ничего из этого не всплывало. **Фикс:** одна строка —
+  `/^size\s*:/.test((lines[j] ?? '').trim())` (trim зеркалит конвенцию цикла; `?? ''` держит его bounds-safe
+  и never-throwing). Без изменений типа/контракта/воркера/UI/бэкенда. **No-op для каждой существующей фикстуры** (awk-скан
+  всех 527 `.atlas` файлов репо нашёл НОЛЬ отступленных page-level `size:` заголовков; отступленные REGION `size:`
+  строки следуют за строкой имени и матчатся по ключу, никогда не доходя до bare-line lookahead) ⇒ ноль golden-дрейфа.
+  — **Тесты**: парсерный unit-тест над ОБОИМИ tab- и space-отступленными multi-page вариантами (pages===2, корректное
+  per-page изображения/размеры/атрибуция спрайтов, `malformedRegions` undefined ⇒ нет фантома), column-0
+  regression-guard, и новый ingest-интеграционный тест (`group-spine-multipage.test.ts`), утверждающий что оба page-
+  изображения ссылаются и ни одно не помечено ошибочно orphan (фиксирует honesty-фикс end-to-end). parsers 46→48,
+  ingest 28→29. Вердикт ревью: **SHIP** (ноль блокеров/мажоров; ревьюер перезапустил gate + воспроизвёл
+  баг). Gate: typecheck + parsers (48) + ingest (29) + analysis (148) + полный vitest + lint зелёные.
 
-## Round 26 — selection (2 picks; all shipped) — 2026-06-29
-Selection (strict bar, thin space): 4-lens brainstorm → 11 candidates → a skeptical judge that VERIFIED each
-premise against code and picked only 2 honesty/correctness wins, dropping 9 (folder-keyed bundles = speculative
-new capability; minify-JSON = self-marginal; PNG bit-depth = unmeasurable estimate; MAX_TEXTURE_SIZE probe =
-rarely fires; wasted-alpha WebP confound = narrow + presentation-only; loose-transcode size guard = uncertain;
-correlateRuntimeDelta = the moat direction but too broad for a contained round; runtime regression tests + R1
-estimate labeling = no user-facing capability). Designs in `docs/improvements/round26-*.md`.
+## Раунд 26 — отбор (2 pick-а; все отгружены) — 2026-06-29
+Отбор (строгая планка, тонкое пространство): brainstorm в 4 линзы → 11 кандидатов → скептический судья, который ПРОВЕРИЛ каждую
+посылку против кода и выбрал только 2 выигрыша честности/корректности, отбросив 9 (folder-keyed bundles = спекулятивная
+новая способность; minify-JSON = само-маргинально; PNG bit-depth = неизмеримая оценка; MAX_TEXTURE_SIZE проба =
+редко срабатывает; wasted-alpha WebP confound = узко + только презентация; loose-transcode size guard = неопределённо;
+correlateRuntimeDelta = направление moat-а, но слишком широко для замкнутого раунда; runtime-регрессионные тесты + R1
+лейблинг оценки = нет user-facing способности). Дизайны в `docs/improvements/round26-*.md`.
 
-- **#3 texture-bleeding detector — lights the dead teal `bleeding` overlay via pure frame-adjacency**
+- **#3 детектор texture-bleeding — зажигает мёртвый бирюзовый оверлей `bleeding` через чистую frame-adjacency**
   (`docs/improvements/round26-bleeding-detector.md`)
-  — `OverlayZone.kind` already included `'bleeding'` and FilmViewer already styled it teal, but **nothing ever
-  emitted it** — texture bleeding (1px color seams when the GPU's linear/mipmap sampler reaches across a 0-gutter
-  frame boundary, a classic PixiJS/Phaser pitfall) was never diagnosed, and we already ship the FIX (edge-extrude).
-  **New pure rule** `bleedingFinding(atlas, cfg)` (`packages/analysis/src/rules.ts`) scans `Atlas.sprites[].frame`
-  (integer rects, ZERO decode) for PAIRS sharing an edge with EXACTLY 0px gap AND strict `>0` perpendicular overlap
-  (corner-only touches excluded), skipping rotated + de-aliasing same-rect frames (one GPU region can't bleed
-  against itself), bucketed by edge coordinate for O(n·k). Gated by `minPairs` (default 4) / `warnPairs` (16);
-  emits ONE Finding with ONE `{kind:'bleeding', rects: thin 1px seam strips}` overlay (FilmViewer renders it
-  generically — **no UI change**). **Invariant 5/3 honesty (the load-bearing constraint):** it carries **NO
-  `estimate` at all** — this is a CORRECTNESS finding, not a saving (edge-extrude can GROW the sheet, so any
-  disk/VRAM claim would be a lie); nothing flows into `potentialDiskSaved`/totals. Copy is the **conditional honest
-  hedge** ("IF your sprites use linear/trilinear filtering or mipmaps … nearest-neighbor pixel art is unaffected").
-  Fires in-browser by default (in `DEFAULT_THRESHOLDS`); **CLI byte-identical** (not in `resolveThresholds` + the
-  `if (!cfg.bleeding) return null` guard). Deterministic (integer-only, stable ordering). **No worker/UI/backend
-  change.**
-  — **Golden reconciliation (honest):** all three existing `ATLAS_CASES` goldens were inspected by frame
-  coordinates — each has ≥10px padding (no touching pairs) so each stays silent and its `expected.json` is
-  UNCHANGED (no blanket update). **Tests** (`analysis.test.ts`, 13 inline cases): touching pair counted + 1px
-  strip + `estimate` undefined (the invariant-5 assertion); 1px-gap padded → null; corner-only → null;
-  below-minPairs → null; warn boundary; rotated excluded; aliased-same-rect not counted; no-config → null;
-  `analyze()` emits bleeding with NOTHING in `totals.potentialDiskSaved`; padded atlas silent. i18n:
-  `find.bleeding.{title,detail,fix}` ×9 (plural on `{pairs}`, identical placeholders; render-drift + catalogs
-  parity green). Review verdict: **SHIP** (zero blockers/majors; honestyOk). Gate: typecheck + analysis (148) +
-  i18n (25) + budget (31) + full vitest + lint green.
+  — `OverlayZone.kind` уже включал `'bleeding'`, а FilmViewer уже стилизовал его бирюзовым, но **ничто его никогда
+  не эмитило** — texture bleeding (1px цветовые швы, когда linear/mipmap-семплер GPU дотягивается через границу фрейма
+  с 0-gutter, классическая ловушка PixiJS/Phaser) никогда не диагностировался, а мы уже отгружаем ФИКС (edge-extrude).
+  **Новое чистое правило** `bleedingFinding(atlas, cfg)` (`packages/analysis/src/rules.ts`) сканирует `Atlas.sprites[].frame`
+  (integer rect-ы, НОЛЬ декода) на ПАРЫ, делящие ребро с РОВНО 0px зазором И строго `>0` перпендикулярным перекрытием
+  (corner-only касания исключены), пропуская повёрнутые + де-алиася same-rect фреймы (один GPU-регион не может bleed-ить
+  сам против себя), bucketed по edge-координате для O(n·k). Гейтится `minPairs` (default 4) / `warnPairs` (16);
+  эмитит ОДИН Finding с ОДНИМ `{kind:'bleeding', rects: тонкие 1px полоски шва}` оверлеем (FilmViewer рендерит его
+  обобщённо — **без изменения UI**). **Честность по инварианту 5/3 (нагруженное ограничение):** он не несёт **НИКАКОЙ
+  `estimate` вообще** — это finding КОРРЕКТНОСТИ, не saving (edge-extrude может УВЕЛИЧИТЬ шит, так что любая
+  disk/VRAM-заявка была бы ложью); ничто не течёт в `potentialDiskSaved`/итоги. Текст это **условный честный
+  hedge** («ЕСЛИ ваши спрайты используют linear/trilinear фильтрацию или mipmap-ы … nearest-neighbor pixel art не затронут»).
+  Срабатывает в браузере по умолчанию (в `DEFAULT_THRESHOLDS`); **CLI байт-в-байт** (нет в `resolveThresholds` +
+  guard `if (!cfg.bleeding) return null`). Детерминированно (только integer, стабильный порядок). **Без изменений воркера/UI/бэкенда.**
+  — **Сверка golden (честная):** все три существующих `ATLAS_CASES` golden-а проинспектированы по координатам
+  фреймов — у каждого ≥10px padding (нет касающихся пар), так что каждый остаётся тихим и его `expected.json`
+  НЕИЗМЕНЁН (без blanket-обновления). **Тесты** (`analysis.test.ts`, 13 inline-кейсов): касающаяся пара посчитана + 1px
+  полоска + `estimate` undefined (assertion инварианта 5); 1px-зазор padded → null; corner-only → null;
+  below-minPairs → null; граница warn; повёрнутые исключены; aliased-same-rect не посчитан; no-config → null;
+  `analyze()` эмитит bleeding с НИЧЕМ в `totals.potentialDiskSaved`; padded-атлас тихий. i18n:
+  `find.bleeding.{title,detail,fix}` ×9 (plural на `{pairs}`, одинаковые плейсхолдеры; render-drift + catalogs
+  parity зелёные). Вердикт ревью: **SHIP** (ноль блокеров/мажоров; honestyOk). Gate: typecheck + analysis (148) +
+  i18n (25) + budget (31) + полный vitest + lint зелёные.
 
-- **#6 de-overlap exact-duplicate dropped copies vs their own format/alpha/strippable savings — removes a
+- **#6 де-overlap exact-duplicate сброшенных копий vs их собственный format/alpha/strippable saving — убирает
   headline disk over-claim** (`docs/improvements/round26-dedup-overclaim.md`)
-  — `analyze.ts` summed the exact-dedup term `perDisk*(n-1)` AND, via the per-ref `bestSavedByRef` running-max,
-  the format/alpha/strippable saving of EVERY loose image — **including the to-be-dropped duplicate copies**.
-  Those files vanish on dedup, so their per-ref bumps are **phantom**: a folder of 2 byte-identical
-  AVIF-transcodable PNGs reported dup(10k)+format-b(4k phantom)+format-a(4k)=18k when the achievable max is 14k.
-  This inflated `metric.saveable` — the FIRST number the user sees (invariant 5 over-claim). **Fix:** when adding
-  the exact-dup term, for each group revert `Σ bestSavedByRef[droppedRef]` (relatedRefs ≠ assetRef) while keeping
-  the dedup term and the KEPT copy's full MAX contribution. The subtraction is EXACT (the running-max final value
-  == total contributed for that ref); uses the SAME `duplicateExactFindings` grouping that charges the disk term
-  (not `buildDedupGroups`); generalizes to atlas-page dups with no branch. The corrected total is always ≤ the old
-  one (we only ever STOP over-claiming, never inflate), never negative. Per-finding estimates each stay honest
-  standalone; VRAM totals untouched (dup `vramBytesSaved` is display-only, never summed). **No core/contract/
-  worker/UI/backend change.** CLI: the dup block DOES run there (it passes `features` with `contentHash`) but the
-  only revertable per-ref saving on the CLI path is strippable-metadata, so it correctly reverts a phantom
-  strippable bump on a dropped dup copy too (the shipped comment is honest about this — a reviewer-caught false
-  "block is skipped" claim was corrected).
-  — **Tests** (`analysis.test.ts`, TDD): the new dup+format case asserts `potentialDiskSaved===14000` (was 18000),
-  the three-way MAX+dup case `===16000` (was 22000), an atlas-page dup `===14000`, plus a regression (dup with no
-  format ⇒ 10000, byte-identical) and a non-dup sanity (different hashes ⇒ 8000, no spurious subtraction); the
-  three over-claim cases were confirmed (via git-stash) to FAIL under the old code. Review verdict: SHIP after one
-  MAJOR fixed (the false CLI comment). Gate: typecheck + analysis (135) + full vitest green.
+  — `analyze.ts` суммировал exact-dedup член `perDisk*(n-1)` И, через per-ref `bestSavedByRef` running-max,
+  format/alpha/strippable saving КАЖДОГО loose-изображения — **включая будущие-сброшенные дубликатные копии**.
+  Те файлы исчезают при dedup-е, так что их per-ref bump-ы **фантомные**: папка из 2 байт-идентичных
+  AVIF-транскодируемых PNG сообщала dup(10k)+format-b(4k фантом)+format-a(4k)=18k, когда достижимый максимум 14k.
+  Это раздувало `metric.saveable` — ПЕРВОЕ число, которое видит пользователь (over-claim инварианта 5). **Фикс:** при добавлении
+  exact-dup члена, для каждой группы откатывать `Σ bestSavedByRef[droppedRef]` (relatedRefs ≠ assetRef), сохраняя
+  dedup-член и полный MAX-вклад СОХРАНЁННОЙ копии. Вычитание ТОЧНОЕ (финальное значение running-max
+  == суммарный вклад для того ref); использует ТУ ЖЕ группировку `duplicateExactFindings`, что начисляет disk-член
+  (не `buildDedupGroups`); обобщается на atlas-page дубли без branch. Исправленный итог всегда ≤ старого
+  (мы только ПРЕКРАЩАЕМ over-claim, никогда не раздуваем), никогда не отрицателен. Per-finding оценки каждая остаётся честной
+  отдельно; VRAM-итоги нетронуты (dup `vramBytesSaved` display-only, никогда не суммируется). **Без изменений core/contract/
+  воркера/UI/бэкенда.** CLI: dup-блок ТАМ запускается (он передаёт `features` с `contentHash`), но единственный
+  откатываемый per-ref saving на CLI-пути это strippable-metadata, так что он корректно откатывает фантомный
+  strippable bump на сброшенной dup-копии тоже (отгруженный комментарий честен об этом — ложная «block is skipped»
+  заявка, пойманная ревьюером, исправлена).
+  — **Тесты** (`analysis.test.ts`, TDD): новый dup+format кейс утверждает `potentialDiskSaved===14000` (было 18000),
+  three-way MAX+dup кейс `===16000` (было 22000), atlas-page dup `===14000`, плюс регрессия (dup без
+  format ⇒ 10000, байт-в-байт) и non-dup sanity (разные хэши ⇒ 8000, без ложного вычитания); три
+  over-claim кейса подтверждены (через git-stash) FAIL-ить при старом коде. Вердикт ревью: SHIP after one
+  MAJOR fixed (ложный CLI-комментарий). Gate: typecheck + analysis (135) + полный vitest зелёные.
 
-## Round 25 — selection (3 picks; all shipped) — 2026-06-29
-Selection (strict bar): from 10 candidates, picked 3 genuinely valuable + non-overlapping —
-**(#0)** strippable-metadata detector, **(#1)** BMFont XML+binary parsers, **(#2)** resample the
-oversize-clamped TOP tier — and dropped the rest (NPOT-fix net-negative on the default pipeline,
-lowercaseOutputNames footgun, two latent-only/no-round cleanups, two duplicates). Designs each
-went design→skeptic→adversarial-review before impl. Designs live in `docs/improvements/round25-*.md`.
+## Раунд 25 — отбор (3 pick-а; все отгружены) — 2026-06-29
+Отбор (строгая планка): из 10 кандидатов выбрано 3 действительно ценных + непересекающихся —
+**(#0)** детектор strippable-metadata, **(#1)** BMFont XML+binary парсеры, **(#2)** ресемпл
+oversize-clamped ВЕРХНЕГО tier-а — а остальное отброшено (NPOT-fix net-negative на дефолтном пайплайне,
+lowercaseOutputNames footgun, две latent-only/no-round очистки, два дубля). Дизайны каждый
+прошли design→skeptic→adversarial-review перед impl. Дизайны лежат в `docs/improvements/round25-*.md`.
 
-- **#0 strippable-metadata detector (ICC / EXIF / XMP / ancillary chunks) — closes a free-tier honesty gap**
+- **#0 детектор strippable-metadata (ICC / EXIF / XMP / ancillary chunks) — закрывает пробел честности free-tier-а**
   (`docs/improvements/round25-strippable-metadata-detector.md`)
-  — The free diagnosis measured only mime+dims (`readImageInfo`), and `formatFinding` only fires for AVIF/WebP
-  at ≥25% — so a metadata-bloated but otherwise-efficient PNG earned **no verdict**, even though the Pro fix
-  (`transcode`/`recompressPng` → canvas re-encode / oxipng) already strips that metadata. **Fix:** a PURE,
-  header-only, no-decode `strippableMetadataBytes(bytes)` (`packages/parsers/src/image-size.ts`) that walks
-  chunk/marker headers and sums EXACT strippable ancillary bytes — PNG allow-set `{iCCP, eXIf, tEXt, iTXt,
-  zTXt, tIME}` (len+12; `tRNS/pHYs/gAMA/cHRM/sRGB/bKGD/sBIT` deliberately EXCLUDED as they can affect
-  rendering), JPEG `APP1..APP15`+`COM` (2+len; `APP0`/JFIF excluded; stop at SOS/EOI), WebP `VP8X`
-  `EXIF/XMP/ICCP` (size+8); AVIF/unknown → 0. Never throws, bounds-checked, bails to partial. Plumbed via an
-  omit-when-zero spread into **all four** `ImageAsset` literals (`parseImage`, `parseAtlas`, `spine-atlas`,
-  `fnt` — incl. the BMFont-refactored path). A `strippable-metadata` rule (loose + atlas page, default ≥4 KB,
-  info/warn by magnitude) carries **`diskBytesSaved` EXACT only, NEVER `vramBytesSaved`** (invariant 5 — the
-  GPU decodes to RGBA8888 regardless, so VRAM is unchanged) and names the EXISTING oxipng/re-encode fix
-  (invariant 3 — measure, generate nothing). Folder rollup mirrors `formatAggregateFinding`.
-  — **No over-claim (the central risk):** the counted set is a strict subset of ancillary, non-pixel chunks
-  that the fix definitively drops — traced through `fix.worker.ts`: every PNG emission is `convertToBlob` or
-  `oxipng.optimise(getImageData)` (pixels only) with NO raw-byte passthrough anywhere (even prebuilt-atlas
-  PASSTHROUGH re-decodes via `transcode`), so `strippableBytes` is a conservative TRUE LOWER BOUND. Test D
-  (allow-set validation) was satisfied as a documented strict-subset + traced-fix-path analysis (honest in the
-  fixture README that a faithful canvas PNG re-encode is unavailable in Vitest; oxipng `-strip` is the anchor).
-  — **De-overlap refactor:** the two ad-hoc `if (x > fmtSaved) potentialDiskSaved += x − fmtSaved` sites in
-  `analyze.ts` were replaced by ONE per-ref `bestSavedByRef` running-max (`bumpBest`) so format ∩ wasted-alpha ∩
-  strippable contributes **MAX, not SUM** (a ref with fmt=4000/alpha=6000/strip=5000 ⇒ 6000, not 7000); the
-  three pre-existing exact-`potentialDiskSaved` tests stay green. **CLI byte-identical** (`strippableMetadata`
-  is not in `resolveThresholds` ⇒ auto-dropped). **No worker/UI/backend change.**
-  — **Tests/i18n/fixture**: 8 new parser cases (inline byte arrays + truncation + the `parseImage` plumb) +
-  11 new analysis cases (warn/info, `diskBytesSaved` set & `vramBytesSaved` undefined, below-min/absent/no-config
-  → null, fires-through-`analyze`, the three-way MAX===6000, folder rollup); 6 new i18n keys ×9 catalogs with
-  identical placeholders (`render.test` drift + `catalogs.test` parity green; copy says DISK/DOWNLOAD only);
-  hand-authored `fixtures/sample-projects/strippable-metadata/metadata.png` (a real 8443-byte valid PNG with
-  injected `iCCP`+`tEXt`+`tIME`=8347 counted strippable bytes + an uncounted `pHYs`), golden-tested through
-  parse→analyze. Review verdict: **SHIP** (overClaimSafe; zero blockers/majors; reviewer re-ran the full gate
-  + independently traced the no-passthrough fix path). Gate: typecheck + parsers (46) + analysis (130) + i18n
-  (25) + budget (31) + full vitest + lint green.
+  — Бесплатная диагностика мерила только mime+dims (`readImageInfo`), а `formatFinding` срабатывает только для AVIF/WebP
+  при ≥25% — так что metadata-раздутый но в остальном эффективный PNG не получал **никакого вердикта**, хотя Pro-фикс
+  (`transcode`/`recompressPng` → canvas re-encode / oxipng) уже срезает эту метаданную. **Фикс:** ЧИСТЫЙ,
+  header-only, без декода `strippableMetadataBytes(bytes)` (`packages/parsers/src/image-size.ts`), который обходит
+  chunk/marker заголовки и суммирует ТОЧНЫЕ strippable-ancillary байты — PNG allow-set `{iCCP, eXIf, tEXt, iTXt,
+  zTXt, tIME}` (len+12; `tRNS/pHYs/gAMA/cHRM/sRGB/bKGD/sBIT` намеренно ИСКЛЮЧЕНЫ, так как могут влиять на
+  рендеринг), JPEG `APP1..APP15`+`COM` (2+len; `APP0`/JFIF исключены; стоп на SOS/EOI), WebP `VP8X`
+  `EXIF/XMP/ICCP` (size+8); AVIF/unknown → 0. Никогда не бросает, bounds-checked, bail-ит на частичное. Проброшен через
+  omit-when-zero spread во **все четыре** `ImageAsset` литерала (`parseImage`, `parseAtlas`, `spine-atlas`,
+  `fnt` — вкл. BMFont-рефакторенный путь). Правило `strippable-metadata` (loose + atlas page, default ≥4 KB,
+  info/warn по величине) несёт **`diskBytesSaved` ТОЛЬКО ТОЧНО, НИКОГДА `vramBytesSaved`** (инвариант 5 —
+  GPU декодирует в RGBA8888 независимо, так что VRAM не меняется) и называет СУЩЕСТВУЮЩИЙ oxipng/re-encode фикс
+  (инвариант 3 — измеряем, ничего не генерируем). Folder rollup зеркалит `formatAggregateFinding`.
+  — **Без over-claim (центральный риск):** посчитанное множество это строгое подмножество ancillary, не-пиксельных chunk-ов,
+  которые фикс определённо роняет — прослежено через `fix.worker.ts`: каждая эмиссия PNG это `convertToBlob` или
+  `oxipng.optimise(getImageData)` (только пиксели) БЕЗ raw-byte passthrough нигде (даже prebuilt-atlas
+  PASSTHROUGH пере-декодирует через `transcode`), так что `strippableBytes` это консервативная ИСТИННАЯ НИЖНЯЯ ГРАНИЦА. Тест D
+  (валидация allow-set) удовлетворён как задокументированный строгий-subset + traced-fix-path анализ (честно в
+  README фикстуры, что верный canvas PNG re-encode недоступен в Vitest; oxipng `-strip` это якорь).
+  — **De-overlap рефактор:** два ad-hoc `if (x > fmtSaved) potentialDiskSaved += x − fmtSaved` места в
+  `analyze.ts` заменены ОДНИМ per-ref `bestSavedByRef` running-max (`bumpBest`), так что format ∩ wasted-alpha ∩
+  strippable вносит **MAX, не SUM** (ref с fmt=4000/alpha=6000/strip=5000 ⇒ 6000, не 7000); три
+  ранее существующих exact-`potentialDiskSaved` теста остаются зелёными. **CLI байт-в-байт** (`strippableMetadata`
+  нет в `resolveThresholds` ⇒ авто-сброшен). **Без изменений воркера/UI/бэкенда.**
+  — **Тесты/i18n/фикстура**: 8 новых парсерных кейсов (inline byte arrays + truncation + плюмбинг `parseImage`) +
+  11 новых analysis-кейсов (warn/info, `diskBytesSaved` set & `vramBytesSaved` undefined, below-min/absent/no-config
+  → null, срабатывает-через-`analyze`, three-way MAX===6000, folder rollup); 6 новых i18n-ключей ×9 каталогов с
+  одинаковыми плейсхолдерами (`render.test` drift + `catalogs.test` parity зелёные; текст говорит только DISK/DOWNLOAD);
+  вручную написанная `fixtures/sample-projects/strippable-metadata/metadata.png` (реальный 8443-байтный валидный PNG с
+  инъецированными `iCCP`+`tEXt`+`tIME`=8347 посчитанных strippable байт + непосчитанный `pHYs`), golden-тестированный через
+  parse→analyze. Вердикт ревью: **SHIP** (overClaimSafe; ноль блокеров/мажоров; ревьюер перезапустил полный gate
+  + независимо проследил no-passthrough fix-путь). Gate: typecheck + parsers (46) + analysis (130) + i18n
+  (25) + budget (31) + полный vitest + lint зелёные.
 
-- **#1 BMFont XML + binary `.fnt` parsers — TEXT-format parity completion**
+- **#1 BMFont XML + binary `.fnt` парсеры — завершение паритета TEXT-формата**
   (`docs/improvements/round25-bmfont-xml-binary-parsers.md`)
-  — `packages/ingest` detected XML (`<`-led) and binary (`BMF`+0x03) `.fnt` by magic and dumped BOTH to
-  `unparsed[]` as "not in TEXT format" — even though binary is the **default** BMFont.exe/libGDX output and
-  carries the identical font + glyph data. **Fix:** `parseFntXml(text)` + `parseFntBinary(bytes)` in
-  `packages/parsers/src/fnt.ts`, both producing **byte-identical `FntPage[]`** to `parseFntText`. First a
-  behavior-preserving refactor lifts the shared page-assembly + glyph-routing + recovery into
-  `buildFntPages(raw: RawFnt)` so all three front-ends share ONE recovery implementation (byte-identity by
-  construction; all pre-existing TEXT tests + the `bmfont-sparse` fixture pass unchanged). `parseFntXml` is a
-  dep-free, DOM-free, worker-safe attribute scanner with the same `num/fin` NaN-preserving discipline + minimal
-  entity decode. `parseFntBinary` is a bounds-checked AngelCode **BMF v3** block walker (info `fontName`@14;
+  — `packages/ingest` детектил XML (`<`-led) и binary (`BMF`+0x03) `.fnt` по magic-у и сбрасывал ОБА в
+  `unparsed[]` как «not in TEXT format» — хотя binary это **дефолтный** вывод BMFont.exe/libGDX и
+  несёт идентичные данные шрифта + глифов. **Фикс:** `parseFntXml(text)` + `parseFntBinary(bytes)` в
+  `packages/parsers/src/fnt.ts`, оба производящие **байт-идентичные `FntPage[]`** к `parseFntText`. Сначала
+  behavior-preserving рефактор поднимает общую page-assembly + glyph-routing + recovery в
+  `buildFntPages(raw: RawFnt)`, так что все три front-end-а делят ОДНУ реализацию recovery (byte-identity по
+  построению; все ранее существующие TEXT-тесты + фикстура `bmfont-sparse` проходят без изменений). `parseFntXml` это
+  dep-free, DOM-free, worker-safe attribute-сканер с той же `num/fin` NaN-сохраняющей дисциплиной + минимальным
+  entity-декодом. `parseFntBinary` это bounds-checked AngelCode **BMF v3** block-walker (info `fontName`@14;
   common `lineHeight` u16@0/`scaleW`@4/`scaleH`@6; pages uniform-stride NUL-terminated; char 20B `id` u32@0,
-  `x/y/w/h` u16@4-10, `page` u8@18; kerning 10B) that **never throws** — every multi-byte read bounds-checked,
-  the walk stops on any short/OOB read and builds on what was collected; wrong-magic / v1-v2 / truncated all
-  degrade to `[]` ⇒ honest `unparsed` (never silent-dropped). Ingest now dispatches by bounds-safe magic with a
-  try/catch backstop. **No core/worker/UI/backend change** (downstream `parseFntPage` → worker → `font-glyph-page`
-  readout → per-glyph `malformedGlyphs` recovery is reused verbatim); pure, deterministic.
-  — **Fixtures/tests**: extended the EXISTING generator (`fixtures/_generator/generate.mjs` Case 12, the single
-  source of truth) with an `encodeBmfBinary` helper + two sibling `bmfont-sparse-xml/` and `bmfont-sparse-bin/`
-  emitted from the SAME glyph data + SAME `font.png` + SAME `expected.json` (all three byte-identical, md5
-  `8714885c…`; reproducible by `node fixtures/_generator/generate.mjs`). Parser unit tests assert
-  `toEqual(parseFntText(...))` byte-identity for XML + binary, binary OOB-glyph recovery, XML quote/entity, and
-  binary/XML defensive cases; the two `group-fnt.test.ts` XML/binary cases were rewritten to assert a bmfont
-  atlas (+ binary-no-page → missing, junk-`BMF\x03` → unparsed); the single-fixture analysis bmfont test became
-  an `it.each` 3-dir loop asserting the identical `expected.json` through the REAL `groupFiles → parseFntPage →
-  analyze` path. Review verdict: **SHIP** (zero blockers/majors; reviewer re-ran the gate + re-verified every
-  binary offset against the AngelCode spec). Gate: typecheck + parsers (37) + ingest (28) + analysis (119) +
-  full vitest + lint green.
+  `x/y/w/h` u16@4-10, `page` u8@18; kerning 10B), который **никогда не бросает** — каждое multi-byte чтение bounds-checked,
+  обход стопится на любом коротком/OOB чтении и строит на собранном; wrong-magic / v1-v2 / truncated всё
+  деградирует в `[]` ⇒ честный `unparsed` (никогда silent-dropped). Ingest теперь диспатчит по bounds-safe magic-у с
+  try/catch backstop-ом. **Без изменений core/воркера/UI/бэкенда** (downstream `parseFntPage` → worker → `font-glyph-page`
+  readout → per-glyph `malformedGlyphs` recovery переиспользован дословно); чистый, детерминированный.
+  — **Фикстуры/тесты**: расширен СУЩЕСТВУЮЩИЙ генератор (`fixtures/_generator/generate.mjs` Case 12, единственный
+  источник правды) хелпером `encodeBmfBinary` + два sibling `bmfont-sparse-xml/` и `bmfont-sparse-bin/`,
+  эмитированных из ТЕХ ЖЕ данных глифов + ТОГО ЖЕ `font.png` + ТОГО ЖЕ `expected.json` (все три байт-идентичны, md5
+  `8714885c…`; воспроизводимо через `node fixtures/_generator/generate.mjs`). Парсерные unit-тесты утверждают
+  `toEqual(parseFntText(...))` byte-identity для XML + binary, binary OOB-glyph recovery, XML quote/entity, и
+  binary/XML defensive кейсы; два `group-fnt.test.ts` XML/binary кейса переписаны утверждать bmfont
+  атлас (+ binary-no-page → missing, junk-`BMF\x03` → unparsed); single-fixture analysis bmfont тест стал
+  `it.each` 3-dir циклом, утверждающим идентичный `expected.json` через РЕАЛЬНЫЙ путь `groupFiles → parseFntPage →
+  analyze`. Вердикт ревью: **SHIP** (ноль блокеров/мажоров; ревьюер перезапустил gate + перепроверил каждый
+  binary offset против AngelCode-спеки). Gate: typecheck + parsers (37) + ingest (28) + analysis (119) +
+  полный vitest + lint зелёные.
 
-- **#2 resample the oversize-clamped TOP tier (effectiveScale<1) — close the r24#0 gap**
+- **#2 ресемпл oversize-clamped ВЕРХНЕГО tier-а (effectiveScale<1) — закрыть пробел r24#0**
   (`docs/improvements/round25-resample-oversize-clamped-top-tier.md`)
-  — The r24#0 lanczos3 resample post-pass gated its candidate-push and its honest hash-skip note on
-  `tier.scale < 1`. But an OVERSIZE source is clamped by `clampToMaxEdge` so the TOP tier (`tier.scale === 1`)
-  still downscales: `effectiveScale < 1`, `dst < src`, and `c2d.drawImage` runs the browser kernel — yet the
-  better lanczos3 candidate was skipped (and under `hashFilenames` no skip note emitted) precisely on the
-  largest, highest-download page. **Fix:** one per-tier local `tierIsDownscale = dst.w < srcW || dst.h < srcH`
-  (the DECODED-source-rect truth condition, robust to a malformed manifest whose `srcSize` diverges from the
-  real PNG) computed right after `dst`, replacing the `tier.scale < 1` guard at BOTH data-flow sites (the
-  candidate push + the hash-skip note). The `recordResampleCandidate` site (gated on
-  `resampleTierTargets.length > 0`) is left textually unchanged and inherits the fix transitively (that array
-  is populated only at the now-fixed push); a comment records this so no one edits it redundantly. Two
-  now-false comments (claiming the top tier is always skipped) corrected. **Default path byte-identical**:
-  resample stays fully opt-in (backend + per-run consent + `op` + token + `hashFilenames` OFF); `vramSaved`
-  untouched (invariant 5 — same dims, no VRAM/disk claim, only the MEASURED HF-energy delta). No
-  contract/wire/backend/i18n change.
-  — **Tests** (`apps/web/test/tier-worker.test.ts`): `runTierLoop` now models `resampleCandidates` with
-  `srcW=srcSize.w` and a parameterized `maxEdge` (self-calibrated `floor(max(banner.w,banner.h)*0.6)=60` from
-  the real 100×50 `banner.png`), reproducing the defect through the REAL `clampToMaxEdge` path. **T14** —
-  clamped top tier produces a top-tier candidate (banner count===3; FAILS under the old `tier.scale<1` model);
-  **T15** — no top-tier candidate when not oversized (count===2, over-fire guard); **T16** — gate off ⇒ 0
-  candidates; plus an `effectiveScale<1 ⇔ dst<src` equivalence assertion. Review verdict: **SHIP** (zero
-  blockers/majors; reviewer re-ran the gate). Gate: typecheck + `tier-worker` (7) + full vitest green
+  — r24 lanczos3 resample post-pass гейтил свой candidate-push и честную hash-skip заметку на
+  `tier.scale < 1`. Но OVERSIZE источник clamp-ится `clampToMaxEdge`, так что ВЕРХНИЙ tier (`tier.scale === 1`)
+  всё равно downscale-ит: `effectiveScale < 1`, `dst < src`, и `c2d.drawImage` запускает kernel браузера — однако
+  лучший lanczos3 кандидат пропускался (и при `hashFilenames` skip-заметка не эмитилась) именно на
+  крупнейшей, highest-download странице. **Фикс:** один per-tier локальный `tierIsDownscale = dst.w < srcW || dst.h < srcH`
+  (DECODED-source-rect истинное условие, устойчивое к малформ-манифесту, чей `srcSize` расходится с
+  реальным PNG), вычисленный сразу после `dst`, заменяющий guard `tier.scale < 1` на ОБОИХ data-flow местах (
+  candidate push + hash-skip заметка). Место `recordResampleCandidate` (гейтнутое на
+  `resampleTierTargets.length > 0`) оставлено текстуально неизменным и наследует фикс транзитивно (тот массив
+  заполняется только на теперь-фикснутом push-е); комментарий это записывает, чтобы никто не правил его избыточно. Два
+  теперь-ложных комментария (заявляющих что верхний tier всегда пропускается) исправлены. **Дефолтный путь байт-в-байт**:
+  resample остаётся полностью opt-in (backend + per-run consent + `op` + token + `hashFilenames` OFF); `vramSaved`
+  нетронут (инвариант 5 — те же dims, нет VRAM/disk-заявки, только ИЗМЕРЕННАЯ HF-energy дельта). Без
+  изменений contract/wire/backend/i18n.
+  — **Тесты** (`apps/web/test/tier-worker.test.ts`): `runTierLoop` теперь моделирует `resampleCandidates` с
+  `srcW=srcSize.w` и параметризованным `maxEdge` (само-калиброванный `floor(max(banner.w,banner.h)*0.6)=60` из
+  реального 100×50 `banner.png`), воспроизводя дефект через РЕАЛЬНЫЙ путь `clampToMaxEdge`. **T14** —
+  clamped верхний tier производит top-tier кандидата (banner count===3; FAIL-ит при старой модели `tier.scale<1`);
+  **T15** — нет top-tier кандидата когда не oversized (count===2, over-fire guard); **T16** — gate off ⇒ 0
+  кандидатов; плюс assertion эквивалентности `effectiveScale<1 ⇔ dst<src`. Вердикт ревью: **SHIP** (ноль
+  блокеров/мажоров; ревьюер перезапустил gate). Gate: typecheck + `tier-worker` (7) + полный vitest зелёные
   (web 476 +1 skipped, fix 429, analysis 117, …).
 
-## Round 24 — selection (#0 shipped) — 2026-06-29
-Pick: **(#0) libvips lanczos3 resample sidecar op + honest measured-quality receipt** — the scale-tier
-DOWNSCALE path uses the browser canvas resampler, which can't be steered to a specific kernel. This adds an
-OPT-IN backend `resample` op (libvips lanczos3) that downscales the full-res top tier with a high-quality
-kernel and REPLACES the browser tile at the SAME dimensions/format. DISK/QUALITY-only (invariant 5: same
-dims ⇒ no VRAM, no disk saving); the receipt carries ONLY a MEASURED high-frequency-energy retention delta
-(invariant 3: a fact, never a "sharper/cleaner" verdict — lanczos3's extra HF energy includes ringing).
+## Раунд 24 — отбор (#0 отгружено) — 2026-06-29
+Pick: **(#0) sidecar-op libvips lanczos3 resample + честный измеренный quality-чек** — путь scale-tier
+DOWNSCALE использует canvas-ресемплер браузера, который нельзя направить на конкретный kernel. Это добавляет
+OPT-IN backend `resample` op (libvips lanczos3), который downscale-ит full-res верхний tier высококачественным
+kernel-ом и ЗАМЕНЯЕТ браузерную плитку при ТЕХ ЖЕ размерах/формате. Только DISK/QUALITY (инвариант 5: те же
+dims ⇒ нет VRAM, нет disk-saving); чек несёт ТОЛЬКО ИЗМЕРЕННУЮ дельту удержания high-frequency-energy
+(инвариант 3: факт, никогда вердикт «sharper/cleaner» — лишняя HF-энергия lanczos3 включает ringing).
 
-- **#0 libvips lanczos3 resample op (sidecar) + measured high-frequency-energy receipt**
+- **#0 op libvips lanczos3 resample (sidecar) + measured high-frequency-energy чек**
   (`docs/improvements/round24-libvips-lanczos3-resample-op-sidec.md`)
-  — **Sidecar** (`apps/encoder`): new `Resample` op + `vips-lanczos3` profile in the closed allowlists
-  (`encode.go`), a mock-testable `ResampleEncoder` shelling to a pinned `vips` over `/dev/stdin`→`/dev/stdout`
-  (no temp files; `thumbnail_source … --size force` for EXACT tier dims, `.png[strip]` deterministic;
-  `resample.go`), Dispatcher arm + `VipsPath` config + `main.go` wiring, and a pinned `libvips-tools` apt
-  package + stable `/usr/local/bin/vips` symlink in the Dockerfile. The op-agnostic gateway (`apps/api`)
-  needed ZERO changes (verified). W/H ASYMMETRY: for resample they are the OUTPUT target the full-res source
-  is downscaled TO (documented; tested). **Client**: `'resample'` in `NativeOpKind` + `profileForOp` +
-  `RESAMPLE_PROFILE`; pure Node-tested HF-energy measure (mean |Laplacian| over luma → clamped retention
-  delta, `resample-quality.ts`) + pure gated predicate (`resample-collect.ts`); a GATED worker tier post-pass
-  that uploads the full-res top tier (PNG-re-encoded, M2), gets the vips tile, measures the delta, re-encodes
-  to each tier format, and replaces the browser tile IN PLACE. **B1 (cache-busting integrity)**: chose the
-  design-accepted simpler v1 — resample is GATED OFF when `hashFilenames` is on (an in-place replace under
-  content-hash names would leave the hash describing the OLD bytes), with an honest tier-path skip note;
-  never an unconditional in-place replace. **B2**: a SEPARATE new `fix.backend.resampleTierHint` key on the
-  tier path only — `whyNoKernel` left UNTOUCHED (still true at its 2 non-tier sites). **M1**: the receipt
-  field is `qualityHfEnergyDelta` ("retained N% more high-frequency content at the same file size"), clamped
-  ≥0, ≤0 keeps the browser tile (delta 0, not failed); NO VRAM/disk field. ADDITIVE: backend off / op not
-  selected / declined / hashFilenames on ⇒ the existing OffscreenCanvas tier downscale runs ⇒ byte-identical.
-  SAFETY (round12/13 parity): opt-in, per-run consent, entitlement-gated, sidecar non-root/RO/stdin-stdout.
-  Live e2e deferred (deploy creds-blocked); shipped behind a mock Encoder + pure helpers like toktx/pngquant.
-  — **Tests**: sidecar `resample_test.go` (closed flags, op/profile/dims reject pre-exec, missing-binary
-  no-byte-leak, `/bin/cat` stdin→stdout passthrough, empty-output fail, Dispatcher routing) + allowlist
-  assertions + `server_test.go` (op-propagation success, op×profile 415, full-res caps 413/415); TS
+  — **Sidecar** (`apps/encoder`): новый `Resample` op + профиль `vips-lanczos3` в закрытых allowlist-ах
+  (`encode.go`), mock-тестируемый `ResampleEncoder`, шеллящий в pinned `vips` через `/dev/stdin`→`/dev/stdout`
+  (без temp-файлов; `thumbnail_source … --size force` для ТОЧНЫХ tier-dims, `.png[strip]` детерминированный;
+  `resample.go`), Dispatcher arm + `VipsPath` config + `main.go` wiring, и pinned `libvips-tools` apt-
+  пакет + стабильный `/usr/local/bin/vips` symlink в Dockerfile. op-agnostic gateway (`apps/api`)
+  потребовал НОЛЬ изменений (проверено). ASYMMETRY W/H: для resample они это OUTPUT-target, в который full-res источник
+  downscale-ится ДО (задокументировано; протестировано). **Client**: `'resample'` в `NativeOpKind` + `profileForOp` +
+  `RESAMPLE_PROFILE`; pure Node-тестированный HF-energy measure (mean |Laplacian| по luma → clamped retention
+  delta, `resample-quality.ts`) + чистый гейтнутый предикат (`resample-collect.ts`); ГЕЙТНУТЫЙ worker tier post-pass,
+  который загружает full-res верхний tier (PNG-re-encoded, M2), получает vips-плитку, измеряет дельту, пере-кодирует
+  в каждый tier-формат и заменяет браузерную плитку IN PLACE. **B1 (cache-busting integrity)**: выбран
+  design-accepted более простой v1 — resample ГЕЙТНУТ OFF когда `hashFilenames` включён (in-place замена под
+  content-hash именами оставила бы хэш описывающим СТАРЫЕ байты), с честной tier-path skip-заметкой;
+  никогда безусловная in-place замена. **B2**: ОТДЕЛЬНЫЙ новый ключ `fix.backend.resampleTierHint` только на
+  tier-пути — `whyNoKernel` оставлен НЕТРОНУТЫМ (всё ещё истинен на своих 2 non-tier местах). **M1**: поле чека это
+  `qualityHfEnergyDelta` («сохранено N% больше high-frequency content при том же размере файла»), clamped
+  ≥0, ≤0 оставляет браузерную плитку (delta 0, не failed); НЕТ VRAM/disk поля. ADDITIVE: backend off / op не
+  выбран / declined / hashFilenames on ⇒ существующий OffscreenCanvas tier downscale запускается ⇒ байт-в-байт.
+  SAFETY (паритет round12/13): opt-in, per-run consent, entitlement-gated, sidecar non-root/RO/stdin-stdout.
+  Live e2e отложен (deploy creds-blocked); отгружено за mock Encoder-ом + чистыми хелперами как toktx/pngquant.
+  — **Тесты**: sidecar `resample_test.go` (closed flags, op/profile/dims reject pre-exec, missing-binary
+  no-byte-leak, `/bin/cat` stdin→stdout passthrough, empty-output fail, Dispatcher routing) + allowlist-
+  assertion-ы + `server_test.go` (op-propagation success, op×profile 415, full-res caps 413/415); TS
   `resample-quality.test.ts` (sharp>blur, identical=0, ≤0 clamp, flat=0, determinism) +
-  `resample-collect.test.ts` (opt-in gate + the B1 hashFilenames interaction) + i18n drift (6 new keys × 9
-  catalogs; `whyNoKernel` asserted unchanged). Review verdict: SALVAGEABLE → all 2 blockers + 2 majors fixed.
-  Gate: typecheck + vitest + lint + `go build/vet/test` (encoder + api) green.
+  `resample-collect.test.ts` (opt-in gate + взаимодействие B1 hashFilenames) + i18n drift (6 новых ключей × 9
+  каталогов; `whyNoKernel` утверждён неизменным). Вердикт ревью: SALVAGEABLE → все 2 блокера + 2 мажора фикснуты.
+  Gate: typecheck + vitest + lint + `go build/vet/test` (encoder + api) зелёные.
 
-- **#1 reviewer-MINOR cleanup batch — FilmViewer no-flicker · cross-atlas comparator · gzipLen 0-byte guard**
+- **#1 batch очистки reviewer-MINOR — FilmViewer no-flicker · cross-atlas comparator · gzipLen 0-byte guard**
   (`docs/improvements/round24-reviewer-minor-cleanup-batch-filmv.md`)
-  — Low-risk polish; each fix additive + honest + deterministic, NO measured-number change.
-  **(1) FilmViewer keep-last-frame:** the selected-film re-read effect (`App.tsx`) eagerly called
-  `setSelectedBytes(null)` on the SUCCESS path, unmounting FilmViewer (render gate → no-image) for one re-read
-  → a blank flash on every row click / arrow-scrub. The swap decision is now a PURE total function
+  — Низкорисковая полировка; каждый фикс аддитивный + честный + детерминированный, БЕЗ изменения измеренного числа.
+  **(1) FilmViewer keep-last-frame:** эффект повторного чтения выбранного фильма (`App.tsx`) жадно вызывал
+  `setSelectedBytes(null)` на SUCCESS-пути, размонтируя FilmViewer (render gate → no-image) на одно повторное чтение
+  → пустая вспышка на каждом клике по строке / arrow-scrub. Решение swap-а теперь ЧИСТАЯ тотальная функция
   `filmSelectionAction(hasSelection, hasReader) → 'clear'|'read'` (`apps/web/src/lib/film-selection.ts`,
-  Node-testable since apps/web has no React harness); the effect dispatches over it and DROPS the success-path
-  clear, so the prior real atlas stays mounted until the new bytes resolve. The cancel flag is preserved
-  (newest read always wins; rapid A→B→A never stale-locks). `'clear'` still fires on genuine no-selection /
-  no-reader (honest no-image, never a fabricated film). **(2) cross-atlas comparator unification:**
-  `crossAtlasRedundancyFinding` (`folder.ts`) ordered clusters + picked the representative under
-  `localeCompare` but sorted the OUTPUT sets (`relatedRefs`, `atlases`, the `assetRef` anchor) under bare
-  `.sort()` (code-unit) — these can DISAGREE on mixed-case / non-ASCII names. Both output sorts now use
-  `localeCompare`, so all four ordering sites share ONE collation (matching `manifest.ts`). Output unchanged on
-  pure-ASCII inputs (both collations agree). **(3) gzipLen 0-byte guard + extraction:** the inline `gzipLen`
-  (worker, includeFileSizes='gzip') is extracted to a PURE module (`apps/web/src/worker/gzip-len.ts`) with a
-  leading `bytes.length===0 ⇒ 0` guard — an empty file has no transported bytes, so the prior ~20-byte gzip
-  frame overhead overstated it (same class as the manifest's missing⇒0 rule). Call site byte-identical.
-  **(4) resample top-tier gate:** SKIPPED — out of scope for this design (not present; the resample work is
-  Round 24 #0). — **Tests**: `film-selection.test.ts` (the load-bearing `(true,true)==='read'` regression
-  lock + clear cases), `gzip-len.test.ts` (empty⇒0; compressible >0 and ≤ raw; single-byte >0; determinism,
-  real `CompressionStream` not mocked), `analysis.test.ts` cross-atlas mixed-case anchor (`B.png`/`a.png`:
-  anchor='a.png' under localeCompare, code-unit would pick 'B.png'); existing ASCII goldens unmoved.
-  Gate: typecheck + vitest + lint green.
+  Node-тестируемо, так как в apps/web нет React-harness-а); эффект диспатчит по ней и УБИРАЕТ success-path
+  clear, так что прежний реальный атлас остаётся смонтированным пока новые байты не резолвятся. Cancel-флаг сохранён
+  (новейшее чтение всегда побеждает; быстрое A→B→A никогда не stale-lock-ится). `'clear'` всё ещё срабатывает на подлинном no-selection /
+  no-reader (честный no-image, никогда сфабрикованный фильм). **(2) унификация cross-atlas comparator-а:**
+  `crossAtlasRedundancyFinding` (`folder.ts`) упорядочивал кластеры + выбирал представителя под
+  `localeCompare`, но сортировал OUTPUT-множества (`relatedRefs`, `atlases`, `assetRef` anchor) под bare
+  `.sort()` (code-unit) — они могут РАСХОДИТЬСЯ на mixed-case / non-ASCII именах. Оба output-sort-а теперь используют
+  `localeCompare`, так что все четыре места упорядочивания делят ОДНУ collation (совпадает с `manifest.ts`). Output неизменен на
+  pure-ASCII входах (обе collation-ы согласны). **(3) gzipLen 0-byte guard + extraction:** inline `gzipLen`
+  (worker, includeFileSizes='gzip') вынесен в ЧИСТЫЙ модуль (`apps/web/src/worker/gzip-len.ts`) с
+  ведущим guard-ом `bytes.length===0 ⇒ 0` — у пустого файла нет транспортируемых байт, так что прежний ~20-байтный gzip-
+  frame overhead его завышал (тот же класс, что правило manifest-а missing⇒0). Место вызова байт-в-байт.
+  **(4) resample top-tier gate:** ПРОПУЩЕНО — вне объёма этого дизайна (отсутствует; resample-работа это
+  Round 24 #0). — **Тесты**: `film-selection.test.ts` (нагруженный `(true,true)==='read'` regression-
+  lock + clear-кейсы), `gzip-len.test.ts` (empty⇒0; compressible >0 и ≤ raw; single-byte >0; determinism,
+  реальный `CompressionStream` не замокан), `analysis.test.ts` cross-atlas mixed-case anchor (`B.png`/`a.png`:
+  anchor='a.png' под localeCompare, code-unit выбрал бы 'B.png'); существующие ASCII golden-ы не сдвинуты.
+  Gate: typecheck + vitest + lint зелёные.
 
-## Round 23 — selection (#0 shipped) — 2026-06-29
-Pick: **(#0) bitmap-font (.fnt BMFont) parser + ingest grouping + glyph-page audit** — AngelCode BMFont
-glyph sheets were an unrecognized file type (silently dropped). A parsed `.fnt` page is structurally an
-atlas, so this teaches the pipeline to ingest it and surfaces a font-specific readout BESIDE the generic
-atlas findings it already trips.
+## Раунд 23 — отбор (#0 отгружено) — 2026-06-29
+Pick: **(#0) парсер bitmap-font (.fnt BMFont) + ingest-группировка + glyph-page аудит** — AngelCode BMFont
+glyph-шиты были нераспознанным типом файла (молча сбрасывались). Распарсенная `.fnt` страница структурно это
+атлас, так что это учит пайплайн её ингестить и всплывает font-специфичный readout РЯДОМ с обобщёнными
+atlas-finding-ами, которые она уже триггерит.
 
-- **#0 Bitmap-font (.fnt BMFont) parser + ingest + glyph-page readout**
+- **#0 парсер Bitmap-font (.fnt BMFont) + ingest + glyph-page readout**
   (`docs/improvements/round23-bitmap-font-fnt-bmfont-parser-inge.md`)
-  — new pure `parseFntText(text) → FntPage[]` / `parseFntPage(page, image, opts) → ParseResult`
-  (`packages/parsers/src/fnt.ts`), a faithful **mirror of the Spine `.atlas` module**: never throws,
-  per-glyph recovery via `FntPage.malformedGlyphs` (read by the worker exactly like
-  `SpinePage.malformedRegions`), NaN-preserving numeric reads (a non-finite required field drops the glyph,
-  never coerced to 0), OOB/degenerate-rect recovery, quote-aware `face=`/`file=`. **TEXT format only**; XML
-  (leading `<`) + binary (`BMF\x03`) `.fnt` → honest `unparsed[]`, never silent-dropped. **Multi-page is
-  keyed by `char.page` id** (in BMFont TEXT every `char` line follows ALL `page` lines, so a "most-recent
-  page" rule would dump every glyph on the last page — the skeptic-flagged correctness/determinism defect);
-  pages emitted id-sorted. A whitespace glyph (`width=0 height=0`, e.g. id=32) is skipped, not an error.
-  Each `char` → a `Sprite` (frame x,y,width,height; sourceSize from width/height; `trimmed:false` —
-  xoffset/yoffset are layout offsets, NOT in-page trim, so occupancy stays the honest packed coverage).
-  — ingest `groupFiles` recognizes `.fnt`, resolves each page image **dir-aware** (reusing
-  `resolve`/`keyOf`/`atlasName`), routes it as `GroupedAtlas.kind: 'bmfont'`; XML/binary/empty `.fnt` →
+  — новый чистый `parseFntText(text) → FntPage[]` / `parseFntPage(page, image, opts) → ParseResult`
+  (`packages/parsers/src/fnt.ts`), верное **зеркало модуля Spine `.atlas`**: никогда не бросает,
+  per-glyph recovery через `FntPage.malformedGlyphs` (читается воркером ровно как
+  `SpinePage.malformedRegions`), NaN-сохраняющие numeric-чтения (non-finite required поле роняет глиф,
+  никогда не coerce-ится в 0), OOB/degenerate-rect recovery, quote-aware `face=`/`file=`. **Только TEXT-формат**; XML
+  (leading `<`) + binary (`BMF\x03`) `.fnt` → честный `unparsed[]`, никогда silent-dropped. **Multi-page
+  ключуется по `char.page` id** (в BMFont TEXT каждая `char` строка следует за ВСЕМИ `page` строками, так что правило «most-recent
+  page» сбросило бы каждый глиф на последнюю страницу — дефект корректности/детерминизма, помеченный скептиком);
+  страницы эмитятся id-sorted. Whitespace-глиф (`width=0 height=0`, напр. id=32) пропускается, не ошибка.
+  Каждый `char` → `Sprite` (frame x,y,width,height; sourceSize из width/height; `trimmed:false` —
+  xoffset/yoffset это layout-offset-ы, НЕ in-page trim, так что occupancy остаётся честным packed-покрытием).
+  — ingest `groupFiles` распознаёт `.fnt`, резолвит каждое page-изображение **dir-aware** (переиспользуя
+  `resolve`/`keyOf`/`atlasName`), маршрутизирует его как `GroupedAtlas.kind: 'bmfont'`; XML/binary/empty `.fnt` →
   `unparsed[]` (`packages/ingest/src/index.ts`).
   — core: `AtlasSourceKind += 'bmfont'`, `Rule += 'font-glyph-page'`, `ThresholdConfig.fontGlyphPage?:
-  { minChars, occupancyWarn }` (default `{ 16, 0.5 }`). new analysis `fontGlyphPageFinding`
+  { minChars, occupancyWarn }` (default `{ 16, 0.5 }`). новый analysis `fontGlyphPageFinding`
   (`packages/analysis/src/font.ts`): glyph-page occupancy + glyph count + kerning-present, positive-guarded
-  on `source.kind === 'bmfont'`; `analyze.ts` threads a new `AnalyzeDeps.fontPages` dep (face + kerning,
-  keyed by atlas.name).
-  — worker routes `a.kind === 'bmfont'` → `parseFntPage` + per-glyph `<page>#<id>` recovery + builds
-  `fontPages` (`apps/web/src/worker/analyze.worker.ts`). i18n `find.font-glyph-page.{title,detail,fix}` in
-  all 9 catalogs (drift-guarded + 9-locale parity). Golden fixture
-  `fixtures/sample-projects/bmfont-sparse/` (a 16-glyph sparse `.fnt` + PNG, a whitespace glyph + an OOB
-  recovery glyph) exercised through the **REAL path** (`groupFiles → parseFntPage → analyze` with
-  `fontPages`) asserting the `font-glyph-page` finding **FIRES** (warn) alongside the generic occupancy
-  (crit) + wasted-regions (info) findings.
-  **DIAGNOSIS-ONLY** (invariant 3 — nothing generated). **Invariant 5 (no double-count):** the readout's
-  `estimate` carries **only** `occupancyPct` — the generic occupancy/oversize findings own the VRAM (w·h·4)
-  on the SAME page; NO fabricated disk/VRAM-saved. **Fix-path SAFE with ZERO change** (verified): the fix
-  branches only on `opts.kind === 'spine'` and **emits** `source.kind`, never reads an incoming
-  `AtlasSourceKind`, so a `'bmfont'` atlas needs no fix wiring. **Additive:** no `.fnt` present ⇒ all output
-  byte-identical (CLI/headless unaffected — `fontGlyphPage` is NOT enumerated by `resolveThresholds`).
-  **Skeptic fixes (load-bearing):** (1) multi-page glyph attachment keyed by `char.page`, NOT most-recent
-  page; (2) the fabricated App.tsx source-kind label task was DROPPED (no such UI exists — `atlas.source` is
-  never rendered).
-  - Gate: `pnpm typecheck && pnpm test && pnpm lint` green.
+  на `source.kind === 'bmfont'`; `analyze.ts` пробрасывает новую dep `AnalyzeDeps.fontPages` (face + kerning,
+  ключуется по atlas.name).
+  — worker маршрутизирует `a.kind === 'bmfont'` → `parseFntPage` + per-glyph `<page>#<id>` recovery + строит
+  `fontPages` (`apps/web/src/worker/analyze.worker.ts`). i18n `find.font-glyph-page.{title,detail,fix}` во
+  всех 9 каталогах (drift-guarded + 9-локальный паритет). Golden-фикстура
+  `fixtures/sample-projects/bmfont-sparse/` (16-glyph sparse `.fnt` + PNG, whitespace-глиф + OOB
+  recovery глиф) прогнана через **РЕАЛЬНЫЙ путь** (`groupFiles → parseFntPage → analyze` с
+  `fontPages`), утверждающая что finding `font-glyph-page` **СРАБАТЫВАЕТ** (warn) рядом с обобщённым occupancy
+  (crit) + wasted-regions (info) finding-ами.
+  **ТОЛЬКО ДИАГНОЗ** (инвариант 3 — ничего не генерируется). **Инвариант 5 (без двойного учёта):** `estimate` readout-а
+  несёт **только** `occupancyPct` — обобщённые occupancy/oversize finding-и владеют VRAM (w·h·4)
+  на ТОЙ ЖЕ странице; НЕТ сфабрикованного disk/VRAM-saved. **Fix-путь БЕЗОПАСЕН с НУЛЕВЫМ изменением** (проверено): фикс
+  ветвится только на `opts.kind === 'spine'` и **эмитит** `source.kind`, никогда не читает входящий
+  `AtlasSourceKind`, так что `'bmfont'` атлас не нуждается в fix-wiring. **Аддитивно:** нет `.fnt` ⇒ весь вывод
+  байт-в-байт (CLI/headless не затронуты — `fontGlyphPage` НЕ перечислен в `resolveThresholds`).
+  **Скептик-фиксы (нагруженные):** (1) multi-page glyph-attachment ключуется по `char.page`, НЕ most-recent
+  page; (2) сфабрикованная задача App.tsx source-kind label-а ОТБРОШЕНА (такого UI нет — `atlas.source`
+  никогда не рендерится).
+  - Gate: `pnpm typecheck && pnpm test && pnpm lint` зелёные.
 
-- **#1 Re-sync the untrimmed-padding generator for idempotency (Case 20 repack block)**
+- **#1 Ре-синк генератора untrimmed-padding для идемпотентности (Case 20 repack-блок)**
   (`docs/improvements/round23-re-sync-the-untrimmed-padding-gene.md`)
-  — `fixtures/_generator/generate.mjs` Case 20 (`untrimmed-padding`) built `regions`/`recoverableArea`/
-  `vramBytesSaved` but **no longer emitted the r20 `repack` block** the committed
-  `untrimmed-padding/expected.json` golden carries (`trimmedSprites`/`trimmedAreaReclaimed`/`perSprite`), so
-  a plain `node generate.mjs` re-run **silently dropped** it — latent generator non-idempotence that would
-  break the two `repack` readers (`packages/fix/test/fix.test.ts`, `apps/web/src/lib/perceptual.test.ts`
+  — `fixtures/_generator/generate.mjs` Case 20 (`untrimmed-padding`) строил `regions`/`recoverableArea`/
+  `vramBytesSaved`, но **больше не эмитил** r20 `repack` блок, который закоммиченный
+  golden `untrimmed-padding/expected.json` несёт (`trimmedSprites`/`trimmedAreaReclaimed`/`perSprite`), так что
+  обычный пере-запуск `node generate.mjs` **молча его ронял** — латентная неидемпотентность генератора, которая сломала бы
+  двух `repack` читателей (`packages/fix/test/fix.test.ts`, `apps/web/src/lib/perceptual.test.ts`
   trim-on-repack e2e).
-  — Re-added the `repack` emission **DERIVED from the same `specs[]`** that build the regions:
-  `trimmedSprites = untrimmedSpecs.length`, `trimmedAreaReclaimed = recoverableArea` (the already-computed
-  Σ(frame−bbox) over untrimmed specs), `perSprite[].{packedSize=(bw,bh), sourceSize=(CELL,CELL),
-  spriteSourceSize=(mx,my,bw,bh)}` — computed, **never hand-copied numbers**; `trimmed_0` excluded via
-  `!s.trimmed`. Key order preserved (`repack` between `vramBytesSaved` and `findings`).
-  — Regenerated the golden so generator output **=== committed golden**: the only byte-change is the
-  `perSprite` block reformatting from hand-authored single-line to canonical `JSON.stringify(_,null,2)`
-  multi-line (semantically identical — verified whitespace-stripped equal; all 6 readers `JSON.parse`).
-  **GENERATOR/FIXTURE ONLY** — no source/behavior/contract change. **Idempotency VERIFIED:** after staging,
-  `node fixtures/_generator/generate.mjs` produces ZERO further git diff across all fixtures (deterministic:
-  static `specs[]`, `.filter/.reduce/.map` order-preserving, integer arithmetic, no randomness/time/FS-order).
-  Trim-margin e2e stays green.
-  - Gate: `pnpm typecheck && pnpm test && pnpm lint` green; `node fixtures/_generator/generate.mjs &&
-    git status --short` → no fixture diff.
+  — Заново добавлена эмиссия `repack` **ВЫВЕДЕННАЯ из тех же `specs[]`**, что строят regions:
+  `trimmedSprites = untrimmedSpecs.length`, `trimmedAreaReclaimed = recoverableArea` (уже-вычисленный
+  Σ(frame−bbox) по untrimmed-spec-ам), `perSprite[].{packedSize=(bw,bh), sourceSize=(CELL,CELL),
+  spriteSourceSize=(mx,my,bw,bh)}` — вычислено, **никогда не hand-copied числа**; `trimmed_0` исключён через
+  `!s.trimmed`. Порядок ключей сохранён (`repack` между `vramBytesSaved` и `findings`).
+  — Регенерирован golden, так что вывод генератора **=== закоммиченному golden-у**: единственное byte-change это
+  переформатирование `perSprite` блока из hand-authored single-line в canonical `JSON.stringify(_,null,2)`
+  multi-line (семантически идентично — проверено whitespace-stripped equal; все 6 читателей `JSON.parse`).
+  **ТОЛЬКО ГЕНЕРАТОР/ФИКСТУРА** — без изменения source/behavior/contract. **Идемпотентность ПРОВЕРЕНА:** после staging-а,
+  `node fixtures/_generator/generate.mjs` производит НОЛЬ дальнейшего git diff по всем фикстурам (детерминированно:
+  статические `specs[]`, `.filter/.reduce/.map` порядко-сохраняющие, integer-арифметика, без randomness/time/FS-order).
+  Trim-margin e2e остаётся зелёным.
+  - Gate: `pnpm typecheck && pnpm test && pnpm lint` зелёные; `node fixtures/_generator/generate.mjs &&
+    git status --short` → нет fixture-diff.
 
-- **#2 `includeFileSizes` → `progressSize` in the PixiJS manifest (AssetPack parity)**
+- **#2 `includeFileSizes` → `progressSize` в PixiJS-манифесте (паритет AssetPack)**
   (`docs/improvements/round23-includefilesizes-progresssize-in-t.md`)
-  — OPT-IN, DEFAULT OFF. When enabled, every `src` candidate in the emitted PixiJS-v8 `manifest.json` becomes
-  `{ src, progressSize }` instead of a bare string — the **REAL field AssetPack 1.7.0 emits**
-  (`pixiManifest.js:139-142`, verified on disk by the design), so PixiJS shows accurate `Assets.load`
-  progress over the transport. `progressSize` is the size in **KB to 2 decimal places**: AssetPack's
-  `getFileSizeInKB` divides the byte length by 1024 in **both** branches (`utils.js:24-42`), so `'raw'` =
-  uncompressed KB (`statBytes/1024`) and `'gzip'` = gzipped KB (`gzipBytes/1024`) — **both are KB**, never
+  — OPT-IN, DEFAULT OFF. Когда включено, каждый `src` кандидат в эмитированном PixiJS-v8 `manifest.json` становится
+  `{ src, progressSize }` вместо bare-строки — **РЕАЛЬНОЕ поле, которое эмитит AssetPack 1.7.0**
+  (`pixiManifest.js:139-142`, проверено на диске дизайном), так что PixiJS показывает точный `Assets.load`
+  прогресс по транспорту. `progressSize` это размер в **KB до 2 знаков после запятой**: `getFileSizeInKB` AssetPack-а
+  делит длину в байтах на 1024 в **обеих** ветках (`utils.js:24-42`), так что `'raw'` =
+  uncompressed KB (`statBytes/1024`) и `'gzip'` = gzipped KB (`gzipBytes/1024`) — **оба это KB**, никогда
   bytes-out.
-  — PURE builder (`packages/fix/src/pixi-manifest.ts`): new `PixiSizedSrc { src; progressSize }`,
-  `PixiUnresolvedAsset.src` widened to `string[] | PixiSizedSrc[]`, `BuildPixiManifestOptions.includeFileSizes?:
-  false | 'raw' | 'gzip'` + `srcBytes?: ReadonlyMap<string, number>` (the FINAL emitted byte length per `src`,
-  supplied by the worker). One branch in the per-tier loop maps each sorted `src` to `{ src, progressSize:
-  kbOf(srcBytes.get(s) ?? 0) }`. **`EmittedVariant` unchanged** (no per-variant `bytes` — the size comes from
-  the worker's post-replace byte map, not the push site). Re-exported `PixiSizedSrc` from `index.ts`.
-  — Worker (`apps/web/src/worker/fix.worker.ts`): SINGLE edit at the manifest build site — builds
-  `srcBytes` over **`dedupedOut`** (the FINAL shipped bytes, keyed by the exact paths the manifest `src`
-  uses), so pngquant/KTX2 **in-place page replacement is reflected honestly** (no stale lossless size). New
-  top-level `gzipLen()` via the standard Worker `CompressionStream('gzip')` (no network, no native lib —
-  invariant 1) supplies the `'gzip'` byte source. The builder call is **spread-gated** so OFF ⇒ neither option
-  reaches the builder.
+  — ЧИСТЫЙ builder (`packages/fix/src/pixi-manifest.ts`): новый `PixiSizedSrc { src; progressSize }`,
+  `PixiUnresolvedAsset.src` расширен до `string[] | PixiSizedSrc[]`, `BuildPixiManifestOptions.includeFileSizes?:
+  false | 'raw' | 'gzip'` + `srcBytes?: ReadonlyMap<string, number>` (ФИНАЛЬНАЯ эмитированная длина в байтах per `src`,
+  поставляемая воркером). Одна ветка в per-tier цикле мапит каждый sorted `src` в `{ src, progressSize:
+  kbOf(srcBytes.get(s) ?? 0) }`. **`EmittedVariant` неизменён** (нет per-variant `bytes` — размер приходит из
+  post-replace byte-map воркера, не из push-места). Реэкспортирован `PixiSizedSrc` из `index.ts`.
+  — Worker (`apps/web/src/worker/fix.worker.ts`): ЕДИНСТВЕННАЯ правка в месте build-а манифеста — строит
+  `srcBytes` над **`dedupedOut`** (ФИНАЛЬНЫЕ отгруженные байты, ключуются по точным путям, которые использует `src`
+  манифеста), так что pngquant/KTX2 **in-place page replacement отражается честно** (без устаревшего lossless-размера). Новый
+  top-level `gzipLen()` через стандартный Worker `CompressionStream('gzip')` (без сети, без native-lib —
+  инвариант 1) поставляет `'gzip'` byte-source. Вызов builder-а **spread-gated**, так что OFF ⇒ ни одна опция
+  не доходит до builder-а.
   — `FixOptions.includeFileSizes?: 'raw' | 'gzip'` (`fix-protocol.ts`); App.tsx `includeFileSizes`
-  state + a `<select>` (Off / Uncompressed KB / Gzip KB) **disabled unless the Pixi manifest is emitted**
-  (`effectiveEmitManifest`), wired through `buildOptions` (UI values ARE the contract values — no remap).
-  i18n: 5 new keys (`fix.includeFileSizes`, `…Hint`, `.off/.raw/.gzip`) across all 9 catalogs (drift-guarded).
-  — **HONESTY (invariant 3):** both modes are MEASURED from the actually-shipped bytes; nothing estimated or
-  fabricated. **ADDITIVITY:** absent/`'off'` ⇒ bare-string `src` ⇒ the manifest is **BYTE-IDENTICAL** to today
-  (no `progressSize` field anywhere). **Invariant 5:** `progressSize` is disk/download size, never summed into
-  VRAM or any saving. **DETERMINISM:** pure math for `'raw'`; gzip length is platform-stable (golden tests
-  assert `'raw'` exactly, gzip only as a bound).
-  — Tests (`packages/fix/test/pixi-manifest.test.ts`, T17-T24): off-path byte-identity (srcBytes ignored when
-  the flag is absent), `'raw'` shape + KB values + format order, KB rounding parity (1536→1.5, 300→0.29,
-  0→0), sheet ⇒ sidecar size (image not in src), determinism under shuffled input, missing-src ⇒ 0,
-  field-name lock (`progressSize` present, `fileSize`/`size` absent), and a real-path multi-tier+atlas fixture
-  proving it fires end-to-end.
-  - Gate: `pnpm typecheck && pnpm test && pnpm lint` green.
+  state + `<select>` (Off / Uncompressed KB / Gzip KB) **отключён пока Pixi-манифест не эмитится**
+  (`effectiveEmitManifest`), проброшен через `buildOptions` (UI-значения ЕСТЬ contract-значения — без remap).
+  i18n: 5 новых ключей (`fix.includeFileSizes`, `…Hint`, `.off/.raw/.gzip`) во всех 9 каталогах (drift-guarded).
+  — **ЧЕСТНОСТЬ (инвариант 3):** оба режима ИЗМЕРЕНЫ из фактически-отгруженных байт; ничего не оценено или
+  сфабриковано. **АДДИТИВНОСТЬ:** absent/`'off'` ⇒ bare-string `src` ⇒ манифест **БАЙТ-В-БАЙТ** к сегодняшнему
+  (нет поля `progressSize` нигде). **Инвариант 5:** `progressSize` это disk/download размер, никогда не суммируется в
+  VRAM или какой-либо saving. **ДЕТЕРМИНИЗМ:** чистая математика для `'raw'`; gzip-длина platform-stable (golden-тесты
+  утверждают `'raw'` точно, gzip только как границу).
+  — Тесты (`packages/fix/test/pixi-manifest.test.ts`, T17-T24): off-path byte-identity (srcBytes игнорируется когда
+  флаг отсутствует), `'raw'` shape + KB-значения + порядок форматов, KB-rounding паритет (1536→1.5, 300→0.29,
+  0→0), sheet ⇒ sidecar size (изображение не в src), детерминизм под shuffled-input-ом, missing-src ⇒ 0,
+  field-name lock (`progressSize` присутствует, `fileSize`/`size` отсутствуют), и real-path multi-tier+atlas фикстура,
+  доказывающая что оно срабатывает end-to-end.
+  - Gate: `pnpm typecheck && pnpm test && pnpm lint` зелёные.
 
 ---
 
-## Round 22 — selection (#0 shipped) — 2026-06-29
-Pick: **(#0) cross-atlas frame-redundancy DETECTOR** — the folder-scope sibling of within-atlas
-frame-redundancy. The region hashes were already computed folder-wide in `analyze.ts` but consumed only
-per-atlas, discarding the cross-atlas comparison; this clusters them across ALL sheets.
+## Раунд 22 — отбор (#0 отгружено) — 2026-06-29
+Pick: **(#0) ДЕТЕКТОР cross-atlas frame-redundancy** — folder-scope сиблинг within-atlas
+frame-redundancy. Region-хэши уже вычислялись folder-wide в `analyze.ts`, но потреблялись только
+per-atlas, отбрасывая cross-atlas сравнение; это кластеризует их по ВСЕМ шитам.
 
-- **#0 Cross-atlas frame-redundancy detector** (`docs/improvements/round22-cross-atlas-frame-redundancy-detec.md`)
-  — new folder-scope `crossAtlasRedundancyFinding(atlases, frameHashByRef, byteByRef, cfg)` (`packages/analysis/src/folder.ts`)
-  clusters the SAME per-atlas region hashes the within-atlas rule consumes (built folder-wide at `analyze.ts`
-  ~:119, previously only read per-atlas ~:174) and fires ONLY when a cluster spans ≥2 DISTINCT atlases
-  (single-atlas clusters stay `frame-redundancy`'s job — no double-report). Reports the count of cross-sheet
-  duplicate copies + **`vramBytesSaved = recoverableArea × 4` EXACT** — mirrors the shipped within-atlas
-  `frameRedundancyFinding` precedent (rules.ts:232) with the SAME distinct-rect guard (a pre-aliased rect = one
-  unit, applied per atlas). New `Rule` `'cross-atlas-redundancy'`; new `crossAtlasRedundancy?: { minDuplicates }`
-  config (default 2 — a cross-sheet recurrence has no in-sheet-aliasing excuse); distinct `messageKey`
-  `'cross-atlas-redundancy'` + `find.cross-atlas-redundancy.{title,detail,fix}` in all 9 catalogs (drift-guarded).
-  Golden fixture `fixtures/sample-projects/cross-atlas-redundant/` (two sheets sharing a byte-identical textured
-  frame) reproduced through the REAL decode path (decode → pure `extractFrameRegions` → SHA → finding) in
-  `apps/web/src/lib/perceptual.test.ts`. **DIAGNOSIS-ONLY** (the cross-atlas FIX is a separate piece — invariant
-  3, we generate nothing). **Additive:** carried in the finding only, NOT folded into `potentialDiskSaved`
-  (invariant 5); absent hashes / no cross-sheet dupes ⇒ no finding ⇒ byte-identical to today.
-  **Skeptic BLOCKERS (load-bearing):** (B2 honesty) NO POT-tier VRAM gate / packer — a real MaxRects pack of
-  the merged set lands on a LARGER bin than the area floor, so a bin-tier delta would OVER-claim a saving no
-  real merge delivers (invariant 5); VRAM is the EXACT duplicate-region px × 4, no `pack()` import, no inline
-  sizer, no POT conditional. (B1) the `messageKey` is a DISTINCT value `'cross-atlas-redundancy'` (a wrong key
-  silently renders the within-atlas template) — pinned + asserted in the unit + e2e tests. (M3) the copy scopes
-  the claim to the DUPLICATE-FRAME area only and documents the orthogonality to atlas-merge (which reclaims
-  EMPTY space — different px, additive not the same win). Disk = area-proportional ESTIMATE attributed per freed
-  copy to its OWN atlas, never conflated with VRAM (invariant 5). Determinism: stable cluster representative
-  (lowest `(atlasName, spriteIndex)`) + sorted ref/atlas lists. Honesty pin: `dupes = Σ(distinctUnits − 1)` =
-  the exact `framesAliased` a future cross-atlas fix would report.
+- **#0 детектор cross-atlas frame-redundancy** (`docs/improvements/round22-cross-atlas-frame-redundancy-detec.md`)
+  — новый folder-scope `crossAtlasRedundancyFinding(atlases, frameHashByRef, byteByRef, cfg)` (`packages/analysis/src/folder.ts`)
+  кластеризует ТЕ ЖЕ per-atlas region-хэши, что потребляет within-atlas правило (построенные folder-wide в `analyze.ts`
+  ~:119, ранее читались только per-atlas ~:174) и срабатывает ТОЛЬКО когда кластер охватывает ≥2 РАЗЛИЧНЫХ атласа
+  (single-atlas кластеры остаются работой `frame-redundancy` — без двойного репорта). Сообщает счёт cross-sheet
+  дубликатных копий + **`vramBytesSaved = recoverableArea × 4` ТОЧНО** — зеркалит отгруженный within-atlas
+  прецедент `frameRedundancyFinding` (rules.ts:232) с ТЕМ ЖЕ distinct-rect guard-ом (pre-aliased rect = одна
+  единица, применяется per atlas). Новый `Rule` `'cross-atlas-redundancy'`; новый config `crossAtlasRedundancy?: { minDuplicates }`
+  (default 2 — у cross-sheet повторения нет оправдания in-sheet-aliasing-ом); distinct `messageKey`
+  `'cross-atlas-redundancy'` + `find.cross-atlas-redundancy.{title,detail,fix}` во всех 9 каталогах (drift-guarded).
+  Golden-фикстура `fixtures/sample-projects/cross-atlas-redundant/` (два шита, делящие байт-идентичный textured
+  фрейм) воспроизведена через РЕАЛЬНЫЙ decode-путь (decode → чистый `extractFrameRegions` → SHA → finding) в
+  `apps/web/src/lib/perceptual.test.ts`. **ТОЛЬКО ДИАГНОЗ** (cross-atlas ФИКС это отдельный кусок — инвариант
+  3, мы ничего не генерируем). **Аддитивно:** несётся только в finding-е, НЕ свёрнуто в `potentialDiskSaved`
+  (инвариант 5); absent-хэши / нет cross-sheet дублей ⇒ нет finding ⇒ байт-в-байт к сегодняшнему.
+  **Скептик-BLOCKER-ы (нагруженные):** (B2 honesty) НЕТ POT-tier VRAM-gate / packer-а — реальный MaxRects-pack
+  объединённого множества приземляется на БОЛЬШИЙ bin, чем area-floor, так что bin-tier delta OVER-claim-ила бы saving, который
+  не доставляет ни один реальный merge (инвариант 5); VRAM это ТОЧНЫЕ duplicate-region px × 4, без `pack()` импорта, без inline-
+  sizer-а, без POT-conditional-а. (B1) `messageKey` это РАЗЛИЧНОЕ значение `'cross-atlas-redundancy'` (неверный ключ
+  молча рендерит within-atlas шаблон) — pinned + утверждён в unit + e2e тестах. (M3) текст ограничивает
+  заявку только областью DUPLICATE-FRAME и документирует ортогональность к atlas-merge (который возвращает
+  ПУСТОЕ пространство — другие px, аддитивно а не тот же выигрыш). Disk = area-пропорциональная ОЦЕНКА, атрибутированная per freed
+  copy её СОБСТВЕННОМУ атласу, никогда не conflate-ится с VRAM (инвариант 5). Детерминизм: стабильный представитель кластера
+  (наименьший `(atlasName, spriteIndex)`) + sorted ref/atlas-списки. Honesty pin: `dupes = Σ(distinctUnits − 1)` =
+  точный `framesAliased`, который будущий cross-atlas фикс сообщил бы.
 
-- **#1 Cross-atlas frame dedup during MERGE** (`docs/improvements/round22-cross-atlas-frame-dedup-during-mer.md`)
-  — the Pro FIX for #0's detector: during an aggressive atlas-MERGE, dedup byte-identical frames that span
-  MULTIPLE source sheets — pack ONE region per cross-sheet cluster and point every duplicate frame name (across
-  ALL merged sheets) at that one region in the merged manifest. New pure `buildMergeAliasMap(group,
-  frameHashByRef, minDistinctRects)` (`packages/fix/src/alias.ts`) — the WHOLE-GROUP analogue of the within-atlas
-  `buildAtlasAliasMap`: clusters region hashes across the group in ONE flat `(atlasName, frameName)` keyspace.
-  **B1 (load-bearing):** the distinct-rect guard is **ATLAS-QUALIFIED** (`${atlasName}|x,y,w,h`, mirroring the
-  detector at `folder.ts:365`) — two byte-identical frames at coincidentally-equal coords on DIFFERENT sheets are
-  two physically-distinct copies ⇒ two distinct rects (the bare within-atlas rectKey would wrongly collapse them
-  to one and never fire); a pre-aliased rect WITHIN one atlas still collapses (no double-count). `repackAtlases`
-  gains an optional flat `mergeAliasMap` arg (`packages/fix/src/repack.ts`): it packs ONE rep per cross-sheet
-  cluster, emits a Sprite for EACH duplicate name at the rep's final rect (copying that name's OWN
-  trim/pivot/sourceSize), one Blit per rep. **HONESTY:** `vramBytesBefore/After` are EXACT from the real
-  `repackAtlases` of the merged group; new `RepackResult.vramReclaimedBytes` (= a no-alias BASELINE pack of the
-  same group's full item set − the deduped bin) + `potTierDropped` isolate the merge's REAL measured VRAM delta —
-  NOT the area-floor/POT-gate the DETECTOR (#0) avoided, because the merge actually produces the bin. When the
-  dedup does NOT drop a POT tier the win is disk-only and reported as such (`crossSheetVramReclaimedBytes:0`,
-  invariant 5). **B2 (worker):** `fix.worker.ts` lazily hashes any group sheet missing from `frameHashByRef` in
-  the merge branch (the upfront `≥minDuplicates` pre-filter starves the headline many-small-sheets case) and
-  caches it back, then builds the merge map on the cross-atlas `minDuplicates` gate (default 2) and threads it
-  into both merge `repackAtlases` calls + the extrude no-gutter baseline (B3). New receipt fields
-  `crossSheetFramesDeduped` / `crossSheetVramReclaimedBytes` / `crossSheetPotTierDropped` + `App.tsx` render
-  (VRAM-tier vs disk-only copy) + 2 new i18n keys × 9 catalogs. **DROP-IN / NO DANGLING REF:** every original
-  frame name from every merged sheet still resolves in the emitted TexturePacker JSON (round-trip tested); a
-  frame whose sheet is dropped resolves to the merged region. **ADDITIVITY:** no merge / no cross-sheet dupes /
-  aggressive-merge off / `mergeAliasMap` absent ⇒ byte-identical (the no-alias fields are omitted; a no-op map
-  deep-equals `repackAtlases(group, opts)`). **DETERMINISM:** stable rep (lowest flat index) + sorted emit.
-  Tests: `alias.test.ts` (T1 group clustering + per-atlas under-alias contrast, T1b atlas-qualified key, pre-
-  aliased collapse, sub-gate carve-out, fail-safe missing hashes) + `fix.test.ts` (T2 one-region-every-name-
-  resolves + one-Blit-per-rep + no-alias contrast, T2-roundtrip, T3 POT-tier-drop EXACT vram vs same-tier
-  disk-only, T4 additivity deep-equal). Rides the existing aggressive atlas-merge path; rotated-mismatch +
-  name-collision guards inherited from the merge path unchanged.
+- **#1 cross-atlas frame dedup во время MERGE** (`docs/improvements/round22-cross-atlas-frame-dedup-during-mer.md`)
+  — Pro-ФИКС для детектора #0: во время агрессивного atlas-MERGE дедуплицировать байт-идентичные фреймы, охватывающие
+  НЕСКОЛЬКО source-шитов — упаковать ОДИН регион на cross-sheet кластер и указать каждое дублирующее имя фрейма (по
+  ВСЕМ объединённым шитам) на тот один регион в объединённом манифесте. Новый чистый `buildMergeAliasMap(group,
+  frameHashByRef, minDistinctRects)` (`packages/fix/src/alias.ts`) — WHOLE-GROUP аналог within-atlas
+  `buildAtlasAliasMap`: кластеризует region-хэши по группе в ОДНОМ плоском `(atlasName, frameName)` keyspace.
+  **B1 (нагруженное):** distinct-rect guard **ATLAS-QUALIFIED** (`${atlasName}|x,y,w,h`, зеркалит
+  детектор в `folder.ts:365`) — два байт-идентичных фрейма на случайно-равных координатах на РАЗНЫХ шитах это
+  две физически-различные копии ⇒ два различных rect-а (bare within-atlas rectKey ошибочно схлопнул бы их
+  в один и никогда не сработал бы); pre-aliased rect ВНУТРИ одного атласа всё ещё схлопывается (без двойного учёта). `repackAtlases`
+  получает опциональный плоский `mergeAliasMap` arg (`packages/fix/src/repack.ts`): он упаковывает ОДИН rep на cross-sheet
+  кластер, эмитит Sprite для КАЖДОГО дублирующего имени на финальном rect-е rep-а (копируя СОБСТВЕННЫЕ имени
+  trim/pivot/sourceSize), один Blit на rep. **ЧЕСТНОСТЬ:** `vramBytesBefore/After` ТОЧНЫЕ из реального
+  `repackAtlases` объединённой группы; новый `RepackResult.vramReclaimedBytes` (= no-alias БАЗОВЫЙ pack
+  полного item-set той же группы − deduped-bin) + `potTierDropped` изолируют РЕАЛЬНУЮ измеренную VRAM-дельту merge-а —
+  НЕ area-floor/POT-gate, которого ДЕТЕКТОР (#0) избегал, потому что merge фактически производит bin. Когда
+  dedup НЕ роняет POT-tier, выигрыш disk-only и сообщается как таковой (`crossSheetVramReclaimedBytes:0`,
+  инвариант 5). **B2 (worker):** `fix.worker.ts` лениво хэширует любой group-шит, отсутствующий в `frameHashByRef`
+  в merge-ветке (upfront `≥minDuplicates` pre-filter голодает headline many-small-sheets кейс) и
+  кэширует обратно, затем строит merge-map на cross-atlas `minDuplicates` gate (default 2) и пробрасывает её
+  в оба merge `repackAtlases` вызова + extrude no-gutter baseline (B3). Новые поля чека
+  `crossSheetFramesDeduped` / `crossSheetVramReclaimedBytes` / `crossSheetPotTierDropped` + рендер `App.tsx`
+  (VRAM-tier vs disk-only текст) + 2 новых i18n-ключа × 9 каталогов. **DROP-IN / БЕЗ DANGLING REF:** каждое оригинальное
+  имя фрейма из каждого объединённого шита всё ещё резолвится в эмитированном TexturePacker JSON (round-trip протестировано);
+  фрейм, чей шит сброшен, резолвится в объединённый регион. **АДДИТИВНОСТЬ:** нет merge / нет cross-sheet дублей /
+  aggressive-merge off / `mergeAliasMap` отсутствует ⇒ байт-в-байт (no-alias поля опущены; no-op map
+  deep-equals `repackAtlases(group, opts)`). **ДЕТЕРМИНИЗМ:** стабильный rep (наименьший плоский индекс) + sorted emit.
+  Тесты: `alias.test.ts` (T1 group-кластеризация + per-atlas under-alias контраст, T1b atlas-qualified key, pre-
+  aliased схлопывание, sub-gate carve-out, fail-safe missing-хэши) + `fix.test.ts` (T2 one-region-every-name-
+  resolves + one-Blit-per-rep + no-alias контраст, T2-roundtrip, T3 POT-tier-drop ТОЧНЫЙ vram vs same-tier
+  disk-only, T4 additivity deep-equal). Едет на существующем пути aggressive atlas-merge; rotated-mismatch +
+  name-collision guard-ы унаследованы от merge-пути без изменений.
 
-- **#2 Honest fix-simulation footprint preview on the Plan card** (`docs/improvements/round22-honest-fix-simulation-footprint-pr.md`)
-  — the dry-run Plan card now surfaces a HONEST before→after footprint preview alongside the op counts, split into
-  two stacked rows that never fabricate a total. New PURE `summarizeFixPlanFootprint(report, ops, excluded)`
-  (`apps/web/src/lib/plan-footprint.ts`) aggregates ONLY the deltas knowable BEFORE compose, from the already-
-  MEASURED finding geometry: **measured now** — DISK = `format`/`format-lossless` srcBytes−bestBytes for a ref with a
-  SURVIVING transcode op (lossy q0.9 estimate ⇒ `estimated`, UI prefixes `~`) + `wasted-alpha` srcBytes−opaqueBytes
-  for a SURVIVING opaque transcode (measured channel drop); VRAM = `dimensions-oversize` `params.vram` − to.w·h·4 for
-  a SURVIVING resize (EXACT). **computed at execute** — `deferredOps` counts repack/merge/pack/dedup + the worker-
-  folded scale-tier multiplier (sizes the encode/pack alone resolves) → "+N more computed at download". New optional
-  `FixPlanFootprint` + `FixPlanSummary.footprint?` (`fix-protocol.ts`); the worker attaches it in the plan block over
-  `countedOps`+`excluded` and folds `tierAssets` into `deferredOps` when tiering survives the mask. `PlanCard`
-  (`App.tsx`) renders the two rows, disk vs VRAM VISUALLY DISTINCT (VRAM in its own teal token), each segment only
-  when >0 (a VRAM-only plan never shows a fabricated "disk −0 B").
-  **HONESTY (load-bearing, invariants 3/5):** the preview sums ONLY pre-compose-knowable numbers; disk and VRAM are
-  kept DISTINCT (never a combined headline); a transcode never feeds VRAM and a resize never feeds disk; **npot/solid
-  are EXCLUDED entirely** (planFix emits no op for them, and a resize achieves neither their POT-padding nor 1×1
-  reclaim — different non-additive baselines, would fabricate a win the run never produces); an op that contributes
-  nothing knowable is excluded and counted honestly as deferred. DIAGNOSIS objectivity preserved — this is a fix-PLAN
-  preview (the plan exists; it generates nothing). **ADDITIVE:** nothing measurable ⇒ `undefined` ⇒ no footprint
-  attached ⇒ the Plan card is byte-identical to today. **DETERMINISM:** stable Set/Map sums over the deterministically-
-  ordered findings/ops, no Date/random. i18n: 3 new keys (`fix.plan.measuredNow` label + `measuredNowDisk`/
-  `measuredNowVram` with `{disk:bytes}`/`{vram:bytes}` hints, split so a VRAM-only plan shows no disk row + `alsoRuns`
-  plural `{n}`) × 9 catalogs (drift + plural-render guarded); `fix.plan.deferredNote` extended with the estimate vs
-  exact + at-download caveat. Tests: PURE `apps/web/test/plan-footprint.test.ts` (correct buckets, disk≠VRAM,
-  invariant-5 separation, op-gating, format∩wasted-alpha-once, mask zeroing, BLOCKER-1 npot/solid 0-VRAM regression,
-  deferredOps, empty⇒undefined, negative-clamp, determinism) + `plan-worker.test.ts` (rewritten honesty assertion —
-  optional top-level footprint with DISTINCT disk/VRAM, repack-is-deferred headline honesty, mask-all⇒undefined).
+- **#2 честный fix-simulation footprint preview на Plan-карте** (`docs/improvements/round22-honest-fix-simulation-footprint-pr.md`)
+  — dry-run Plan-карта теперь всплывает ЧЕСТНЫЙ before→after footprint preview рядом со счётами op-ов, разделённый на
+  две сложенных строки, которые никогда не фабрикуют итог. Новый ЧИСТЫЙ `summarizeFixPlanFootprint(report, ops, excluded)`
+  (`apps/web/src/lib/plan-footprint.ts`) агрегирует ТОЛЬКО дельты, познаваемые ДО compose, из уже-
+  ИЗМЕРЕННОЙ finding-геометрии: **measured now** — DISK = `format`/`format-lossless` srcBytes−bestBytes для ref-а с
+  ВЫЖИВШИМ transcode-op-ом (lossy q0.9 оценка ⇒ `estimated`, UI префиксует `~`) + `wasted-alpha` srcBytes−opaqueBytes
+  для ВЫЖИВШЕГО opaque transcode-а (измеренный channel-drop); VRAM = `dimensions-oversize` `params.vram` − to.w·h·4 для
+  ВЫЖИВШЕГО resize-а (ТОЧНО). **computed at execute** — `deferredOps` считает repack/merge/pack/dedup + worker-
+  свёрнутый scale-tier множитель (размеры, которые encode/pack один резолвит) → «+N more computed at download». Новый опциональный
+  `FixPlanFootprint` + `FixPlanSummary.footprint?` (`fix-protocol.ts`); worker прикрепляет его в plan-блоке над
+  `countedOps`+`excluded` и сворачивает `tierAssets` в `deferredOps` когда tiering выживает маску. `PlanCard`
+  (`App.tsx`) рендерит две строки, disk vs VRAM ВИЗУАЛЬНО РАЗЛИЧНЫЕ (VRAM в собственном бирюзовом token-е), каждый сегмент только
+  когда >0 (VRAM-only план никогда не показывает сфабрикованный «disk −0 B»).
+  **ЧЕСТНОСТЬ (нагруженное, инварианты 3/5):** preview суммирует ТОЛЬКО pre-compose-познаваемые числа; disk и VRAM
+  держатся РАЗЛИЧНЫМИ (никогда комбинированный headline); transcode никогда не питает VRAM а resize никогда не питает disk; **npot/solid
+  ИСКЛЮЧЕНЫ полностью** (planFix не эмитит op для них, а resize не достигает ни их POT-padding-а ни 1×1
+  reclaim-а — разные non-additive baseline-ы, сфабриковали бы выигрыш, который run никогда не производит); op, который вносит
+  ничего познаваемого, исключён и честно посчитан как deferred. Объективность ДИАГНОЗА сохранена — это fix-PLAN
+  preview (план существует; он ничего не генерирует). **АДДИТИВНО:** ничего измеримого ⇒ `undefined` ⇒ нет footprint-а
+  прикреплено ⇒ Plan-карта байт-в-байт к сегодняшней. **ДЕТЕРМИНИЗМ:** стабильные Set/Map суммы над детерминированно-
+  упорядоченными finding-ами/op-ами, без Date/random. i18n: 3 новых ключа (`fix.plan.measuredNow` label + `measuredNowDisk`/
+  `measuredNowVram` с `{disk:bytes}`/`{vram:bytes}` hint-ами, разделённые так что VRAM-only план не показывает disk-строку + `alsoRuns`
+  plural `{n}`) × 9 каталогов (drift + plural-render guarded); `fix.plan.deferredNote` расширен estimate vs
+  exact + at-download caveat-ом. Тесты: ЧИСТЫЙ `apps/web/test/plan-footprint.test.ts` (корректные bucket-ы, disk≠VRAM,
+  разделение инварианта 5, op-gating, format∩wasted-alpha-once, mask-обнуление, BLOCKER-1 npot/solid 0-VRAM регрессия,
+  deferredOps, empty⇒undefined, negative-clamp, детерминизм) + `plan-worker.test.ts` (переписанный honesty-assertion —
+  опциональный top-level footprint с РАЗЛИЧНЫМИ disk/VRAM, repack-is-deferred headline honesty, mask-all⇒undefined).
 
 ---
 
-## Round 21 — selection (#0 shipped) — 2026-06-29
-Pick: **(#0) standalone trim-margin → repack scheduling** — uncaps the r20 trim-on-repack FIX so it fires
-even when no occupancy/frame-redundancy/merge repack is already scheduled.
+## Раунд 21 — отбор (#0 отгружено) — 2026-06-29
+Pick: **(#0) standalone trim-margin → repack scheduling** — снимает кэп с r20 trim-on-repack ФИКСА, так что он срабатывает
+даже когда никакой occupancy/frame-redundancy/merge repack уже не запланирован.
 
-- **#0 Standalone trim-margin → repack scheduling** (`docs/improvements/round21-standalone-trim-margin-repack-sche.md`)
-  — a `trim-margin` finding now emits its OWN pass-1 `repack` op (`PlanOptions.trimMargin`, default ON), so a
-  padded-but-FULLY-PACKED atlas (no occupancy/wasted finding ⇒ no repack today) finally gets trimmed. Reuses
-  the r20 trim-on-repack execute path (`buildTrimArrays` → `repackAtlases({trim})`): exact `vramSaved`
-  before−after, the disk number stays an estimate (invariant 5), `trimmedSprites` surfaces in the receipt.
-  Guarded against double-emit with the occupancy AND frame-redundancy paths via the shared `repacked` set
-  (order-free — findings are SORTED), and pre-excluded from tiering like the other repack-driving findings.
-  **Skeptic BLOCKER B0/B1 (load-bearing):** the FIX worker re-runs `analyze()` itself, but its local
-  `hashAtlasFrames` returned ONLY hashes (no bboxes) and NEVER passed `frameTrims`, so the trim-margin finding
-  fired in the FREE diagnosis worker but **never** in the fix worker → the feature would have been a no-op (a
-  dead toggle). Fixed by porting the analyze worker's `{hashes,bboxes}` shape into the fix worker and feeding
-  `frameTrims` (key `bboxes`) into its `analyze()` call; the diagnosis decode pass now runs when
-  `frameRedundancyOn || trimMarginOn` (shared page decode — one decode either way) and keeps each array
-  independently (a `frameRedundancy:false, trimMargin:true` run still gets trim bboxes; `trimMargin:false` ⇒
-  byte-identical). `FixOptions.trimMargin` + App toggle (default ON) + i18n ×9. Tests exercise the REAL
-  analyze→plan path (synthetic decoded RGBA → real `alphaBBox` → `frameTrims` → `analyze` → `planFix`): a
-  fully-packed padded atlas ⇒ exactly one repack op + `trimmedSprites > 0` realized; no double-emit when
-  occupancy also fires; additive (off ⇒ byte-identical). ADDITIVE — default-on but absent-field ⇒ no plan/byte
-  change when nothing qualifies.
+- **#0 standalone trim-margin → repack scheduling** (`docs/improvements/round21-standalone-trim-margin-repack-sche.md`)
+  — finding `trim-margin` теперь эмитит СОБСТВЕННЫЙ pass-1 `repack` op (`PlanOptions.trimMargin`, default ON), так что
+  padded-но-ПОЛНОСТЬЮ-УПАКОВАННЫЙ атлас (нет occupancy/wasted finding-а ⇒ нет repack сегодня) наконец trim-ится. Переиспользует
+  r20 trim-on-repack execute-путь (`buildTrimArrays` → `repackAtlases({trim})`): точный `vramSaved`
+  before−after, disk-число остаётся оценкой (инвариант 5), `trimmedSprites` всплывает в чеке.
+  Защищён от double-emit с occupancy И frame-redundancy путями через общий `repacked` set
+  (order-free — finding-и SORTED), и pre-excluded из tiering-а как другие repack-driving finding-и.
+  **Скептик-BLOCKER B0/B1 (нагруженный):** FIX-worker сам перезапускает `analyze()`, но его локальный
+  `hashAtlasFrames` возвращал ТОЛЬКО хэши (без bbox-ов) и НИКОГДА не передавал `frameTrims`, так что trim-margin finding
+  срабатывал в FREE diagnosis-worker-е, но **никогда** в fix-worker-е → фича была бы no-op (мёртвый toggle).
+  Фикснуто портированием `{hashes,bboxes}` shape-а analyze-worker-а в fix-worker и подачей
+  `frameTrims` (ключ `bboxes`) в его `analyze()` вызов; diagnosis decode-проход теперь запускается когда
+  `frameRedundancyOn || trimMarginOn` (общий page-decode — один decode в любом случае) и держит каждый массив
+  независимо (run `frameRedundancy:false, trimMargin:true` всё равно получает trim-bbox-ы; `trimMargin:false` ⇒
+  байт-в-байт). `FixOptions.trimMargin` + App toggle (default ON) + i18n ×9. Тесты прогоняют РЕАЛЬНЫЙ
+  analyze→plan путь (synthetic decoded RGBA → реальный `alphaBBox` → `frameTrims` → `analyze` → `planFix`):
+  полностью-упакованный padded-атлас ⇒ ровно один repack-op + `trimmedSprites > 0` реализован; без double-emit когда
+  occupancy тоже срабатывает; аддитивно (off ⇒ байт-в-байт). АДДИТИВНО — default-on но absent-field ⇒ нет plan/byte
+  изменения когда ничего не квалифицируется.
 
-- **#1 Per-frame recovery for TexturePacker/Pixi atlases** (`docs/improvements/round21-per-frame-recovery-for-texturepack.md`)
-  — `parseAtlasManifest` used to WHOLE-REJECT a sheet on the first unusable frame (`{ok:false}`), losing 499
-  good frames for 1 corrupt one. Now it RECOVERS the good sprites and collects each dropped frame into
-  `malformedFrames[] {name, reason}` — symmetric with the Spine per-region recovery already shipped. The
-  array/hash frame loops and the out-of-bounds pass became per-frame partitions (skip + surface) instead of
-  whole-manifest bails; the analyze worker fans `res.malformedFrames` into the existing `unparsed[]` channel
-  as `<atlas>#<frame>` (deterministic, sorted). HONESTY (invariant 3): every dropped frame is reported with a
-  reason — nothing silently dropped or clamped. ADDITIVITY: a fully-valid atlas parses byte-identically (same
-  sprites, same order, no `malformedFrames` field); an EMPTY `frames` object still returns `{ok:true,
-  sprites:[]}` (zero-survivor guard gated on `malformedFrames.length>0`); an ALL-bad manifest still
-  wholesale-fails with today's first-failure error (preserves the F3 single-frame-sheet tests). STRUCTURAL
-  failures (bad JSON / no frames object / no `meta.image`) still wholesale-fail at ingest/parse as before.
-  Contract is additive only: optional `malformedFrames` on `AtlasParseResult`'s ok-branch + a local return
-  widen on `parseAtlas` (no `@asset-doctor/core` / `ParseResult` change; all other callers destructure
-  `{ok,asset}` and ignore the extra prop). New fixture `fixtures/sample-projects/atlas-frame-recovery/`
-  (Hash with a degenerate `w:0` frame + Array with an OOB frame, reproduced through the REAL parse path) +
-  golden `expected.json`. Tests: 5 parser units (Hash/Array recovery, zero-survivor still `{ok:false}`,
-  empty-frames byte-identity, clean-sheet has no field) + 1 e2e worker-path `it` (group→parse→fan-out→analyze
-  surfaces `sheet.png#bad.png` + `sheet.png#over.png` while the good frames stay diagnosed).
-  **Gate:** `pnpm typecheck` + `pnpm test` (parsers 17→22, apps/web 407→408; all packages green) + `pnpm lint` clean.
+- **#1 per-frame recovery для TexturePacker/Pixi атласов** (`docs/improvements/round21-per-frame-recovery-for-texturepack.md`)
+  — `parseAtlasManifest` раньше WHOLE-REJECT-ил шит на первом непригодном фрейме (`{ok:false}`), теряя 499
+  хороших фреймов из-за 1 повреждённого. Теперь он ВОССТАНАВЛИВАЕТ хорошие спрайты и собирает каждый сброшенный фрейм в
+  `malformedFrames[] {name, reason}` — симметрично с уже-отгруженным Spine per-region recovery. Циклы
+  array/hash фреймов и out-of-bounds проход стали per-frame partition-ами (skip + surface) вместо
+  whole-manifest bail-ов; analyze-worker fan-ит `res.malformedFrames` в существующий канал `unparsed[]`
+  как `<atlas>#<frame>` (детерминированно, sorted). ЧЕСТНОСТЬ (инвариант 3): каждый сброшенный фрейм сообщён с
+  reason-ом — ничего молча не сброшено или clamp-нуто. АДДИТИВНОСТЬ: полностью-валидный атлас парсится байт-в-байт (те же
+  спрайты, тот же порядок, нет поля `malformedFrames`); ПУСТОЙ `frames` объект всё равно возвращает `{ok:true,
+  sprites:[]}` (zero-survivor guard гейтнут на `malformedFrames.length>0`); ALL-bad манифест всё равно
+  wholesale-fail-ит сегодняшней first-failure ошибкой (сохраняет F3 single-frame-sheet тесты). СТРУКТУРНЫЕ
+  сбои (плохой JSON / нет frames-объекта / нет `meta.image`) всё равно wholesale-fail-ят на ingest/parse как раньше.
+  Contract аддитивный только: опциональный `malformedFrames` на ok-ветке `AtlasParseResult` + локальное расширение return-а
+  на `parseAtlas` (без изменения `@asset-doctor/core` / `ParseResult`; все остальные callers деструктурируют
+  `{ok,asset}` и игнорируют лишний prop). Новая фикстура `fixtures/sample-projects/atlas-frame-recovery/`
+  (Hash с degenerate `w:0` фреймом + Array с OOB-фреймом, воспроизведено через РЕАЛЬНЫЙ parse-путь) +
+  golden `expected.json`. Тесты: 5 парсерных unit-ов (Hash/Array recovery, zero-survivor всё ещё `{ok:false}`,
+  empty-frames byte-identity, clean-sheet не имеет поля) + 1 e2e worker-path `it` (group→parse→fan-out→analyze
+  всплывает `sheet.png#bad.png` + `sheet.png#over.png` пока хорошие фреймы остаются диагностированными).
+  **Gate:** `pnpm typecheck` + `pnpm test` (parsers 17→22, apps/web 407→408; все пакеты зелёные) + `pnpm lint` чисто.
 
-- **#2 Bound the analyze (FREE-path) worker's resident bytes** (`docs/improvements/round21-bound-the-analyze-free-path-worker.md`)
-  — kills the genuine ~2× source-byte copy on the free diagnosis path and makes the previously-SILENT oversize
-  scan skips honest. **(a) Transfer + lazy re-read.** `runAnalysis` now TRANSFERS each `PickedFile.bytes` into
-  the analyze worker (the worker becomes the SOLE resident copy) when EVERY file carries a re-readable `file`
-  (additive `PickedFile.file?: File`, populated by all three ingest paths); else it CLONES (today's behavior) so
-  legacy callers stay correct. The main thread no longer keeps an eager dir-aware byte `map` (which had captured
-  `f.bytes` BEFORE the transfer ⇒ would have held DETACHED buffers — the sequencing BLOCKER) — it RE-READS from
-  disk on demand via new pure `lib/source-bytes.ts` (`readSourceBytes` / `sourceReaders`, keyed by the SAME
-  `keyOf`). The FilmViewer selection (async-resolved into state, cancel-guarded; null ⇒ honest "no image"
-  branch, never a fabricated film), the render-probe (`attachProbeReadings` `bytesOf` widened to async + an
-  extra post-re-read abort guard), and the fix path (FixCard re-sources fresh bytes before `planFix`/`runFix`;
-  any null ⇒ honest refuse, never a corrupt zip) all read through it. **(b) Honest oversize skips + cap unify.**
-  The worker's full-resolution `decodeFeatures` alpha scan and `hashAtlasFrames` page read are gated by the
-  shared `pageExceedsScanBudget` / surfaced via `scanSkipReason` (new in `lib/bitmap-budget.ts` as the
-  single-sourced `ANALYZE_PAGE_MAX_PX` — `perceptual.FRAME_HASH_MAX_PX` now re-exports it; the worker's inline
-  `ALPHA_SCAN_MAX_PX` is deleted, ending the byte-identical-but-forked drift). An oversize page now lands a
-  `{ref, reason}` in the existing `unparsed[]` (px-cap vs sprite-cap kept as TWO distinct reasons via a
-  discriminated `hashAtlasFrames` result) instead of vanishing silently; the `unparsed.sort()` is hoisted to
-  AFTER both push-loops so order is deterministic. **No `BitmapBudget` LRU instance in the analyze worker** — its
-  decoded bitmaps are already `close()`d eagerly (no many-live working set, unlike the FIX worker), so an LRU
-  here would be dead code; the honest, no-fork reuse of `bitmap-budget.ts` is its px-cap POLICY half (a
-  documented working-set bound, Inv 5 — never a VRAM/saving number). HONESTY (Inv 3/5): re-read bytes are
-  byte-identical to the original ⇒ identical findings/report/overlay; the cap value is unchanged ⇒ the same
-  pages are scanned ⇒ no measured-number drift. ADDITIVITY: under the cap nothing is skipped and no `unparsed`
-  entry is added; a legacy `PickedFile` (no `file`) still clones. Inv 1: transfer is intra-process, re-read is
-  local disk — zero network. Inv 4: transfer is cheaper than clone and re-reads are lazy (selected/probed/fix)
-  ⇒ off the ≤10s critical path. Tests: extended `bitmap-budget.test.ts` (the cap predicate boundary/degenerate,
-  `scanSkipReason` determinism, the `perceptual.FRAME_HASH_MAX_PX === ANALYZE_PAGE_MAX_PX` drift-guard); new
-  pure `source-bytes.test.ts` (exact bytes, null-on-missing-file, null-on-reject, dir-aware keys, laziness); new
-  `analyze-transfer-skip.test.ts` (runAnalysis posts a non-empty transfer list when all files have `file`, empty
-  when one lacks it; the worker's whole-page skip mapping fires SELECTIVELY, surfaces the two distinct reasons,
-  and sorts deterministically).
+- **#2 ограничить resident-байты analyze (FREE-path) воркера** (`docs/improvements/round21-bound-the-analyze-free-path-worker.md`)
+  — убивает подлинную ~2× source-byte копию на free diagnosis-пути и делает ранее-ТИХИЕ oversize-scan
+  пропуски честными. **(a) Transfer + lazy re-read.** `runAnalysis` теперь ПЕРЕДАЁТ каждый `PickedFile.bytes` в
+  analyze-worker (worker становится ЕДИНСТВЕННОЙ resident-копией) когда КАЖДЫЙ файл несёт re-readable `file` (
+  аддитивный `PickedFile.file?: File`, заполняемый всеми тремя ingest-путями); иначе он КЛОНИРУЕТ (сегодняшнее поведение), так что
+  legacy-callers остаются корректными. Main-thread больше не держит eager dir-aware byte-`map` (который захватил
+  `f.bytes` ДО transfer-а ⇒ держал бы DETACHED буферы — sequencing-BLOCKER) — он ПЕРЕ-ЧИТЫВАЕТ с
+  диска по требованию через новый чистый `lib/source-bytes.ts` (`readSourceBytes` / `sourceReaders`, ключуется ТЕМ ЖЕ
+  `keyOf`). FilmViewer-selection (async-резолвится в state, cancel-guarded; null ⇒ честная «no image»
+  ветка, никогда сфабрикованный фильм), render-probe (`attachProbeReadings` `bytesOf` расширен в async + 
+  дополнительный post-re-read abort-guard), и fix-путь (FixCard пере-source-ит свежие байты перед `planFix`/`runFix`;
+  любой null ⇒ честный refuse, никогда повреждённый zip) — все читают через него. **(b) честные oversize-пропуски + cap unify.**
+  Full-resolution `decodeFeatures` alpha-scan воркера и `hashAtlasFrames` page-read гейтятся
+  общим `pageExceedsScanBudget` / всплывают через `scanSkipReason` (новый в `lib/bitmap-budget.ts` как
+  single-sourced `ANALYZE_PAGE_MAX_PX` — `perceptual.FRAME_HASH_MAX_PX` теперь его реэкспортирует; inline
+  `ALPHA_SCAN_MAX_PX` воркера удалён, заканчивая byte-identical-but-forked дрейф). Oversize-страница теперь приземляет
+  `{ref, reason}` в существующий `unparsed[]` (px-cap vs sprite-cap держатся как ДВА различных reason-а через
+  discriminated `hashAtlasFrames` результат) вместо тихого исчезновения; `unparsed.sort()` поднят
+  ПОСЛЕ обоих push-циклов, так что порядок детерминирован. **Нет `BitmapBudget` LRU-инстанса в analyze-воркере** — его
+  декодированные битмапы уже `close()`-ятся eagerly (нет много-живого working-set-а, в отличие от FIX-воркера), так что LRU
+  здесь был бы dead-кодом; честное, no-fork переиспользование `bitmap-budget.ts` это его px-cap ПОЛИТИЧЕСКАЯ половина (
+  задокументированная working-set граница, Инв 5 — никогда VRAM/saving число). ЧЕСТНОСТЬ (Инв 3/5): пере-читанные байты
+  байт-идентичны оригиналу ⇒ идентичные finding-и/report/overlay; cap-значение неизменно ⇒ те же
+  страницы сканируются ⇒ без дрейфа измеренного числа. АДДИТИВНОСТЬ: под cap-ом ничего не пропускается и нет `unparsed`
+  записи; legacy `PickedFile` (без `file`) всё ещё клонирует. Инв 1: transfer intra-process, re-read
+  локальный диск — ноль сети. Инв 4: transfer дешевле клона, а re-read-ы ленивые (selected/probed/fix)
+  ⇒ вне ≤10с критического пути. Тесты: расширен `bitmap-budget.test.ts` (cap-предикат граница/degenerate,
+  `scanSkipReason` детерминизм, drift-guard `perceptual.FRAME_HASH_MAX_PX === ANALYZE_PAGE_MAX_PX`); новый
+  чистый `source-bytes.test.ts` (точные байты, null-on-missing-file, null-on-reject, dir-aware ключи, ленивость); новый
+  `analyze-transfer-skip.test.ts` (runAnalysis постит непустой transfer-list когда у всех файлов есть `file`, пустой
+  когда у одного его нет; whole-page skip-маппинг воркера срабатывает ВЫБОРОЧНО, всплывает два различных reason-а,
+  и сортирует детерминированно).
   **Gate:** `pnpm typecheck` + `pnpm test` + `pnpm lint`.
 
-## Round 20 — selection (#0 shipped) — 2026-06-29
-Pick: **(#0) trim-on-repack FIX** (shipped below) — turns the r19 trim-margin DETECTOR into a Pro fix.
+## Раунд 20 — отбор (#0 отгружено) — 2026-06-29
+Pick: **(#0) trim-on-repack ФИКС** (отгружен ниже) — превращает r19 trim-margin ДЕТЕКТОР в Pro-фикс.
 
-- **#0 Trim-on-repack FIX** (`docs/improvements/round20-trim-on-repack-fix-auto-trim-untri.md`) — when a repack
-  runs, every UNtrimmed sprite carrying reclaimable transparent padding is now tightened to its opaque bounds.
-  Rides the EXISTING repack op (free-rider boundary — occupancy/frame-redundancy/merge-scheduled repacks also
-  trim; no separate trim-margin→repack scheduling in v1). `repackAtlases` gained `RepackOptions.trim?`
-  (per-atlas, index-aligned frame-relative bboxes from `alphaBBox`) + `trimAsSpineOffset?`: a shrinkable
-  untrimmed sprite is packed at the TIGHTER `{bbox.w,bbox.h}`, the Blit reads the INSET source sub-region, and
-  the emitted Sprite carries `trimmed:true` + `sourceSize`(full) + `spriteSourceSize`/offset (TP top-left or
-  Spine bottom-left Y-flip via `spineOffsetFrom`) — a correct NON-destructive shrink (renders identically
-  in-engine from a smaller sheet). Three skeptic BLOCKERS folded in: **B1** no `minMarginPx` gate in the fix
-  (trimming any shrinkable sprite is always correct) and the receipt reports the MEASURED reclaim ("reclaimed N
-  px"), never the detector's "up to" promise; **B2** an UNtrimmed ALIAS of a trimmed representative INHERITS the
-  rep's trim (byte-identical pixels ⇒ same bbox) — emitting a tight rect with the alias still marked untrimmed
-  would be a BROKEN manifest; **B3** the no-gutter `extrudeVramDelta` baseline repack calls (Spine + rect/merge)
-  receive the IDENTICAL trim so the delta isolates ONLY the gutter (else the sign flips). Worker `buildTrimArrays`
-  decodes each atlas page once (LRU-cached/pinned) and computes the bbox per untrimmed frame via the SAME pure
-  `alphaBBox` the analyze pass uses; fed into all 5 `repackAtlases` calls. New `RepackResult.trimmedSprites`/
-  `trimmedAreaReclaimed` + `FixReceipt` fields + App receipt line + `fix.trimmedOnRepack` i18n ×9 (mirrors
-  `framesAliased`). Additive: no shrinkable untrimmed sprite / trim absent ⇒ byte-identical. Tests: pure
-  `fix.test.ts` (TP tighter-pack + emitted metadata, Spine Y-flip, B2 alias-inherits-trim, null/full/already-
-  trimmed verbatim, additivity pin, fixture golden) + E2E `perceptual.test.ts` (decode→alphaBBox→repack realizes
-  the defect: reclaimed ≥ recoverableArea, exact per-sprite packedSize===bbox, parser+pixel round-trip) + worker
-  control-flow `trim-on-repack-worker.test.ts`; fixture `untrimmed-padding/expected.json` extended with the
-  additive `repack` golden. Gate: typecheck + test + lint green.
+- **#0 trim-on-repack ФИКС** (`docs/improvements/round20-trim-on-repack-fix-auto-trim-untri.md`) — когда repack
+  запускается, каждый UNtrimmed-спрайт, несущий reclaimable transparent-padding, теперь подтягивается к своим opaque-границам.
+  Едет на СУЩЕСТВУЮЩЕМ repack-op-е (free-rider граница — occupancy/frame-redundancy/merge-scheduled repack-и тоже
+  trim-ят; нет отдельного trim-margin→repack scheduling в v1). `repackAtlases` получил `RepackOptions.trim?`
+  (per-atlas, index-aligned frame-relative bbox-ы из `alphaBBox`) + `trimAsSpineOffset?`: shrinkable untrimmed-
+  спрайт упакован при БОЛЕЕ ТЕСНОМ `{bbox.w,bbox.h}`, Blit читает INSET source sub-region, а
+  эмитированный Sprite несёт `trimmed:true` + `sourceSize`(full) + `spriteSourceSize`/offset (TP top-left или
+  Spine bottom-left Y-flip через `spineOffsetFrom`) — корректный НЕ-деструктивный shrink (рендерится идентично
+  in-engine с меньшего шита). Три скептик-BLOCKER-а свёрнуты: **B1** нет `minMarginPx` gate в фиксе
+  (trimming любого shrinkable-спрайта всегда корректен) и чек сообщает ИЗМЕРЕННЫЙ reclaim («reclaimed N
+  px»), никогда «up to» обещание детектора; **B2** UNtrimmed АЛИАС trimmed-представителя НАСЛЕДУЕТ
+  trim rep-а (байт-идентичные пиксели ⇒ тот же bbox) — эмиссия tight-rect-а с алиасом всё ещё помеченным untrimmed
+  была бы СЛОМАННЫМ манифестом; **B3** no-gutter `extrudeVramDelta` baseline repack-вызовы (Spine + rect/merge)
+  получают ИДЕНТИЧНЫЙ trim, так что delta изолирует ТОЛЬКО gutter (иначе знак переворачивается). Worker `buildTrimArrays`
+  декодирует каждую atlas-page однажды (LRU-cached/pinned) и вычисляет bbox per untrimmed-фрейм через ТОТ ЖЕ чистый
+  `alphaBBox`, что использует analyze-проход; подано во все 5 `repackAtlases` вызовов. Новые `RepackResult.trimmedSprites`/
+  `trimmedAreaReclaimed` + поля `FixReceipt` + receipt-строка App + `fix.trimmedOnRepack` i18n ×9 (зеркалит
+  `framesAliased`). Аддитивно: нет shrinkable untrimmed-спрайта / trim отсутствует ⇒ байт-в-байт. Тесты: чистый
+  `fix.test.ts` (TP tighter-pack + эмитированная метаданная, Spine Y-flip, B2 alias-inherits-trim, null/full/already-
+  trimmed дословно, additivity pin, fixture golden) + E2E `perceptual.test.ts` (decode→alphaBBox→repack реализует
+  дефект: reclaimed ≥ recoverableArea, точный per-sprite packedSize===bbox, parser+pixel round-trip) + worker
+  control-flow `trim-on-repack-worker.test.ts`; фикстура `untrimmed-padding/expected.json` расширена
+  аддитивным `repack` golden-ом. Gate: typecheck + test + lint зелёные.
 
-- **#1 Prebuilt-atlas passthrough transcode — closes a DANGLING-REFERENCE bug**
-  (`docs/improvements/round20-prebuilt-atlas-passthrough-transco.md`) — `analyze.ts` sizes ATLAS PAGES too
-  (`addFormat(atlas.name, image)`), so a WELL-PACKED (high-occupancy) + correctly-sized (POT, not oversize)
-  prebuilt sheet whose page transcodes smaller earns a `format` finding on its PAGE → a standalone `transcode`
-  op with NO repack/resize. The old worker treated that op as a LOOSE image: it renamed `sheet.png` →
-  `sheet.webp` but NEVER repointed the sidecar — `sheet.json` `meta.image` / the Spine `.atlas` texture line
-  still said `sheet.png` ⇒ the loader resolved a file that no longer exists (**dangling reference / broken
-  drop-in**). NEW atlas-aware branch in `fix.worker.ts` (after the profile-fanout block; the loose path is now
-  reached ONLY for non-atlas refs): re-encode the existing page VERBATIM (no recompose — frame/trim/pivot/mesh
-  untouched), repoint the sidecar's `meta.image` (TP) / Spine texture line at the new page via the new PURE
-  `repointAtlasImage` (`packages/fix/src/atlas-transcode.ts`, the proven `relativeImageRef` inverse → resolves
-  back through `@asset-doctor/parsers`), re-emit the sidecar deterministically, and DROP the old page
-  (`replaced.add`). Skeptic blockers folded in: **B1** the KTX2 candidate is recorded for TexturePacker ONLY
-  (the post-pass hardcodes `.json`→`.ktx2.json` + `emitTexturePackerJson`, so a Spine `.atlas` would ship a
-  malformed `.ktx2.json`); **B2** a general size-loss guard (`enc >= src` PLUS the opaque `transcodeIsSizeLoss`
-  parity) KEEPS the original page + original sidecar when the re-encode isn't smaller — the fix that fixes
-  dangling refs never CREATES one by shipping a worse page; **M1** `recordVariant`/`repackChanges`/
-  `referencesChanged` fire UNCONDITIONALLY (a transcode ALWAYS renames the page by extension — NOT the
-  `hashOn`-gated stable-name drop-in resize-atlas uses); **M3** a transcoded atlas page that is a retained dedup
-  OWNER updates `ownerActualName`/`ownerActualUnhashed` so Phase-C repoints CONSUMERS at the real page. Fail-safe
-  honest skips: missing sidecar, multi-page Spine (`emitSpineAtlasText` writes ONE page), encode-unavailable.
-  HONESTY (invariant 5): identical pixel dims ⇒ identical RGBA8888 VRAM ⇒ NO `vramSaved` increment (disk-only).
-  Dry-run preview updated to predict `referencesChanged` for an atlas transcode (matches execute). ADDITIVITY:
-  off / no-atlas-target ⇒ byte-identical (the loose path is untouched; a non-atlas ref never enters the block).
-  Tests: pure `packages/fix/test/atlas-transcode.test.ts` (TP/Spine repoint round-trip through `parseAtlasManifest`
-  / `parseSpineAtlasText` + `resolveImageRef` incl. same-dir / cross-dir / cache-busted; no-dangling-ref
-  membership; frame-verbatim) + worker-seam `apps/web/test/atlas-transcode-worker.test.ts` (Harness A: the real
-  analyze→plan path yields exactly one transcode op on the atlas page with no repack/resize; Harness B: emit→
-  parse→resolve leaves no dangling ref; Harness C: B2 size-loss / multi-page Spine / sidecar-unavailable / B1
-  Spine-no-KTX2 / M3 dedup-owner decision predicates; additivity: a loose transcode emits no sidecar). Gate:
-  typecheck + test + lint green.
+- **#1 prebuilt-atlas passthrough-транскод — закрывает баг DANGLING-REFERENCE**
+  (`docs/improvements/round20-prebuilt-atlas-passthrough-transco.md`) — `analyze.ts` размеряет ATLAS-страницы тоже
+  (`addFormat(atlas.name, image)`), так что ХОРОШО-УПАКОВАННЫЙ (high-occupancy) + корректно-размеренный (POT, не oversize)
+  prebuilt-шит, чья страница транскодируется меньше, зарабатывает `format` finding на своей СТРАНИЦЕ → standalone `transcode`
+  op БЕЗ repack/resize. Старый worker трактовал тот op как LOOSE-изображение: он переименовывал `sheet.png` →
+  `sheet.webp`, но НИКОГДА не репойнтил sidecar — `sheet.json` `meta.image` / Spine `.atlas` texture-строка
+  всё ещё говорили `sheet.png` ⇒ лоадер резолвил файл, который больше не существует (**dangling reference / сломанный
+  drop-in**). НОВАЯ atlas-aware ветка в `fix.worker.ts` (после profile-fanout блока; loose-путь теперь
+  достигается ТОЛЬКО для non-atlas ref-ов): пере-кодировать существующую страницу ДОСЛОВНО (без recompose — frame/trim/pivot/mesh
+  нетронуты), репойнтить `meta.image` sidecar-а (TP) / Spine texture-строку на новую страницу через новый ЧИСТЫЙ
+  `repointAtlasImage` (`packages/fix/src/atlas-transcode.ts`, проверенный `relativeImageRef` inverse → резолвит
+  обратно через `@asset-doctor/parsers`), пере-эмитить sidecar детерминированно, и СБРОСИТЬ старую страницу
+  (`replaced.add`). Скептик-блокеры свёрнуты: **B1** KTX2-кандидат записывается ТОЛЬКО для TexturePacker
+  (post-pass хардкодит `.json`→`.ktx2.json` + `emitTexturePackerJson`, так что Spine `.atlas` отгрузил бы
+  малформ `.ktx2.json`); **B2** общий size-loss guard (`enc >= src` ПЛЮС opaque `transcodeIsSizeLoss`
+  паритет) ДЕРЖИТ оригинальную страницу + оригинальный sidecar когда пере-кодировка не меньше — фикс, который чинит
+  dangling-ref-ы, никогда не СОЗДАЁТ один отгружая худшую страницу; **M1** `recordVariant`/`repackChanges`/
+  `referencesChanged` срабатывают БЕЗУСЛОВНО (transcode ВСЕГДА переименовывает страницу по расширению — НЕ
+  `hashOn`-гейтнутый stable-name drop-in, что использует resize-atlas); **M3** транскодированная atlas-страница, которая retained dedup-
+  OWNER, обновляет `ownerActualName`/`ownerActualUnhashed`, так что Phase-C репойнтит CONSUMER-ы на реальную страницу. Fail-safe
+  честные пропуски: missing sidecar, multi-page Spine (`emitSpineAtlasText` пишет ОДНУ страницу), encode-unavailable.
+  ЧЕСТНОСТЬ (инвариант 5): идентичные pixel-dims ⇒ идентичный RGBA8888 VRAM ⇒ НЕТ `vramSaved` инкремента (disk-only).
+  Dry-run preview обновлён предсказывать `referencesChanged` для atlas-транскода (совпадает с execute). АДДИТИВНОСТЬ:
+  off / no-atlas-target ⇒ байт-в-байт (loose-путь нетронут; non-atlas ref никогда не входит в блок).
+  Тесты: чистый `packages/fix/test/atlas-transcode.test.ts` (TP/Spine repoint round-trip через `parseAtlasManifest`
+  / `parseSpineAtlasText` + `resolveImageRef` вкл. same-dir / cross-dir / cache-busted; no-dangling-ref
+  membership; frame-verbatim) + worker-seam `apps/web/test/atlas-transcode-worker.test.ts` (Harness A: реальный
+  analyze→plan путь даёт ровно один transcode-op на atlas-странице без repack/resize; Harness B: emit→
+  parse→resolve не оставляет dangling-ref; Harness C: B2 size-loss / multi-page Spine / sidecar-unavailable / B1
+  Spine-no-KTX2 / M3 dedup-owner decision-предикаты; аддитивность: loose-transcode не эмитит sidecar). Gate:
+  typecheck + test + lint зелёные.
 
-- **#2 Close the i18n-app-keys guard's dynamic-key blind spots** (test-only hardening,
-  `docs/improvements/round20-close-the-i18n-app-keys-guard-s-dy.md`) — the `apps/web/test/i18n-app-keys.test.ts`
-  guard scanned only `App.tsx + FilmViewer + VerdictBar + TriageLedger` and expanded only the
-  `fix.pack.{mode,grouping}.*` + `triage.{filter,sort,scope}.*` dynamic templates, so **four** other
-  `t(`prefix.${…}`)` classes rendered raw dotted keys on a future rename, undetected by the catalog drift test:
-  `severity.${f.severity}` (App.tsx + the previously-unscanned Findings.tsx), `license.err.${…}` (the unscanned
-  LicensePanel.tsx), and `fix.lazy.${s}` + `fix.op.${…}` (both ALREADY inside the scanned App.tsx but with no
-  expansion branch). NOW: Findings.tsx + LicensePanel.tsx added to `appSrc`; four new `expandedDynamicKeys`
-  branches — `fix.op.*` import-backed by the live `OP_KIND_ORDER` verb set (+`'other'` UI bucket) so it
-  self-maintains, `severity.*`/`license.err.*`/`fix.lazy.*` mirror a type-only union / private `KNOWN_CODES` Set,
-  each pinned by a per-class drift-guard `it()` block asserting every suffix resolves in `CATALOGS.en`. All
-  referenced keys already exist in en (and all 9 locales) ⇒ pure regression-hardening, NO catalog change, NO app
-  behavior change; the guard is now red on any future rename of these keys. Gate: typecheck + test + lint green.
+- **#2 закрыть dynamic-key слепые зоны i18n-app-keys guard-а** (test-only hardening,
+  `docs/improvements/round20-close-the-i18n-app-keys-guard-s-dy.md`) — guard `apps/web/test/i18n-app-keys.test.ts`
+  сканировал только `App.tsx + FilmViewer + VerdictBar + TriageLedger` и раскрывал только
+  `fix.pack.{mode,grouping}.*` + `triage.{filter,sort,scope}.*` dynamic-шаблоны, так что **четыре** других
+  класса `t(`prefix.${…}`)` рендерили raw dotted-ключи на будущем rename, не обнаруженные catalog-drift тестом:
+  `severity.${f.severity}` (App.tsx + ранее-несканированный Findings.tsx), `license.err.${…}` (несканированный
+  LicensePanel.tsx), и `fix.lazy.${s}` + `fix.op.${…}` (оба УЖЕ внутри сканированного App.tsx но без
+  expansion-ветки). ТЕПЕРЬ: Findings.tsx + LicensePanel.tsx добавлены в `appSrc`; четыре новых `expandedDynamicKeys`
+  ветки — `fix.op.*` import-backed живым `OP_KIND_ORDER` verb-set-ом (+`'other'` UI-bucket), так что он
+  само-поддерживается, `severity.*`/`license.err.*`/`fix.lazy.*` зеркалят type-only union / private `KNOWN_CODES` Set,
+  каждая pinned per-class drift-guard `it()` блоком, утверждающим что каждый суффикс резолвится в `CATALOGS.en`. Все
+  упомянутые ключи уже существуют в en (и во всех 9 локалях) ⇒ чистое regression-hardening, БЕЗ изменения каталога, БЕЗ изменения
+  поведения app-а; guard теперь красный на любом будущем rename этих ключей. Gate: typecheck + test + lint зелёные.
 
 ---
 
-## Round 19 — selection (3 picks; #0 shipped) — 2026-06-29
-Picks: **(a) frame-redundancy FIX** (shipped, #0 below); **(b) fix-worker memory bounds**; **(c) trim-margin
-detector**. Designs for (b)/(c) pending.
+## Раунд 19 — отбор (3 pick-а; #0 отгружено) — 2026-06-29
+Pick-и: **(a) frame-redundancy ФИКС** (отгружен, #0 ниже); **(b) fix-worker memory bounds**; **(c) trim-margin
+детектор**. Дизайны для (b)/(c) в ожидании.
 
-- **#0 Frame-redundancy FIX** (`docs/improvements/round19-frame-redundancy-fix.md`) — turns the r18 detector
-  into a Pro fix: alias N byte-identical animation frames within an atlas onto ONE packed region in the repack
-  (one Blit per representative; every original name still resolves via the manifest), exact VRAM before→after
-  (no estimate), drop-in by construction. Review verdict from the design's own skeptic: **SALVAGEABLE +
-  BLOCKER B1 fixed** — a frame-redundant atlas is usually FULLY packed (its duplicates fill the sheet ⇒ no
-  occupancy/wasted finding ⇒ no repack today), so the FINDING itself now emits its OWN `repack` op (reuses the
-  `repack` OpKind ⇒ tally/manifest/selective-fix/receipt unchanged), and the WORKER pre-hashes qualifying merged
-  atlas pages BEFORE `analyze()` (one decode/qualifying page, ≥minDuplicates pre-filter, respects cancel) so the
-  finding actually fires. `repackAtlases` gained an optional `aliasMaps` arg: packs ONE representative per
-  byte-identical cluster, emits a Sprite for each alias name at the shared rect copying the alias's OWN
-  trim/pivot/sourceSize, with a DUAL occupancy accumulator (source=all sprites before, packed=reps after).
-  Pure `packages/fix/src/alias.ts` mirrors the detector's distinct-rect guard byte-for-byte (pre-aliased rects
-  never double-count; `aliasedFrames` === the finding's `dupes`). New `FixOptions.frameRedundancy`
+- **#0 frame-redundancy ФИКС** (`docs/improvements/round19-frame-redundancy-fix.md`) — превращает r18-детектор
+  в Pro-фикс: алиасит N байт-идентичных animation-фреймов внутри атласа на ОДИН упакованный регион в repack-е
+  (один Blit на представителя; каждое оригинальное имя всё ещё резолвится через манифест), точный VRAM before→after
+  (без оценки), drop-in по построению. Вердикт ревью от собственного скептика дизайна: **SALVAGEABLE +
+  BLOCKER B1 fixed** — frame-redundant атлас обычно ПОЛНОСТЬЮ упакован (его дубли заполняют шит ⇒ нет
+  occupancy/wasted finding-а ⇒ нет repack сегодня), так что сам FINDING теперь эмитит СОБСТВЕННЫЙ `repack` op (переиспользует
+  `repack` OpKind ⇒ tally/manifest/selective-fix/receipt неизменны), а WORKER пре-хэширует квалифицирующиеся merged
+  atlas-страницы ПЕРЕД `analyze()` (один decode/квалифицирующуюся страницу, ≥minDuplicates pre-filter, уважает cancel), так что
+  finding фактически срабатывает. `repackAtlases` получил опциональный `aliasMaps` arg: упаковывает ОДНОГО представителя на
+  байт-идентичный кластер, эмитит Sprite для каждого alias-имени на общем rect-е, копируя СОБСТВЕННЫЕ алиаса
+  trim/pivot/sourceSize, с DUAL occupancy-аккумулятором (source=все спрайты до, packed=rep-ы после).
+  Чистый `packages/fix/src/alias.ts` зеркалит distinct-rect guard детектора байт-в-байт (pre-aliased rect-ы
+  никогда не double-count-ятся; `aliasedFrames` === `dupes` finding-а). Новый `FixOptions.frameRedundancy`
   (default ON) + App toggle + `PlanOptions.frameRedundancy` + `RepackResult.aliasedFrames` +
-  `FixReceipt.framesAliased` + receipt line + i18n ×9. Additive: absent/false ⇒ no hashing, no new op, no
-  aliasing ⇒ byte-identical. Tests: pure `alias.test.ts` (8) + end-to-end on the fully-packed
-  `frame-redundant` fixture (B1 op fires, all 8 names resolve, 4 idle share one rect, exact VRAM, honesty pin
-  `aliasedFrames === dupes`) + a synthetic POT-tier VRAM-drop proof. Gate: typecheck + test (388 fix) + lint green.
+  `FixReceipt.framesAliased` + receipt-строка + i18n ×9. Аддитивно: absent/false ⇒ нет хэширования, нет нового op-а, нет
+  алиасинга ⇒ байт-в-байт. Тесты: чистый `alias.test.ts` (8) + end-to-end на полностью-упакованной
+  `frame-redundant` фикстуре (B1 op срабатывает, все 8 имён резолвятся, 4 idle делят один rect, точный VRAM, honesty pin
+  `aliasedFrames === dupes`) + synthetic POT-tier VRAM-drop доказательство. Gate: typecheck + test (388 fix) + lint зелёные.
 
-- **#1 Fix-worker memory bounds** (`docs/improvements/round19-fix-worker-memory-bounds.md`) — bounds the
-  fix-worker's decoded-source resident set so a multi-dozen-page Pro fix can't pile hundreds of MB of decoded
-  ImageBitmaps resident and OOM the tab (the worst failure on the PAID path: `bitmapOf`'s old `bmpCache`
-  never `.close()`d/evicted/drained, holding every decode for the whole run). New PURE Node-testable policy
-  `apps/web/src/lib/bitmap-budget.ts`: `BitmapBudget<Closeable>` — an LRU keyed by ref, bounded by a
-  documented byte budget (`BITMAP_BUDGET_BYTES` = 256 MB ≈ 16 full 2048² RGBA pages, Σ w·h·4), with a
-  close-callback, a `pin`/`unpinAll` set for the in-flight op's source refs (the LRU NEVER evicts a pinned
-  bitmap), and a `drain()` that close()s + clears everything. Over-budget insert close()+evicts the LRU
-  UNPINNED entry (≠ the just-inserted ref) until under budget OR only pinned/this remain (a single page > the
-  whole budget is admitted; all-pinned-over-budget is tolerated — correctness over the bound, surfaced via
-  `peakCount`). Worker wiring: `bitmapOf` routes through it; `bmpBudget` is hoisted at the top of `runFix` and
-  the whole body wrapped in `try { … } finally { bmpBudget?.drain() }` so a finished/superseded run (incl.
-  every round18 cancel `return` and a thrown error) frees native memory immediately (composes with the
-  abortable-workers cancel path; plan-mode / pre-decode cancel ⇒ `bmpBudget` undefined ⇒ drain no-op). A
-  `teardownPrevOp()` at the TOP of each `plan.ops` iteration (and once after) unpins + drops the prior op's
-  per-op `maskCache`/`meshCache`/`trimCache` entries — ONE site that fires regardless of the body's 20+
-  `continue` exits. `pin(srcRefs)` early in the merge/polygon (group atlases) + pack (`group.regions`)
-  branches stops a re-decode storm within one multi-source op. Optional descriptive receipt note
-  `FixReceipt.decodeWorkingSet { decodedPages, budgetBytes }` (gated on `peakCount > 0`; NEVER a VRAM/saving
-  number — invariant 5). CORRECTNESS: a miss re-decodes safely from the whole-run-retained `bytesByRef` (a
-  wrongly-evicted entry costs CPU, never a wrong pixel); the LRU never evicts a ref the current op still needs.
-  ADDITIVITY: under the byte budget nothing evicts ⇒ same decode set + order ⇒ output byte-identical to before.
-  DETERMINISM: eviction only frees memory (recency = call order, ties by Map insertion order). Tests: PURE
+- **#1 fix-worker memory bounds** (`docs/improvements/round19-fix-worker-memory-bounds.md`) — ограничивает
+  decoded-source resident-set fix-воркера, так что multi-dozen-page Pro-фикс не может навалить сотни МБ декодированных
+  ImageBitmap-ов resident и OOM-нуть вкладку (худший сбой на ПЛАТНОМ пути: старый `bmpCache` в `bitmapOf`
+  никогда не `.close()`-ил/evict-ил/drain-ил, держа каждый decode весь run). Новая ЧИСТАЯ Node-тестируемая политика
+  `apps/web/src/lib/bitmap-budget.ts`: `BitmapBudget<Closeable>` — LRU ключуемый по ref, ограниченный
+  задокументированным byte-budget-ом (`BITMAP_BUDGET_BYTES` = 256 MB ≈ 16 полных 2048² RGBA-страниц, Σ w·h·4), с
+  close-callback-ом, `pin`/`unpinAll` set-ом для source-ref-ов in-flight op-а (LRU НИКОГДА не evict-ит pinned-
+  битмап), и `drain()`, который close()-ит + очищает всё. Over-budget insert close()+evict-ит UNPINNED LRU-
+  запись (≠ только-что-вставленный ref) пока не под budget-ом ИЛИ остаются только pinned/this (одна страница > 
+  всего budget-а admit-ится; all-pinned-over-budget толерируется — корректность над границей, всплывает через
+  `peakCount`). Worker-wiring: `bitmapOf` маршрутизирует через него; `bmpBudget` поднят в верх `runFix`, а
+  всё тело обёрнуто в `try { … } finally { bmpBudget?.drain() }`, так что finished/superseded run (вкл.
+  каждый round18 cancel `return` и брошенную ошибку) освобождает native-память немедленно (компонует с
+  abortable-workers cancel-путём; plan-mode / pre-decode cancel ⇒ `bmpBudget` undefined ⇒ drain no-op). 
+  `teardownPrevOp()` в ВЕРХУ каждой `plan.ops` итерации (и однажды после) unpin-ит + дропает предыдущего op-а
+  per-op `maskCache`/`meshCache`/`trimCache` записи — ОДНО место, что срабатывает независимо от 20+ `continue` exit-ов
+  тела. `pin(srcRefs)` рано в merge/polygon (group-атласы) + pack (`group.regions`)
+  ветках останавливает re-decode storm внутри одного multi-source op-а. Опциональная описательная receipt-заметка
+  `FixReceipt.decodeWorkingSet { decodedPages, budgetBytes }` (гейтнута на `peakCount > 0`; НИКОГДА VRAM/saving
+  число — инвариант 5). КОРРЕКТНОСТЬ: miss пере-декодирует безопасно из whole-run-retained `bytesByRef` (
+  ошибочно-evict-нутая запись стоит CPU, никогда неверный пиксель); LRU никогда не evict-ит ref, который текущий op ещё нужен.
+  АДДИТИВНОСТЬ: под byte-budget-ом ничего не evict-ится ⇒ тот же decode-set + порядок ⇒ вывод байт-в-байт к прежнему.
+  ДЕТЕРМИНИЗМ: eviction только освобождает память (recency = call-order, ties по Map-insertion order). Тесты: ЧИСТЫЙ
   headless `apps/web/src/lib/bitmap-budget.test.ts` (13) — eviction-over-budget + close-fires +
-  nothing-under-budget + recency-refresh + never-evict-the-pinned-ref (+ unpin makes it evictable, all-pinned
-  tolerated) + single-oversized-admitted + drain-closes-once/idempotent + replace-frees-stale + peakCount +
-  determinism. Additive: under budget ⇒ byte-identical. Gate: typecheck + test (web 389) + lint green.
+  nothing-under-budget + recency-refresh + never-evict-the-pinned-ref (+ unpin делает его evictable, all-pinned
+  толерируется) + single-oversized-admitted + drain-closes-once/idempotent + replace-frees-stale + peakCount +
+  детерминизм. Аддитивно: под budget-ом ⇒ байт-в-байт. Gate: typecheck + test (web 389) + lint зелёные.
 
-- **#2 Per-atlas trim-margin detector** (`docs/improvements/round19-trim-margin-detector.md`) — DETECTION-only
-  sibling of the r18 frame-redundancy detector: for each sprite NOT already trimmed (no `spriteSourceSize` —
-  its `frame` IS the full untrimmed image), MEASURE the transparent margin it carries (frame area − opaque
-  alpha bbox area) and report the summed recoverable area × 4 as EXACT VRAM (the atlas space the padding pins
-  that a trimmed repack reclaims), plus an area-proportional DISK estimate (invariant 5 — carried separately,
-  NEVER folded into `potentialDiskSaved`), and ONE `transparent` (yellow) overlay zone of per-side border
-  strips in atlas px. INSTANT-WOW: the worker computes each opaque bbox via the pure `alphaBBox`
-  (`@asset-doctor/fix`) off the SAME already-decoded page the frame-redundancy pass reads — `hashAtlasFrames`
-  now returns `{ hashes, bboxes }` from ONE decode, so the trim feature adds ZERO extra decode and reuses the
-  SAME px/sprite caps. HONESTY: gate on `Sprite.trimmed === false` (the `&& spriteSourceSize === undefined`
-  conjunct kept only as a documented redundant-by-parser-construction guard); skip already-trimmed sprites;
-  distinct-rect alias guard counts shared packed rects once; a `null` bbox on an untrimmed sprite =
-  fully-transparent frame (whole frame recoverable). Rotation-invariant (area + per-side margin read over the
-  placed region; strips drawn in placed-page space). New core `AtlasFrameTrims` contract + `'trim-margin'`
-  Rule + `trimMargin` ThresholdConfig (`{minMarginPx:4, minRecoverablePct:0.05}`, browser-only — NOT in
-  resolveThresholds); `trimMarginFinding` threaded into `analyze()` like `frameHashes` (absent ⇒ byte-identical
-  ⇒ CLI/headless unaffected). i18n ×9 (copy says "reclaims **up to**" — uniform-cell padding is sometimes
-  intentional) + render-drift guard. Golden fixture `untrimmed-padding/` (textured cores in transparent
-  margins, one already-trimmed sprite the detector skips) via the generator. Tests: analysis unit + golden
+- **#2 per-atlas trim-margin детектор** (`docs/improvements/round19-trim-margin-detector.md`) — DETECTION-only
+  сиблинг r18 frame-redundancy детектора: для каждого спрайта НЕ уже trimmed (нет `spriteSourceSize` —
+  его `frame` ЕСТЬ полное untrimmed изображение), ИЗМЕРЬ transparent-margin, который он несёт (frame area − opaque
+  alpha bbox area), и сообщи суммированную recoverable area × 4 как ТОЧНЫЙ VRAM (atlas-пространство, что padding пинит,
+  которое trimmed-repack возвращает), плюс area-пропорциональную DISK-оценку (инвариант 5 — несётся отдельно,
+  НИКОГДА не свёрнута в `potentialDiskSaved`), и ОДНУ `transparent` (жёлтую) overlay-зону per-side border-
+  полосок в atlas-px. INSTANT-WOW: worker вычисляет каждый opaque-bbox через чистый `alphaBBox`
+  (`@asset-doctor/fix`) с ТОЙ ЖЕ уже-декодированной страницы, что читает frame-redundancy проход — `hashAtlasFrames`
+  теперь возвращает `{ hashes, bboxes }` из ОДНОГО decode-а, так что trim-фича добавляет НОЛЬ лишнего decode-а и переиспользует
+  ТЕ ЖЕ px/sprite кэпы. ЧЕСТНОСТЬ: gate на `Sprite.trimmed === false` (конъюнкт `&& spriteSourceSize === undefined`
+  оставлен только как задокументированный redundant-by-parser-construction guard); пропускать уже-trimmed-спрайты;
+  distinct-rect alias guard считает общие packed-rect-ы однажды; `null` bbox на untrimmed-спрайте =
+  полностью-transparent фрейм (весь фрейм recoverable). Rotation-инвариантно (area + per-side margin читается над
+  размещённым регионом; полоски рисуются в placed-page пространстве). Новый core `AtlasFrameTrims` contract + `'trim-margin'`
+  Rule + `trimMargin` ThresholdConfig (`{minMarginPx:4, minRecoverablePct:0.05}`, browser-only — НЕ в
+  resolveThresholds); `trimMarginFinding` пробрасывается в `analyze()` как `frameHashes` (absent ⇒ байт-в-байт
+  ⇒ CLI/headless не затронуты). i18n ×9 (текст говорит «reclaims **up to**» — uniform-cell padding иногда
+  намеренный) + render-drift guard. Golden-фикстура `untrimmed-padding/` (textured-ядра в transparent-
+  margin-ах, один уже-trimmed спрайт, который детектор пропускает) через генератор. Тесты: analysis-unit + golden
   (skip-trimmed, null-bbox whole-frame, alias-once, below-floor/thin-margin/length-mismatch/no-config ⇒ null,
-  disk-not-folded) + web e2e (fixture PNG → real `alphaBBox` → rule). Gate: typecheck + test + lint green.
+  disk-not-folded) + web e2e (fixture PNG → реальный `alphaBBox` → правило). Gate: typecheck + test + lint зелёные.
 
-## Round 18 — robustness + moat + analysis depth — 2026-06-29
-- `4870cc1` **Abortable workers** — `AbortSignal` seam through analyze + fix workers + clients; cooperative cancel flag; a superseded drop aborts the prior run. Additive (no signal ⇒ byte-identical). Review SHIP.
-- `1c6902d` **correlateFix(receipt)** — measured before→after fix probe → one localized doctor verdict (reuses `CorrelatedFinding` + variant-suffixed i18n; measured-only, honest). Review SHIP.
-- `c3950ae` **Frame-redundancy detector** — duplicate frames within an atlas (per-region SHA, instant-wow caps + flat-guard; exact VRAM-area waste). Review FIX_THEN_SHIP — both MAJORs fixed (fixture now reproduces the defect through the real flat-guarded path; worker decode path tested).
+## Раунд 18 — robustness + moat + analysis depth — 2026-06-29
+- `4870cc1` **Abortable workers** — `AbortSignal` seam через analyze + fix воркеры + клиенты; кооперативный cancel-флаг; superseded-drop абортит предыдущий run. Аддитивно (нет signal ⇒ байт-в-байт). Review SHIP.
+- `1c6902d` **correlateFix(receipt)** — измеренная before→after fix-проба → один локализованный doctor-вердикт (переиспользует `CorrelatedFinding` + variant-suffixed i18n; measured-only, честно). Review SHIP.
+- `c3950ae` **frame-redundancy детектор** — дублирующие фреймы внутри атласа (per-region SHA, instant-wow кэпы + flat-guard; точная VRAM-area трата). Review FIX_THEN_SHIP — оба MAJOR-а фикснуты (фикстура теперь воспроизводит дефект через реальный flat-guarded путь; worker decode-путь протестирован).
 
-## Round 17 — moat / parity / honesty — 2026-06-28
-- `3be0d6a` **Render-probe the produced fix** — measured before→after draw calls + decoded VRAM per sheet (3rd probe sibling); honest badge kept separate from static numbers. Review SHIP.
-- `01e5950` **Per-image measured best-format pick** — carry the diagnosis's measured smallest-encode winner into the fix plan (default OFF; precedence profile>override>bestMime>global). Review FIX_THEN_SHIP — MAJOR fixed (dedup owner-name prediction honors the per-op mime).
-- `bb2fd38` **Opaque fan-out size-loss guard** — never ship a larger same-format opaque page. Review SHIP (zero findings).
+## Раунд 17 — moat / parity / honesty — 2026-06-28
+- `3be0d6a` **render-probe произведённого фикса** — измеренные before→after draw calls + decoded VRAM per sheet (3-й probe-сиблинг); честный badge держится отдельно от статических чисел. Review SHIP.
+- `01e5950` **per-image measured best-format pick** — нести measured smallest-encode победителя диагностики в fix-план (default OFF; precedence profile>override>bestMime>global). Review FIX_THEN_SHIP — MAJOR фикснут (dedup owner-name prediction уважает per-op mime).
+- `bb2fd38` **opaque fan-out size-loss guard** — никогда не отгружать большую same-format opaque страницу. Review SHIP (ноль finding-ов).
 
-## Round 16 — consolidation (round-15 MINORs) — 2026-06-28
-- `2fe9828` — honesty double-count de-overlap (`potentialDiskSaved` MAX not SUM for format+wasted-alpha refs); keep-original-on-size-loss guard for opaque transcode; `ktx2-probe-collect` extracted+tested; gl-instrument 9-arg form; loader copy softened ×9. Review SHIP.
+## Раунд 16 — консолидация (round-15 MINOR-ы) — 2026-06-28
+- `2fe9828` — honesty double-count de-overlap (`potentialDiskSaved` MAX не SUM для format+wasted-alpha ref-ов); keep-original-on-size-loss guard для opaque-транскода; `ktx2-probe-collect` извлечён+протестирован; gl-instrument 9-arg форма; loader-текст смягчён ×9. Review SHIP.
 
-## Round 15 — selection (3 picks) — 2026-06-28
-- `b297290` **Measure REAL KTX2 GPU VRAM on-device** — `compressedTexImage2D` instrument + `probeKtx2` + self-hosted transcoder (no CDN); shown beside the worst-case ceiling, device-local. Review FIX_THEN_SHIP.
-- `84b8ea7` **KTX2 loader-migration snippet** — emit `import 'pixi.js/ktx2'` when a fix produced `.ktx2` (fixes the manifest-refs-`.ktx2`-but-loader-can't-decode bug; Phaser honest NOTE). Review SHIP.
-- `21710a0` **Wasted-alpha detector + opaque-encode fix** — full-frame opaque pass (short-circuit/size-capped/worker = instant-wow safe); disk-only saving, never VRAM. Review SHIP.
+## Раунд 15 — отбор (3 pick-а) — 2026-06-28
+- `b297290` **измерить РЕАЛЬНЫЙ KTX2 GPU VRAM on-device** — `compressedTexImage2D` instrument + `probeKtx2` + self-hosted transcoder (без CDN); показан рядом с worst-case ceiling-ом, device-local. Review FIX_THEN_SHIP.
+- `84b8ea7` **KTX2 loader-migration сниппет** — эмитить `import 'pixi.js/ktx2'` когда фикс произвёл `.ktx2` (чинит баг manifest-refs-`.ktx2`-but-loader-can't-decode; Phaser честная NOTE). Review SHIP.
+- `21710a0` **wasted-alpha детектор + opaque-encode фикс** — full-frame opaque проход (short-circuit/size-capped/worker = instant-wow safe); disk-only saving, никогда VRAM. Review SHIP.
 
-## Round 14 — consolidation (round-11→13 MINORs) — 2026-06-28
-- `b5c1405` — i18n-app-keys guard extended to the new components; highlightId debounced; shared `defaultSelectOpts`; `countCandidates` (no per-keystroke re-sort); consent upload count/preview; auto-pair the Pixi manifest when a backend op is on; gateway one-fewer body copy; suppress empty all-quality-floor entry. Review SHIP.
+## Раунд 14 — консолидация (round-11→13 MINOR-ы) — 2026-06-28
+- `b5c1405` — i18n-app-keys guard расширен на новые компоненты; highlightId debounced; общий `defaultSelectOpts`; `countCandidates` (без per-keystroke re-sort); consent upload count/preview; авто-пара Pixi-манифеста когда backend-op включён; gateway на одну body-копию меньше; подавить пустую all-quality-floor запись. Review SHIP.
 
-## Round 13 — native→backend #2 — 2026-06-28
-- `a872dd0` **pngquant lossy-PNG** disk-only op on the sidecar (browser-impossible); zero VRAM field (decodes to RGBA); quality-floor decline kept-not-failed; Op propagated; `backendNative` array; PNG dup-key split. Review FIX_THEN_SHIP (MAJOR fixed: honest skip on tiered path).
+## Раунд 13 — native→backend #2 — 2026-06-28
+- `a872dd0` **pngquant lossy-PNG** disk-only op на sidecar-е (browser-impossible); нулевое VRAM-поле (декодирует в RGBA); quality-floor decline kept-not-failed; Op проброшен; `backendNative` массив; PNG dup-key split. Review FIX_THEN_SHIP (MAJOR фикснут: честный skip на tiered-пути).
 
-## Round 12 — native→backend #1 (invariant 1/2 amendment) — 2026-06-28
-- `25f7af0` **KTX2 GPU-texture sidecar** (`apps/encoder`, Go toktx) via `apps/api` entitlement-gated reverse proxy; opt-in, default OFF, explicit upload consent; honest VRAM ceiling; two-json-sidecar manifest; CLAUDE.md invariants 1&2 amended. Review FIX_THEN_SHIP (2 MAJORs fixed: manifest order + worker/client test coverage). Go: apps/api + apps/encoder build/vet/test green.
+## Раунд 12 — native→backend #1 (поправка инварианта 1/2) — 2026-06-28
+- `25f7af0` **KTX2 GPU-texture sidecar** (`apps/encoder`, Go toktx) через `apps/api` entitlement-gated reverse proxy; opt-in, default OFF, явный upload consent; честный VRAM ceiling; two-json-sidecar манифест; инварианты CLAUDE.md 1&2 поправлены. Review FIX_THEN_SHIP (2 MAJOR-а фикснуты: manifest order + worker/client test coverage). Go: apps/api + apps/encoder build/vet/test зелёные.
 
-## Round 11 — UI/UX — 2026-06-28
-- `6c17ffd` **Triage-first scalable results view** — pure `triage.ts` (O(assets+findings) index, kills the per-render O(N×F) scan) + zero-dep virtualization; VerdictBar + virtualized TriageLedger (search/sort/filter/group, honest rollups) replacing the chip wall; sticky film detail w/ debounced decode; collapsed the double ArrayBuffer copy. Fixes the many-images chaos. Review FIX_THEN_SHIP (MAJOR fixed: show-clean emits real clean rows).
+## Раунд 11 — UI/UX — 2026-06-28
+- `6c17ffd` **triage-first масштабируемый results view** — чистый `triage.ts` (O(assets+findings) индекс, убивает per-render O(N×F) скан) + zero-dep виртуализация; VerdictBar + virtualized TriageLedger (search/sort/filter/group, честные rollup-ы) заменяющий chip-wall; sticky film-detail с debounced decode; схлопнута двойная ArrayBuffer-копия. Чинит many-images хаос. Review FIX_THEN_SHIP (MAJOR фикснут: show-clean эмитит реальные clean-строки).
 
-## Round 10 — asset-builder parity — 2026-06-28
-- `8af0247` **Per-folder/prefix export overrides** — `ExportProfile.overrides[]` (exact-or-prefix match) overlays formats/quality/lossless/AVIF-4:4:4 (fonts→4:4:4); pure `resolveProfileForRef`; default OFF ⇒ byte-identical. Review SHIP.
+## Раунд 10 — паритет asset-builder — 2026-06-28
+- `8af0247` **per-folder/prefix export overrides** — `ExportProfile.overrides[]` (exact-or-prefix match) накладывает formats/quality/lossless/AVIF-4:4:4 (fonts→4:4:4); чистый `resolveProfileForRef`; default OFF ⇒ байт-в-байт. Review SHIP.
 
-## Round 9 — AssetPack arc — 2026-06-28
-- `8c478d4` **Content-hash cache-busting** (`hashFilenames`) — 8-hex content hash chained through atlas `meta.image`, Spine `.atlas` line, Pixi manifest, dedup consumer images, loader rows. Skeptic caught 3 blockers + 4 majors pre-code; reviewer caught 1 more (dedup→loose-owner 404) — all fixed.
+## Раунд 9 — AssetPack-дуга — 2026-06-28
+- `8c478d4` **content-hash cache-busting** (`hashFilenames`) — 8-hex content-hash сцеплен через atlas `meta.image`, Spine `.atlas` строку, Pixi-манифест, dedup consumer-изображения, loader-строки. Скептик поймал 3 блокера + 4 мажора pre-code; ревьюер поймал ещё 1 (dedup→loose-owner 404) — все фикснуты.
 
-## Round 8 — AssetPack arc — 2026-06-28
-- `0727449` **PixiJS manifest.json emitter** — real v8 `{bundles}` (one alias-suffixed entry per tier; sheets→sidecar; no fabricated `data.resolution`); makes the variant fan-out loadable with one `Assets.init`. Review SHIP.
+## Раунд 8 — AssetPack-дуга — 2026-06-28
+- `0727449` **эмиттер PixiJS manifest.json** — реальные v8 `{bundles}` (одна alias-suffixed запись per tier; sheets→sidecar; без сфабрикованного `data.resolution`); делает variant fan-out загружаемым одним `Assets.init`. Review SHIP.
 
-## Round 7 — asset-builder parity / AssetPack arc — 2026-06-28
-- `f3b3cc9` **Config-driven export profile** — arbitrary resolutions × formats × per-format compression, replacing the fixed 3-tier ladder; first-class format fan-out; lossless genuinely threaded. Skeptic caught 3 real defects pre-code. Review FIX_THEN_SHIP.
+## Раунд 7 — паритет asset-builder / AssetPack-дуга — 2026-06-28
+- `f3b3cc9` **config-driven export profile** — произвольные resolutions × formats × per-format compression, заменяющий фиксированную 3-tier лестницу; first-class format fan-out; lossless по-настоящему проброшен. Скептик поймал 3 реальных дефекта pre-code. Review FIX_THEN_SHIP.
 
-## Backend ↔ frontend connection — 2026-06-28
-- `e59916d` — wired the React app to the Go license backend (`:8088`): `.env.local` (gitignored) + `apps/api/tools/devmint` (dev-license) + `tools/verify/license-connect-run.mjs` (proves activate→sign→offline-verify vs the live backend). LICENSE_CONNECT PASS.
+## Связка backend ↔ frontend — 2026-06-28
+- `e59916d` — связан React-app с Go license-бэкендом (`:8088`): `.env.local` (gitignored) + `apps/api/tools/devmint` (dev-license) + `tools/verify/license-connect-run.mjs` (доказывает activate→sign→offline-verify против живого бэкенда). LICENSE_CONNECT PASS.
 
-## Round 6 + fss fix — 2026-06-28
-- `7eca731` **Round 6** — F1 before/after FilmViewer sheet-diff (visual proof), F2 solid-fill detector, F3 surface-unparsed-files + parser hardening.
-- `7499fb7` **fss bug** — pack ALL spine regions (don't drop large ones via the static `maxSpriteEdgePx` filter).
+## Раунд 6 + fss-фикс — 2026-06-28
+- `7eca731` **Round 6** — F1 before/after FilmViewer sheet-diff (визуальное доказательство), F2 solid-fill детектор, F3 surface-unparsed-files + parser hardening.
+- `7499fb7` **fss-баг** — упаковывать ВСЕ spine-регионы (не ронять большие через статический `maxSpriteEdgePx` фильтр).
 
-## Earlier rounds (rounds 2–5, same branch) — 2026-06-26/27
-- `e09c539` engine-aware loader-migration guide · `bd3d8e0` zip UTF-8 flag + occupancy clamp · `fb7fbc7` content-class format-suitability · `411b9de` per-texture VRAM/probe breakdown · `8074226` polygon-pack content-extent trim (no empty bottom) · `9411b44` probe-into-verdict (measured GPU footprint) · `a5f7864` selective fix · `ae51c15` atlas fragmentation score · `e9d18ca` dry-run plan preview · `416828f` edge-extrude (bleed).
-- (Pre-branch foundations — Phase 1 diagnosis, render-probe, runtime profiler, MV3 extension, correlate, CLI + budget-gate, i18n, Phase-2 browser fix, polygon packer, Part B dedup, scale-tiers, Slice B Go billing — see `docs/` + git history.)
+## Более ранние раунды (раунды 2–5, та же ветка) — 2026-06-26/27
+- `e09c539` engine-aware loader-migration guide · `bd3d8e0` zip UTF-8 флаг + occupancy clamp · `fb7fbc7` content-class format-suitability · `411b9de` per-texture VRAM/probe breakdown · `8074226` polygon-pack content-extent trim (без пустого низа) · `9411b44` probe-into-verdict (measured GPU footprint) · `a5f7864` selective fix · `ae51c15` atlas fragmentation score · `e9d18ca` dry-run plan preview · `416828f` edge-extrude (bleed).
+- (Pre-branch фундаменты — Phase 1 diagnosis, render-probe, runtime profiler, MV3 extension, correlate, CLI + budget-gate, i18n, Phase-2 browser fix, polygon packer, Part B dedup, scale-tiers, Slice B Go billing — см. `docs/` + git-историю.)
