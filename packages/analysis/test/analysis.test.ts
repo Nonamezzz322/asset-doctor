@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { Asset, Atlas, ImageAsset, ImageMime, Rect } from '@asset-doctor/core';
-import { parseAtlas, parseImage } from '@asset-doctor/parsers';
+import { parseAtlas, parseImage, parseFntText, parseFntPage, type FntPage } from '@asset-doctor/parsers';
+import { groupFiles, type RawFile } from '@asset-doctor/ingest';
 import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, frameRedundancyFinding, trimMarginFinding, wastedAlphaFinding, crossAtlasRedundancyFinding, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
@@ -1305,5 +1306,82 @@ describe('atlas fragmentation (dispersion of empty space)', () => {
     expect(rep.assets[0]?.fragmentation).toBeUndefined(); // no empty rects ⇒ no measured dispersion
     expect(rep.findings.some((f) => f.rule === 'occupancy')).toBe(true);
     expect(rep.findings.some((f) => f.rule === 'wasted-regions')).toBe(false);
+  });
+});
+
+describe('bmfont-sparse — BMFont .fnt glyph-page readout through the REAL path', () => {
+  interface BmExpected {
+    face: string;
+    atlas: { w: number; h: number };
+    glyphCount: number;
+    kerningCount: number;
+    occupancy: number;
+    malformedGlyph: { id: string; reason: string };
+    findings: { rule: string; severity: string }[];
+  }
+  const readArrayBuffer = (p: string): ArrayBuffer => {
+    const u8 = readBytes(p);
+    const ab = new ArrayBuffer(u8.byteLength);
+    new Uint8Array(ab).set(u8);
+    return ab;
+  };
+
+  it('groupFiles → parseFntPage → analyze fires font-glyph-page (warn) + the generic atlas findings', async () => {
+    const expected = readJson('bmfont-sparse/expected.json') as BmExpected;
+    // REAL path: ingest groups the .fnt + its page PNG as a bmfont atlas …
+    const files: RawFile[] = [
+      { name: 'font.fnt', path: 'font.fnt', bytes: readArrayBuffer('bmfont-sparse/font.fnt') },
+      { name: 'font.png', path: 'font.png', bytes: readArrayBuffer('bmfont-sparse/font.png') },
+    ];
+    const grouped = groupFiles(files);
+    expect(grouped.atlases).toHaveLength(1);
+    const a = grouped.atlases[0]!;
+    expect(a.kind).toBe('bmfont');
+    const fp = a.manifest as FntPage;
+    // per-glyph recovery: the OOB glyph (id=255) is surfaced, the page kept its 16 usable glyphs.
+    expect(fp.sprites).toHaveLength(expected.glyphCount);
+    expect(fp.kerningCount).toBe(expected.kerningCount);
+    expect(fp.face).toBe(expected.face);
+    expect(fp.malformedGlyphs).toEqual([expected.malformedGlyph]);
+
+    // … parseFntPage builds the Atlas off the page-image bytes …
+    const res = parseFntPage(fp, { ref: a.name, bytes: new Uint8Array(a.image.bytes) }, { name: a.name });
+    expect(res.ok).toBe(true);
+    if (!res.ok || res.asset.kind !== 'atlas') throw new Error('expected atlas');
+
+    // … and analyze fires the font readout BESIDE the generic findings (fontPages dep mirrors the worker).
+    const report = await analyze([res.asset], DEFAULT_THRESHOLDS, {
+      fontPages: [{ atlasRef: a.name, faceName: fp.face, kerningCount: fp.kerningCount }],
+    });
+    const f = report.findings.find((x) => x.rule === 'font-glyph-page');
+    expect(f).toBeTruthy();
+    expect(f!.severity).toBe('warn');
+    expect(f!.params!.glyphs).toBe(expected.glyphCount);
+    expect(f!.params!.kerning).toBe(expected.kerningCount);
+    expect(f!.params!.face).toBe(expected.face);
+    // the estimate carries ONLY occupancyPct (invariant 5 — no fabricated disk/VRAM saved)
+    expect(f!.estimate?.occupancyPct).toBeCloseTo(expected.occupancy, 4);
+    expect(f!.estimate?.vramBytesSaved).toBeUndefined();
+    expect(f!.estimate?.diskBytesSaved).toBeUndefined();
+
+    // the generic occupancy + wasted-regions findings fire for free (the .fnt page IS an atlas).
+    expect(sig(report.findings)).toEqual(sig(expected.findings));
+    expect(report.assets[0]?.vramBytes).toBe(expected.atlas.w * expected.atlas.h * 4);
+  });
+
+  it('with fontGlyphPage OMITTED from cfg the font finding does NOT fire (gate proof + byte-identity)', async () => {
+    const fnt = parseFntText(new TextDecoder().decode(readBytes('bmfont-sparse/font.fnt')));
+    const fp = fnt[0]!;
+    const res = parseFntPage(fp, { ref: 'font.png', bytes: readBytes('bmfont-sparse/font.png') }, { name: 'font.png' });
+    expect(res.ok).toBe(true);
+    if (!res.ok || res.asset.kind !== 'atlas') throw new Error('expected atlas');
+    const cfgNoFont = { ...DEFAULT_THRESHOLDS };
+    delete (cfgNoFont as { fontGlyphPage?: unknown }).fontGlyphPage;
+    const report = await analyze([res.asset], cfgNoFont, {
+      fontPages: [{ atlasRef: 'font.png', faceName: fp.face, kerningCount: fp.kerningCount }],
+    });
+    expect(report.findings.some((x) => x.rule === 'font-glyph-page')).toBe(false);
+    // the generic atlas findings still fire (the page is an atlas regardless of the font gate).
+    expect(report.findings.some((x) => x.rule === 'occupancy')).toBe(true);
   });
 });

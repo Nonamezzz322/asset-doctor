@@ -9,3 +9,5 @@ export { parseAtlasManifest, parseAtlas, parseImage } from './atlas';
 export type { AtlasParseResult, MalformedFrame } from './atlas';
 export { parseSpineAtlasText, parseSpinePage } from './spine-atlas';
 export type { SpinePage } from './spine-atlas';
+export { parseFntText, parseFntPage } from './fnt';
+export type { FntPage } from './fnt';

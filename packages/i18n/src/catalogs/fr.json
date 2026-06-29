@@ -157,6 +157,17 @@
     "other": "{dupes} images dans {groups} groupe(s) ont des régions de pixels identiques au byte près partagées entre {sheets} atlas ({atlases}). Elles fixent {vram:bytes} de VRAM ({area}px × 4) que le fait de référencer une seule copie partagée récupère (la surface des images dupliquées — distincte de tout gain de fusion d'espace vide), plus ~{disk:bytes} de disque d'atlas (estimation par surface)."
   },
   "find.cross-atlas-redundancy.fix": "Référencez une seule copie partagée entre les feuilles au lieu d'empaqueter des images identiques sur chacune.",
+  "find.font-glyph-page.title": {
+    "$count": "glyphs",
+    "one": "{glyphs} glyphe sur une page BMFont — {occ:pct} rempli",
+    "other": "{glyphs} glyphes sur une page BMFont — {occ:pct} rempli"
+  },
+  "find.font-glyph-page.detail": {
+    "$count": "kerning",
+    "one": "{face} : {glyphs} glyphes couvrent {occ:pct} de la page de glyphes {w}×{h} ({vram:bytes} de VRAM, l×h×4), avec {kerning} paire de crénage. Une feuille de glyphes clairsemée immobilise cette VRAM pour un espace presque vide.",
+    "other": "{face} : {glyphs} glyphes couvrent {occ:pct} de la page de glyphes {w}×{h} ({vram:bytes} de VRAM, l×h×4), avec {kerning} paires de crénage. Une feuille de glyphes clairsemée immobilise cette VRAM pour un espace presque vide."
+  },
+  "find.font-glyph-page.fix": "Empaquetez les glyphes plus serrés, supprimez les caractères inutilisés ou générez une page plus petite pour le jeu de caractères utilisé.",
   "find.duplicate-exact.title": "{n}× fichier identique",
   "find.duplicate-exact.detail": "Copies identiques au byte près : {refs}. Gardez-en une et référencez-la — chaque copie est aussi un upload de texture distinct ({vram:bytes} de VRAM chacune).",
   "find.duplicate-exact.fix": "Dédupliquez : gardez une seule copie et mettez à jour les références.",

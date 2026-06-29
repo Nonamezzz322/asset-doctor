@@ -10,6 +10,53 @@ GitHub creds — user pushes); commit hashes below are over that base.
 
 ---
 
+## Round 23 — selection (#0 shipped) — 2026-06-29
+Pick: **(#0) bitmap-font (.fnt BMFont) parser + ingest grouping + glyph-page audit** — AngelCode BMFont
+glyph sheets were an unrecognized file type (silently dropped). A parsed `.fnt` page is structurally an
+atlas, so this teaches the pipeline to ingest it and surfaces a font-specific readout BESIDE the generic
+atlas findings it already trips.
+
+- **#0 Bitmap-font (.fnt BMFont) parser + ingest + glyph-page readout**
+  (`docs/improvements/round23-bitmap-font-fnt-bmfont-parser-inge.md`)
+  — new pure `parseFntText(text) → FntPage[]` / `parseFntPage(page, image, opts) → ParseResult`
+  (`packages/parsers/src/fnt.ts`), a faithful **mirror of the Spine `.atlas` module**: never throws,
+  per-glyph recovery via `FntPage.malformedGlyphs` (read by the worker exactly like
+  `SpinePage.malformedRegions`), NaN-preserving numeric reads (a non-finite required field drops the glyph,
+  never coerced to 0), OOB/degenerate-rect recovery, quote-aware `face=`/`file=`. **TEXT format only**; XML
+  (leading `<`) + binary (`BMF\x03`) `.fnt` → honest `unparsed[]`, never silent-dropped. **Multi-page is
+  keyed by `char.page` id** (in BMFont TEXT every `char` line follows ALL `page` lines, so a "most-recent
+  page" rule would dump every glyph on the last page — the skeptic-flagged correctness/determinism defect);
+  pages emitted id-sorted. A whitespace glyph (`width=0 height=0`, e.g. id=32) is skipped, not an error.
+  Each `char` → a `Sprite` (frame x,y,width,height; sourceSize from width/height; `trimmed:false` —
+  xoffset/yoffset are layout offsets, NOT in-page trim, so occupancy stays the honest packed coverage).
+  — ingest `groupFiles` recognizes `.fnt`, resolves each page image **dir-aware** (reusing
+  `resolve`/`keyOf`/`atlasName`), routes it as `GroupedAtlas.kind: 'bmfont'`; XML/binary/empty `.fnt` →
+  `unparsed[]` (`packages/ingest/src/index.ts`).
+  — core: `AtlasSourceKind += 'bmfont'`, `Rule += 'font-glyph-page'`, `ThresholdConfig.fontGlyphPage?:
+  { minChars, occupancyWarn }` (default `{ 16, 0.5 }`). new analysis `fontGlyphPageFinding`
+  (`packages/analysis/src/font.ts`): glyph-page occupancy + glyph count + kerning-present, positive-guarded
+  on `source.kind === 'bmfont'`; `analyze.ts` threads a new `AnalyzeDeps.fontPages` dep (face + kerning,
+  keyed by atlas.name).
+  — worker routes `a.kind === 'bmfont'` → `parseFntPage` + per-glyph `<page>#<id>` recovery + builds
+  `fontPages` (`apps/web/src/worker/analyze.worker.ts`). i18n `find.font-glyph-page.{title,detail,fix}` in
+  all 9 catalogs (drift-guarded + 9-locale parity). Golden fixture
+  `fixtures/sample-projects/bmfont-sparse/` (a 16-glyph sparse `.fnt` + PNG, a whitespace glyph + an OOB
+  recovery glyph) exercised through the **REAL path** (`groupFiles → parseFntPage → analyze` with
+  `fontPages`) asserting the `font-glyph-page` finding **FIRES** (warn) alongside the generic occupancy
+  (crit) + wasted-regions (info) findings.
+  **DIAGNOSIS-ONLY** (invariant 3 — nothing generated). **Invariant 5 (no double-count):** the readout's
+  `estimate` carries **only** `occupancyPct` — the generic occupancy/oversize findings own the VRAM (w·h·4)
+  on the SAME page; NO fabricated disk/VRAM-saved. **Fix-path SAFE with ZERO change** (verified): the fix
+  branches only on `opts.kind === 'spine'` and **emits** `source.kind`, never reads an incoming
+  `AtlasSourceKind`, so a `'bmfont'` atlas needs no fix wiring. **Additive:** no `.fnt` present ⇒ all output
+  byte-identical (CLI/headless unaffected — `fontGlyphPage` is NOT enumerated by `resolveThresholds`).
+  **Skeptic fixes (load-bearing):** (1) multi-page glyph attachment keyed by `char.page`, NOT most-recent
+  page; (2) the fabricated App.tsx source-kind label task was DROPPED (no such UI exists — `atlas.source` is
+  never rendered).
+  - Gate: `pnpm typecheck && pnpm test && pnpm lint` green.
+
+---
+
 ## Round 22 — selection (#0 shipped) — 2026-06-29
 Pick: **(#0) cross-atlas frame-redundancy DETECTOR** — the folder-scope sibling of within-atlas
 frame-redundancy. The region hashes were already computed folder-wide in `analyze.ts` but consumed only

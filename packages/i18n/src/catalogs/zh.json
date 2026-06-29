@@ -153,6 +153,17 @@
     "other": "{groups} 组中的 {dupes} 个帧具有跨 {sheets} 个图集（{atlases}）共享的字节完全相同的像素区域。它们占用 {vram:bytes} 显存（{area}px × 4），引用一份共享副本即可回收（即重复帧的面积 — 与任何空白合并收益无关），另加约 {disk:bytes} 的图集磁盘（按面积估算）。"
   },
   "find.cross-atlas-redundancy.fix": "在各图集间引用一份共享副本，而不是在每个图集上打包完全相同的帧。",
+  "find.font-glyph-page.title": {
+    "$count": "glyphs",
+    "one": "BMFont 页面上有 {glyphs} 个字形 — 已占用 {occ:pct}",
+    "other": "BMFont 页面上有 {glyphs} 个字形 — 已占用 {occ:pct}"
+  },
+  "find.font-glyph-page.detail": {
+    "$count": "kerning",
+    "one": "{face}：{glyphs} 个字形覆盖了 {w}×{h} 字形页的 {occ:pct}（{vram:bytes} 显存，宽×高×4），有 {kerning} 对字距调整。稀疏的字形表为大片空白占用了这些显存。",
+    "other": "{face}：{glyphs} 个字形覆盖了 {w}×{h} 字形页的 {occ:pct}（{vram:bytes} 显存，宽×高×4），有 {kerning} 对字距调整。稀疏的字形表为大片空白占用了这些显存。"
+  },
+  "find.font-glyph-page.fix": "更紧密地打包字形、删除未使用的字符，或为使用的字符集生成更小的页面。",
   "find.duplicate-exact.title": "{n}× 完全相同的文件",
   "find.duplicate-exact.detail": "字节完全相同的副本：{refs}。保留一份并引用它 — 每份副本也是一次单独的纹理上传（各占 {vram:bytes} VRAM）。",
   "find.duplicate-exact.fix": "去重：仅保留一份副本并更新引用。",

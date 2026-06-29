@@ -47,6 +47,7 @@ import {
   shouldAtlasFinding,
 } from './folder';
 import { groupVariants, variantsFinding } from './variants';
+import { fontGlyphPageFinding } from './font';
 
 export interface AnalyzeDeps {
   /** Encode an asset's image to a target format → byte size (or null). Browser/worker supplies
@@ -75,6 +76,11 @@ export interface AnalyzeDeps {
    *  honestly instead of silently dropped. Pure pass-through: the host has already sorted by ref; this
    *  layer never re-sorts or filters. Absent/empty ⇒ byte-identical to today. */
   unparsed?: { ref: string; reason: string }[];
+  /** Per-bmfont-page font metadata (face name + kerning count) read off the parsed FntPage by the host,
+   *  keyed by atlas.name. Drives the font-glyph-page readout for `source.kind === 'bmfont'` atlases.
+   *  Absent ⇒ the readout falls back to kerning 0 / no face (still fires if the page clears minChars);
+   *  additive — a folder with no bmfont page is byte-identical to today (gated like frameHashes). */
+  fontPages?: { atlasRef: string; faceName?: string; kerningCount: number }[];
 }
 
 const RANK: Record<Severity, number> = { crit: 0, warn: 1, info: 2, ok: 3 };
@@ -119,6 +125,12 @@ export async function analyze(
   // byte-identical to today (CLI / headless tests unaffected).
   const frameHashByRef = new Map<string, (string | null)[]>();
   for (const fh of deps.frameHashes ?? []) frameHashByRef.set(fh.atlasRef, fh.frameHashes);
+
+  // Per-bmfont-page font metadata (face + kerning count), keyed by atlas.name. The host reads it off the
+  // parsed FntPage; absent ⇒ empty ⇒ the font-glyph-page readout falls back to no-face / kerning 0 (still
+  // fires on a bmfont page that clears minChars), and a non-bmfont folder is byte-identical to today.
+  const fontByRef = new Map<string, { faceName?: string; kerningCount: number }>();
+  for (const fp of deps.fontPages ?? []) fontByRef.set(fp.atlasRef, { faceName: fp.faceName, kerningCount: fp.kerningCount });
 
   // Per-atlas image byteSize, keyed by atlas.name — feeds the CROSS-ATLAS-redundancy disk estimate (each
   // freed cross-sheet copy's bytes are area-proportionally attributed to its OWN atlas). Populated in the
@@ -191,6 +203,15 @@ export async function analyze(
       if (ft) {
         const tm = trimMarginFinding(atlas, cfg, ft, image.byteSize);
         if (tm) findings.push(tm);
+      }
+      // BMFont glyph-page readout: a parsed `.fnt` page IS an atlas, so it already tripped the generic
+      // findings above; this adds a font-specific informational readout BESIDE them (positive-guarded on
+      // source.kind === 'bmfont' inside the rule). The estimate carries ONLY occupancyPct — the generic
+      // occupancy/oversize findings own the VRAM on this same page (invariant 5; no double-count).
+      if (atlas.source.kind === 'bmfont') {
+        const fp = fontByRef.get(atlas.name) ?? { kerningCount: 0 };
+        const gp = fontGlyphPageFinding(atlas, cfg, fp);
+        if (gp) findings.push(gp);
       }
       // The packed rects the host render-probe replays as sprites. Keyed by atlas.name === the
       // assetRef pushed above. `frame` is the rect AS PLACED in the atlas image (already w/h-swapped

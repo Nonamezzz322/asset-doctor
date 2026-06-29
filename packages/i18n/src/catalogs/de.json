@@ -155,6 +155,17 @@
     "other": "{dupes} Frames in {groups} Gruppe(n) haben byte-identische Pixelregionen, die über {sheets} Atlanten ({atlases}) geteilt werden. Sie binden {vram:bytes} VRAM ({area}px × 4), die das Referenzieren einer gemeinsamen Kopie freigibt (die Fläche der doppelten Frames — getrennt von jedem Leerraum-Merge-Gewinn), plus ~{disk:bytes} Atlas-Speicher (Flächenschätzung)."
   },
   "find.cross-atlas-redundancy.fix": "Eine gemeinsame Kopie über die Sheets referenzieren, statt identische Frames auf jedem zu packen.",
+  "find.font-glyph-page.title": {
+    "$count": "glyphs",
+    "one": "{glyphs} Glyph auf einer BMFont-Seite — {occ:pct} belegt",
+    "other": "{glyphs} Glyphen auf einer BMFont-Seite — {occ:pct} belegt"
+  },
+  "find.font-glyph-page.detail": {
+    "$count": "kerning",
+    "one": "{face}: {glyphs} Glyphen bedecken {occ:pct} der {w}×{h}-Glyphenseite ({vram:bytes} VRAM, B×H×4), mit {kerning} Kerning-Paar. Eine spärliche Glyphenseite bindet diesen VRAM für überwiegend leeren Raum.",
+    "other": "{face}: {glyphs} Glyphen bedecken {occ:pct} der {w}×{h}-Glyphenseite ({vram:bytes} VRAM, B×H×4), mit {kerning} Kerning-Paaren. Eine spärliche Glyphenseite bindet diesen VRAM für überwiegend leeren Raum."
+  },
+  "find.font-glyph-page.fix": "Glyphen enger packen, ungenutzte Zeichen entfernen oder eine kleinere Seite für den genutzten Zeichensatz erzeugen.",
   "find.duplicate-exact.title": "{n}× identische Datei",
   "find.duplicate-exact.detail": "Byte-identische Kopien: {refs}. Eine behalten und referenzieren — jede Kopie ist auch ein eigener Textur-Upload ({vram:bytes} VRAM pro Stück).",
   "find.duplicate-exact.fix": "Deduplizieren: eine einzige Kopie behalten und Referenzen aktualisieren.",

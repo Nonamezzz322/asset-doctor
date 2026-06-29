@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { parseAtlas, parseImage, readImageInfo, parseSpineAtlasText } from '../src/index';
+import { parseAtlas, parseImage, readImageInfo, parseSpineAtlasText, parseFntText, parseFntPage } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const json = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -170,6 +170,125 @@ regionB
     expect(pages[1]!.image).toBe('sheet2.png');
     expect(pages[1]!.size).toEqual({ w: 64, h: 64 });
     expect(pages[1]!.sprites).toHaveLength(1);
+  });
+});
+
+describe('parseFntText — BMFont TEXT', () => {
+  const FNT = `info face="TestFont" size=32 bold=0 padding=2,2,2,2
+common lineHeight=38 base=30 scaleW=256 scaleH=256 pages=1
+page id=0 file="font.png"
+chars count=3
+char id=65 x=2 y=2 width=28 height=30 xoffset=0 yoffset=4 xadvance=30 page=0 chnl=15
+char id=66 x=40 y=2 width=24 height=30 xoffset=1 yoffset=4 xadvance=26 page=0 chnl=15
+char id=32 x=0 y=0 width=0 height=0 xoffset=0 yoffset=0 xadvance=10 page=0 chnl=15
+kerning first=65 second=86 amount=-2
+kerning first=65 second=87 amount=-1
+`;
+
+  it('parses info/common/page/char/kerning into one page', () => {
+    const pages = parseFntText(FNT);
+    expect(pages).toHaveLength(1);
+    const p = pages[0]!;
+    expect(p.image).toBe('font.png');
+    expect(p.face).toBe('TestFont');
+    expect(p.lineHeight).toBe(38);
+    expect(p.size).toEqual({ w: 256, h: 256 });
+    expect(p.kerningCount).toBe(2);
+    // the space glyph (width=0 height=0) is skipped — only A + B are real packed regions
+    expect(p.sprites.map((s) => s.name)).toEqual(['glyph_65', 'glyph_66']);
+    const a = p.sprites.find((s) => s.name === 'glyph_65')!;
+    expect(a.frame).toEqual({ x: 2, y: 2, w: 28, h: 30 });
+    expect(a.rotated).toBe(false);
+    expect(a.trimmed).toBe(false);
+    expect(a.sourceSize).toEqual({ w: 28, h: 30 });
+    expect(p.malformedGlyphs).toBeUndefined();
+  });
+
+  it('quote-aware face= preserves embedded spaces', () => {
+    const p = parseFntText(`info face="My Font"\ncommon scaleW=64 scaleH=64 pages=1\npage id=0 file="f.png"\nchar id=65 x=0 y=0 width=10 height=10 page=0\n`)[0]!;
+    expect(p.face).toBe('My Font');
+  });
+
+  it('non-finite required field drops the glyph + surfaces the exact reason; page keeps the good ones', () => {
+    const fnt = `common scaleW=128 scaleH=128 pages=1
+page id=0 file="f.png"
+char id=65 x=0 y=0 width=20 height=20 page=0
+char id=66 x= y=0 width=20 height=20 page=0
+`;
+    const p = parseFntText(fnt)[0]!;
+    expect(p.sprites.map((s) => s.name)).toEqual(['glyph_65']);
+    expect(p.malformedGlyphs).toEqual([{ id: '66', reason: 'glyph id=66: non-finite x' }]);
+  });
+
+  it('OOB glyph past scaleW/scaleH is dropped + surfaced; the page keeps good glyphs', () => {
+    const fnt = `common scaleW=64 scaleH=64 pages=1
+page id=0 file="f.png"
+char id=65 x=0 y=0 width=32 height=32 page=0
+char id=66 x=40 y=0 width=40 height=10 page=0
+`;
+    const p = parseFntText(fnt)[0]!;
+    expect(p.sprites.map((s) => s.name)).toEqual(['glyph_65']);
+    expect(p.malformedGlyphs).toEqual([{ id: '66', reason: 'glyph id=66 extends past page 64×64' }]);
+  });
+
+  it('multi-page: each char attaches to the page whose id === char.page (NOT most-recent page)', () => {
+    // ALL char lines follow ALL page lines (the real BMFont TEXT order). Interleave page= ids so a
+    // "most-recent page" rule would mis-attach: every glyph would land on the LAST page (id=1).
+    const fnt = `common lineHeight=20 scaleW=128 scaleH=128 pages=2
+page id=0 file="p0.png"
+page id=1 file="p1.png"
+char id=65 x=0 y=0 width=10 height=10 page=1
+char id=66 x=0 y=0 width=10 height=10 page=0
+char id=67 x=20 y=0 width=10 height=10 page=1
+char id=68 x=20 y=0 width=10 height=10 page=0
+`;
+    const pages = parseFntText(fnt);
+    expect(pages).toHaveLength(2);
+    expect(pages[0]!.image).toBe('p0.png'); // id-sorted output
+    expect(pages[1]!.image).toBe('p1.png');
+    expect(pages[0]!.sprites.map((s) => s.name)).toEqual(['glyph_66', 'glyph_68']); // page=0 glyphs only
+    expect(pages[1]!.sprites.map((s) => s.name)).toEqual(['glyph_65', 'glyph_67']); // page=1 glyphs only
+  });
+
+  it('a char referencing a missing page id is dropped + surfaced (kept off the first page)', () => {
+    const fnt = `common scaleW=64 scaleH=64 pages=1
+page id=0 file="p0.png"
+char id=65 x=0 y=0 width=10 height=10 page=0
+char id=66 x=0 y=0 width=10 height=10 page=9
+`;
+    const pages = parseFntText(fnt);
+    expect(pages).toHaveLength(1);
+    expect(pages[0]!.sprites.map((s) => s.name)).toEqual(['glyph_65']);
+    expect(pages[0]!.malformedGlyphs).toEqual([{ id: '66', reason: 'glyph id=66: references missing page 9' }]);
+  });
+
+  it('returns [] for input with no page/char lines (caller surfaces unparsed)', () => {
+    expect(parseFntText('this is not a font')).toEqual([]);
+    expect(parseFntText('')).toEqual([]);
+  });
+
+  it('parseFntPage builds a bmfont Atlas with size/imageRef/sprites; bad image bytes → {ok:false}', () => {
+    const page = parseFntText(FNT)[0]!;
+    const good = parseFntPage(page, { ref: 'font.png', bytes: bytes('pixi-packed-ok/packed.png') }, { name: 'fonts/font.png' });
+    expect(good.ok).toBe(true);
+    if (!good.ok || good.asset.kind !== 'atlas') throw new Error('expected atlas');
+    expect(good.asset.atlas.source.kind).toBe('bmfont');
+    expect(good.asset.atlas.name).toBe('fonts/font.png');
+    expect(good.asset.atlas.size).toEqual({ w: 256, h: 256 }); // common scaleW/scaleH wins
+    expect(good.asset.atlas.sprites).toHaveLength(2);
+
+    const bad = parseFntPage(page, { ref: 'font.png', bytes: new Uint8Array([1, 2, 3, 4]) });
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.error).toMatch(/bmfont page image unrecognized/);
+  });
+
+  it('parseFntPage falls back to the image header size when no common scaleW/scaleH', () => {
+    const page = parseFntText(`info face="F"\npage id=0 file="f.png"\nchar id=65 x=0 y=0 width=10 height=10 page=0\n`)[0]!;
+    expect(page.size).toBeUndefined();
+    const res = parseFntPage(page, { ref: 'f.png', bytes: bytes('pixi-packed-ok/packed.png') });
+    expect(res.ok).toBe(true);
+    if (!res.ok || res.asset.kind !== 'atlas') throw new Error('expected atlas');
+    expect(res.asset.atlas.size).toEqual({ w: 1024, h: 1024 }); // from the PNG header
   });
 });
 

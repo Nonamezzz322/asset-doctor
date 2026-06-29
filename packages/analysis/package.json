@@ -16,6 +16,7 @@
     "@asset-doctor/core": "workspace:*"
   },
   "devDependencies": {
+    "@asset-doctor/ingest": "workspace:*",
     "@asset-doctor/parsers": "workspace:*"
   }
 }

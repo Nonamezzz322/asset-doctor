@@ -157,6 +157,17 @@
     "other": "{dupes} fotogrammi in {groups} gruppo(i) hanno regioni di pixel byte-identiche condivise tra {sheets} atlas ({atlases}). Fissano {vram:bytes} di VRAM ({area}px × 4) che referenziare una sola copia condivisa recupera (l'area dei fotogrammi duplicati — separata da qualsiasi guadagno da fusione di spazio vuoto), più ~{disk:bytes} di disco dell'atlas (stima per area)."
   },
   "find.cross-atlas-redundancy.fix": "Referenzia una sola copia condivisa tra i fogli invece di impacchettare fotogrammi identici su ciascuno.",
+  "find.font-glyph-page.title": {
+    "$count": "glyphs",
+    "one": "{glyphs} glifo su una pagina BMFont — {occ:pct} occupato",
+    "other": "{glyphs} glifi su una pagina BMFont — {occ:pct} occupato"
+  },
+  "find.font-glyph-page.detail": {
+    "$count": "kerning",
+    "one": "{face}: {glyphs} glifi coprono {occ:pct} della pagina di glifi {w}×{h} ({vram:bytes} di VRAM, l×a×4), con {kerning} coppia di crenatura. Un foglio di glifi sparso blocca quella VRAM per spazio quasi vuoto.",
+    "other": "{face}: {glyphs} glifi coprono {occ:pct} della pagina di glifi {w}×{h} ({vram:bytes} di VRAM, l×a×4), con {kerning} coppie di crenatura. Un foglio di glifi sparso blocca quella VRAM per spazio quasi vuoto."
+  },
+  "find.font-glyph-page.fix": "Impacchetta i glifi più stretti, rimuovi i caratteri inutilizzati o genera una pagina più piccola per il set di caratteri usato.",
   "find.duplicate-exact.title": "{n}× file identico",
   "find.duplicate-exact.detail": "Copie byte-identiche: {refs}. Tienine una e referenziala — ogni copia è anche un caricamento texture separato ({vram:bytes} VRAM ciascuna).",
   "find.duplicate-exact.fix": "Deduplica: tieni una sola copia e aggiorna i riferimenti.",

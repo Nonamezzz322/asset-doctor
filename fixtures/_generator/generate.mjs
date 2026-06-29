@@ -1982,4 +1982,105 @@ fires with the documented recoverable area.
   );
 }
 
+/* ── Case 12: bmfont-sparse — AngelCode BMFont .fnt (TEXT) glyph page for the font-glyph-page readout ──
+ * A single-page TEXT BMFont on a 256×256 POT page with 16 small opaque glyph rects → a SPARSE glyph sheet
+ * (the documented defect: a glyph page pinning w×h×4 VRAM for mostly-empty space). 16 usable glyphs clears
+ * minChars (16); occupancy 16·20² / 256² ≈ 9.8% ≤ occupancyWarn (0.5) ⇒ the readout is WARN. Includes a
+ * whitespace glyph (id=32, width=0 height=0 → skipped from sprites, NOT an error) and one deliberately
+ * out-of-page glyph (kept OUT of the usable count, IN per-glyph recovery). Exercised through the REAL path
+ * (groupFiles → parseFntPage → analyze) in packages/analysis/test/analysis.test.ts. */
+{
+  const size = { w: 256, h: 256 };
+  const GLYPH = 20;
+  const PER_ROW = 8;
+  const GAP = 12; // step so glyphs don't touch; 8 cols × 12px*… stays well inside 256
+  // 16 usable glyphs (ASCII 'A'..'P' = 65..80) laid out in a 8×2 grid of 20×20 opaque rects.
+  const glyphs = [];
+  for (let i = 0; i < 16; i++) {
+    const col = i % PER_ROW;
+    const r = Math.floor(i / PER_ROW);
+    const x = 4 + col * (GLYPH + GAP);
+    const y = 4 + r * (GLYPH + GAP);
+    glyphs.push({ id: 65 + i, x, y, w: GLYPH, h: GLYPH });
+  }
+  const usableArea = glyphs.reduce((s, g) => s + g.w * g.h, 0); // 16 * 400 = 6400
+  const occupancy = round4(usableArea / (size.w * size.h)); // 6400 / 65536 = 0.0977
+
+  // Paint the glyph rects opaque onto a transparent page (the page IS an atlas; the generic occupancy
+  // finding reads these as packed frames, the font readout reads occupancy + glyph count).
+  const fontPng = (() => {
+    const png = new PNG({ width: size.w, height: size.h });
+    png.data.fill(0);
+    glyphs.forEach((g, i) => fillRect(png, g.x, g.y, g.w, g.h, COLORS[i % COLORS.length]));
+    return PNG.sync.write(png);
+  })();
+
+  // BMFont TEXT: info/common/page then 16 char lines + 1 whitespace glyph + 1 OOB glyph + 2 kerning lines.
+  const charLine = (g) =>
+    `char id=${g.id} x=${g.x} y=${g.y} width=${g.w} height=${g.h} xoffset=0 yoffset=4 xadvance=${g.w + 2} page=0 chnl=15`;
+  const fntText =
+    `info face="SparseFont" size=20 bold=0 italic=0 padding=2,2,2,2 spacing=1,1\n` +
+    `common lineHeight=24 base=18 scaleW=${size.w} scaleH=${size.h} pages=1 packed=0\n` +
+    `page id=0 file="font.png"\n` +
+    `chars count=${glyphs.length}\n` +
+    glyphs.map(charLine).join('\n') + '\n' +
+    `char id=32 x=0 y=0 width=0 height=0 xoffset=0 yoffset=0 xadvance=8 page=0 chnl=15\n` + // space → skipped
+    `char id=255 x=250 y=250 width=40 height=40 xoffset=0 yoffset=0 xadvance=40 page=0 chnl=15\n` + // OOB → recovery
+    `kerning first=65 second=86 amount=-2\n` +
+    `kerning first=65 second=87 amount=-1\n`;
+
+  writeCase(
+    'bmfont-sparse',
+    {
+      'font.png': fontPng,
+      'font.fnt': fntText,
+      'expected.json': {
+        kind: 'bmfont',
+        face: 'SparseFont',
+        atlas: size,
+        glyphCount: 16, // usable glyphs (space skipped, OOB glyph recovered out)
+        kerningCount: 2,
+        occupancy, // ≈ 0.0977 (sparse → the documented defect)
+        malformedGlyph: { id: '255', reason: 'glyph id=255 extends past page 256×256' },
+        findings: [
+          { rule: 'font-glyph-page', severity: 'warn' },
+          { rule: 'occupancy', severity: 'crit' }, // sparse page also trips the generic occupancy finding (free)
+          { rule: 'wasted-regions', severity: 'info' },
+        ],
+        note:
+          'Single-page TEXT BMFont (.fnt) on a 256×256 POT page with 16 small opaque glyphs → a SPARSE glyph '
+          + 'sheet (~9.8% packed) pinning w×h×4 VRAM for mostly-empty space. 16 usable glyphs clears minChars '
+          + '(16); occupancy ≤ occupancyWarn (0.5) ⇒ the font-glyph-page readout is WARN. A whitespace glyph '
+          + '(id=32, 0×0) is skipped (not an error); one out-of-page glyph (id=255) is dropped + surfaced via '
+          + 'per-glyph recovery. The page IS an atlas, so the generic occupancy/wasted-regions findings fire '
+          + 'for free. The font readout estimate carries ONLY occupancyPct — the generic findings own the VRAM '
+          + 'on the same page (invariant 5; no double-count). Exercised through the REAL path '
+          + '(groupFiles → parseFntPage → analyze).',
+      },
+    },
+    `# bmfont-sparse
+
+A single-page **AngelCode BMFont** \`.fnt\` (TEXT format) glyph page for the **font-glyph-page** readout
+(\`docs/improvements/round23-bitmap-font-fnt-bmfont-parser-inge.md\`).
+
+A 256×256 POT page carries **16 small opaque glyph rects** (ASCII \`A\`–\`P\`, 20×20 each) → a **sparse**
+glyph sheet at ~9.8% occupancy: the documented defect, a glyph page pinning **w×h×4 VRAM** for mostly-empty
+space. 16 usable glyphs clears \`minChars\` (16) and occupancy ≤ \`occupancyWarn\` (0.5), so the readout is
+**warn**.
+
+- a **whitespace glyph** (\`id=32\`, \`width=0 height=0\`) → skipped from sprites, **not** an error.
+- one deliberately **out-of-page glyph** (\`id=255\` at 250,250 / 40×40) → dropped + surfaced via **per-glyph
+  recovery** (kept OUT of the usable glyph count).
+
+The \`.fnt\` page **is** an Atlas, so the generic **occupancy** (crit) + **wasted-regions** (info) findings
+fire for free — the font readout sits BESIDE them and its estimate carries **only** \`occupancyPct\` (the
+generic findings own the VRAM on the same page — invariant 5, no double-count).
+
+The regression test feeds this through the **REAL path** (\`groupFiles → parseFntPage → analyze\` with the
+\`fontPages\` dep) and asserts the \`font-glyph-page\` finding **fires** with the documented glyph/kerning
+counts. XML and binary \`.fnt\` are a follow-up (surfaced honestly as \`unparsed\` today).
+`,
+  );
+}
+
 console.log('Done.');

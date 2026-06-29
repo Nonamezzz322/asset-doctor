@@ -45,4 +45,11 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   // an area-proportional ESTIMATE never folded into totals (invariant 5). ORTHOGONAL to atlasMerge (empty px
   // vs duplicate-frame px). Browser-only — NOT in resolveThresholds (clusters the SAME region hashes the
   // worker already computes off the decoded page; the CLI never opts in).
+  fontGlyphPage: { minChars: 16, occupancyWarn: 0.5 }, // CALIBRATE — bitmap-font glyph-page gate. A parsed
+  // BMFont `.fnt` page IS an atlas; this surfaces a font-specific readout (glyph-page occupancy + glyph
+  // count + kerning-present) ALONGSIDE the generic atlas findings. `minChars`: a page must expose ≥ this
+  // many glyphs before the readout fires (a handful of glyphs is not a real font sheet). `occupancyWarn`:
+  // glyph-page occupancy at/below which the readout is `warn`, else `info`. The estimate carries ONLY
+  // occupancyPct — the generic occupancy/oversize findings own the VRAM (w·h·4) on the SAME page; this rule
+  // never double-counts (invariant 5). Browser-only — NOT in resolveThresholds (the CLI never opts in).
 };

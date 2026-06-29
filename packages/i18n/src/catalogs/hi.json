@@ -155,6 +155,17 @@
     "other": "{groups} समूह में {dupes} फ़्रेम के पास {sheets} एटलस ({atlases}) में साझा बाइट-समान पिक्सेल क्षेत्र हैं। ये {vram:bytes} VRAM ({area}px × 4) घेरते हैं जिन्हें एक साझा कॉपी का reference देने पर वापस पाया जाता है (यानी डुप्लिकेट-फ़्रेम क्षेत्रफल — किसी भी खाली-जगह मर्ज लाभ से अलग), साथ ही ~{disk:bytes} एटलस डिस्क (क्षेत्रफल अनुमान)।"
   },
   "find.cross-atlas-redundancy.fix": "हर शीट पर समान फ़्रेम पैक करने के बजाय शीटों के बीच एक साझा कॉपी का reference दें।",
+  "find.font-glyph-page.title": {
+    "$count": "glyphs",
+    "one": "BMFont पेज पर {glyphs} ग्लिफ़ — {occ:pct} भरा",
+    "other": "BMFont पेज पर {glyphs} ग्लिफ़ — {occ:pct} भरा"
+  },
+  "find.font-glyph-page.detail": {
+    "$count": "kerning",
+    "one": "{face}: {glyphs} ग्लिफ़ {w}×{h} ग्लिफ़ पेज का {occ:pct} घेरते हैं ({vram:bytes} VRAM, चौ×ऊं×4), {kerning} कर्निंग जोड़ी के साथ। एक विरल ग्लिफ़ शीट उस VRAM को लगभग खाली जगह के लिए बांधे रखती है।",
+    "other": "{face}: {glyphs} ग्लिफ़ {w}×{h} ग्लिफ़ पेज का {occ:pct} घेरते हैं ({vram:bytes} VRAM, चौ×ऊं×4), {kerning} कर्निंग जोड़ियों के साथ। एक विरल ग्लिफ़ शीट उस VRAM को लगभग खाली जगह के लिए बांधे रखती है।"
+  },
+  "find.font-glyph-page.fix": "ग्लिफ़ को सघन रूप से पैक करें, अप्रयुक्त वर्ण हटाएं, या उपयोग किए गए वर्णसेट के लिए छोटा पेज बनाएं।",
   "find.duplicate-exact.title": "{n}× समान फ़ाइल",
   "find.duplicate-exact.detail": "बाइट-समान कॉपियाँ: {refs}। एक रखें और उसका reference दें — हर कॉपी एक अलग texture upload भी है (प्रत्येक {vram:bytes} VRAM)।",
   "find.duplicate-exact.fix": "डी-डुप्लिकेट करें: एक ही कॉपी रखें और references अपडेट करें।",

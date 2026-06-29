@@ -31,6 +31,7 @@ export {
   integrityFindings,
   formatAggregateFinding,
 } from './folder';
+export { fontGlyphPageFinding } from './font';
 export { defaultCell, buildCoverage, mergeEmptyRects, summarizeEmpty } from './grid';
 export type { Coverage, EmptySpace } from './grid';
 export {

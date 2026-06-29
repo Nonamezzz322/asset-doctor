@@ -1,0 +1,30 @@
+{
+  "kind": "bmfont",
+  "face": "SparseFont",
+  "atlas": {
+    "w": 256,
+    "h": 256
+  },
+  "glyphCount": 16,
+  "kerningCount": 2,
+  "occupancy": 0.0977,
+  "malformedGlyph": {
+    "id": "255",
+    "reason": "glyph id=255 extends past page 256×256"
+  },
+  "findings": [
+    {
+      "rule": "font-glyph-page",
+      "severity": "warn"
+    },
+    {
+      "rule": "occupancy",
+      "severity": "crit"
+    },
+    {
+      "rule": "wasted-regions",
+      "severity": "info"
+    }
+  ],
+  "note": "Single-page TEXT BMFont (.fnt) on a 256×256 POT page with 16 small opaque glyphs → a SPARSE glyph sheet (~9.8% packed) pinning w×h×4 VRAM for mostly-empty space. 16 usable glyphs clears minChars (16); occupancy ≤ occupancyWarn (0.5) ⇒ the font-glyph-page readout is WARN. A whitespace glyph (id=32, 0×0) is skipped (not an error); one out-of-page glyph (id=255) is dropped + surfaced via per-glyph recovery. The page IS an atlas, so the generic occupancy/wasted-regions findings fire for free. The font readout estimate carries ONLY occupancyPct — the generic findings own the VRAM on the same page (invariant 5; no double-count). Exercised through the REAL path (groupFiles → parseFntPage → analyze)."
+}

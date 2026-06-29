@@ -27,7 +27,7 @@ export interface Rect {
  * `spriteSourceSize` must survive parsing — occupancy and the grid coverage map
  * depend on them. Absent source fields stay `undefined`, never fabricated. */
 
-export type AtlasSourceKind = 'texturepacker-hash' | 'texturepacker-array' | 'pixi' | 'spine';
+export type AtlasSourceKind = 'texturepacker-hash' | 'texturepacker-array' | 'pixi' | 'spine' | 'bmfont';
 
 /* ── Sprite mesh (Phase 2 polygon mode — additive, TexturePacker-compatible) ──────────────
  * A tight outline + triangulation an engine MAY consume to cut overdraw, AND the clip geometry
@@ -271,7 +271,9 @@ export type Rule =
   // per-atlas group: untrimmed sprites whose transparent margin (frame − opaque bbox) wastes atlas space
   | 'trim-margin'
   // whole-folder (scope: 'folder'): frames whose pixel REGIONS are byte-identical ACROSS ≥2 atlases
-  | 'cross-atlas-redundancy';
+  | 'cross-atlas-redundancy'
+  // per-bmfont-page glyph-sheet readout (informational; a parsed .fnt page IS an atlas)
+  | 'font-glyph-page';
 
 /** Mipmap chain multiplier on base texture VRAM: a full chain adds Σ(1/4ⁿ) for n≥1 → 4/3 (+33%).
  *  The ONE place this factor lives — both the static analysis path AND the runtime probe import it
@@ -599,6 +601,15 @@ export interface ThresholdConfig {
    *  hashes regions off the already-decoded page; the CLI never opts in). No new finding/estimate/overlay
    *  shape — reuses the existing Finding/estimate fields. */
   crossAtlasRedundancy?: { minDuplicates: number };
+  /** Bitmap-font glyph-page gate (browser + headless). A parsed BMFont `.fnt` page is structurally an
+   *  atlas; this surfaces a font-specific readout (glyph-page occupancy + glyph count + kerning-present)
+   *  ALONGSIDE the generic atlas findings the page already trips. `minChars` — a page must expose ≥ this
+   *  many glyphs before the readout fires. `occupancyWarn` — glyph-page occupancy at/below which the
+   *  readout is `warn`, else `info`. The estimate carries ONLY occupancyPct — the generic
+   *  occupancy/oversize findings own the VRAM (w·h·4) on the SAME page; this rule never double-counts and
+   *  fabricates NO disk/VRAM-saved (invariant 5). Optional/additive: absent ⇒ readout suppressed (CLI/
+   *  budget configs that don't opt in; NOT enumerated by resolveThresholds, mirrors frameRedundancy). */
+  fontGlyphPage?: { minChars: number; occupancyWarn: number };
 }
 
 export interface AnalysisReport {

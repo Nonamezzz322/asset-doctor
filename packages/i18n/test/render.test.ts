@@ -17,6 +17,7 @@ import {
   shouldAtlasFinding,
   atlasMergeFinding,
   crossAtlasRedundancyFinding,
+  fontGlyphPageFinding,
   integrityFindings,
   formatAggregateFinding,
   groupVariants,
@@ -79,6 +80,13 @@ async function realFindings(): Promise<Finding[]> {
     sprites: [{ name: 'b0', frame: { x: 64, y: 0, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 32, h: 32 } }],
   };
   out.push(crossAtlasRedundancyFinding([caA, caB], new Map([['caA.png', ['sh']], ['caB.png', ['sh']]]), new Map([['caA.png', 8000], ['caB.png', 8000]]), cfg)!);
+  // font-glyph-page: a sparse bmfont page — 16 glyphs of 32×32 on 256² → occ 0.25 ≤ occupancyWarn (0.5)
+  // ⇒ warn; kerning 12 (>1) drives the 'other' plural; face non-empty drives the detail prefix.
+  const fontAtlas: Atlas = {
+    name: 'font.png', imageRef: 'font.png', size: { w: 256, h: 256 }, source: { kind: 'bmfont' },
+    sprites: Array.from({ length: 16 }, (_, i) => ({ name: `glyph_${i}`, frame: { x: (i % 8) * 32, y: Math.floor(i / 8) * 32, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 32, h: 32 } })),
+  };
+  out.push(fontGlyphPageFinding(fontAtlas, cfg, { faceName: 'Arial', kerningCount: 12 })!);
   out.push(integrityFindings([{ manifest: 'm.json', image: 'x.png' }])[0]!);
   const ff1 = (await formatFinding('hero.png', img('hero.png', 256, 256, 10000).image, cfg, async () => 4000))!;
   const ff2 = (await formatFinding('logo.png', img('logo.png', 256, 256, 20000).image, cfg, async () => 8000))!;
@@ -92,7 +100,7 @@ describe('renderFinding — English catalog reproduces the baked strings (drift 
     const findings = await realFindings();
     const keys = new Set(findings.map((f) => f.messageKey));
     // sanity: we exercised every messageKey family the rules emit
-    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'frame-redundancy', 'trim-margin', 'cross-atlas-redundancy', 'wasted-alpha', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'integrity', 'format-aggregate', 'variants']));
+    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'frame-redundancy', 'trim-margin', 'cross-atlas-redundancy', 'font-glyph-page', 'wasted-alpha', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'integrity', 'format-aggregate', 'variants']));
     for (const f of findings) {
       expect(f.messageKey, `${f.id} must carry a messageKey`).toBeTruthy();
       const r = renderFinding(f, 'en');

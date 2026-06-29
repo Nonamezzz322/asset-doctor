@@ -4,7 +4,7 @@
 // folder-level duplicate detection, and format sizing (OffscreenCanvas → WebP/AVIF).
 
 import type { Asset, AtlasFrameHashes, AtlasFrameTrims, ImageFeatures, ImageMime, Sprite, TrimRect } from '@asset-doctor/core';
-import { parseAtlas, parseImage, parseSpinePage, type MalformedFrame, type ParseResult, type SpinePage } from '@asset-doctor/parsers';
+import { parseAtlas, parseImage, parseSpinePage, parseFntPage, type FntPage, type MalformedFrame, type ParseResult, type SpinePage } from '@asset-doctor/parsers';
 import { analyze, mergeSharedAtlases, type EncodeSizer, type OpaqueEncodeSizer } from '@asset-doctor/analysis';
 import { alphaBBox } from '@asset-doctor/fix';
 import { pageExceedsScanBudget, scanSkipReason } from '../lib/bitmap-budget';
@@ -53,6 +53,9 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
     // own parse failures (atlas/spine threw or image header unrecognized) + per-region Spine recovery.
     // Sorted by ref before handing to analyze (which passes it through verbatim).
     const unparsed = [...grouped.unparsed];
+    // Per-bmfont-page font metadata (face + kerning count) read off the parsed FntPage, keyed by atlas.name
+    // — drives the font-glyph-page readout. Absent ⇒ never fires (additive, gated like frameHashes).
+    const fontPages: { atlasRef: string; faceName?: string; kerningCount: number }[] = [];
 
     for (const a of grouped.atlases) {
       if (cancelled) return; // superseded — stop before the next parse (terminate() will land shortly)
@@ -64,7 +67,9 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       const res: ParseResult & { malformedFrames?: MalformedFrame[] } =
         a.kind === 'spine'
           ? parseSpinePage(a.manifest as SpinePage, image, { name: a.name })
-          : parseAtlas(a.manifest, image, { name: a.name });
+          : a.kind === 'bmfont'
+            ? parseFntPage(a.manifest as FntPage, image, { name: a.name })
+            : parseAtlas(a.manifest, image, { name: a.name });
       post({ type: 'progress', done: ++done, total, label: a.name });
       if (res.ok && res.asset.kind === 'atlas') {
         assets.push(res.asset);
@@ -82,6 +87,19 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       if (a.kind === 'spine') {
         for (const mr of (a.manifest as SpinePage).malformedRegions ?? []) {
           unparsed.push({ ref: `${a.name}#${mr.name}`, reason: mr.reason });
+        }
+      }
+      // Per-glyph BMFont recovery + the font-glyph-page metadata. The page kept its good glyphs; surface the
+      // dropped ones via the same `<page>#<id>` ref convention spine/TP use. fontPages drives the readout.
+      if (a.kind === 'bmfont') {
+        const fp = a.manifest as FntPage;
+        for (const mg of fp.malformedGlyphs ?? []) {
+          unparsed.push({ ref: `${a.name}#${mg.id}`, reason: mg.reason });
+        }
+        // bmfont pages are never shared-page-merged (a single-image glyph page keeps its name), so a.name
+        // here === the merged atlas name analyze sees → the fontByRef lookup keys match.
+        if (res.ok && res.asset.kind === 'atlas') {
+          fontPages.push({ atlasRef: a.name, faceName: fp.face, kerningCount: fp.kerningCount });
         }
       }
     }
@@ -172,6 +190,7 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       ...(frameHashes.length ? { frameHashes } : {}),
       ...(frameTrims.length ? { frameTrims } : {}),
       ...(unparsed.length ? { unparsed } : {}),
+      ...(fontPages.length ? { fontPages } : {}),
     });
     if (cancelled) return; // superseded — suppress a `done` that would race the terminate
     post({ type: 'done', report });

@@ -135,6 +135,17 @@
     "other": "{dupes} frames in {groups} group(s) have byte-identical pixel regions shared across {sheets} atlases ({atlases}). They pin {vram:bytes} of VRAM ({area}px × 4) that referencing one shared copy reclaims (the duplicate-frame area — separate from any empty-space merge win), plus ~{disk:bytes} of atlas disk (area estimate)."
   },
   "find.cross-atlas-redundancy.fix": "Reference one shared copy across the sheets instead of packing identical frames on each.",
+  "find.font-glyph-page.title": {
+    "$count": "glyphs",
+    "one": "{glyphs} glyph on a BMFont page — {occ:pct} packed",
+    "other": "{glyphs} glyphs on a BMFont page — {occ:pct} packed"
+  },
+  "find.font-glyph-page.detail": {
+    "$count": "kerning",
+    "one": "{face}: {glyphs} glyphs cover {occ:pct} of the {w}×{h} glyph page ({vram:bytes} of VRAM, w×h×4), with {kerning} kerning pair. A sparse glyph sheet pins that VRAM for mostly-empty space.",
+    "other": "{face}: {glyphs} glyphs cover {occ:pct} of the {w}×{h} glyph page ({vram:bytes} of VRAM, w×h×4), with {kerning} kerning pairs. A sparse glyph sheet pins that VRAM for mostly-empty space."
+  },
+  "find.font-glyph-page.fix": "Repack the glyphs tighter, drop unused characters, or generate a smaller page for the used charset.",
   "find.duplicate-exact.title": "{n}× identical file",
   "find.duplicate-exact.detail": "Byte-identical copies: {refs}. Keep one and reference it — each copy is also a separate texture upload ({vram:bytes} VRAM each).",
   "find.duplicate-exact.fix": "De-duplicate: keep a single copy and update references.",

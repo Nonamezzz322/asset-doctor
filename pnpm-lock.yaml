@@ -168,6 +168,9 @@ importers:
         specifier: workspace:*
         version: link:../core
     devDependencies:
+      '@asset-doctor/ingest':
+        specifier: workspace:*
+        version: link:../ingest
       '@asset-doctor/parsers':
         specifier: workspace:*
         version: link:../parsers
