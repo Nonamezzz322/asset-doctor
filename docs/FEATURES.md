@@ -97,7 +97,9 @@ the Pro fix generates optimized output; native-only ops run on an opt-in backend
 - **Abortable workers** — an `AbortSignal` seam through the analyze + fix workers so a superseded drop stops competing (additive, default-off).
 - **Honest skips everywhere** — unparseable inputs, encode failures, quality-floor declines, GPU-format unavailability all surfaced (never silent), never shipping a larger "optimized" file.
 - **De-overlapped headline savings** — the `potentialDiskSaved` headline never double-counts: format ∩ wasted-alpha ∩ strippable-metadata collapse to a per-ref MAX, and exact-duplicate dropped copies don't also charge their own format/alpha/strippable saving (phantom bytes for files that vanish on dedup). Always ≤ the achievable total — the product under-promises rather than over-claims.
+- **Partitioned duplicate reclaim** — within-atlas frame-redundancy and cross-atlas redundancy count DISJOINT pixel sets: an atlas's own intra-atlas dupes are reclaimed once (per-rect), and cross-atlas only counts the (distinct-sheets − 1) freed copies, so the two readouts are honestly additive (each reported count equals what the corresponding fix actually delivers).
+- **Robust multi-page Spine parsing** — the `.atlas` page-boundary lookahead tolerates modern Spine 4.x indented page headers, so a second/Nth texture page is never silently dropped (no phantom full-page sprite, no false-orphan image).
 
 ---
 
-*Updated 2026-06-29 (through round 26). Branch `feat/asset-pipeline` (= local `main`), ~55 commits over `origin/main`, all green. Deploy (GH Pages) awaits the user's `git push origin main`; live backend ops need the toktx/pngquant/vips binaries in the deployed sidecar.*
+*Updated 2026-06-29 (through round 27). Branch `feat/asset-pipeline` (= local `main`), ~58 commits over `origin/main`, all green. Deploy (GH Pages) awaits the user's `git push origin main`; live backend ops need the toktx/pngquant/vips binaries in the deployed sidecar.*
