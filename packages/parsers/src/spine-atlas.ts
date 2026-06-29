@@ -148,10 +148,12 @@ export function parseSpineAtlasText(text: string): SpinePage[] {
       continue;
     }
     if (!m) {
-      // bare line — a page image if the next non-empty line is a (non-indented) page `size:` header.
+      // bare line — a page image if the next non-empty line is a page `size:` header.
+      // Trim the looked-ahead line first (mirroring the loop's trim-then-classify convention) so a
+      // modern Spine 4.x INDENTED page `size:` header on page 2+ is still recognized (not swallowed).
       let j = i + 1;
       while (j < lines.length && lines[j]!.trim() === '') j++;
-      const pageStart = !page || /^size\s*:/.test(j < lines.length ? lines[j]! : '');
+      const pageStart = !page || /^size\s*:/.test((lines[j] ?? '').trim());
       flushRegion();
       if (pageStart) {
         page = { image: t, sprites: [] };

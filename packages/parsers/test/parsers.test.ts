@@ -710,6 +710,75 @@ rgn
     expect(p.sprites).toHaveLength(1);
     expect(p.malformedRegions).toBeUndefined(); // offset is tolerant, not a required field
   });
+
+  it('spine modern multi-page: an INDENTED page size: header on page 2+ is NOT swallowed (no lost page)', () => {
+    // Bug (R27): the page-boundary lookahead tested the RAW un-trimmed next line against /^size\s*:/,
+    // while every other classification used the trimmed line. So on page 2+ a modern Spine 4.x INDENTED
+    // page header ("\tsize:" / "  size:") was unrecognized → page 2 was silently dropped, its image line
+    // became a phantom full-page sprite on page 1, and regionB was misattributed to page 1.
+    // Two variants below — tab-indented AND space-indented page headers — both must yield 2 clean pages.
+    for (const [label, indent] of [['tab', '\t'], ['space', '  ']] as const) {
+      const atlas = `page1.png
+${indent}size: 64, 64
+${indent}format: RGBA8888
+regionA
+${indent}rotate: 0
+${indent}xy: 0, 0
+${indent}size: 32, 32
+${indent}orig: 32, 32
+page2.png
+${indent}size: 64, 64
+${indent}format: RGBA8888
+regionB
+${indent}rotate: 0
+${indent}xy: 0, 0
+${indent}size: 16, 16
+${indent}orig: 16, 16
+`;
+      const pages = parseSpineAtlasText(atlas);
+      expect(pages.length, label).toBe(2);
+      expect(pages.map((p) => p.image)).toEqual(['page1.png', 'page2.png']);
+      expect(pages[0]!.size).toEqual({ w: 64, h: 64 });
+      expect(pages[1]!.size).toEqual({ w: 64, h: 64 });
+      // correct per-page sprite attribution — no phantom "page2.png" full-page region poisoning page 1
+      expect(pages[0]!.sprites.map((s) => s.name)).toEqual(['regionA']);
+      expect(pages[1]!.sprites.map((s) => s.name)).toEqual(['regionB']);
+      // no fabricated/malformed region surfaced on either page
+      expect(pages[0]!.malformedRegions).toBeUndefined();
+      expect(pages[1]!.malformedRegions).toBeUndefined();
+    }
+    // NOTE: this only covers the size:-first page-header ordering (the common case). A modern variant that
+    // emits a non-size page key (e.g. format:) BEFORE size: is a separate, currently-also-broken case and
+    // is explicitly out of scope for this fix.
+  });
+
+  it('spine legacy column-0 multi-page regression guard: still 2 pages with correct attribution', () => {
+    // Locks the legacy (non-indented) path so the lookahead-trim fix is a no-op for column-0 headers.
+    const atlas = `page1.png
+size: 64, 64
+format: RGBA8888
+regionA
+rotate: 0
+xy: 0, 0
+size: 32, 32
+orig: 32, 32
+page2.png
+size: 64, 64
+format: RGBA8888
+regionB
+rotate: 0
+xy: 0, 0
+size: 16, 16
+orig: 16, 16
+`;
+    const pages = parseSpineAtlasText(atlas);
+    expect(pages.length).toBe(2);
+    expect(pages.map((p) => p.image)).toEqual(['page1.png', 'page2.png']);
+    expect(pages[0]!.sprites.map((s) => s.name)).toEqual(['regionA']);
+    expect(pages[1]!.sprites.map((s) => s.name)).toEqual(['regionB']);
+    expect(pages[0]!.malformedRegions).toBeUndefined();
+    expect(pages[1]!.malformedRegions).toBeUndefined();
+  });
 });
 
 describe('per-frame recovery — one bad frame no longer nukes the sheet (R21 #1)', () => {

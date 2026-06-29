@@ -10,6 +10,34 @@ GitHub creds — user pushes); commit hashes below are over that base.
 
 ---
 
+## Round 27 — selection (2 picks; Spine shipped) — 2026-06-29
+Selection (high bar, thin space): 4-lens brainstorm → 5 candidates → strict judge verified each premise and
+picked 2 contained correctness/honesty wins; dropped 3 (declared-vs-real atlas-dimension detector — real +
+relevant but needs a calibrated false-positive tolerance + 9-locale catalog, a capability not a contained fix,
+reconsider as its own round; RGBA4444/RGB565 format note — speculative about loader behavior, can't honestly
+move VRAM, invariant-3 risk; preserve `meta.related_multi_packs` on multipack passthrough — verified real
+PAID-path break but spans 3 packages with sibling-list-regen scope creep, deserves its own scoped round).
+Designs in `docs/improvements/round27-*.md`.
+
+- **(Spine) multi-page `.atlas` page-boundary lookahead — trim before the regex so an indented page `size:`
+  header on page 2+ is not swallowed** (`docs/improvements/round27-spine-pageheader.md`)
+  — `parseSpineAtlasText`'s page-start lookahead tested `/^size\s*:/` against the RAW un-trimmed looked-ahead
+  line, while every other classification in the loop uses the trimmed line. The first page is masked by a
+  `!page` short-circuit, but on **page 2+** a modern Spine 4.x **indented** page `size:` header failed the
+  regex → the second texture page was **silently dropped**, a phantom full-page sprite poisoned page 1's
+  occupancy/wasted-region analysis, and the real page-2 image was mis-flagged as an orphan — an invariant-3
+  honesty break (fabrication + false negative + false positive), none of it surfaced. **Fix:** one line —
+  `/^size\s*:/.test((lines[j] ?? '').trim())` (trim mirrors the loop convention; `?? ''` keeps it bounds-safe
+  and never-throwing). No type/contract/worker/UI/backend change. **No-op for every existing fixture** (an awk
+  scan of all 527 repo `.atlas` files found ZERO indented page-level `size:` headers; indented REGION `size:`
+  lines follow a name line and are key-matched, never reaching the bare-line lookahead) ⇒ zero golden drift.
+  — **Tests**: a parser unit test over BOTH tab- and space-indented multi-page variants (pages===2, correct
+  per-page images/sizes/sprite attribution, `malformedRegions` undefined ⇒ no phantom), a column-0
+  regression-guard, and a new ingest integration test (`group-spine-multipage.test.ts`) asserting both page
+  images are referenced and neither is mis-flagged orphan (locks the honesty fix end-to-end). parsers 46→48,
+  ingest 28→29. Review verdict: **SHIP** (zero blockers/majors; reviewer re-ran the gate + re-reproduced the
+  bug). Gate: typecheck + parsers (48) + ingest (29) + analysis (148) + full vitest + lint green.
+
 ## Round 26 — selection (2 picks; all shipped) — 2026-06-29
 Selection (strict bar, thin space): 4-lens brainstorm → 11 candidates → a skeptical judge that VERIFIED each
 premise against code and picked only 2 honesty/correctness wins, dropping 9 (folder-keyed bundles = speculative
