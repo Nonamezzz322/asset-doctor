@@ -125,6 +125,19 @@ describe('catalog completeness (all 9 locales)', () => {
   // B2 (load-bearing honesty): the existing `whyNoKernel` note MUST stay UNCHANGED — it still renders at the
   // non-tier downscale sites where resample is NOT routed, so retargeting it would lie there. This pins the en
   // copy so a future "retarget" can't slip through; the resample hint lives in the SEPARATE key asserted above.
+  // The mobile sub-md totals strip labels the DECLARED chip with the self-disambiguating `readout.declared`
+  // ("vram (declared)") instead of the bare `metric.vram` ("vram"), so declared stays textually distinct
+  // from measured even when the (probe-gated) measured chip is absent (the honesty correction). Pin that
+  // every locale carries the key (no missing-key fallback on mobile) AND that it differs from metric.vram
+  // in EN — a bare-vram regression would re-introduce the ambiguity the strip exists to avoid.
+  it('readout.declared exists in all 9 locales and is self-disambiguating (≠ metric.vram in en)', () => {
+    for (const loc of LOCALES) {
+      const v = CATALOGS[loc]['readout.declared'];
+      expect(typeof v === 'string' && v.length > 0, `${loc} readout.declared`).toBe(true);
+    }
+    expect(translate('en', 'readout.declared')).not.toBe(translate('en', 'metric.vram'));
+  });
+
   it('whyNoKernel is left untouched (a separate resample key carries the tier hint — B2)', () => {
     expect(translate('en', 'fix.skipped.whyNoKernel')).toBe(
       "Downscale kernel isn't configurable in-browser — the browser's high-quality resampler is used.",

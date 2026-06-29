@@ -33,6 +33,7 @@ import { TriageLedger } from './components/TriageLedger';
 import { useDebounced } from './lib/useDebounced';
 import { buildIndex, countCandidates, defaultSelectOpts, DEFAULT_SEVERITIES, DEFAULT_SORT, selectRows, type LedgerRow, type SelectOpts, type SortKey } from './lib/triage';
 import { analysisReadyMessage, resultCountMessage } from './lib/announce';
+import { buildTotalsRows } from './lib/totals-rows';
 
 type Phase =
   | { t: 'idle' }
@@ -359,6 +360,19 @@ export function App() {
         {report && phase.t === 'done' && index && selectOpts && (
           <div className="space-y-5">
             <VerdictBar tally={index.tally} severityFilter={severityFilter} onToggle={toggleSeverity} />
+            {/* Sub-md totals strip — the EXACT inverse breakpoint of the desktop header block (md:flex):
+                below md the header totals are display:none, so without this the disk≠VRAM honesty pin
+                (invariant 5) and the saveable instant-wow payoff are 100% invisible on phones/small
+                tablets. md:hidden ⇒ the two NEVER co-exist on any viewport (no duplication). Reuses the
+                EXACT totals values + fmtBytes + savedPct; declared uses readout.declared so it stays
+                textually distinct from measured even when the (probe-gated) measured chip is absent. */}
+            {totals ? (
+              <div className="flex flex-wrap gap-x-5 gap-y-1.5 border-b border-line pb-4 md:hidden">
+                {buildTotalsRows(totals, t, fmtBytes).map((r) => (
+                  <MobileTotal key={r.key} label={r.label} value={r.value} accent={r.accent} title={r.title} />
+                ))}
+              </div>
+            ) : null}
             {report.assets.length === 0 && index.rows.length === 0 ? (
               <p className="font-mono text-sm text-ink-soft">{t('report.noAssets')}</p>
             ) : (
@@ -438,6 +452,19 @@ function HeaderMetric({ label, value, accent, title }: { label: string; value: s
     <div className="bg-panel px-3 py-1.5" title={title}>
       <div className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-soft">{label}</div>
       <div className={`font-mono text-xs font-semibold ${accent ? 'text-cta' : 'text-ink'}`}>{value}</div>
+    </div>
+  );
+}
+
+// Mirrors HeaderMetric but inline-wrap-friendly for the sub-md totals strip: no per-cell border/bg
+// (unlike the header's bg-line divider grid) — a wrapping label/value list under VerdictBar. flex-col
+// glues each label to its own value so wrapping never blurs declared/measured/saveable. No animation
+// ⇒ inert under prefers-reduced-motion. Token-driven only (text-ink/text-ink-soft/text-cta).
+function MobileTotal({ label, value, accent, title }: { label: string; value: string; accent?: boolean; title?: string }) {
+  return (
+    <div className="flex flex-col" title={title}>
+      <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-soft">{label}</span>
+      <span className={`font-mono text-xs font-semibold ${accent ? 'text-cta' : 'text-ink'}`}>{value}</span>
     </div>
   );
 }
