@@ -142,6 +142,17 @@
     "other": "{sprites} 个未裁剪精灵在其不透明图像周围带有透明边距。该留白占用 {vram:bytes} 显存（{area}px × 4），启用裁剪的重排最多可回收这些空间，另加约 {disk:bytes} 的图集磁盘（按面积估算）。"
   },
   "find.trim-margin.fix": "启用裁剪后重排，使每帧收紧到其不透明边界。",
+  "find.cross-atlas-redundancy.title": {
+    "$count": "dupes",
+    "one": "{dupes} 个重复帧跨 {sheets} 个图集 — 不同图集上像素完全相同",
+    "other": "{dupes} 个重复帧跨 {sheets} 个图集 — 不同图集上像素完全相同"
+  },
+  "find.cross-atlas-redundancy.detail": {
+    "$count": "dupes",
+    "one": "{groups} 组中的 {dupes} 个帧具有跨 {sheets} 个图集（{atlases}）共享的字节完全相同的像素区域。它们占用 {vram:bytes} 显存（{area}px × 4），引用一份共享副本即可回收（即重复帧的面积 — 与任何空白合并收益无关），另加约 {disk:bytes} 的图集磁盘（按面积估算）。",
+    "other": "{groups} 组中的 {dupes} 个帧具有跨 {sheets} 个图集（{atlases}）共享的字节完全相同的像素区域。它们占用 {vram:bytes} 显存（{area}px × 4），引用一份共享副本即可回收（即重复帧的面积 — 与任何空白合并收益无关），另加约 {disk:bytes} 的图集磁盘（按面积估算）。"
+  },
+  "find.cross-atlas-redundancy.fix": "在各图集间引用一份共享副本，而不是在每个图集上打包完全相同的帧。",
   "find.duplicate-exact.title": "{n}× 完全相同的文件",
   "find.duplicate-exact.detail": "字节完全相同的副本：{refs}。保留一份并引用它 — 每份副本也是一次单独的纹理上传（各占 {vram:bytes} VRAM）。",
   "find.duplicate-exact.fix": "去重：仅保留一份副本并更新引用。",

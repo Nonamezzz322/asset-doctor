@@ -2,7 +2,7 @@
 // sprites that should be atlased, under-filled atlases that could merge, integrity, and the
 // aggregate transcode win. All folder findings carry scope: 'folder' and relatedRefs.
 
-import type { Asset, AssetMetrics, Atlas, Finding, ImageAsset, ImageFeatures, ThresholdConfig } from '@asset-doctor/core';
+import type { Asset, AssetMetrics, Atlas, Finding, ImageAsset, ImageFeatures, Rect, ThresholdConfig } from '@asset-doctor/core';
 import { fmtBytes, occupancyValue, vramBytes } from './rules';
 import { buildCoverage, defaultCell, mergeEmptyRects, summarizeEmpty } from './grid';
 
@@ -255,5 +255,181 @@ export function mipmapCostFinding(metrics: AssetMetrics[], cfg: ThresholdConfig)
     fix: 'Leave mipmaps off for UI/atlas textures never minified; budget the +33% only where you enable them.',
     messageKey: 'mipmap',
     params: { n, base, mip, overhead },
+  };
+}
+
+/** Folder-scope CROSS-ATLAS duplicate-frame detector — the folder sibling of `frameRedundancyFinding`
+ *  (rules.ts). The host hashes each sprite's PIXEL REGION off the already-decoded page (`frameHashByRef`,
+ *  per-atlas, index-aligned to `atlas.sprites`; `null` = host-skipped flat region / read failure, never
+ *  clustered) — the SAME hashes the within-atlas rule consumes per-atlas. This rule clusters those region
+ *  hashes ACROSS ALL atlases and fires ONLY when a cluster spans ≥2 DISTINCT atlases (single-atlas clusters
+ *  belong to `frameRedundancyFinding` — no double-report). We MEASURE the cross-sheet duplicate set and report:
+ *    • VRAM — the recoverable distinct-rect area × 4 (the atlas px the cross-sheet copies pin; a merged,
+ *      de-duplicated repack that references ONE shared copy reclaims it). EXACT area arithmetic, identical
+ *      precedent to rules.ts `frameRedundancyFinding` — NO POT-tier bin gate, NO packer, NO inline sizer, so
+ *      it CANNOT over-claim (a real MaxRects pack of the merged set lands on a LARGER bin than any area floor;
+ *      claiming a bin-tier delta would assert a saving no real merge delivers, invariant 5).
+ *    • DISK — an AREA-PROPORTIONAL ESTIMATE only (no per-region disk bytes exist), attributed to each freed
+ *      copy's OWN atlas: byteSize[member.atlas] × memberRectArea / Σ(that atlas's frame areas). Guarded per
+ *      atlas (Σ > 0 + byteSize present, else that copy's disk is skipped). Carried in the finding only, NEVER
+ *      folded into the aggregate potentialDiskSaved (invariant 5: VRAM and disk are distinct quantities).
+ *  GATE: `cfg.crossAtlasRedundancy.minDuplicates` counts CROSS-SHEET DUPLICATE COPIES (≥2 ⇒ the frame recurs
+ *  on ≥2 sheets), NOT clusters. DISTINCT-RECT GUARD (invariant 3, honesty): two manifest names pointing at the
+ *  IDENTICAL packed rect within ONE atlas (a pre-aliased Spine/TP sheet) are ALREADY one region — they cluster
+ *  by hash but contribute ONE unit, never an inflated count (same guard as the within-atlas rule, applied
+ *  per-atlas). ORTHOGONAL to `atlasMergeFinding`: atlas-merge reclaims EMPTY sheet space; this reclaims
+ *  DUPLICATE-FRAME px — different pixels, additive reclaimable areas, NOT the same win (documented so the two
+ *  findings never read as double-counting). HONESTY PIN: `dupes` = Σ(distinctUnits − 1) per cluster = exactly
+ *  the `framesAliased` a future cross-atlas FIX would report (this is DIAGNOSIS-ONLY — we generate nothing,
+ *  invariant 3). Returns null with no config, with <2 atlases carrying hashes, when no cluster spans ≥2
+ *  atlases, or when no cluster reaches the gate. Deterministic: clusters processed by lowest
+ *  (atlasName, spriteIndex); all output ref/atlas lists sorted; pure integer math (no Date/random). */
+export function crossAtlasRedundancyFinding(
+  atlases: Atlas[],
+  frameHashByRef: Map<string, (string | null)[]>,
+  byteByRef: Map<string, number>,
+  cfg: ThresholdConfig,
+): Finding | null {
+  if (!cfg.crossAtlasRedundancy) return null;
+
+  const rectKey = (r: Rect): string => `${r.x},${r.y},${r.w},${r.h}`;
+
+  // Per-atlas Σ(frame area) for the area-proportional disk estimate. Built only for atlases whose hash entry
+  // length matches the sprite count (a length mismatch ⇒ stale/desynced dep for THAT atlas — exclude it only,
+  // never mis-key a region; the others still compare).
+  const allFrameArea = new Map<string, number>();
+
+  // Flatten every (atlas, spriteIndex) carrying a non-null region hash into a stable list. Iterate atlases in
+  // the order given (analyze pushes them in asset order) and sprites in index order; the flattened order is
+  // deterministic and only used to seed clusters — every output below is independently sorted.
+  interface Unit {
+    atlas: string;
+    index: number;
+    name: string;
+    hash: string;
+    rect: Rect;
+  }
+  const units: Unit[] = [];
+  for (const atlas of atlases) {
+    const hashes = frameHashByRef.get(atlas.name);
+    if (!hashes || hashes.length !== atlas.sprites.length) continue; // no/desynced hashes for this atlas
+    allFrameArea.set(
+      atlas.name,
+      atlas.sprites.reduce((s, sp) => s + sp.frame.w * sp.frame.h, 0),
+    );
+    for (let i = 0; i < atlas.sprites.length; i++) {
+      const h = hashes[i];
+      if (h == null) continue; // host-skipped flat region / read failure — never clusters
+      const sp = atlas.sprites[i]!;
+      units.push({ atlas: atlas.name, index: i, name: sp.name, hash: h, rect: sp.frame });
+    }
+  }
+  if (units.length === 0) return null;
+
+  // Cluster units by region hash.
+  const clusters = new Map<string, Unit[]>();
+  for (const u of units) {
+    const g = clusters.get(u.hash) ?? [];
+    g.push(u);
+    clusters.set(u.hash, g);
+  }
+
+  // Deterministic cluster ordering: by each cluster's lowest (atlasName, spriteIndex).
+  const lowestOf = (g: Unit[]): Unit =>
+    g.reduce((min, u) =>
+      u.atlas < min.atlas || (u.atlas === min.atlas && u.index < min.index) ? u : min,
+    );
+  const ordered = [...clusters.values()].sort((a, b) => {
+    const la = lowestOf(a);
+    const lb = lowestOf(b);
+    return la.atlas.localeCompare(lb.atlas) || la.index - lb.index;
+  });
+
+  const refs: string[] = []; // every sprite name in a qualifying cross-atlas cluster (proof; names may repeat
+  // across sheets — that repetition IS the cross-sheet duplication, so we keep it like the within-atlas rule)
+  const atlasSet = new Set<string>(); // distinct atlases touched by qualifying clusters
+  let recoverableArea = 0; // Σ over clusters of Σ(freed distinct-rect area) — the reclaimable atlas px
+  let dupes = 0; // count of recoverable cross-sheet copies (distinct units beyond the one kept)
+  let groups = 0; // qualifying cluster count
+  let diskEstimate = 0; // area-proportional disk estimate (per freed copy → its own atlas), invariant 5
+
+  for (const cluster of ordered) {
+    // Require the cluster to span ≥2 DISTINCT atlases (single-atlas clusters are frameRedundancy's job).
+    const atlasesInCluster = new Set(cluster.map((u) => u.atlas));
+    if (atlasesInCluster.size < 2) continue;
+
+    // DISTINCT-RECT GUARD, applied PER ATLAS: collapse manifest names that alias the SAME packed rect within
+    // one atlas to a single unit (a pre-aliased Spine/TP rect is one GPU region). Key by atlas + rect.
+    const byAtlasRect = new Map<string, Unit>();
+    for (const u of cluster) {
+      const k = `${u.atlas}|${rectKey(u.rect)}`;
+      const prev = byAtlasRect.get(k);
+      // Keep the lowest-index member as the representative for this distinct rect (determinism).
+      if (!prev || u.index < prev.index) byAtlasRect.set(k, u);
+    }
+    const distinctUnits = [...byAtlasRect.values()];
+    if (distinctUnits.length < cfg.crossAtlasRedundancy.minDuplicates) continue; // not enough cross-sheet copies
+
+    // Keep ONE representative cluster-wide (lowest (atlasName, spriteIndex)); every OTHER distinct unit is a
+    // freed copy. Area is uniform within a hash cluster (identical region pixels ⇒ identical w×h).
+    distinctUnits.sort((a, b) => a.atlas.localeCompare(b.atlas) || a.index - b.index);
+    const freed = distinctUnits.slice(1);
+    groups += 1;
+    dupes += freed.length;
+
+    for (const u of cluster) {
+      refs.push(u.name);
+      atlasSet.add(u.atlas);
+    }
+    for (const f of freed) {
+      const area = f.rect.w * f.rect.h;
+      recoverableArea += area;
+      // Disk: attribute each freed copy's bytes to ITS OWN atlas (the sheet the redundant copy sat on).
+      const byteSize = byteByRef.get(f.atlas);
+      const atlasArea = allFrameArea.get(f.atlas) ?? 0;
+      if (byteSize != null && atlasArea > 0) diskEstimate += (byteSize * area) / atlasArea;
+    }
+  }
+
+  if (dupes < 1) return null; // no cluster spanned ≥2 atlases AND reached the gate
+  diskEstimate = Math.round(diskEstimate);
+
+  const sortedRefs = refs.sort();
+  const sortedAtlases = [...atlasSet].sort();
+  const sheets = sortedAtlases.length;
+  const vram = recoverableArea * 4; // BYTES_PER_PX — EXACT duplicate-region area, mirrors frameRedundancy
+
+  // Baked English — MUST mirror the en catalog templates byte-for-byte (the renderFinding drift guard). The
+  // headline `dupes` count drives the plural (title + detail). The claim is SCOPED to the duplicate-frame area
+  // ("reclaim the duplicate-frame area"), explicitly orthogonal to atlas-merge (which reclaims EMPTY space).
+  const frameWord = dupes === 1 ? 'frame' : 'frames';
+  return {
+    id: 'folder:cross-atlas-redundancy',
+    rule: 'cross-atlas-redundancy',
+    severity: 'warn',
+    scope: 'folder',
+    assetRef: sortedAtlases[0]!,
+    relatedRefs: sortedRefs,
+    title: `${dupes} duplicate ${frameWord} across ${sheets} atlases — identical pixels on separate sheets`,
+    detail:
+      `${dupes} ${frameWord} in ${groups} group(s) have byte-identical pixel regions shared across ${sheets} ` +
+      `atlases (${sortedAtlases.join(', ')}). They pin ${fmtBytes(vram)} of VRAM (${recoverableArea}px × 4) ` +
+      `that referencing one shared copy reclaims (the duplicate-frame area — separate from any empty-space ` +
+      `merge win), plus ~${fmtBytes(diskEstimate)} of atlas disk (area estimate).`,
+    fix: 'Reference one shared copy across the sheets instead of packing identical frames on each.',
+    // VRAM is exact area arithmetic; diskBytesSaved is an area-proportional ESTIMATE, kept here for the
+    // finding's own readout but NOT folded into the aggregate potentialDiskSaved (see analyze.ts).
+    estimate: { vramBytesSaved: vram, ...(diskEstimate > 0 ? { diskBytesSaved: diskEstimate } : {}) },
+    messageKey: 'cross-atlas-redundancy',
+    params: {
+      dupes,
+      groups,
+      sheets,
+      refs: sortedRefs.join(', '),
+      atlases: sortedAtlases.join(', '),
+      vram,
+      area: recoverableArea,
+      disk: diskEstimate,
+    },
   };
 }

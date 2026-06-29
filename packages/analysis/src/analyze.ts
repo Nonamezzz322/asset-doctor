@@ -38,6 +38,7 @@ import {
 } from './rules';
 import {
   atlasMergeFinding,
+  crossAtlasRedundancyFinding,
   duplicateExactFindings,
   duplicateSimilarFindings,
   formatAggregateFinding,
@@ -119,6 +120,11 @@ export async function analyze(
   const frameHashByRef = new Map<string, (string | null)[]>();
   for (const fh of deps.frameHashes ?? []) frameHashByRef.set(fh.atlasRef, fh.frameHashes);
 
+  // Per-atlas image byteSize, keyed by atlas.name — feeds the CROSS-ATLAS-redundancy disk estimate (each
+  // freed cross-sheet copy's bytes are area-proportionally attributed to its OWN atlas). Populated in the
+  // atlas branch below; empty for a loose-only folder ⇒ the disk estimate is simply 0 (VRAM still exact).
+  const byteByRef = new Map<string, number>();
+
   // Per-atlas sprite opaque bboxes (within-atlas trim-margin), keyed by post-merge atlas.name. The host
   // computes them in the SAME decode pass as the frame hashes; absent ⇒ empty ⇒ no trim-margin finding ⇒
   // byte-identical to today (CLI / headless tests unaffected).
@@ -147,6 +153,7 @@ export async function analyze(
     if (asset.kind === 'atlas') {
       const { atlas, image } = asset;
       atlases.push(atlas);
+      byteByRef.set(atlas.name, image.byteSize); // for the cross-atlas-redundancy disk estimate (folder scope)
       // B3: call wastedRegions BEFORE metrics.push so the dispersion (frag/largestPct) it computes is
       // available both to AssetMetrics.fragmentation and to occupancyFinding's honest copy.
       const waste = wastedRegions(atlas, cfg);
@@ -236,6 +243,12 @@ export async function analyze(
   if (sa) folder.push(sa);
   const am = atlasMergeFinding(atlases, cfg);
   if (am) folder.push(am);
+  // Cross-atlas frame redundancy: frames whose pixel REGIONS are byte-identical ACROSS ≥2 atlases. Clusters
+  // the SAME region hashes the within-atlas rule consumes per-atlas (here folder-wide); absent hashes / no
+  // cross-sheet dupes ⇒ no finding ⇒ byte-identical to today. The disk number is an area-proportional ESTIMATE
+  // and is DELIBERATELY NOT folded into potentialDiskSaved (invariant 5) — same precedent as frame-redundancy.
+  const car = crossAtlasRedundancyFinding(atlases, frameHashByRef, byteByRef, cfg);
+  if (car) folder.push(car);
   if (deps.missingImages && deps.missingImages.length > 0) {
     folder.push(...integrityFindings(deps.missingImages));
   }

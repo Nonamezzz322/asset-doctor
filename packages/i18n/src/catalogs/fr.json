@@ -146,6 +146,17 @@
     "other": "{sprites} sprites non rognés portent des marges transparentes autour de leur art opaque. Cette marge fixe {vram:bytes} de VRAM ({area}px × 4) qu'un réempaquetage avec rognage récupère jusqu'à, plus ~{disk:bytes} de disque d'atlas (estimation par surface)."
   },
   "find.trim-margin.fix": "Réempaquetez avec le rognage activé pour que chaque image soit ajustée à ses limites opaques.",
+  "find.cross-atlas-redundancy.title": {
+    "$count": "dupes",
+    "one": "{dupes} image dupliquée sur {sheets} atlas — pixels identiques sur des feuilles distinctes",
+    "other": "{dupes} images dupliquées sur {sheets} atlas — pixels identiques sur des feuilles distinctes"
+  },
+  "find.cross-atlas-redundancy.detail": {
+    "$count": "dupes",
+    "one": "{dupes} image dans {groups} groupe(s) a des régions de pixels identiques au byte près partagées entre {sheets} atlas ({atlases}). Elles fixent {vram:bytes} de VRAM ({area}px × 4) que le fait de référencer une seule copie partagée récupère (la surface des images dupliquées — distincte de tout gain de fusion d'espace vide), plus ~{disk:bytes} de disque d'atlas (estimation par surface).",
+    "other": "{dupes} images dans {groups} groupe(s) ont des régions de pixels identiques au byte près partagées entre {sheets} atlas ({atlases}). Elles fixent {vram:bytes} de VRAM ({area}px × 4) que le fait de référencer une seule copie partagée récupère (la surface des images dupliquées — distincte de tout gain de fusion d'espace vide), plus ~{disk:bytes} de disque d'atlas (estimation par surface)."
+  },
+  "find.cross-atlas-redundancy.fix": "Référencez une seule copie partagée entre les feuilles au lieu d'empaqueter des images identiques sur chacune.",
   "find.duplicate-exact.title": "{n}× fichier identique",
   "find.duplicate-exact.detail": "Copies identiques au byte près : {refs}. Gardez-en une et référencez-la — chaque copie est aussi un upload de texture distinct ({vram:bytes} de VRAM chacune).",
   "find.duplicate-exact.fix": "Dédupliquez : gardez une seule copie et mettez à jour les références.",

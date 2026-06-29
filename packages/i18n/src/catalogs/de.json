@@ -144,6 +144,17 @@
     "other": "{sprites} ungetrimmte Sprites tragen transparente Ränder um ihre deckende Grafik. Dieser Rand bindet {vram:bytes} VRAM ({area}px × 4), die ein getrimmtes Neupacken bis zu freigibt, plus ~{disk:bytes} Atlas-Speicher (Flächenschätzung)."
   },
   "find.trim-margin.fix": "Mit aktiviertem Trimmen neu packen, damit jeder Frame auf seine deckenden Grenzen verkleinert wird.",
+  "find.cross-atlas-redundancy.title": {
+    "$count": "dupes",
+    "one": "{dupes} doppelter Frame über {sheets} Atlanten — identische Pixel auf getrennten Sheets",
+    "other": "{dupes} doppelte Frames über {sheets} Atlanten — identische Pixel auf getrennten Sheets"
+  },
+  "find.cross-atlas-redundancy.detail": {
+    "$count": "dupes",
+    "one": "{dupes} Frame in {groups} Gruppe(n) hat byte-identische Pixelregionen, die über {sheets} Atlanten ({atlases}) geteilt werden. Sie binden {vram:bytes} VRAM ({area}px × 4), die das Referenzieren einer gemeinsamen Kopie freigibt (die Fläche der doppelten Frames — getrennt von jedem Leerraum-Merge-Gewinn), plus ~{disk:bytes} Atlas-Speicher (Flächenschätzung).",
+    "other": "{dupes} Frames in {groups} Gruppe(n) haben byte-identische Pixelregionen, die über {sheets} Atlanten ({atlases}) geteilt werden. Sie binden {vram:bytes} VRAM ({area}px × 4), die das Referenzieren einer gemeinsamen Kopie freigibt (die Fläche der doppelten Frames — getrennt von jedem Leerraum-Merge-Gewinn), plus ~{disk:bytes} Atlas-Speicher (Flächenschätzung)."
+  },
+  "find.cross-atlas-redundancy.fix": "Eine gemeinsame Kopie über die Sheets referenzieren, statt identische Frames auf jedem zu packen.",
   "find.duplicate-exact.title": "{n}× identische Datei",
   "find.duplicate-exact.detail": "Byte-identische Kopien: {refs}. Eine behalten und referenzieren — jede Kopie ist auch ein eigener Textur-Upload ({vram:bytes} VRAM pro Stück).",
   "find.duplicate-exact.fix": "Deduplizieren: eine einzige Kopie behalten und Referenzen aktualisieren.",

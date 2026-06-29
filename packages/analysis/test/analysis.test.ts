@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { Asset, Atlas, ImageAsset, ImageMime, Rect } from '@asset-doctor/core';
 import { parseAtlas, parseImage } from '@asset-doctor/parsers';
-import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, frameRedundancyFinding, trimMarginFinding, wastedAlphaFinding, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, frameRedundancyFinding, trimMarginFinding, wastedAlphaFinding, crossAtlasRedundancyFinding, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -602,6 +602,164 @@ describe('frame-redundancy (within-atlas duplicate frames)', () => {
       frameHashes: [{ atlasRef: 'x.png', frameHashes: ['aa', 'aa', 'aa'] }],
     });
     expect(report.findings.some((f) => f.rule === 'frame-redundancy')).toBe(false);
+  });
+});
+
+describe('cross-atlas-redundancy (frames byte-identical ACROSS ≥2 atlases)', () => {
+  // A pure atlas with one row of distinct-rect frames. Region hashes are injected directly (no canvas).
+  const sheetAtlas = (name: string, frames: { x: number; y: number; w: number; h: number }[]): Atlas => ({
+    name,
+    imageRef: name,
+    size: { w: 256, h: 256 },
+    sprites: frames.map((f, i) => ({ name: `${name}_${i}`, frame: f, rotated: false, trimmed: false, sourceSize: { w: f.w, h: f.h } })),
+    source: { kind: 'pixi' },
+  });
+  const sheetAsset = (atlas: Atlas, byteSize = 8000): Asset => ({
+    kind: 'atlas',
+    atlas,
+    image: { name: atlas.name, imageRef: atlas.imageRef, size: atlas.size, mime: 'image/png', byteSize },
+  });
+  const cell = { w: 32, h: 32 };
+  const row = (n: number): { x: number; y: number; w: number; h: number }[] =>
+    Array.from({ length: n }, (_, i) => ({ x: i * 32, y: 0, w: 32, h: 32 }));
+
+  it('two atlases share ONE frame on a distinct rect each ⇒ warn, dupes:1, groups:1, sheets:2, exact VRAM, DISTINCT messageKey', () => {
+    const A = sheetAtlas('A.png', row(2)); // A_0 shares the hash; A_1 distinct
+    const B = sheetAtlas('B.png', row(2)); // B_0 shares the hash; B_1 distinct
+    const hashes = new Map([
+      ['A.png', ['shared', 'aOnly']],
+      ['B.png', ['shared', 'bOnly']],
+    ]);
+    const bytes = new Map([['A.png', 8000], ['B.png', 8000]]);
+    const f = crossAtlasRedundancyFinding([A, B], hashes, bytes, DEFAULT_THRESHOLDS)!;
+    expect(f).not.toBeNull();
+    expect(f.rule).toBe('cross-atlas-redundancy');
+    expect(f.severity).toBe('warn');
+    expect(f.scope).toBe('folder');
+    // BLOCKER 1: the messageKey MUST be the DISTINCT cross-atlas key, NOT 'frame-redundancy' (a wrong key
+    // silently renders the within-atlas template against the wrong placeholders).
+    expect(f.messageKey).toBe('cross-atlas-redundancy');
+    expect(f.params?.dupes).toBe(1); // 2 distinct cross-sheet copies → 1 recoverable beyond the kept one
+    expect(f.params?.groups).toBe(1);
+    expect(f.params?.sheets).toBe(2);
+    // B2: VRAM = recoverableArea × 4 EXACTLY (one freed 32×32 copy) — no bin-tier / POT inflation.
+    expect(f.params?.area).toBe(cell.w * cell.h);
+    expect(f.estimate?.vramBytesSaved).toBe(cell.w * cell.h * 4);
+    expect(f.assetRef).toBe('A.png'); // lowest-sorted atlas
+    expect(f.relatedRefs).toEqual(['A.png_0', 'B.png_0']); // sorted member names (only the shared cluster)
+    expect(f.params?.atlases).toBe('A.png, B.png');
+  });
+
+  it('a single-atlas cluster ⇒ null (frame-redundancy owns within-atlas; no double-report)', () => {
+    const A = sheetAtlas('A.png', row(3));
+    const hashes = new Map([['A.png', ['dup', 'dup', 'other']]]); // 2 copies but all on ONE sheet
+    const f = crossAtlasRedundancyFinding([A], hashes, new Map([['A.png', 8000]]), DEFAULT_THRESHOLDS);
+    expect(f).toBeNull();
+  });
+
+  it('three atlases share a frame ⇒ dupes:2, sheets:3, area = 2 freed copies', () => {
+    const A = sheetAtlas('A.png', row(1));
+    const B = sheetAtlas('B.png', row(1));
+    const C = sheetAtlas('C.png', row(1));
+    const hashes = new Map([['A.png', ['z']], ['B.png', ['z']], ['C.png', ['z']]]);
+    const bytes = new Map([['A.png', 8000], ['B.png', 8000], ['C.png', 8000]]);
+    const f = crossAtlasRedundancyFinding([A, B, C], hashes, bytes, DEFAULT_THRESHOLDS)!;
+    expect(f.params?.dupes).toBe(2); // 3 copies → 2 recoverable
+    expect(f.params?.groups).toBe(1);
+    expect(f.params?.sheets).toBe(3);
+    expect(f.params?.area).toBe(2 * cell.w * cell.h);
+    expect(f.estimate?.vramBytesSaved).toBe(2 * cell.w * cell.h * 4);
+  });
+
+  it('pre-aliased rect in one sheet ⇒ collapses to one unit per atlas (distinct-rect guard)', () => {
+    // A.png has TWO manifest names on the IDENTICAL packed rect (a pre-aliased sheet) + B.png shares the hash.
+    const A: Atlas = {
+      name: 'A.png', imageRef: 'A.png', size: { w: 256, h: 256 }, source: { kind: 'pixi' },
+      sprites: [
+        { name: 'A_alias0', frame: { x: 0, y: 0, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: cell },
+        { name: 'A_alias1', frame: { x: 0, y: 0, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: cell },
+      ],
+    };
+    const B = sheetAtlas('B.png', row(1));
+    const hashes = new Map([['A.png', ['sh', 'sh']], ['B.png', ['sh']]]);
+    const bytes = new Map([['A.png', 8000], ['B.png', 8000]]);
+    const f = crossAtlasRedundancyFinding([A, B], hashes, bytes, DEFAULT_THRESHOLDS)!;
+    // A's two aliases collapse to ONE unit; with B's one ⇒ 2 distinct units across 2 sheets → 1 recoverable.
+    expect(f.params?.dupes).toBe(1);
+    expect(f.params?.sheets).toBe(2);
+    expect(f.params?.area).toBe(cell.w * cell.h);
+  });
+
+  it('<2 atlases with hashes ⇒ null', () => {
+    const A = sheetAtlas('A.png', row(2));
+    const f = crossAtlasRedundancyFinding([A], new Map([['A.png', ['x', 'x']]]), new Map([['A.png', 8000]]), DEFAULT_THRESHOLDS);
+    expect(f).toBeNull();
+  });
+
+  it('length mismatch on one atlas ⇒ that atlas excluded; the rest still compared', () => {
+    const A = sheetAtlas('A.png', row(2));
+    const B = sheetAtlas('B.png', row(1));
+    const C = sheetAtlas('C.png', row(1));
+    // A's hash array length (1) ≠ sprite count (2) ⇒ A is dropped. B & C still share a hash → fires across 2.
+    const hashes = new Map([['A.png', ['sh']], ['B.png', ['sh']], ['C.png', ['sh']]]);
+    const bytes = new Map([['A.png', 8000], ['B.png', 8000], ['C.png', 8000]]);
+    const f = crossAtlasRedundancyFinding([A, B, C], hashes, bytes, DEFAULT_THRESHOLDS)!;
+    expect(f.params?.sheets).toBe(2); // A excluded
+    expect(f.params?.atlases).toBe('B.png, C.png');
+    expect(f.relatedRefs).toEqual(['B.png_0', 'C.png_0']);
+  });
+
+  it('all-null hashes ⇒ null (host-skipped flat regions never cluster)', () => {
+    const A = sheetAtlas('A.png', row(1));
+    const B = sheetAtlas('B.png', row(1));
+    const hashes = new Map<string, (string | null)[]>([['A.png', [null]], ['B.png', [null]]]);
+    const f = crossAtlasRedundancyFinding([A, B], hashes, new Map([['A.png', 8000], ['B.png', 8000]]), DEFAULT_THRESHOLDS);
+    expect(f).toBeNull();
+  });
+
+  it('no crossAtlasRedundancy config ⇒ null (CLI / budget configs that don\'t opt in)', () => {
+    const cfg = { ...DEFAULT_THRESHOLDS };
+    delete cfg.crossAtlasRedundancy;
+    const A = sheetAtlas('A.png', row(1));
+    const B = sheetAtlas('B.png', row(1));
+    const hashes = new Map([['A.png', ['sh']], ['B.png', ['sh']]]);
+    expect(crossAtlasRedundancyFinding([A, B], hashes, new Map([['A.png', 8000], ['B.png', 8000]]), cfg)).toBeNull();
+  });
+
+  it('disk is area-proportional per freed copy\'s OWN atlas; missing byteSize ⇒ that copy\'s disk skipped', () => {
+    // Two atlases share a 32×32 frame. A is the representative (kept); B's copy is freed → its disk attributes
+    // to B's bytes: 8000 × (1024 / Σ B frame area). B has only the one 32×32 frame ⇒ Σ = 1024 ⇒ disk = 8000.
+    const A = sheetAtlas('A.png', row(1));
+    const B = sheetAtlas('B.png', row(1));
+    const hashes = new Map([['A.png', ['sh']], ['B.png', ['sh']]]);
+    const f = crossAtlasRedundancyFinding([A, B], hashes, new Map([['A.png', 8000], ['B.png', 8000]]), DEFAULT_THRESHOLDS)!;
+    expect(f.params?.disk).toBe(8000);
+    expect(f.estimate?.diskBytesSaved).toBe(8000);
+    // Missing byteSize for B ⇒ B's freed copy contributes NO disk (VRAM/area still reported).
+    const f2 = crossAtlasRedundancyFinding([A, B], hashes, new Map([['A.png', 8000]]), DEFAULT_THRESHOLDS)!;
+    expect(f2.params?.disk).toBe(0);
+    expect(f2.estimate?.diskBytesSaved).toBeUndefined(); // omitted when 0
+    expect(f2.estimate?.vramBytesSaved).toBe(cell.w * cell.h * 4); // VRAM unaffected
+  });
+
+  it('analyze threads the folder-wide hashes and does NOT fold the disk estimate into potentialDiskSaved', async () => {
+    const A = sheetAtlas('A.png', row(1));
+    const B = sheetAtlas('B.png', row(1));
+    const baseline = await analyze([sheetAsset(A), sheetAsset(B)]); // no frameHashes ⇒ dormant
+    expect(baseline.findings.some((f) => f.rule === 'cross-atlas-redundancy')).toBe(false);
+
+    const report = await analyze([sheetAsset(A), sheetAsset(B)], undefined, {
+      frameHashes: [
+        { atlasRef: 'A.png', frameHashes: ['sh'] },
+        { atlasRef: 'B.png', frameHashes: ['sh'] },
+      ],
+    });
+    const car = report.findings.find((f) => f.rule === 'cross-atlas-redundancy');
+    expect(car).toBeTruthy();
+    expect(car?.scope).toBe('folder');
+    expect(car?.estimate?.vramBytesSaved).toBe(cell.w * cell.h * 4);
+    // The disk number is an area-proportional ESTIMATE — NEVER folded into the aggregate (invariant 5).
+    expect(report.totals.potentialDiskSaved).toBe(baseline.totals.potentialDiskSaved);
   });
 });
 

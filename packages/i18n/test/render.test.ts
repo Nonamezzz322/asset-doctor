@@ -16,6 +16,7 @@ import {
   duplicateSimilarFindings,
   shouldAtlasFinding,
   atlasMergeFinding,
+  crossAtlasRedundancyFinding,
   integrityFindings,
   formatAggregateFinding,
   groupVariants,
@@ -67,6 +68,17 @@ async function realFindings(): Promise<Finding[]> {
   out.push(duplicateSimilarFindings([{ assetRef: 'x.png', contentHash: 'c1', dHash: 'aaaaaaaaaaaaaaaa' }, { assetRef: 'y.png', contentHash: 'c2', dHash: 'aaaaaaaaaaaaaaab' }], cfg)[0]!);
   out.push(shouldAtlasFinding(Array.from({ length: 8 }, (_, i) => img(`s${i}.png`, 64, 64, 100)), cfg)!);
   out.push(atlasMergeFinding([atlas('m1', 1, 200), atlas('m2', 1, 200)], cfg)!);
+  // cross-atlas-redundancy: two atlases sharing ONE byte-identical frame region on a DISTINCT rect each →
+  // 1 cluster spanning 2 sheets, 1 recoverable copy. Distinct messageKey (not 'frame-redundancy').
+  const caA: Atlas = {
+    name: 'caA.png', imageRef: 'caA.png', size: { w: 256, h: 256 }, source: { kind: 'pixi' },
+    sprites: [{ name: 'a0', frame: { x: 0, y: 0, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 32, h: 32 } }],
+  };
+  const caB: Atlas = {
+    name: 'caB.png', imageRef: 'caB.png', size: { w: 256, h: 256 }, source: { kind: 'pixi' },
+    sprites: [{ name: 'b0', frame: { x: 64, y: 0, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 32, h: 32 } }],
+  };
+  out.push(crossAtlasRedundancyFinding([caA, caB], new Map([['caA.png', ['sh']], ['caB.png', ['sh']]]), new Map([['caA.png', 8000], ['caB.png', 8000]]), cfg)!);
   out.push(integrityFindings([{ manifest: 'm.json', image: 'x.png' }])[0]!);
   const ff1 = (await formatFinding('hero.png', img('hero.png', 256, 256, 10000).image, cfg, async () => 4000))!;
   const ff2 = (await formatFinding('logo.png', img('logo.png', 256, 256, 20000).image, cfg, async () => 8000))!;
@@ -80,7 +92,7 @@ describe('renderFinding — English catalog reproduces the baked strings (drift 
     const findings = await realFindings();
     const keys = new Set(findings.map((f) => f.messageKey));
     // sanity: we exercised every messageKey family the rules emit
-    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'frame-redundancy', 'trim-margin', 'wasted-alpha', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'integrity', 'format-aggregate', 'variants']));
+    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'frame-redundancy', 'trim-margin', 'cross-atlas-redundancy', 'wasted-alpha', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'integrity', 'format-aggregate', 'variants']));
     for (const f of findings) {
       expect(f.messageKey, `${f.id} must carry a messageKey`).toBeTruthy();
       const r = renderFinding(f, 'en');

@@ -146,6 +146,17 @@
     "other": "{sprites} sprite non ritagliati portano margini trasparenti attorno alla loro grafica opaca. Quel margine fissa {vram:bytes} di VRAM ({area}px × 4) che una ricompattazione con ritaglio recupera fino a, più ~{disk:bytes} di disco dell'atlas (stima per area)."
   },
   "find.trim-margin.fix": "Ricompatta con il ritaglio abilitato così ogni fotogramma è ridotto ai suoi limiti opachi.",
+  "find.cross-atlas-redundancy.title": {
+    "$count": "dupes",
+    "one": "{dupes} fotogramma duplicato su {sheets} atlas — pixel identici su fogli separati",
+    "other": "{dupes} fotogrammi duplicati su {sheets} atlas — pixel identici su fogli separati"
+  },
+  "find.cross-atlas-redundancy.detail": {
+    "$count": "dupes",
+    "one": "{dupes} fotogramma in {groups} gruppo(i) ha regioni di pixel byte-identiche condivise tra {sheets} atlas ({atlases}). Fissano {vram:bytes} di VRAM ({area}px × 4) che referenziare una sola copia condivisa recupera (l'area dei fotogrammi duplicati — separata da qualsiasi guadagno da fusione di spazio vuoto), più ~{disk:bytes} di disco dell'atlas (stima per area).",
+    "other": "{dupes} fotogrammi in {groups} gruppo(i) hanno regioni di pixel byte-identiche condivise tra {sheets} atlas ({atlases}). Fissano {vram:bytes} di VRAM ({area}px × 4) che referenziare una sola copia condivisa recupera (l'area dei fotogrammi duplicati — separata da qualsiasi guadagno da fusione di spazio vuoto), più ~{disk:bytes} di disco dell'atlas (stima per area)."
+  },
+  "find.cross-atlas-redundancy.fix": "Referenzia una sola copia condivisa tra i fogli invece di impacchettare fotogrammi identici su ciascuno.",
   "find.duplicate-exact.title": "{n}× file identico",
   "find.duplicate-exact.detail": "Copie byte-identiche: {refs}. Tienine una e referenziala — ogni copia è anche un caricamento texture separato ({vram:bytes} VRAM ciascuna).",
   "find.duplicate-exact.fix": "Deduplica: tieni una sola copia e aggiorna i riferimenti.",

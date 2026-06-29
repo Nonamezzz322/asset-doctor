@@ -146,6 +146,17 @@
     "other": "{sprites} sprites sem recorte carregam margens transparentes ao redor da sua arte opaca. Esse preenchimento prende {vram:bytes} de VRAM ({area}px × 4) que um reempacotamento com recorte recupera até, mais ~{disk:bytes} de disco do atlas (estimativa por área)."
   },
   "find.trim-margin.fix": "Reempacote com recorte ativado para que cada quadro seja ajustado aos seus limites opacos.",
+  "find.cross-atlas-redundancy.title": {
+    "$count": "dupes",
+    "one": "{dupes} quadro duplicado em {sheets} atlas — pixels idênticos em folhas separadas",
+    "other": "{dupes} quadros duplicados em {sheets} atlas — pixels idênticos em folhas separadas"
+  },
+  "find.cross-atlas-redundancy.detail": {
+    "$count": "dupes",
+    "one": "{dupes} quadro em {groups} grupo(s) tem regiões de pixels idênticas byte a byte compartilhadas entre {sheets} atlas ({atlases}). Eles prendem {vram:bytes} de VRAM ({area}px × 4) que referenciar uma única cópia compartilhada recupera (a área dos quadros duplicados — separada de qualquer ganho de fusão de espaço vazio), mais ~{disk:bytes} de disco do atlas (estimativa por área).",
+    "other": "{dupes} quadros em {groups} grupo(s) têm regiões de pixels idênticas byte a byte compartilhadas entre {sheets} atlas ({atlases}). Eles prendem {vram:bytes} de VRAM ({area}px × 4) que referenciar uma única cópia compartilhada recupera (a área dos quadros duplicados — separada de qualquer ganho de fusão de espaço vazio), mais ~{disk:bytes} de disco do atlas (estimativa por área)."
+  },
+  "find.cross-atlas-redundancy.fix": "Referencie uma única cópia compartilhada entre as folhas em vez de empacotar quadros idênticos em cada uma.",
   "find.duplicate-exact.title": "{n}× arquivo idêntico",
   "find.duplicate-exact.detail": "Cópias idênticas byte a byte: {refs}. Mantenha uma e referencie-a — cada cópia também é um upload de textura separado ({vram:bytes} de VRAM cada).",
   "find.duplicate-exact.fix": "Desduplique: mantenha uma única cópia e atualize as referências.",

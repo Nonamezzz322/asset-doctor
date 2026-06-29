@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { PNG, type PNGImage } from 'pngjs';
 import { describe, expect, it } from 'vitest';
 import type { ContentClass } from '@asset-doctor/core';
-import { frameRedundancyFinding, trimMarginFinding, DEFAULT_THRESHOLDS } from '@asset-doctor/analysis';
+import { frameRedundancyFinding, trimMarginFinding, crossAtlasRedundancyFinding, DEFAULT_THRESHOLDS } from '@asset-doctor/analysis';
 import { alphaBBox, emitTexturePackerJson, repackAtlases } from '@asset-doctor/fix';
 import { parseAtlas, parseAtlasManifest } from '@asset-doctor/parsers';
 import {
@@ -529,6 +529,80 @@ describe('frame-redundancy END-TO-END: fixture reproduces the defect through the
     expect(finding!.rule).toBe('frame-redundancy');
     expect(finding!.estimate?.vramBytesSaved).toBe(expected.vramBytesSaved);
     expect(finding!.params?.area).toBe(expected.recoverableArea);
+  });
+});
+
+// ── END-TO-END: the cross-atlas-redundant fixture — TWO sheets fed through the REAL production hashing path
+// (decode each PNG → pure extractFrameRegions → SHA → folder-scope crossAtlasRedundancyFinding). This is the
+// folder-scope sibling of the frame-redundancy e2e: the `shared` frame is byte-identical ACROSS the two sheets,
+// so its region SHA collides cross-atlas and the cluster spans 2 sheets. The frames are textured-but-identical
+// precisely so the production flat-guard does NOT null them. No canvas — pngjs decodes each PNG to the same RGBA
+// buffer createImageBitmap+getImageData would; the SHA stand-in is byte-stable (same digest both sheets ⇒ cluster).
+describe('cross-atlas-redundancy END-TO-END: fixture reproduces the cross-sheet dup through the real decode path', () => {
+  const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../../fixtures/sample-projects/cross-atlas-redundant');
+  const sha = (b: Uint8Array): string => createHash('sha256').update(b).digest('hex');
+
+  it('the shared frame collides cross-sheet (same SHA) and a_only/b_only stay distinct & non-null', () => {
+    const read = (sheet: string) => {
+      const png = PNG.sync.read(readFileSync(join(FIXTURES, `${sheet}.png`)));
+      const manifest = JSON.parse(readFileSync(join(FIXTURES, `${sheet}.json`), 'utf8')) as {
+        frames: Record<string, { frame: FrameRect }>;
+      };
+      const names = Object.keys(manifest.frames);
+      const rects = names.map((n) => manifest.frames[n]!.frame);
+      const hashes = hashFrameRegions(new Uint8ClampedArray(png.data), png.width, png.height, rects, sha)!;
+      return Object.fromEntries(names.map((n, i) => [n, hashes[i]])) as Record<string, string | null>;
+    };
+    const a = read('sheetA');
+    const b = read('sheetB');
+    expect(a['shared']).not.toBeNull(); // textured ⇒ not nulled by the flat-guard
+    expect(a['shared']).toBe(b['shared']); // byte-identical region ACROSS sheets ⇒ identical SHA (the cluster)
+    expect(a['a_only']).not.toBeNull();
+    expect(b['b_only']).not.toBeNull();
+    expect(new Set([a['shared'], a['a_only'], b['b_only']]).size).toBe(3); // shared distinct from both per-sheet frames
+  });
+
+  it('the rule FIRES warn from the real cross-atlas region hashes, matching expected.json', () => {
+    const expected = JSON.parse(readFileSync(join(FIXTURES, 'expected.json'), 'utf8')) as {
+      recoverableArea: number;
+      vramBytesSaved: number;
+      dupes: number;
+      groups: number;
+      sheets: number;
+    };
+
+    const atlases = [];
+    const frameHashByRef = new Map<string, (string | null)[]>();
+    const byteByRef = new Map<string, number>();
+    for (const sheet of ['sheetA', 'sheetB']) {
+      const pngBytes = readFileSync(join(FIXTURES, `${sheet}.png`));
+      const png = PNG.sync.read(pngBytes);
+      const parsed = parseAtlas(JSON.parse(readFileSync(join(FIXTURES, `${sheet}.json`), 'utf8')), {
+        ref: `${sheet}.png`,
+        bytes: new Uint8Array(pngBytes),
+      });
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok || parsed.asset.kind !== 'atlas') return;
+      const atlas = parsed.asset.atlas;
+      atlases.push(atlas);
+      // Hash index-aligned to the PARSED sprite order — exactly what the worker passes analyze().
+      const rects = atlas.sprites.map((s) => s.frame);
+      const hashes = hashFrameRegions(new Uint8ClampedArray(png.data), png.width, png.height, rects, sha)!;
+      frameHashByRef.set(`${sheet}.png`, hashes);
+      byteByRef.set(`${sheet}.png`, pngBytes.length);
+    }
+
+    const finding = crossAtlasRedundancyFinding(atlases, frameHashByRef, byteByRef, DEFAULT_THRESHOLDS);
+    expect(finding).not.toBeNull();
+    expect(finding!.severity).toBe('warn');
+    expect(finding!.rule).toBe('cross-atlas-redundancy');
+    expect(finding!.messageKey).toBe('cross-atlas-redundancy'); // BLOCKER 1: distinct key
+    expect(finding!.params?.dupes).toBe(expected.dupes);
+    expect(finding!.params?.groups).toBe(expected.groups);
+    expect(finding!.params?.sheets).toBe(expected.sheets);
+    expect(finding!.params?.area).toBe(expected.recoverableArea);
+    expect(finding!.estimate?.vramBytesSaved).toBe(expected.vramBytesSaved);
+    expect(finding!.relatedRefs).toEqual(['shared', 'shared']); // both sheets' shared frame names (kept, sorted)
   });
 });
 

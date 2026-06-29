@@ -27,6 +27,7 @@ export {
   duplicateSimilarFindings,
   shouldAtlasFinding,
   atlasMergeFinding,
+  crossAtlasRedundancyFinding,
   integrityFindings,
   formatAggregateFinding,
 } from './folder';

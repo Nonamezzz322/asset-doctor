@@ -124,6 +124,17 @@
     "other": "{sprites} untrimmed sprites carry transparent margins around their opaque art. That padding pins {vram:bytes} of VRAM ({area}px × 4) that a trimmed repack reclaims up to, plus ~{disk:bytes} of atlas disk (area estimate)."
   },
   "find.trim-margin.fix": "Repack with trim enabled so each frame is tightened to its opaque bounds.",
+  "find.cross-atlas-redundancy.title": {
+    "$count": "dupes",
+    "one": "{dupes} duplicate frame across {sheets} atlases — identical pixels on separate sheets",
+    "other": "{dupes} duplicate frames across {sheets} atlases — identical pixels on separate sheets"
+  },
+  "find.cross-atlas-redundancy.detail": {
+    "$count": "dupes",
+    "one": "{dupes} frame in {groups} group(s) have byte-identical pixel regions shared across {sheets} atlases ({atlases}). They pin {vram:bytes} of VRAM ({area}px × 4) that referencing one shared copy reclaims (the duplicate-frame area — separate from any empty-space merge win), plus ~{disk:bytes} of atlas disk (area estimate).",
+    "other": "{dupes} frames in {groups} group(s) have byte-identical pixel regions shared across {sheets} atlases ({atlases}). They pin {vram:bytes} of VRAM ({area}px × 4) that referencing one shared copy reclaims (the duplicate-frame area — separate from any empty-space merge win), plus ~{disk:bytes} of atlas disk (area estimate)."
+  },
+  "find.cross-atlas-redundancy.fix": "Reference one shared copy across the sheets instead of packing identical frames on each.",
   "find.duplicate-exact.title": "{n}× identical file",
   "find.duplicate-exact.detail": "Byte-identical copies: {refs}. Keep one and reference it — each copy is also a separate texture upload ({vram:bytes} VRAM each).",
   "find.duplicate-exact.fix": "De-duplicate: keep a single copy and update references.",

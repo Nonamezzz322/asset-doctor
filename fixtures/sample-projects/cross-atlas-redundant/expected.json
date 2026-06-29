@@ -1,0 +1,33 @@
+{
+  "kind": "cross-atlas-redundancy",
+  "feature": "cross-atlas-duplicate-frames",
+  "atlases": [
+    {
+      "name": "sheetA.png",
+      "w": 64,
+      "h": 32
+    },
+    {
+      "name": "sheetB.png",
+      "w": 64,
+      "h": 32
+    }
+  ],
+  "duplicateCluster": [
+    "sheetA.png:shared",
+    "sheetB.png:shared"
+  ],
+  "sheets": 2,
+  "minDuplicates": 2,
+  "dupes": 1,
+  "groups": 1,
+  "recoverableArea": 1024,
+  "vramBytesSaved": 4096,
+  "findings": [
+    {
+      "rule": "cross-atlas-redundancy",
+      "severity": "warn"
+    }
+  ],
+  "note": "Two atlases (sheetA, sheetB) that each pack the SAME byte-identical TEXTURED frame (`shared`, a 2-color checker) plus a distinct per-sheet frame. The shared frame forms a cross-atlas cluster spanning 2 sheets → 1 recoverable copy beyond the one kept. The frames are textured — NOT a single solid color — so they clear the production flat-guard (box-average to 9×8 → grayStdDev ≥ 6) and the folder-scope cross-atlas-redundancy detector clusters them off the REAL decoded page (worker hashAtlasFrames / pure extractFrameRegions). Recoverable DUPLICATE-FRAME AREA → VRAM (vramBytesSaved, EXACT area × 4 — identical precedent to within-atlas frame-redundancy, NO bin-tier delta so it never over-claims, invariant 5); the disk number is an area-proportional ESTIMATE, never conflated (invariant 5). ORTHOGONAL to atlas-merge (which reclaims EMPTY space — different px). The detector MEASURES the cross-sheet duplicate set; the cross-atlas FIX is a separate piece (generation — invariant 3)."
+}

@@ -269,7 +269,9 @@ export type Rule =
   // per-atlas group: frames whose pixel REGIONS are identical within ONE atlas (redundant frames)
   | 'frame-redundancy'
   // per-atlas group: untrimmed sprites whose transparent margin (frame − opaque bbox) wastes atlas space
-  | 'trim-margin';
+  | 'trim-margin'
+  // whole-folder (scope: 'folder'): frames whose pixel REGIONS are byte-identical ACROSS ≥2 atlases
+  | 'cross-atlas-redundancy';
 
 /** Mipmap chain multiplier on base texture VRAM: a full chain adds Σ(1/4ⁿ) for n≥1 → 4/3 (+33%).
  *  The ONE place this factor lives — both the static analysis path AND the runtime probe import it
@@ -580,6 +582,23 @@ export interface ThresholdConfig {
    *  that don't opt in). Browser-only — NOT enumerated by resolveThresholds (mirrors frameRedundancy: the
    *  worker computes the opaque bboxes off the already-decoded page; the CLI never opts in). */
   trimMargin?: { minMarginPx: number; minRecoverablePct: number };
+  /** Cross-atlas-redundancy (frames whose pixel REGIONS are byte-identical ACROSS ≥2 atlases) gate.
+   *  `minDuplicates` — the number of CROSS-SHEET duplicate copies a cluster must reach before firing
+   *  (≥2 ⇒ the frame recurs on ≥2 sheets; counted by DISTINCT packed rect per atlas so a pre-aliased
+   *  Spine/TP rect contributes ONE unit, never inflating the count). This is the folder-scope sibling of
+   *  `frameRedundancy`: that rule owns single-atlas clusters; THIS one fires ONLY when a cluster spans ≥2
+   *  distinct atlases, off the SAME already-computed region hashes (zero new decode). VRAM = the exact
+   *  duplicate-region area × 4 (the atlas px the cross-sheet copies pin; identical-precedent to
+   *  frameRedundancy — NO bin-tier delta, so it can never over-claim, invariant 5). The disk number is an
+   *  area-proportional ESTIMATE attributed to each freed copy's OWN atlas, carried in the finding only and
+   *  NEVER folded into the aggregate potentialDiskSaved (invariant 5). ORTHOGONAL to atlas-merge: that
+   *  reclaims EMPTY sheet space, this reclaims DUPLICATE-FRAME px — different pixels, additive, not the same
+   *  win. DIAGNOSIS-ONLY (the cross-atlas FIX is a separate piece; invariant 3 — we generate nothing).
+   *  Optional/additive: absent ⇒ the cross-atlas-redundancy finding is suppressed (CLI/budget configs that
+   *  don't opt in). Browser-only — NOT enumerated by resolveThresholds (mirrors frameRedundancy: the worker
+   *  hashes regions off the already-decoded page; the CLI never opts in). No new finding/estimate/overlay
+   *  shape — reuses the existing Finding/estimate fields. */
+  crossAtlasRedundancy?: { minDuplicates: number };
 }
 
 export interface AnalysisReport {

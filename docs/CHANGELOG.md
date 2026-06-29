@@ -10,6 +10,39 @@ GitHub creds — user pushes); commit hashes below are over that base.
 
 ---
 
+## Round 22 — selection (#0 shipped) — 2026-06-29
+Pick: **(#0) cross-atlas frame-redundancy DETECTOR** — the folder-scope sibling of within-atlas
+frame-redundancy. The region hashes were already computed folder-wide in `analyze.ts` but consumed only
+per-atlas, discarding the cross-atlas comparison; this clusters them across ALL sheets.
+
+- **#0 Cross-atlas frame-redundancy detector** (`docs/improvements/round22-cross-atlas-frame-redundancy-detec.md`)
+  — new folder-scope `crossAtlasRedundancyFinding(atlases, frameHashByRef, byteByRef, cfg)` (`packages/analysis/src/folder.ts`)
+  clusters the SAME per-atlas region hashes the within-atlas rule consumes (built folder-wide at `analyze.ts`
+  ~:119, previously only read per-atlas ~:174) and fires ONLY when a cluster spans ≥2 DISTINCT atlases
+  (single-atlas clusters stay `frame-redundancy`'s job — no double-report). Reports the count of cross-sheet
+  duplicate copies + **`vramBytesSaved = recoverableArea × 4` EXACT** — mirrors the shipped within-atlas
+  `frameRedundancyFinding` precedent (rules.ts:232) with the SAME distinct-rect guard (a pre-aliased rect = one
+  unit, applied per atlas). New `Rule` `'cross-atlas-redundancy'`; new `crossAtlasRedundancy?: { minDuplicates }`
+  config (default 2 — a cross-sheet recurrence has no in-sheet-aliasing excuse); distinct `messageKey`
+  `'cross-atlas-redundancy'` + `find.cross-atlas-redundancy.{title,detail,fix}` in all 9 catalogs (drift-guarded).
+  Golden fixture `fixtures/sample-projects/cross-atlas-redundant/` (two sheets sharing a byte-identical textured
+  frame) reproduced through the REAL decode path (decode → pure `extractFrameRegions` → SHA → finding) in
+  `apps/web/src/lib/perceptual.test.ts`. **DIAGNOSIS-ONLY** (the cross-atlas FIX is a separate piece — invariant
+  3, we generate nothing). **Additive:** carried in the finding only, NOT folded into `potentialDiskSaved`
+  (invariant 5); absent hashes / no cross-sheet dupes ⇒ no finding ⇒ byte-identical to today.
+  **Skeptic BLOCKERS (load-bearing):** (B2 honesty) NO POT-tier VRAM gate / packer — a real MaxRects pack of
+  the merged set lands on a LARGER bin than the area floor, so a bin-tier delta would OVER-claim a saving no
+  real merge delivers (invariant 5); VRAM is the EXACT duplicate-region px × 4, no `pack()` import, no inline
+  sizer, no POT conditional. (B1) the `messageKey` is a DISTINCT value `'cross-atlas-redundancy'` (a wrong key
+  silently renders the within-atlas template) — pinned + asserted in the unit + e2e tests. (M3) the copy scopes
+  the claim to the DUPLICATE-FRAME area only and documents the orthogonality to atlas-merge (which reclaims
+  EMPTY space — different px, additive not the same win). Disk = area-proportional ESTIMATE attributed per freed
+  copy to its OWN atlas, never conflated with VRAM (invariant 5). Determinism: stable cluster representative
+  (lowest `(atlasName, spriteIndex)`) + sorted ref/atlas lists. Honesty pin: `dupes = Σ(distinctUnits − 1)` =
+  the exact `framesAliased` a future cross-atlas fix would report.
+
+---
+
 ## Round 21 — selection (#0 shipped) — 2026-06-29
 Pick: **(#0) standalone trim-margin → repack scheduling** — uncaps the r20 trim-on-repack FIX so it fires
 even when no occupancy/frame-redundancy/merge repack is already scheduled.
