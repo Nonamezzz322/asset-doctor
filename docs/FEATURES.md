@@ -25,6 +25,7 @@ the Pro fix generates optimized output; native-only ops run on an opt-in backend
 - **Frame-redundancy detector** — byte-identical duplicate frames *within* an atlas (per-region SHA, flat-guarded, instant-wow caps); exact wasted atlas-area/VRAM.
 - **Strippable-metadata detector** — pure header-only byte-walk (no decode) summing EXACT strippable ancillary bytes (PNG `iCCP/eXIf/tEXt/iTXt/zTXt/tIME`, JPEG `APP1..15`+`COM`, WebP `EXIF/XMP/ICCP`; render-affecting chunks excluded); **disk-only** saving (the GPU decodes to RGBA8888 regardless), MAX-de-overlapped vs the format/wasted-alpha findings, names the existing oxipng/re-encode fix. Conservative true lower bound (never over-claims).
 - **Texture-bleeding detector** — pure integer frame-adjacency (no decode): flags atlas frame pairs packed with a 0px gutter (shared edge + perpendicular overlap; corner-touches & rotated/aliased frames excluded) that can bleed 1px seams under linear/mipmap sampling. A **correctness** finding carrying NO saving (edge-extrude can grow the sheet — invariant 5), with a conditional honest hedge; lights the teal `bleeding` film overlay and points at the existing edge-extrude fix.
+- **Declared-vs-real dimension-mismatch detector** — the always-on static sibling of the render-probe label: compares the manifest's declared `meta.size` (Spine page `size:`) against the REAL decoded pixel header (zero decode), beyond a small absolute tolerance. Direction-aware (real<declared with a frame off the real edge = crit; in-bounds = warn; real>declared = info). A **correctness** finding carrying NO estimate — states two measurements (declared vs real), and discloses that the static VRAM estimate is charged on the declared size (never a fix-saving claim).
 - **Unparsed-file surfacing** — files that look like a manifest but can't be parsed are shown honestly (never silently dropped) + hardened frame/Spine parsers (reject neg/zero/OOB rects; Spine `numsRaw` per-region recovery).
 
 ## 2. Render-probe & runtime profiler (the moat)
@@ -64,6 +65,7 @@ the Pro fix generates optimized output; native-only ops run on an opt-in backend
 - **PixiJS manifest.json emitter** — a real Pixi v8 `AssetsManifest` so the whole optimized output loads with one `Assets.init({ manifest })` (one alias-suffixed entry per resolution tier; sheets point at the `.json`/`.atlas` sidecar).
 - **Content-hash cache-busting** — append a content hash to emitted filenames, chained through atlas `meta.image`, the Spine `.atlas` line, the Pixi manifest, dedup consumer images, and loader-migration rows.
 - **Pack loose assets into spritesheets** — from scratch: static TexturePacker JSON + correct Spine `.atlas` composition, multi-page spill.
+- **Multipack round-trip safety** — TexturePacker `meta.related_multi_packs` (the sibling-`.json` linkage Pixi v8 auto-loads) is carried verbatim through the byte-stable passthrough/resize re-emit, and honestly stripped (with a skip note) on every path that renames siblings (tier suffixes, KTX2, content-hashed filenames) — so a multipack page-0 keeps loading pages 1+ instead of silently dropping them.
 
 ## 5. UI — the x-ray cabinet
 
@@ -102,4 +104,4 @@ the Pro fix generates optimized output; native-only ops run on an opt-in backend
 
 ---
 
-*Updated 2026-06-29 (through round 27). Branch `feat/asset-pipeline` (= local `main`), ~58 commits over `origin/main`, all green. Deploy (GH Pages) awaits the user's `git push origin main`; live backend ops need the toktx/pngquant/vips binaries in the deployed sidecar.*
+*Updated 2026-06-29 (through round 28). Branch `feat/asset-pipeline` (= local `main`), ~61 commits over `origin/main`, all green. Deploy (GH Pages) awaits the user's `git push origin main`; live backend ops need the toktx/pngquant/vips binaries in the deployed sidecar.*
