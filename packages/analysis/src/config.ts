@@ -30,4 +30,11 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   // a stray dupe pair is often a deliberate shared region, a redundant animation set is many. Recoverable
   // atlas AREA → VRAM; the disk number is an area-proportional ESTIMATE (invariant 5). Browser-only — NOT
   // in resolveThresholds (the worker hashes regions off the already-decoded page; the CLI never opts in).
+  trimMargin: { minMarginPx: 4, minRecoverablePct: 0.05 }, // CALIBRATE — untrimmed-sprite transparent-padding
+  // gate. `minMarginPx`: the largest single-side transparent border a sprite must carry before it counts (a
+  // 1–2px border is noise / deliberate bleed). `minRecoverablePct`: the summed reclaimable margin must reach
+  // this fraction of the WHOLE atlas before firing (baked-in uniform-cell padding is common and sometimes
+  // intentional, so the floor keeps it quiet). Recoverable atlas AREA → VRAM (exact); the disk number is an
+  // area-proportional ESTIMATE (invariant 5). Browser-only — NOT in resolveThresholds (the worker computes
+  // opaque bboxes off the already-decoded page, the SAME pass as frameRedundancy; the CLI never opts in).
 };

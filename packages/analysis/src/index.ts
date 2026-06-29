@@ -15,6 +15,7 @@ export {
   dimensionFindings,
   solidFillFinding,
   frameRedundancyFinding,
+  trimMarginFinding,
   wastedAlphaFinding,
   wastedRegions,
   formatFinding,

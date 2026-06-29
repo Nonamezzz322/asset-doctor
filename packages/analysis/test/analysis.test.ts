@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { Asset, Atlas, ImageAsset, ImageMime, Rect } from '@asset-doctor/core';
 import { parseAtlas, parseImage } from '@asset-doctor/parsers';
-import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, frameRedundancyFinding, wastedAlphaFinding, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, frameRedundancyFinding, trimMarginFinding, wastedAlphaFinding, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -602,6 +602,199 @@ describe('frame-redundancy (within-atlas duplicate frames)', () => {
       frameHashes: [{ atlasRef: 'x.png', frameHashes: ['aa', 'aa', 'aa'] }],
     });
     expect(report.findings.some((f) => f.rule === 'frame-redundancy')).toBe(false);
+  });
+});
+
+describe('trim-margin (untrimmed sprites with reclaimable transparent padding)', () => {
+  // A pure atlas on a 256×256 sheet; each sprite is UNtrimmed (frame == full untrimmed image). The test
+  // injects opaque bboxes directly (no canvas) — each bbox is RELATIVE to its frame, top-left origin.
+  type Bbox = { x: number; y: number; w: number; h: number };
+  const padAtlas = (
+    name: string,
+    sprites: { frame: Bbox; trimmed?: boolean; spriteSourceSize?: Bbox }[],
+  ): Atlas => ({
+    name,
+    imageRef: name,
+    size: { w: 256, h: 256 },
+    sprites: sprites.map((s, i) => ({
+      name: `s${i}`,
+      frame: s.frame,
+      rotated: false,
+      trimmed: s.trimmed ?? false,
+      sourceSize: { w: s.frame.w, h: s.frame.h },
+      ...(s.spriteSourceSize ? { spriteSourceSize: s.spriteSourceSize } : {}),
+    })),
+    source: { kind: 'pixi' },
+  });
+  const padAsset = (atlas: Atlas, byteSize = 8000): Asset => ({
+    kind: 'atlas',
+    atlas,
+    image: { name: atlas.name, imageRef: atlas.imageRef, size: atlas.size, mime: 'image/png', byteSize },
+  });
+  // Two 64×64 untrimmed frames, each with a 32×32 opaque core inset 16px on all sides → 16px margin per side,
+  // recoverable = 64² − 32² = 4096 − 1024 = 3072 px each → 6144 px total (> 5% of 256² = 3276.8).
+  const twoPadded = [
+    { frame: { x: 0, y: 0, w: 64, h: 64 } },
+    { frame: { x: 64, y: 0, w: 64, h: 64 } },
+  ];
+  const twoBboxes: (Bbox | null)[] = [
+    { x: 16, y: 16, w: 32, h: 32 },
+    { x: 16, y: 16, w: 32, h: 32 },
+  ];
+
+  it('untrimmed sprites with padding ⇒ warn, EXACT VRAM, refs, one transparent overlay zone', () => {
+    const atlas = padAtlas('pad.png', twoPadded);
+    const f = trimMarginFinding(atlas, DEFAULT_THRESHOLDS, twoBboxes, 8000)!;
+    expect(f).not.toBeNull();
+    expect(f.rule).toBe('trim-margin');
+    expect(f.severity).toBe('warn');
+    expect(f.messageKey).toBe('trim-margin');
+    expect(f.params?.sprites).toBe(2);
+    // recoverable = 2 × (64² − 32²) = 2 × 3072 = 6144 px → ×4 = 24576 bytes VRAM (EXACT).
+    expect(f.params?.area).toBe(2 * (64 * 64 - 32 * 32));
+    expect(f.estimate?.vramBytesSaved).toBe(2 * (64 * 64 - 32 * 32) * 4);
+    expect(f.relatedRefs).toEqual(['s0', 's1']);
+    expect(f.overlay).toHaveLength(1);
+    expect(f.overlay?.[0]?.kind).toBe('transparent');
+    expect(f.overlay?.[0]?.rects.length).toBeGreaterThan(0); // border strips
+    // disk is area-proportional: 8000 × (6144 / ΣframeArea=8192) = 6000.
+    expect(f.params?.disk).toBe(Math.round((8000 * 6144) / (2 * 64 * 64)));
+    expect(f.estimate?.diskBytesSaved).toBe(Math.round((8000 * 6144) / (2 * 64 * 64)));
+  });
+
+  it('overlay strips are translated into ATLAS px (frame.xy offset) and cover the four borders', () => {
+    const atlas = padAtlas('pad.png', [{ frame: { x: 64, y: 0, w: 64, h: 64 } }]);
+    // Need ≥ minRecoverablePct: 1 × 3072 / 65536 = 4.7% < 5% → won't fire. Use a bigger frame.
+    const big = padAtlas('big.png', [{ frame: { x: 64, y: 0, w: 100, h: 100 } }]);
+    const f = trimMarginFinding(big, DEFAULT_THRESHOLDS, [{ x: 20, y: 20, w: 40, h: 40 }], 8000)!;
+    expect(f).not.toBeNull();
+    const rects = f.overlay![0]!.rects;
+    // top strip y == frame.y (0); left strip x == frame.x (64). Proves atlas-px translation.
+    expect(rects.some((r) => r.x === 64)).toBe(true);
+    expect(rects.some((r) => r.y === 0)).toBe(true);
+    expect(atlas.sprites[0]!.frame.x).toBe(64); // (silence unused)
+  });
+
+  it('skips ALREADY-TRIMMED sprites (those with spriteSourceSize) — never re-counts a trimmed frame', () => {
+    const atlas = padAtlas('mixed.png', [
+      { frame: { x: 0, y: 0, w: 64, h: 64 }, trimmed: true, spriteSourceSize: { x: 16, y: 16, w: 32, h: 32 } },
+      { frame: { x: 64, y: 0, w: 64, h: 64 } }, // only THIS one is untrimmed
+      { frame: { x: 128, y: 0, w: 64, h: 64 } },
+    ]);
+    const bboxes: (Bbox | null)[] = [null, { x: 16, y: 16, w: 32, h: 32 }, { x: 16, y: 16, w: 32, h: 32 }];
+    const f = trimMarginFinding(atlas, DEFAULT_THRESHOLDS, bboxes, 8000)!;
+    expect(f.params?.sprites).toBe(2); // s1 + s2 only; the trimmed s0 is skipped despite its null bbox
+    expect(f.relatedRefs).toEqual(['s1', 's2']);
+  });
+
+  it('a null bbox on an UNtrimmed sprite = fully-transparent frame ⇒ the whole frame is recoverable', () => {
+    const atlas = padAtlas('dead.png', [{ frame: { x: 0, y: 0, w: 64, h: 64 } }, { frame: { x: 64, y: 0, w: 64, h: 64 } }]);
+    const bboxes: (Bbox | null)[] = [null, { x: 16, y: 16, w: 32, h: 32 }];
+    const f = trimMarginFinding(atlas, DEFAULT_THRESHOLDS, bboxes, 8000)!;
+    // s0 (null) whole frame = 4096 px; s1 padding = 3072 px → 7168 px total.
+    expect(f.params?.area).toBe(64 * 64 + (64 * 64 - 32 * 32));
+  });
+
+  it('per-side margin below minMarginPx ⇒ that sprite is skipped (thin border is noise)', () => {
+    // 2px border per side on a 100×100 frame: margin 2 < minMarginPx (4) → skipped → no qualifying sprite.
+    const atlas = padAtlas('thin.png', [{ frame: { x: 0, y: 0, w: 100, h: 100 } }]);
+    const f = trimMarginFinding(atlas, DEFAULT_THRESHOLDS, [{ x: 2, y: 2, w: 96, h: 96 }], 8000);
+    expect(f).toBeNull();
+  });
+
+  it('aliased frames (same rect) ⇒ padding counted ONCE; both names still appear in refs', () => {
+    const atlas = padAtlas('alias.png', [
+      { frame: { x: 0, y: 0, w: 100, h: 100 } },
+      { frame: { x: 0, y: 0, w: 100, h: 100 } }, // same packed rect → ONE GPU region
+    ]);
+    const bb: Bbox = { x: 20, y: 20, w: 40, h: 40 };
+    const f = trimMarginFinding(atlas, DEFAULT_THRESHOLDS, [bb, bb], 8000)!;
+    expect(f.params?.sprites).toBe(1); // one distinct rect
+    expect(f.params?.area).toBe(100 * 100 - 40 * 40); // counted once
+    expect(f.relatedRefs).toEqual(['s0', 's1']); // both names attributed
+  });
+
+  it('below minRecoverablePct ⇒ null (a single small padded sprite is not a verdict)', () => {
+    // 1 × (64²−32²) = 3072 px / 65536 = 4.7% < 5% → null.
+    const atlas = padAtlas('small.png', [{ frame: { x: 0, y: 0, w: 64, h: 64 } }]);
+    const f = trimMarginFinding(atlas, DEFAULT_THRESHOLDS, [{ x: 16, y: 16, w: 32, h: 32 }], 8000);
+    expect(f).toBeNull();
+  });
+
+  it('no trimMargin config ⇒ null (CLI / budget configs that don\'t opt in)', () => {
+    const cfg = { ...DEFAULT_THRESHOLDS };
+    delete cfg.trimMargin;
+    expect(trimMarginFinding(padAtlas('pad.png', twoPadded), cfg, twoBboxes, 8000)).toBeNull();
+  });
+
+  it('length mismatch ⇒ null (stale/desynced dep, never mis-key a sprite)', () => {
+    expect(trimMarginFinding(padAtlas('pad.png', twoPadded), DEFAULT_THRESHOLDS, [twoBboxes[0]!], 8000)).toBeNull();
+  });
+
+  it('analyze threads frameTrims to an ATLAS and does NOT fold the disk estimate into potentialDiskSaved', async () => {
+    const atlas = padAtlas('pad.png', twoPadded);
+    const baseline = await analyze([padAsset(atlas)]); // no frameTrims ⇒ rule dormant
+    expect(baseline.findings.some((f) => f.rule === 'trim-margin')).toBe(false);
+
+    const report = await analyze([padAsset(atlas)], undefined, {
+      frameTrims: [{ atlasRef: 'pad.png', bboxes: twoBboxes }],
+    });
+    const tm = report.findings.find((f) => f.rule === 'trim-margin');
+    expect(tm?.assetRef).toBe('pad.png');
+    expect(tm?.estimate?.vramBytesSaved).toBe(2 * (64 * 64 - 32 * 32) * 4);
+    // The disk number is an area-proportional ESTIMATE — NEVER folded into the aggregate (invariant 5).
+    expect(report.totals.potentialDiskSaved).toBe(baseline.totals.potentialDiskSaved);
+  });
+
+  it('absent frameTrims ⇒ byte-identical to today (CLI / headless unaffected)', async () => {
+    const atlas = padAsset(padAtlas('pad.png', twoPadded));
+    const a = await analyze([atlas]);
+    const b = await analyze([atlas], undefined, {});
+    expect(a.findings.some((f) => f.rule === 'trim-margin')).toBe(false);
+    expect(b.findings.some((f) => f.rule === 'trim-margin')).toBe(false);
+  });
+
+  it('a LOOSE asset never fires trim-margin even if a trim entry names it', async () => {
+    const loose: Asset = { kind: 'image', image: { name: 'x.png', imageRef: 'x.png', size: { w: 64, h: 64 }, mime: 'image/png', byteSize: 1000 } };
+    const report = await analyze([loose], undefined, {
+      frameTrims: [{ atlasRef: 'x.png', bboxes: [{ x: 16, y: 16, w: 32, h: 32 }] }],
+    });
+    expect(report.findings.some((f) => f.rule === 'trim-margin')).toBe(false);
+  });
+
+  it('golden: untrimmed-padding fixture fires warn with the documented recoverable area', async () => {
+    // Headless/pure — can't decode the PNG here (no canvas). Verifies the RULE wiring given the documented
+    // opaque bboxes (authored in expected.json). The REAL decode path — fixture PNG → alphaBBox → this same
+    // finding — is asserted end-to-end in apps/web/src/lib/perceptual.test.ts (where the page is decoded).
+    interface TmExpected {
+      atlas: { w: number; h: number };
+      recoverableArea: number;
+      vramBytesSaved: number;
+      regions: { name: string; frame: Rect; bbox: { x: number; y: number; w: number; h: number } | null; trimmed: boolean }[];
+      findings: { rule: string; severity: string }[];
+    }
+    const expected = readJson('untrimmed-padding/expected.json') as TmExpected;
+    const parsed = parseAtlas(readJson('untrimmed-padding/sheet.json'), {
+      ref: 'sheet.png',
+      bytes: readBytes('untrimmed-padding/sheet.png'),
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok || parsed.asset.kind !== 'atlas') return;
+    const atlas = parsed.asset.atlas;
+
+    // bboxes BY SPRITE NAME (robust to parser ordering): the authored opaque bbox per region, RELATIVE to
+    // the frame; an already-trimmed region contributes null (the rule skips it via Sprite.trimmed anyway).
+    const bboxByName = new Map(expected.regions.map((r) => [r.name, r.bbox]));
+    const bboxes = atlas.sprites.map((s) => bboxByName.get(s.name) ?? null);
+
+    const report = await analyze([parsed.asset], undefined, {
+      frameTrims: [{ atlasRef: 'sheet.png', bboxes }],
+    });
+    const tm = report.findings.find((f) => f.rule === 'trim-margin');
+    expect(tm?.severity).toBe('warn');
+    expect(tm?.estimate?.vramBytesSaved).toBe(expected.vramBytesSaved);
+    expect(tm?.params?.area).toBe(expected.recoverableArea);
+    expect(sig(report.findings.filter((f) => f.rule === 'trim-margin'))).toEqual(sig(expected.findings));
   });
 });
 

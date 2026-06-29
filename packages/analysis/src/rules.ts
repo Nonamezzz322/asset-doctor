@@ -2,7 +2,7 @@
 // Finding(s) with a verdict, the proof (numbers), a fix, and — where visual — overlay zones.
 // We measure; we never fabricate. Thresholds come from config, never inline magic numbers.
 
-import { MIP_OVERHEAD, type Atlas, type ContentClass, type Finding, type ImageAsset, type ImageMime, type OverlayZone, type Rect, type Severity, type Size, type ThresholdConfig } from '@asset-doctor/core';
+import { MIP_OVERHEAD, type Atlas, type ContentClass, type Finding, type ImageAsset, type ImageMime, type OverlayZone, type Rect, type Severity, type Size, type ThresholdConfig, type TrimRect } from '@asset-doctor/core';
 import { buildCoverage, defaultCell, mergeEmptyRects, summarizeEmpty } from './grid';
 
 const BYTES_PER_PX = 4; // RGBA8888
@@ -266,6 +266,133 @@ export function frameRedundancyFinding(
       area: recoverableArea,
       disk: diskEstimate,
     },
+  };
+}
+
+/** Per-atlas trim-margin detector. The host (worker) computes each sprite's OPAQUE bounding box from the
+ *  SAME already-decoded atlas page the frame-redundancy pass reads (`frameTrims`, index-aligned to
+ *  `atlas.sprites`; each bbox is in PLACED-PAGE px with a TOP-LEFT origin RELATIVE to its frame). For every
+ *  sprite NOT ALREADY TRIMMED (no baked `spriteSourceSize` — its `frame` IS the full untrimmed image), we
+ *  MEASURE the transparent padding it carries (frame area − opaque bbox area) and report:
+ *    • VRAM — the recoverable distinct-rect padding area × 4 (the atlas space the margins pin; a trimmed
+ *      repack tightens each frame to its opaque bounds and reclaims it). Honest, EXACT area arithmetic.
+ *    • DISK — an AREA-PROPORTIONAL ESTIMATE only (no per-region disk bytes exist): the image's byteSize
+ *      scaled by recoverableArea / Σ(all frame areas). Guarded on Σ > 0; carried separately, NEVER folded
+ *      into the aggregate potentialDiskSaved (invariant 5: VRAM and disk are distinct quantities).
+ *  GATE (honesty): qualify a sprite iff `sp.trimmed === false` (its frame is the full untrimmed image, so
+ *  any opaque bbox < frame is genuine reclaimable padding). `&& sp.spriteSourceSize === undefined` is kept
+ *  ONLY as a defensive guard for hand-built headless callers — it is REDUNDANT by parser construction
+ *  (atlas.ts: spriteSourceSize is set only when trimmed; spine-atlas.ts: same), NOT an independent signal.
+ *  DISTINCT-RECT GUARD: two manifest names pointing at the IDENTICAL packed rect (a pre-aliased Spine/TP
+ *  sheet) are ONE region on the GPU, so they contribute their padding ONCE (first/lowest-index wins).
+ *  ROTATION: `frame area − bbox area` and the per-side margin are rotation-INVARIANT (the host reads the
+ *  bbox over the PLACED, already-rotated region); the 4 border-strip overlay rects live in placed-page
+ *  space and draw correctly — no special-casing. A `null` bbox for an UNtrimmed sprite = a fully-transparent
+ *  frame (whole frame is dead margin; the per-side gate is bypassed). DETECTION ONLY — the trim-on-repack
+ *  fix lives on the pack path (invariant 3). Returns null below the gate, with no config, on a length
+ *  mismatch, or when the summed recoverable area is below `minRecoverablePct` of the atlas. */
+export function trimMarginFinding(
+  atlas: Atlas,
+  cfg: ThresholdConfig,
+  frameTrims: (TrimRect | null)[],
+  imageByteSize: number,
+): Finding | null {
+  if (!cfg.trimMargin) return null;
+  // Defensive: the host computes bboxes index-aligned to the SAME (post-merge) sprite list. A mismatch
+  // means the dep is stale/desynced — bail rather than mis-key a sprite (additive: no finding, byte-identical).
+  if (frameTrims.length !== atlas.sprites.length) return null;
+
+  const rectKey = (r: Rect): string => `${r.x},${r.y},${r.w},${r.h}`;
+  const seen = new Set<string>(); // distinct packed rects already counted (alias guard)
+
+  const refs: string[] = []; // every qualifying sprite name (proof, incl. aliases that share a counted rect)
+  const overlay: Rect[] = []; // border-strip rects (atlas px) — one flattened transparent zone
+  let recoverableArea = 0; // Σ over distinct untrimmed rects of (frame area − opaque bbox area)
+  let qualifying = 0; // count of qualifying DISTINCT rects (drives the plural + headline)
+
+  for (let i = 0; i < atlas.sprites.length; i++) {
+    const sp = atlas.sprites[i]!;
+    // Primary gate: an untrimmed sprite's `frame` IS its full untrimmed image, so any opaque bbox smaller
+    // than the frame is genuine reclaimable padding. The second conjunct is redundant-by-parser (see doc).
+    if (sp.trimmed !== false || sp.spriteSourceSize !== undefined) continue;
+    const frame = sp.frame;
+    const frameArea = frame.w * frame.h;
+    if (frameArea <= 0) continue; // a zero-area frame can carry no recoverable padding
+    const b = frameTrims[i]!; // TrimRect | null (null = fully-transparent frame OR host-skipped)
+
+    // ALIAS GUARD: a packed rect already counted (a manifest alias) contributes its padding ONCE, but the
+    // alias name still joins `refs` (proof) so the duplicate-name sheet is fully attributed.
+    const key = rectKey(frame);
+    const firstForRect = !seen.has(key);
+
+    if (b === null) {
+      // A fully-transparent UNtrimmed frame: the whole frame is dead margin. Bypass the per-side gate.
+      if (firstForRect) {
+        seen.add(key);
+        recoverableArea += frameArea;
+        qualifying++;
+        overlay.push({ ...frame });
+      }
+      refs.push(sp.name);
+      continue;
+    }
+
+    // Per-side transparent border (placed-page px). margin = largest single-side border; rotation-invariant.
+    const left = b.x;
+    const top = b.y;
+    const right = frame.w - (b.x + b.w);
+    const bottom = frame.h - (b.y + b.h);
+    const margin = Math.max(left, top, right, bottom);
+    if (margin < cfg.trimMargin.minMarginPx) continue; // padding too thin to be worth a verdict
+    if (firstForRect) {
+      seen.add(key);
+      recoverableArea += frameArea - b.w * b.h;
+      qualifying++;
+      // 4 border strips (skip empty sides), in ATLAS px (translate the placed-page-relative bbox by frame.xy).
+      if (top > 0) overlay.push({ x: frame.x, y: frame.y, w: frame.w, h: top });
+      if (bottom > 0) overlay.push({ x: frame.x, y: frame.y + b.y + b.h, w: frame.w, h: bottom });
+      if (left > 0) overlay.push({ x: frame.x, y: frame.y + b.y, w: left, h: b.h });
+      if (right > 0) overlay.push({ x: frame.x + b.x + b.w, y: frame.y + b.y, w: right, h: b.h });
+    }
+    refs.push(sp.name);
+  }
+
+  if (qualifying < 1 || recoverableArea <= 0) return null; // nothing reclaimable
+  const atlasPx = atlas.size.w * atlas.size.h;
+  if (atlasPx <= 0) return null;
+  if (recoverableArea / atlasPx < cfg.trimMargin.minRecoverablePct) return null; // below the noise floor
+  refs.sort();
+
+  const vram = recoverableArea * BYTES_PER_PX;
+  // DISK is an area-proportional ESTIMATE (no per-region disk bytes): byteSize × recoverableArea / Σ(all
+  // frame areas). Guard Σ > 0 (qualifying ≥ 1 already implies a non-zero frame area, so Σ > 0 holds here).
+  const allFrameArea = atlas.sprites.reduce((s, s2) => s + s2.frame.w * s2.frame.h, 0);
+  const diskEstimate = allFrameArea > 0 ? Math.round((imageByteSize * recoverableArea) / allFrameArea) : 0;
+
+  // Baked English — MUST mirror the en catalog templates byte-for-byte (the renderFinding drift guard). The
+  // `sprites` count drives the plural (title + detail); copy says "up to" (upper bound: a trimmed repack may
+  // not reclaim ALL padding once re-placed, and uniform-cell grids sometimes keep padding deliberately).
+  const one = qualifying === 1;
+  const spriteWord = one ? 'sprite' : 'sprites';
+  const carryWord = one ? 'carries' : 'carry';
+  return {
+    id: `${atlas.name}:trim-margin`,
+    rule: 'trim-margin',
+    severity: 'warn',
+    assetRef: atlas.name,
+    relatedRefs: refs,
+    title: `${qualifying} untrimmed ${spriteWord} — ${fmtBytes(vram)} of transparent padding`,
+    detail:
+      `${qualifying} untrimmed ${spriteWord} ${carryWord} transparent margins around their opaque art. ` +
+      `That padding pins ${fmtBytes(vram)} of VRAM (${recoverableArea}px × 4) that a trimmed repack reclaims ` +
+      `up to, plus ~${fmtBytes(diskEstimate)} of atlas disk (area estimate).`,
+    fix: 'Repack with trim enabled so each frame is tightened to its opaque bounds.',
+    // VRAM is exact area arithmetic; diskBytesSaved is an area-proportional ESTIMATE, kept here for the
+    // finding's own readout but NOT folded into the aggregate potentialDiskSaved (see analyze.ts).
+    estimate: { vramBytesSaved: vram, ...(diskEstimate > 0 ? { diskBytesSaved: diskEstimate } : {}) },
+    overlay: [{ kind: 'transparent', rects: overlay }],
+    messageKey: 'trim-margin',
+    params: { sprites: qualifying, vram, area: recoverableArea, disk: diskEstimate },
   };
 }
 

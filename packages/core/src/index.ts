@@ -267,7 +267,9 @@ export type Rule =
   | 'variants'
   | 'mipmap-cost'
   // per-atlas group: frames whose pixel REGIONS are identical within ONE atlas (redundant frames)
-  | 'frame-redundancy';
+  | 'frame-redundancy'
+  // per-atlas group: untrimmed sprites whose transparent margin (frame − opaque bbox) wastes atlas space
+  | 'trim-margin';
 
 /** Mipmap chain multiplier on base texture VRAM: a full chain adds Σ(1/4ⁿ) for n≥1 → 4/3 (+33%).
  *  The ONE place this factor lives — both the static analysis path AND the runtime probe import it
@@ -379,6 +381,21 @@ export interface ImageFeatures {
 export interface AtlasFrameHashes {
   atlasRef: string;
   frameHashes: (string | null)[];
+}
+
+/** Per-atlas sprite OPAQUE bounding boxes computed by the host (worker) from the ALREADY-DECODED atlas page
+ *  (the SAME decode pass as `AtlasFrameHashes` — no second decode), fed to analysis for the within-atlas
+ *  `trim-margin` check (untrimmed sprites whose transparent margin wastes atlas space). `atlasRef` ===
+ *  Atlas.name (post-merge); `bboxes` is index-aligned to the merged atlas's sprites: entry i is sprite i's
+ *  opaque bbox in PLACED-PAGE px (TOP-LEFT origin, RELATIVE to its frame — `{x,y}` is the inset from the
+ *  frame corner), or `null` when the host SKIPPED it (an already-trimmed sprite, a fully-transparent frame —
+ *  no opaque pixel — or a decode/read failure / cap). A `null` for an UNtrimmed sprite means a fully-dead
+ *  frame (whole frame is recoverable margin); the rule disambiguates via `Sprite.trimmed`. Additive: absent
+ *  (no host bbox pass — CLI/headless) ⇒ the trim-margin finding never fires ⇒ byte-identical to today, gated
+ *  exactly like `AtlasFrameHashes`. */
+export interface AtlasFrameTrims {
+  atlasRef: string;
+  bboxes: (TrimRect | null)[];
 }
 
 /* ── Bundle / lazy marking (Feature 3 — UI-sourced) ────────────────────────────────────────
@@ -552,6 +569,17 @@ export interface ThresholdConfig {
    *  Optional/additive: absent ⇒ the frame-redundancy finding is suppressed (CLI/budget configs that don't
    *  opt in). Browser-only — NOT enumerated by resolveThresholds (mirrors solidFill/wastedAlpha). */
   frameRedundancy?: { minDuplicates: number };
+  /** Trim-margin (untrimmed sprites with reclaimable transparent padding) gate. `minMarginPx` — the
+   *  largest single-side transparent border (px) a sprite must carry before it counts (a 1–2px border is
+   *  noise / deliberate bleed). `minRecoverablePct` — the fraction of the WHOLE atlas area the summed
+   *  recoverable margin (Σ frame area − opaque bbox area over UNtrimmed qualifying sprites) must reach
+   *  before the finding fires (baked-in uniform-cell padding is common and sometimes intentional, so a
+   *  conservative floor keeps it from being noisy). Recoverable atlas AREA → VRAM (the padding pins sheet
+   *  space a trimmed repack reclaims); the disk number is an area-proportional ESTIMATE, never conflated
+   *  (invariant 5). Optional/additive: absent ⇒ the trim-margin finding is suppressed (CLI/budget configs
+   *  that don't opt in). Browser-only — NOT enumerated by resolveThresholds (mirrors frameRedundancy: the
+   *  worker computes the opaque bboxes off the already-decoded page; the CLI never opts in). */
+  trimMargin?: { minMarginPx: number; minRecoverablePct: number };
 }
 
 export interface AnalysisReport {

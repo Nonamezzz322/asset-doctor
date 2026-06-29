@@ -1747,4 +1747,133 @@ the duplicate frames are textured-but-identical precisely so the production flat
   );
 }
 
+/* ── Case 20: untrimmed-padding — within-atlas trim-margin detector golden (docs/improvements/round19-trim-margin-detector.md) ──
+ * ONE atlas of UNtrimmed sprites that each carry a transparent margin around their opaque art. The
+ * trim-margin detector computes each sprite's OPAQUE bbox from the already-decoded page (worker alphaBBox,
+ * the SAME decode pass as frame-redundancy) and sums (frame area − bbox area) over UNtrimmed sprites; the
+ * recoverable atlas AREA → VRAM (a trimmed repack tightens each frame), plus a separate area-proportional
+ * DISK estimate (invariant 5 — never conflated).
+ *
+ * Layout: a 256×256 sheet, 4 frames laid out in a row of 64×64 cells (the rest of the sheet empty). Three
+ * are UNtrimmed with a transparent margin (opaque core inset inside a 64×64 frame, trimmed:false, NO
+ * spriteSourceSize); one is ALREADY trimmed (carries spriteSourceSize) and MUST be skipped by the detector.
+ * The opaque cores are TEXTURED (a 2-color checker) so the fixture is realistic; the trim detector reads
+ * alpha, not luma, so the texture is irrelevant to the bbox but keeps the art honest. */
+{
+  const size = { w: 256, h: 256 };
+  const CELL = 64;
+  // name, frame xy, opaque core inset (mx,my) + size (bw,bh) RELATIVE to the frame, trimmed?
+  // padded_0/1/2 are untrimmed with margins; trimmed_0 is already trimmed (skipped by the detector).
+  const specs = [
+    { name: 'padded_0', fx: 0, fy: 0, mx: 16, my: 16, bw: 32, bh: 32, trimmed: false }, // 16px all sides
+    { name: 'padded_1', fx: 64, fy: 0, mx: 12, my: 8, bw: 40, bh: 44, trimmed: false }, // asymmetric margin
+    { name: 'padded_2', fx: 128, fy: 0, mx: 8, my: 8, bw: 48, bh: 48, trimmed: false }, // 8px all sides
+    // Already-trimmed sprite: its FRAME (40×48 placed) is the tight opaque region; sourceSize is the larger
+    // original. The detector skips it (it carries spriteSourceSize) — a NO-double-count negative golden.
+    { name: 'trimmed_0', fx: 192, fy: 0, mx: 0, my: 0, bw: 40, bh: 48, trimmed: true },
+  ];
+  const DUP_A = [42, 161, 152];
+  const DUP_B = [16, 32, 42];
+
+  const png = new PNG({ width: size.w, height: size.h });
+  png.data.fill(0); // transparent background = the margins
+  for (const s of specs) {
+    // Paint only the opaque core (textured checker) inside the frame; the rest of the frame stays transparent.
+    fillChecker(png, s.fx + s.mx, s.fy + s.my, s.bw, s.bh, DUP_A, DUP_B);
+  }
+  const sheet = PNG.sync.write(png);
+
+  // Authoring helper: a sprite frame body. Untrimmed → frame == full image (64×64), no spriteSourceSize.
+  // Trimmed → frame is the tight rect, spriteSourceSize records the inset within the larger sourceSize.
+  const frameOf = (s) =>
+    s.trimmed
+      ? {
+          name: s.name,
+          frame: { x: s.fx, y: s.fy, w: s.bw, h: s.bh },
+          rotated: false,
+          trimmed: true,
+          spriteSourceSize: { x: 4, y: 4, w: s.bw, h: s.bh },
+          sourceSize: { w: s.bw + 8, h: s.bh + 8 },
+        }
+      : {
+          name: s.name,
+          frame: { x: s.fx, y: s.fy, w: CELL, h: CELL },
+          rotated: false,
+          trimmed: false,
+          sourceSize: { w: CELL, h: CELL },
+        };
+  const frames = specs.map(frameOf);
+
+  // expected.json (authored HERE, independent of @asset-doctor/analysis): each region's opaque bbox RELATIVE
+  // to its frame (top-left), and the summed recoverable margin over the UNtrimmed sprites only.
+  const regions = specs.map((s) => ({
+    name: s.name,
+    frame: s.trimmed ? { x: s.fx, y: s.fy, w: s.bw, h: s.bh } : { x: s.fx, y: s.fy, w: CELL, h: CELL },
+    // The opaque bbox the worker's alphaBBox recovers, RELATIVE to the frame. Trimmed → frame IS the opaque
+    // region (bbox covers the whole frame) but the detector skips it via spriteSourceSize regardless.
+    bbox: s.trimmed ? { x: 0, y: 0, w: s.bw, h: s.bh } : { x: s.mx, y: s.my, w: s.bw, h: s.bh },
+    trimmed: s.trimmed,
+  }));
+  // Recoverable = Σ over UNtrimmed sprites of (frame area − opaque bbox area).
+  const recoverableArea = specs
+    .filter((s) => !s.trimmed)
+    .reduce((sum, s) => sum + (CELL * CELL - s.bw * s.bh), 0);
+
+  writeCase(
+    'untrimmed-padding',
+    {
+      'sheet.png': sheet,
+      'sheet.json': hashManifest('sheet.png', size, frames),
+      'expected.json': {
+        kind: 'trim-margin',
+        feature: 'within-atlas-untrimmed-padding',
+        atlas: { w: size.w, h: size.h },
+        // The UNtrimmed sprites with reclaimable padding (trimmed_0 is intentionally excluded).
+        qualifying: ['padded_0', 'padded_1', 'padded_2'],
+        minMarginPx: 4,
+        minRecoverablePct: 0.05,
+        regions,
+        recoverableArea,
+        vramBytesSaved: recoverableArea * 4,
+        findings: [{ rule: 'trim-margin', severity: 'warn' }],
+        note:
+          'One atlas of UNtrimmed sprites carrying transparent margins (opaque cores inset inside 64×64 frames, '
+          + 'trimmed:false, NO spriteSourceSize), plus one ALREADY-trimmed sprite that the detector must SKIP. '
+          + 'The trim-margin detector computes each opaque bbox off the decoded page (worker alphaBBox — the SAME '
+          + 'decode pass as frame-redundancy) and sums (frame area − bbox area) over the untrimmed sprites only: '
+          + 'recoverable atlas AREA → VRAM (vramBytesSaved, EXACT); the disk number is an area-proportional '
+          + 'ESTIMATE, never conflated (invariant 5). The detector MEASURES the padding; trimming the frames is '
+          + 'the Pro fix\'s job (generation — invariant 3).',
+      },
+    },
+    `# untrimmed-padding
+
+ONE atlas with **untrimmed sprites carrying transparent padding** for the **trim-margin** detector
+(\`docs/improvements/round19-trim-margin-detector.md\`).
+
+A 256×256 sheet, 4 frames in a row of 64×64 cells. Each opaque core is a **textured** 2-color checker
+(the detector reads alpha, not luma — the texture just keeps the art honest):
+
+- **\`padded_0\`–\`padded_2\`** — **untrimmed** (\`trimmed:false\`, frame == full 64×64 image, NO
+  \`spriteSourceSize\`), each with a transparent margin around a smaller opaque core → genuine
+  reclaimable padding.
+- **\`trimmed_0\`** — **already trimmed** (carries \`spriteSourceSize\`); the detector **SKIPS** it (a
+  trimmed frame has no reclaimable margin) — a no-double-count negative golden.
+
+The detector computes each sprite's **opaque bbox** off the already-decoded page (worker \`alphaBBox\`,
+the SAME decode pass as frame-redundancy) and sums **(frame area − bbox area)** over the UNtrimmed
+sprites:
+
+- **VRAM** — the recoverable padding area × 4 (the atlas space the margins pin that a **trimmed repack
+  reclaims up to**). EXACT area arithmetic.
+- **DISK** — an **area-proportional estimate** only, carried separately and **never** conflated with
+  VRAM (invariant 5).
+
+Trimming the frames is the **Pro fix's** job (generation — invariant 3). The regression test feeds this
+PNG through the REAL decode path (decode → \`alphaBBox\` → \`trimMarginFinding\`) and asserts the finding
+fires with the documented recoverable area.
+`,
+  );
+}
+
 console.log('Done.');

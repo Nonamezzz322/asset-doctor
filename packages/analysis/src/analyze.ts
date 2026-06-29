@@ -9,6 +9,7 @@ import type {
   AssetMetrics,
   Atlas,
   AtlasFrameHashes,
+  AtlasFrameTrims,
   ContentClass,
   Finding,
   ImageAsset,
@@ -16,6 +17,7 @@ import type {
   Rect,
   Severity,
   ThresholdConfig,
+  TrimRect,
 } from '@asset-doctor/core';
 import { MIP_OVERHEAD } from '@asset-doctor/core';
 import { DEFAULT_THRESHOLDS } from './config';
@@ -26,6 +28,7 @@ import {
   occupancyFinding,
   occupancyValue,
   solidFillFinding,
+  trimMarginFinding,
   vramBytes,
   vramBytesMipmapped,
   wastedAlphaFinding,
@@ -60,6 +63,11 @@ export interface AnalyzeDeps {
    *  atlas page (one decode/page, bounded); headless/CLI omits them ⇒ the finding never fires (additive,
    *  byte-identical — gated exactly like the dHash features). */
   frameHashes?: AtlasFrameHashes[];
+  /** Per-atlas sprite OPAQUE bounding boxes (keyed by post-merge atlas.name, index-aligned to the merged
+   *  sprite list) for the within-atlas trim-margin check. The worker computes these in the SAME decode pass
+   *  as `frameHashes` (off the already-decoded atlas page — no second decode); headless/CLI omits them ⇒ the
+   *  finding never fires (additive, byte-identical — gated exactly like the frame hashes). */
+  frameTrims?: AtlasFrameTrims[];
   /** Manifests whose referenced image is missing from the folder. */
   missingImages?: { manifest: string; image: string }[];
   /** Would-be assets the host could NOT parse (ingest skip-points + worker parse failures) — surfaced
@@ -111,6 +119,12 @@ export async function analyze(
   const frameHashByRef = new Map<string, (string | null)[]>();
   for (const fh of deps.frameHashes ?? []) frameHashByRef.set(fh.atlasRef, fh.frameHashes);
 
+  // Per-atlas sprite opaque bboxes (within-atlas trim-margin), keyed by post-merge atlas.name. The host
+  // computes them in the SAME decode pass as the frame hashes; absent ⇒ empty ⇒ no trim-margin finding ⇒
+  // byte-identical to today (CLI / headless tests unaffected).
+  const frameTrimByRef = new Map<string, (TrimRect | null)[]>();
+  for (const ft of deps.frameTrims ?? []) frameTrimByRef.set(ft.atlasRef, ft.bboxes);
+
   // Per-loose-ref disk saving already counted by the FORMAT finding (transcode to AVIF/WebP). The
   // wasted-alpha finding for the SAME ref overlaps it (re-encoding the format ALSO drops the dead alpha
   // plane — most of the alpha saving is already inside the transcode estimate), so summing both would
@@ -161,6 +175,15 @@ export async function analyze(
       if (fh) {
         const fr = frameRedundancyFinding(atlas, cfg, fh, image.byteSize);
         if (fr) findings.push(fr);
+      }
+      // Within-atlas trim-margin: untrimmed sprites carrying reclaimable transparent padding (host-measured
+      // opaque bboxes off the SAME decoded page as the frame hashes). Only when the host supplied bboxes for
+      // THIS atlas (absent ⇒ no finding ⇒ byte-identical). Like frame-redundancy, the recoverable disk number
+      // is an area-proportional ESTIMATE, so it is DELIBERATELY NOT folded into potentialDiskSaved (invariant 5).
+      const ft = frameTrimByRef.get(atlas.name);
+      if (ft) {
+        const tm = trimMarginFinding(atlas, cfg, ft, image.byteSize);
+        if (tm) findings.push(tm);
       }
       // The packed rects the host render-probe replays as sprites. Keyed by atlas.name === the
       // assetRef pushed above. `frame` is the rect AS PLACED in the atlas image (already w/h-swapped

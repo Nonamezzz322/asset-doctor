@@ -133,6 +133,17 @@
     "other": "{dupes} Frames in {groups} Gruppe(n) haben byte-identische Pixelregionen in diesem Atlas. Sie belegen {vram:bytes} VRAM ({area}px × 4), die ein deduplizierter Repack zurückgewinnt, plus ~{disk:bytes} Atlas-Speicher (Flächenschätzung)."
   },
   "find.frame-redundancy.fix": "Verweise auf einen gemeinsamen Frame statt identische Kopien zu packen, oder dedupliziert neu packen.",
+  "find.trim-margin.title": {
+    "$count": "sprites",
+    "one": "{sprites} ungetrimmtes Sprite — {vram:bytes} transparenter Rand",
+    "other": "{sprites} ungetrimmte Sprites — {vram:bytes} transparenter Rand"
+  },
+  "find.trim-margin.detail": {
+    "$count": "sprites",
+    "one": "{sprites} ungetrimmtes Sprite trägt transparente Ränder um seine deckende Grafik. Dieser Rand bindet {vram:bytes} VRAM ({area}px × 4), die ein getrimmtes Neupacken bis zu freigibt, plus ~{disk:bytes} Atlas-Speicher (Flächenschätzung).",
+    "other": "{sprites} ungetrimmte Sprites tragen transparente Ränder um ihre deckende Grafik. Dieser Rand bindet {vram:bytes} VRAM ({area}px × 4), die ein getrimmtes Neupacken bis zu freigibt, plus ~{disk:bytes} Atlas-Speicher (Flächenschätzung)."
+  },
+  "find.trim-margin.fix": "Mit aktiviertem Trimmen neu packen, damit jeder Frame auf seine deckenden Grenzen verkleinert wird.",
   "find.duplicate-exact.title": "{n}× identische Datei",
   "find.duplicate-exact.detail": "Byte-identische Kopien: {refs}. Eine behalten und referenzieren — jede Kopie ist auch ein eigener Textur-Upload ({vram:bytes} VRAM pro Stück).",
   "find.duplicate-exact.fix": "Deduplizieren: eine einzige Kopie behalten und Referenzen aktualisieren.",

@@ -61,6 +61,28 @@ detector**. Designs for (b)/(c) pending.
   tolerated) + single-oversized-admitted + drain-closes-once/idempotent + replace-frees-stale + peakCount +
   determinism. Additive: under budget ⇒ byte-identical. Gate: typecheck + test (web 389) + lint green.
 
+- **#2 Per-atlas trim-margin detector** (`docs/improvements/round19-trim-margin-detector.md`) — DETECTION-only
+  sibling of the r18 frame-redundancy detector: for each sprite NOT already trimmed (no `spriteSourceSize` —
+  its `frame` IS the full untrimmed image), MEASURE the transparent margin it carries (frame area − opaque
+  alpha bbox area) and report the summed recoverable area × 4 as EXACT VRAM (the atlas space the padding pins
+  that a trimmed repack reclaims), plus an area-proportional DISK estimate (invariant 5 — carried separately,
+  NEVER folded into `potentialDiskSaved`), and ONE `transparent` (yellow) overlay zone of per-side border
+  strips in atlas px. INSTANT-WOW: the worker computes each opaque bbox via the pure `alphaBBox`
+  (`@asset-doctor/fix`) off the SAME already-decoded page the frame-redundancy pass reads — `hashAtlasFrames`
+  now returns `{ hashes, bboxes }` from ONE decode, so the trim feature adds ZERO extra decode and reuses the
+  SAME px/sprite caps. HONESTY: gate on `Sprite.trimmed === false` (the `&& spriteSourceSize === undefined`
+  conjunct kept only as a documented redundant-by-parser-construction guard); skip already-trimmed sprites;
+  distinct-rect alias guard counts shared packed rects once; a `null` bbox on an untrimmed sprite =
+  fully-transparent frame (whole frame recoverable). Rotation-invariant (area + per-side margin read over the
+  placed region; strips drawn in placed-page space). New core `AtlasFrameTrims` contract + `'trim-margin'`
+  Rule + `trimMargin` ThresholdConfig (`{minMarginPx:4, minRecoverablePct:0.05}`, browser-only — NOT in
+  resolveThresholds); `trimMarginFinding` threaded into `analyze()` like `frameHashes` (absent ⇒ byte-identical
+  ⇒ CLI/headless unaffected). i18n ×9 (copy says "reclaims **up to**" — uniform-cell padding is sometimes
+  intentional) + render-drift guard. Golden fixture `untrimmed-padding/` (textured cores in transparent
+  margins, one already-trimmed sprite the detector skips) via the generator. Tests: analysis unit + golden
+  (skip-trimmed, null-bbox whole-frame, alias-once, below-floor/thin-margin/length-mismatch/no-config ⇒ null,
+  disk-not-folded) + web e2e (fixture PNG → real `alphaBBox` → rule). Gate: typecheck + test + lint green.
+
 ## Round 18 — robustness + moat + analysis depth — 2026-06-29
 - `4870cc1` **Abortable workers** — `AbortSignal` seam through analyze + fix workers + clients; cooperative cancel flag; a superseded drop aborts the prior run. Additive (no signal ⇒ byte-identical). Review SHIP.
 - `1c6902d` **correlateFix(receipt)** — measured before→after fix probe → one localized doctor verdict (reuses `CorrelatedFinding` + variant-suffixed i18n; measured-only, honest). Review SHIP.

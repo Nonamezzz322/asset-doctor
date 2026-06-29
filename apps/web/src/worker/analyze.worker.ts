@@ -3,9 +3,10 @@
 // pure analysis core): per-image features (SHA-256 content hash + perceptual dHash) for
 // folder-level duplicate detection, and format sizing (OffscreenCanvas → WebP/AVIF).
 
-import type { Asset, AtlasFrameHashes, ImageFeatures, ImageMime, Sprite } from '@asset-doctor/core';
+import type { Asset, AtlasFrameHashes, AtlasFrameTrims, ImageFeatures, ImageMime, Sprite, TrimRect } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
 import { analyze, mergeSharedAtlases, type EncodeSizer, type OpaqueEncodeSizer } from '@asset-doctor/analysis';
+import { alphaBBox } from '@asset-doctor/fix';
 import { groupFiles, keyOf, type RawFile } from '../lib/group';
 import {
   alphaFullyOpaque,
@@ -120,13 +121,17 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
     // each sprite region is read off that single bitmap. Bounded by a size cap (very large pages skipped
     // honestly). Absent (no OffscreenCanvas / skipped) ⇒ the rule never fires (additive, gated like dHash).
     const frameHashes: AtlasFrameHashes[] = [];
+    const frameTrims: AtlasFrameTrims[] = []; // computed in the SAME decode pass — no extra page decode
     for (const a of merged) {
       if (cancelled) return; // superseded — stop before the next (heavy) page decode
       if (a.kind !== 'atlas' || a.atlas.sprites.length === 0) continue;
       const bytes = imageBytes.get(a.atlas.name);
       if (!bytes) continue;
-      const hashes = await hashAtlasFrames(bytes, a.atlas.sprites);
-      if (hashes) frameHashes.push({ atlasRef: a.atlas.name, frameHashes: hashes });
+      const res = await hashAtlasFrames(bytes, a.atlas.sprites);
+      if (res) {
+        frameHashes.push({ atlasRef: a.atlas.name, frameHashes: res.hashes });
+        frameTrims.push({ atlasRef: a.atlas.name, bboxes: res.bboxes });
+      }
     }
 
     const report = await analyze(merged, undefined, {
@@ -135,6 +140,7 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       features,
       missingImages: grouped.missing,
       ...(frameHashes.length ? { frameHashes } : {}),
+      ...(frameTrims.length ? { frameTrims } : {}),
       ...(unparsed.length ? { unparsed } : {}),
     });
     if (cancelled) return; // superseded — suppress a `done` that would race the terminate
@@ -202,17 +208,23 @@ async function decodeFeatures(
   }
 }
 
-/** Hash each sprite's PIXEL REGION off the atlas page for the within-atlas frame-redundancy check. ONE
+/** Hash each sprite's PIXEL REGION off the atlas page (within-atlas frame-redundancy) AND compute each
+ *  UNtrimmed sprite's OPAQUE bounding box (within-atlas trim-margin) — BOTH off ONE shared decode. ONE
  *  `createImageBitmap` + ONE full-resolution `getImageData` per page (a NEW decode — owned cost, same
- *  magnitude as the main-thread FilmViewer decode), then the PURE `extractFrameRegions` does the load-bearing
- *  work canvas-free off that single page buffer: caps (sprite count / px), bounds, region extraction, and the
- *  box-averaged 9×8 flat-guard (a featureless region → null so it never falsely clusters, mirroring the dHash
- *  isFlat skip). Each surviving region's tightly-packed RGBA bytes are SHA-256'd here (crypto.subtle is async,
- *  so the hashing stays in the worker; everything else is the unit-tested pure helper). Index-aligned to
- *  `sprites`. Returns null (whole page skipped) when OffscreenCanvas is unavailable, the decode fails, the
- *  2d context is unavailable, or the page exceeds the size/sprite cap. Deterministic: stable SHA over the raw
- *  region bytes + a deterministic flat threshold. */
-async function hashAtlasFrames(pageBytes: ArrayBuffer, sprites: Sprite[]): Promise<(string | null)[] | null> {
+ *  magnitude as the main-thread FilmViewer decode); the trim bboxes piggyback on that SAME `page` buffer, so
+ *  the trim feature adds ZERO extra decode (instant-wow ≤10s). The PURE `extractFrameRegions` does the
+ *  load-bearing redundancy work canvas-free (caps / bounds / region extraction / box-averaged 9×8 flat-guard);
+ *  the pure `alphaBBox` reads the SAME buffer for the trim bbox. Each surviving region's RGBA bytes are
+ *  SHA-256'd here (crypto.subtle is async). Both arrays are index-aligned to `sprites`. A bbox is computed ONLY
+ *  for an UNtrimmed sprite (`!sp.trimmed`) — an already-trimmed sprite is `null` (skipped; the rule re-gates on
+ *  Sprite.trimmed anyway); a fully-transparent untrimmed frame is `null` too (alphaBBox finds no opaque pixel —
+ *  the rule reads that as a whole-frame margin). Reuses the SAME caps: `extractFrameRegions` returns null ⇒ the
+ *  WHOLE page is skipped for BOTH halves. Returns null when OffscreenCanvas is unavailable, the decode fails,
+ *  the 2d context is unavailable, or the page exceeds the size/sprite cap. Deterministic. */
+async function hashAtlasFrames(
+  pageBytes: ArrayBuffer,
+  sprites: Sprite[],
+): Promise<{ hashes: (string | null)[]; bboxes: (TrimRect | null)[] } | null> {
   if (typeof OffscreenCanvas === 'undefined') return null;
   try {
     const bmp = await createImageBitmap(new Blob([pageBytes]));
@@ -229,17 +241,24 @@ async function hashAtlasFrames(pageBytes: ArrayBuffer, sprites: Sprite[]): Promi
     }
     c2d.drawImage(bmp, 0, 0);
     bmp.close();
-    const page = c2d.getImageData(0, 0, width, height).data; // one full-res read; the pure helper does the rest
+    const page = c2d.getImageData(0, 0, width, height).data; // one full-res read; both halves read this buffer
     const regions = extractFrameRegions(
       page,
       width,
       height,
       sprites.map((sp) => sp.frame),
     );
-    if (!regions) return null; // whole page skipped (caps) — honest, the rule never fires for it
-    const out: (string | null)[] = [];
-    for (const region of regions) out.push(region === null ? null : await sha256Hex(region.buffer as ArrayBuffer));
-    return out;
+    if (!regions) return null; // whole page skipped (caps) — honest, BOTH rules never fire for it
+    const hashes: (string | null)[] = [];
+    for (const region of regions) hashes.push(region === null ? null : await sha256Hex(region.buffer as ArrayBuffer));
+    // Trim bboxes off the SAME page buffer (no second decode). Only for UNtrimmed sprites; alphaBBox returns a
+    // bbox RELATIVE to the frame top-left (exactly what trimMarginFinding expects), or null for a fully
+    // transparent frame. `regions` already cleared the caps, so this loop is bounded by the same ceilings.
+    const src = { data: page, width };
+    const bboxes: (TrimRect | null)[] = sprites.map((sp) =>
+      sp.trimmed ? null : alphaBBox(src, { x: sp.frame.x, y: sp.frame.y, w: sp.frame.w, h: sp.frame.h }),
+    );
+    return { hashes, bboxes };
   } catch {
     return null;
   }

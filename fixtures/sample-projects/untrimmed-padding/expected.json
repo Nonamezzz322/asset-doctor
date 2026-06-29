@@ -1,0 +1,90 @@
+{
+  "kind": "trim-margin",
+  "feature": "within-atlas-untrimmed-padding",
+  "atlas": {
+    "w": 256,
+    "h": 256
+  },
+  "qualifying": [
+    "padded_0",
+    "padded_1",
+    "padded_2"
+  ],
+  "minMarginPx": 4,
+  "minRecoverablePct": 0.05,
+  "regions": [
+    {
+      "name": "padded_0",
+      "frame": {
+        "x": 0,
+        "y": 0,
+        "w": 64,
+        "h": 64
+      },
+      "bbox": {
+        "x": 16,
+        "y": 16,
+        "w": 32,
+        "h": 32
+      },
+      "trimmed": false
+    },
+    {
+      "name": "padded_1",
+      "frame": {
+        "x": 64,
+        "y": 0,
+        "w": 64,
+        "h": 64
+      },
+      "bbox": {
+        "x": 12,
+        "y": 8,
+        "w": 40,
+        "h": 44
+      },
+      "trimmed": false
+    },
+    {
+      "name": "padded_2",
+      "frame": {
+        "x": 128,
+        "y": 0,
+        "w": 64,
+        "h": 64
+      },
+      "bbox": {
+        "x": 8,
+        "y": 8,
+        "w": 48,
+        "h": 48
+      },
+      "trimmed": false
+    },
+    {
+      "name": "trimmed_0",
+      "frame": {
+        "x": 192,
+        "y": 0,
+        "w": 40,
+        "h": 48
+      },
+      "bbox": {
+        "x": 0,
+        "y": 0,
+        "w": 40,
+        "h": 48
+      },
+      "trimmed": true
+    }
+  ],
+  "recoverableArea": 7200,
+  "vramBytesSaved": 28800,
+  "findings": [
+    {
+      "rule": "trim-margin",
+      "severity": "warn"
+    }
+  ],
+  "note": "One atlas of UNtrimmed sprites carrying transparent margins (opaque cores inset inside 64×64 frames, trimmed:false, NO spriteSourceSize), plus one ALREADY-trimmed sprite that the detector must SKIP. The trim-margin detector computes each opaque bbox off the decoded page (worker alphaBBox — the SAME decode pass as frame-redundancy) and sums (frame area − bbox area) over the untrimmed sprites only: recoverable atlas AREA → VRAM (vramBytesSaved, EXACT); the disk number is an area-proportional ESTIMATE, never conflated (invariant 5). The detector MEASURES the padding; trimming the frames is the Pro fix's job (generation — invariant 3)."
+}

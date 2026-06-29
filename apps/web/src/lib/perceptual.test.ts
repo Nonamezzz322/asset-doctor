@@ -5,7 +5,8 @@ import { dirname, join } from 'node:path';
 import { PNG, type PNGImage } from 'pngjs';
 import { describe, expect, it } from 'vitest';
 import type { ContentClass } from '@asset-doctor/core';
-import { frameRedundancyFinding, DEFAULT_THRESHOLDS } from '@asset-doctor/analysis';
+import { frameRedundancyFinding, trimMarginFinding, DEFAULT_THRESHOLDS } from '@asset-doctor/analysis';
+import { alphaBBox } from '@asset-doctor/fix';
 import { parseAtlas } from '@asset-doctor/parsers';
 import {
   alphaFullyOpaque,
@@ -528,5 +529,55 @@ describe('frame-redundancy END-TO-END: fixture reproduces the defect through the
     expect(finding!.rule).toBe('frame-redundancy');
     expect(finding!.estimate?.vramBytesSaved).toBe(expected.vramBytesSaved);
     expect(finding!.params?.area).toBe(expected.recoverableArea);
+  });
+});
+
+// ── END-TO-END: the untrimmed-padding fixture PNG, fed through the REAL production trim-bbox path (decode →
+// pure alphaBBox → trimMarginFinding). This proves the textured-core-in-a-transparent-margin fixture
+// reproduces the trim-margin defect through production code (the SAME alphaBBox the worker calls off the
+// already-decoded page), not just through injected bboxes. No canvas — pngjs decodes the PNG to the same RGBA
+// buffer createImageBitmap+getImageData would, and alphaBBox is the SAME pure helper @asset-doctor/fix exports.
+describe('trim-margin END-TO-END: fixture reproduces the defect through the real decode path', () => {
+  const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../../fixtures/sample-projects/untrimmed-padding');
+
+  it('alphaBBox recovers each untrimmed sprite bbox; the rule FIRES warn matching expected.json', () => {
+    const png = PNG.sync.read(readFileSync(join(FIXTURES, 'sheet.png')));
+    const expected = JSON.parse(readFileSync(join(FIXTURES, 'expected.json'), 'utf8')) as {
+      recoverableArea: number;
+      vramBytesSaved: number;
+      qualifying: string[];
+      regions: { name: string; bbox: { x: number; y: number; w: number; h: number } | null; trimmed: boolean }[];
+    };
+    const parsed = parseAtlas(JSON.parse(readFileSync(join(FIXTURES, 'sheet.json'), 'utf8')), {
+      ref: 'sheet.png',
+      bytes: new Uint8Array(readFileSync(join(FIXTURES, 'sheet.png'))),
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok || parsed.asset.kind !== 'atlas') return;
+    const atlas = parsed.asset.atlas;
+
+    // Compute the opaque bbox off the REAL decoded page via the SAME pure alphaBBox the worker uses — only for
+    // UNtrimmed sprites (the worker passes null for trimmed ones). Index-aligned to the parsed sprite order.
+    const src = { data: new Uint8ClampedArray(png.data), width: png.width };
+    const bboxes = atlas.sprites.map((s) =>
+      s.trimmed ? null : alphaBBox(src, { x: s.frame.x, y: s.frame.y, w: s.frame.w, h: s.frame.h }),
+    );
+
+    // Cross-check each recovered bbox against the authored golden (frame-relative top-left).
+    const bboxByName = new Map(expected.regions.map((r) => [r.name, r.bbox]));
+    for (let i = 0; i < atlas.sprites.length; i++) {
+      const sp = atlas.sprites[i]!;
+      if (sp.trimmed) continue;
+      expect(bboxes[i], `${sp.name} bbox`).toEqual(bboxByName.get(sp.name));
+    }
+
+    const finding = trimMarginFinding(atlas, DEFAULT_THRESHOLDS, bboxes, atlas.size.w * atlas.size.h);
+    expect(finding).not.toBeNull();
+    expect(finding!.severity).toBe('warn');
+    expect(finding!.rule).toBe('trim-margin');
+    expect(finding!.params?.sprites).toBe(expected.qualifying.length); // already-trimmed sprite excluded
+    expect(finding!.estimate?.vramBytesSaved).toBe(expected.vramBytesSaved);
+    expect(finding!.params?.area).toBe(expected.recoverableArea);
+    expect(finding!.relatedRefs).toEqual([...expected.qualifying].sort());
   });
 });

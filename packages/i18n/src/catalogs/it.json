@@ -135,6 +135,17 @@
     "other": "{dupes} fotogrammi in {groups} gruppo(i) hanno regioni di pixel identiche byte per byte in questo atlante. Bloccano {vram:bytes} di VRAM ({area}px × 4) che un ricompattamento deduplicato recupera, più ~{disk:bytes} di disco dell'atlante (stima per area)."
   },
   "find.frame-redundancy.fix": "Riferisci un singolo fotogramma condiviso invece di impacchettare copie identiche, o ricompatta deduplicato.",
+  "find.trim-margin.title": {
+    "$count": "sprites",
+    "one": "{sprites} sprite non ritagliato — {vram:bytes} di margine trasparente",
+    "other": "{sprites} sprite non ritagliati — {vram:bytes} di margine trasparente"
+  },
+  "find.trim-margin.detail": {
+    "$count": "sprites",
+    "one": "{sprites} sprite non ritagliato porta margini trasparenti attorno alla sua grafica opaca. Quel margine fissa {vram:bytes} di VRAM ({area}px × 4) che una ricompattazione con ritaglio recupera fino a, più ~{disk:bytes} di disco dell'atlas (stima per area).",
+    "other": "{sprites} sprite non ritagliati portano margini trasparenti attorno alla loro grafica opaca. Quel margine fissa {vram:bytes} di VRAM ({area}px × 4) che una ricompattazione con ritaglio recupera fino a, più ~{disk:bytes} di disco dell'atlas (stima per area)."
+  },
+  "find.trim-margin.fix": "Ricompatta con il ritaglio abilitato così ogni fotogramma è ridotto ai suoi limiti opachi.",
   "find.duplicate-exact.title": "{n}× file identico",
   "find.duplicate-exact.detail": "Copie byte-identiche: {refs}. Tienine una e referenziala — ogni copia è anche un caricamento texture separato ({vram:bytes} VRAM ciascuna).",
   "find.duplicate-exact.fix": "Deduplica: tieni una sola copia e aggiorna i riferimenti.",

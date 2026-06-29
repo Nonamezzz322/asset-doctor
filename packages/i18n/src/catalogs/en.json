@@ -113,6 +113,17 @@
     "other": "{dupes} frames in {groups} group(s) have byte-identical pixel regions within this atlas. They pin {vram:bytes} of VRAM ({area}px × 4) that a de-duplicated repack reclaims, plus ~{disk:bytes} of atlas disk (area estimate)."
   },
   "find.frame-redundancy.fix": "Reference one shared frame instead of packing identical copies, or repack de-duplicated.",
+  "find.trim-margin.title": {
+    "$count": "sprites",
+    "one": "{sprites} untrimmed sprite — {vram:bytes} of transparent padding",
+    "other": "{sprites} untrimmed sprites — {vram:bytes} of transparent padding"
+  },
+  "find.trim-margin.detail": {
+    "$count": "sprites",
+    "one": "{sprites} untrimmed sprite carries transparent margins around their opaque art. That padding pins {vram:bytes} of VRAM ({area}px × 4) that a trimmed repack reclaims up to, plus ~{disk:bytes} of atlas disk (area estimate).",
+    "other": "{sprites} untrimmed sprites carry transparent margins around their opaque art. That padding pins {vram:bytes} of VRAM ({area}px × 4) that a trimmed repack reclaims up to, plus ~{disk:bytes} of atlas disk (area estimate)."
+  },
+  "find.trim-margin.fix": "Repack with trim enabled so each frame is tightened to its opaque bounds.",
   "find.duplicate-exact.title": "{n}× identical file",
   "find.duplicate-exact.detail": "Byte-identical copies: {refs}. Keep one and reference it — each copy is also a separate texture upload ({vram:bytes} VRAM each).",
   "find.duplicate-exact.fix": "De-duplicate: keep a single copy and update references.",

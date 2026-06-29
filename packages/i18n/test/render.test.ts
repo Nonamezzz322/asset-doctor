@@ -8,6 +8,7 @@ import {
   dimensionFindings,
   solidFillFinding,
   frameRedundancyFinding,
+  trimMarginFinding,
   wastedAlphaFinding,
   wastedRegions,
   formatFinding,
@@ -49,6 +50,13 @@ async function realFindings(): Promise<Finding[]> {
     sprites: [0, 1, 2, 3].map((i) => ({ name: `f${i}`, frame: { x: i * 32, y: 0, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 32, h: 32 } })),
   };
   out.push(frameRedundancyFinding(frAtlas, cfg, ['hh', 'hh', 'hh', 'other'], 8000)!);
+  // trim-margin: 2 untrimmed 64×64 frames on a 256² sheet, each with a 32×32 opaque core inset 16px →
+  // recoverable 2×(64²−32²) = 6144 px (9.4% of 256², clears minRecoverablePct). Plural ('other') form.
+  const tmAtlas: Atlas = {
+    name: 'pad.png', imageRef: 'pad.png', size: { w: 256, h: 256 }, source: { kind: 'pixi' },
+    sprites: [0, 1].map((i) => ({ name: `p${i}`, frame: { x: i * 64, y: 0, w: 64, h: 64 }, rotated: false, trimmed: false, sourceSize: { w: 64, h: 64 } })),
+  };
+  out.push(trimMarginFinding(tmAtlas, cfg, [{ x: 16, y: 16, w: 32, h: 32 }, { x: 16, y: 16, w: 32, h: 32 }], 8000)!);
   // wasted-alpha: a fully-opaque PNG re-encoded opaque saves bytes (sizer 7000 < byteSize 10000 = 30%)
   out.push((await wastedAlphaFinding('flat.png', img('flat.png', 256, 256, 10000).image, cfg, async () => 7000))!);
   out.push((await formatFinding('hero.png', img('hero.png', 256, 256, 10000).image, cfg, async () => 4000))!);
@@ -72,7 +80,7 @@ describe('renderFinding — English catalog reproduces the baked strings (drift 
     const findings = await realFindings();
     const keys = new Set(findings.map((f) => f.messageKey));
     // sanity: we exercised every messageKey family the rules emit
-    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'frame-redundancy', 'wasted-alpha', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'integrity', 'format-aggregate', 'variants']));
+    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'frame-redundancy', 'trim-margin', 'wasted-alpha', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'integrity', 'format-aggregate', 'variants']));
     for (const f of findings) {
       expect(f.messageKey, `${f.id} must carry a messageKey`).toBeTruthy();
       const r = renderFinding(f, 'en');
