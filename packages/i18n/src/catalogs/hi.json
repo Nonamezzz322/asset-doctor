@@ -77,6 +77,7 @@
     "other": "{n} जानकारी"
   },
   "triage.search": "एसेट खोजें",
+  "triage.listLabel": "ट्रायेज परिणाम",
   "triage.sort.label": "क्रमबद्ध करें",
   "triage.sort.severity": "सबसे खराब पहले",
   "triage.sort.wastedDisk": "बर्बाद डिस्क",

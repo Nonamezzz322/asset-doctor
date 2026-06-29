@@ -75,6 +75,7 @@
     "other": "{n} 提示"
   },
   "triage.search": "搜索资源",
+  "triage.listLabel": "分诊结果",
   "triage.sort.label": "排序",
   "triage.sort.severity": "最严重优先",
   "triage.sort.wastedDisk": "浪费的磁盘",

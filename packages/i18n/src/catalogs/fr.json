@@ -78,6 +78,7 @@
     "other": "{n} info"
   },
   "triage.search": "Rechercher des ressources",
+  "triage.listLabel": "Résultats du triage",
   "triage.sort.label": "Trier",
   "triage.sort.severity": "Pire d'abord",
   "triage.sort.wastedDisk": "Disque gaspillé",

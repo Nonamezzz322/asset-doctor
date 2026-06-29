@@ -77,6 +77,7 @@
     "other": "{n} Info"
   },
   "triage.search": "Assets suchen",
+  "triage.listLabel": "Triage-Ergebnisse",
   "triage.sort.label": "Sortieren",
   "triage.sort.severity": "Schlimmste zuerst",
   "triage.sort.wastedDisk": "Verschwendeter Speicher",

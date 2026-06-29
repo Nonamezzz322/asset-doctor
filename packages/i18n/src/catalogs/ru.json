@@ -81,6 +81,7 @@
     "other": "{n} инфо"
   },
   "triage.search": "Поиск ассетов",
+  "triage.listLabel": "Результаты диагностики",
   "triage.sort.label": "Сортировка",
   "triage.sort.severity": "Сначала худшие",
   "triage.sort.wastedDisk": "Потери на диске",

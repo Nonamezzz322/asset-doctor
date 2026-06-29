@@ -80,6 +80,7 @@
   "triage.filter.warn": { "$count": "n", "one": "{n} warn", "other": "{n} warn" },
   "triage.filter.info": { "$count": "n", "one": "{n} info", "other": "{n} info" },
   "triage.search": "Search assets",
+  "triage.listLabel": "Triage results",
   "triage.sort.label": "Sort",
   "triage.sort.severity": "Worst first",
   "triage.sort.wastedDisk": "Wasted disk",
