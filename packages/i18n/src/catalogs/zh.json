@@ -453,5 +453,7 @@
   "fix.settings.trimMargin": "裁剪未裁剪精灵的边距",
   "fix.settings.trimMarginHint": "在重新打包时将每个未裁剪的精灵收紧到其不透明边界——更小的图集、更少的显存。直接替换：每个名称仍可解析。精确显存，非估算。",
   "fix.framesAliased": { "$count": "n", "one": "已将 {n} 个重复帧别名化到共享区域 — 显存 {before:bytes} → {after:bytes}（所有帧名称仍可解析）", "other": "已将 {n} 个重复帧别名化到共享区域 — 显存 {before:bytes} → {after:bytes}（所有帧名称仍可解析）" },
+  "fix.crossSheetFramesDeduped": { "$count": "n", "one": "已将合并图集间的 {n} 个重复帧去重到共享区域 — 回收 {vram:bytes} 显存（所有帧名称仍可解析）", "other": "已将合并图集间的 {n} 个重复帧去重到共享区域 — 回收 {vram:bytes} 显存（所有帧名称仍可解析）" },
+  "fix.crossSheetFramesDedupedDiskOnly": { "$count": "n", "one": "已将合并图集间的 {n} 个重复帧去重到共享区域 — 显存层级不变，仅节省磁盘（所有帧名称仍可解析）", "other": "已将合并图集间的 {n} 个重复帧去重到共享区域 — 显存层级不变，仅节省磁盘（所有帧名称仍可解析）" },
   "fix.trimmedOnRepack": { "$count": "n", "one": "已将 {n} 个未裁剪精灵裁剪到其不透明边界 — 回收 {area} px，显存 {before:bytes} → {after:bytes}（所有名称仍可解析）", "other": "已将 {n} 个未裁剪精灵裁剪到其不透明边界 — 回收 {area} px，显存 {before:bytes} → {after:bytes}（所有名称仍可解析）" }
 }

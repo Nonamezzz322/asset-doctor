@@ -1942,6 +1942,17 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
           {t('fix.framesAliased', { n: receipt.framesAliased ?? 0, before: receipt.vramBytesBefore, after: receipt.vramBytesAfter })}
         </p>
       ) : null}
+      {/* Cross-atlas frame dedup during MERGE (round22 #1): byte-identical frames that spanned MULTIPLE source
+          sheets, deduped onto ONE merged region (every name still resolves). HONESTY (invariant 5): when the
+          POT bin dropped a tier the reclaimed VRAM is EXACT (measured from the real merge bin); otherwise the
+          win is disk-only (same tier) and we say so. Present ONLY when ≥1 cross-sheet frame was deduped. */}
+      {(receipt.crossSheetFramesDeduped ?? 0) > 0 ? (
+        <p className="font-mono text-[10px] text-ink-soft">
+          {receipt.crossSheetPotTierDropped
+            ? t('fix.crossSheetFramesDeduped', { n: receipt.crossSheetFramesDeduped ?? 0, vram: receipt.crossSheetVramReclaimedBytes ?? 0 })
+            : t('fix.crossSheetFramesDedupedDiskOnly', { n: receipt.crossSheetFramesDeduped ?? 0 })}
+        </p>
+      ) : null}
       {/* Trim-on-repack (round20): untrimmed sprites tightened to their opaque bounds during a repack. The
           reclaimed px is MEASURED (Σ frame − bbox), not the detector's "up to" estimate; the VRAM win is EXACT
           (already inside vramBytesBefore→After — invariant 5). Every name still resolves (drop-in). Present

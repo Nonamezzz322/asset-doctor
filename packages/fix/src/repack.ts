@@ -8,7 +8,7 @@ import { pack, type PackItem } from './pack';
 import type { MaskItem } from './mask';
 import type { RawMesh } from './mesh';
 import { nestMasks } from './polygon-pack';
-import type { AtlasAliasMap } from './alias';
+import type { AtlasAliasMap, MergeAliasMap } from './alias';
 import { spineOffsetFrom, spriteSourceSizeFrom } from './trim';
 
 const vram = (w: number, h: number): number => w * h * 4;
@@ -146,8 +146,23 @@ function resolveTrim(s: Sprite, bbox: TrimRect | null, asSpineOffset: boolean): 
  * all - the source sheet genuinely held them), occupancyAfter uses only the PACKED representatives' area over
  * the new sheet area. vramBytesBefore/After are exact w*h*4 of the POT bins (aliasing simply yields a smaller
  * sheet => fewer/smaller bins) - no estimate.
+ *
+ * `mergeAliasMap` (round22 #1, cross-atlas frame dedup during MERGE): when supplied (the multi-atlas merge
+ * path only), it SUPERSEDES `aliasMaps` and clusters byte-identical frames across the WHOLE group in ONE flat
+ * (atlasName, frameName) key space — a frame byte-identical between sheet A and sheet B is packed ONCE and every
+ * duplicate name (across ALL merged sheets) is aliased onto that one region (its OWN trim/pivot/sourceSize
+ * copied; one Blit per representative). Its flat index space MUST be the SAME order this function iterates
+ * `atlases` (group order, sprite index order) — they advance in lockstep below. With it supplied we ALSO run a
+ * no-alias BASELINE pack of the SAME group's full item set and report the EXACT VRAM delta as
+ * `vramReclaimedBytes` (baseline POT bin VRAM − the aliased `vramBytesAfter`) + `potTierDropped` — a REAL
+ * measured delta (the merge actually produces the deduped bin), never an area floor. Absent ⇒ unchanged.
  */
-export function repackAtlases(atlases: Atlas[], opts: RepackOptions, aliasMaps?: Map<string, AtlasAliasMap>): RepackResult {
+export function repackAtlases(
+  atlases: Atlas[],
+  opts: RepackOptions,
+  aliasMaps?: Map<string, AtlasAliasMap>,
+  mergeAliasMap?: MergeAliasMap,
+): RepackResult {
   const items: PackItem[] = [];
   const srcOf = new Map<string, { sprite: Sprite; atlasRef: string }>();
   // For a representative id: the alias source sprites whose names must be emitted at the representative's final
@@ -166,12 +181,19 @@ export function repackAtlases(atlases: Atlas[], opts: RepackOptions, aliasMaps?:
   const trimOf = new Map<string, ResolvedTrim>();
   let trimmedSprites = 0;
   let trimmedAreaReclaimed = 0;
+  // Cross-atlas merge dedup (round22 #1): when a mergeAliasMap is supplied it SUPERSEDES the per-atlas aliasMaps
+  // for this whole group. `flatCursor` walks the SAME flat index space the map was built over (group order,
+  // sprite index order); its repOf entries point at FLAT indices, which we resolve to `${repAtlasName} repName`.
+  // aliasedFrames is the map's already-honest Σ(distinctRects−1); counted ONCE here (never per-sprite).
+  let flatCursor = 0;
+  if (mergeAliasMap) aliasedFrames += mergeAliasMap.aliasedFrames;
   for (let ai = 0; ai < atlases.length; ai++) {
     const a = atlases[ai]!;
     const atlasTrim = opts.trim?.[ai];
     vramBefore += vram(a.size.w, a.size.h);
     areaBefore += a.size.w * a.size.h;
-    const am = aliasMaps?.get(a.name);
+    // mergeAliasMap (if present) governs aliasing for the whole group; otherwise the per-atlas map for THIS sheet.
+    const am = mergeAliasMap ? undefined : aliasMaps?.get(a.name);
     // HONESTY (finding [0]): accumulate the alias map's ALREADY-HONEST count once per atlas — Σ(distinctRects−1)
     // over qualifying clusters, which EQUALS the detector's `dupes` (the value surfaced in receipt.framesAliased,
     // the operations string, and the i18n `fix.framesAliased` line). We must NOT recount per non-representative
@@ -185,8 +207,23 @@ export function repackAtlases(atlases: Atlas[], opts: RepackOptions, aliasMaps?:
       const id = `${a.name} ${s.name}`;
       srcOf.set(id, { sprite: s, atlasRef: a.name });
       coveredAreaSource += s.frame.w * s.frame.h;
-      const rep = am ? am.repOf[idx]! : idx;
-      if (rep === idx) {
+      // Resolve the representative. mergeAliasMap: repOf is FLAT, so map the flat rep index back to its (atlas,
+      // sprite) and decide self-vs-alias by comparing the flat index, NOT idx (idx is per-atlas). Per-atlas am:
+      // repOf is local to this sheet. No map: the sprite is its own rep.
+      const flatIndex = flatCursor++;
+      let isSelf: boolean;
+      let repId: string;
+      if (mergeAliasMap) {
+        const repFlat = mergeAliasMap.repOf[flatIndex]!;
+        isSelf = repFlat === flatIndex;
+        const repEntry = mergeAliasMap.flat[repFlat]!;
+        repId = `${repEntry.atlasName} ${repEntry.sprite.name}`;
+      } else {
+        const rep = am ? am.repOf[idx]! : idx;
+        isSelf = rep === idx;
+        repId = `${a.name} ${a.sprites[rep]!.name}`;
+      }
+      if (isSelf) {
         // Representative (or no aliasing for this atlas): pack a real item, count its area as packed. When this
         // sprite carries reclaimable padding (resolveTrim ⇒ non-null), pack the TIGHTER bbox extent + record
         // the resolved trim so the emit branch can tighten this rep AND every alias sharing its rect (B2).
@@ -202,8 +239,9 @@ export function repackAtlases(atlases: Atlas[], opts: RepackOptions, aliasMaps?:
           coveredAreaPacked += s.frame.w * s.frame.h;
         }
       } else {
-        // Aliased duplicate: do NOT pack - record it under its representative's id for post-pack emit.
-        const repId = `${a.name} ${a.sprites[rep]!.name}`;
+        // Aliased duplicate: do NOT pack - record it under its representative's id for post-pack emit. `repId`
+        // is the (cross-atlas, for mergeAliasMap) representative resolved above — its OWN trim/pivot/sourceSize
+        // come from THIS source sprite, only the packed RECT is shared.
         const g = aliasesOf.get(repId) ?? [];
         g.push({ sprite: s, atlasRef: a.name });
         aliasesOf.set(repId, g);
@@ -263,6 +301,45 @@ export function repackAtlases(atlases: Atlas[], opts: RepackOptions, aliasMaps?:
   });
 
   const occupancyAfter = areaAfter > 0 ? coveredAreaPacked / areaAfter : 0;
+
+  // Cross-atlas merge dedup (round22 #1): EXACT VRAM delta vs the no-alias counterfactual. Re-pack the SAME
+  // group's FULL item set with NO aliasing — every sprite (representatives AND the duplicates we aliased) at the
+  // EXACT extent this aliased pass would have used for it (trim-resolved identically: a tightened rep packs its
+  // bbox, an alias inheriting a rep's trim packs the rep's bbox extent — byte-identical pixels ⇒ same bbox).
+  // The delta `baseline POT-bin VRAM − vramAfter` is a REAL measured saving (the merge actually emits the
+  // deduped bin), never an area floor. potTierDropped iff the smaller alias pack dropped a POT VRAM tier.
+  // Only computed when a mergeAliasMap actually aliased ≥1 frame (else 0/false ⇒ omitted, byte-identical).
+  let vramReclaimedBytes = 0;
+  let potTierDropped = false;
+  if (mergeAliasMap && mergeAliasMap.aliasedFrames > 0) {
+    const baseItems: PackItem[] = [];
+    let fc = 0;
+    for (let ai = 0; ai < atlases.length; ai++) {
+      const a = atlases[ai]!;
+      const atlasTrim = opts.trim?.[ai];
+      a.sprites.forEach((s, idx) => {
+        const fi = fc++;
+        // The extent this sprite occupies in the ALIASED pass: a representative uses its own resolveTrim; an
+        // alias inherits the REP's resolved trim (its pixels are byte-identical ⇒ same bbox). Recompute the same.
+        const repFlat = mergeAliasMap.repOf[fi]!;
+        const repEntry = mergeAliasMap.flat[repFlat]!;
+        const repId = `${repEntry.atlasName} ${repEntry.sprite.name}`;
+        const repTr = trimOf.get(repId);
+        if (repTr) {
+          baseItems.push({ id: `b${fi}`, w: repTr.packW, h: repTr.packH });
+        } else {
+          const ownTr = atlasTrim ? resolveTrim(s, atlasTrim[idx] ?? null, !!opts.trimAsSpineOffset) : null;
+          if (ownTr) baseItems.push({ id: `b${fi}`, w: ownTr.packW, h: ownTr.packH });
+          else baseItems.push({ id: `b${fi}`, w: s.frame.w, h: s.frame.h });
+        }
+      });
+    }
+    const baseBins = pack(baseItems, { allowRotation: opts.allowRotation, padding: opts.padding, maxSize: opts.maxSize, ...(opts.gutter ? { gutter: opts.gutter } : {}) });
+    const baseVram = baseBins.reduce((sum, b) => sum + vram(b.w, b.h), 0);
+    vramReclaimedBytes = Math.max(0, baseVram - vramAfter);
+    potTierDropped = vramAfter < baseVram;
+  }
+
   return {
     atlases: atlasesOut,
     blits,
@@ -272,6 +349,7 @@ export function repackAtlases(atlases: Atlas[], opts: RepackOptions, aliasMaps?:
     vramBytesAfter: vramAfter,
     ...(aliasedFrames > 0 ? { aliasedFrames } : {}),
     ...(trimmedSprites > 0 ? { trimmedSprites, trimmedAreaReclaimed } : {}),
+    ...(mergeAliasMap && mergeAliasMap.aliasedFrames > 0 ? { vramReclaimedBytes, potTierDropped } : {}),
   };
 }
 

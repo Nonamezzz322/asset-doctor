@@ -400,6 +400,26 @@ export interface FixReceipt {
    *  VRAM win is ALREADY inside vramBytesBefore/After (exact, no estimate). Absent/0 ⇒ no frames were aliased
    *  (no frame-redundancy finding, or the toggle was off) ⇒ receipt byte-identical to today. */
   framesAliased?: number;
+  /** Cross-atlas frame dedup during MERGE (round22 #1): the count of byte-identical frames that spanned ≥2
+   *  SOURCE sheets and were deduped onto ONE shared region when an atlas-MERGE folded them together — every
+   *  duplicate name (across all merged sheets) still resolves in the merged manifest; the pixels are written
+   *  ONCE (one Blit per cluster). This is a SUBSET of `framesAliased` (the cross-sheet portion); a within-atlas
+   *  dupe is the round19 frameRedundancy path's job. These are MERGE-DISCOVERED (the free cross-atlas detector,
+   *  round22 #0, surfaces them in the diagnosis) — the copy says "across sheets". Absent/0 ⇒ no merge deduped a
+   *  cross-sheet frame ⇒ receipt byte-identical to today. */
+  crossSheetFramesDeduped?: number;
+  /** Cross-atlas frame dedup during MERGE (round22 #1): the EXACT VRAM bytes reclaimed by the cross-sheet
+   *  dedups — Σ RepackResult.vramReclaimedBytes, a REAL measured delta (the no-alias baseline pack of the
+   *  merged group's POT bin minus the deduped bin). NOT an area floor / POT-gate estimate (that is what the
+   *  DETECTOR avoids; the merge actually produces the bin, so this is measured). `0` when the dedup did not
+   *  drop a POT tier (drop-in, fewer pixels on disk, but same VRAM tier ⇒ disk-only, invariant 5). The win is
+   *  ALSO already inside vramBytesBefore/After. Absent ⇒ no cross-sheet dedup ran. */
+  crossSheetVramReclaimedBytes?: number;
+  /** Cross-atlas frame dedup during MERGE (round22 #1): TRUE iff ≥1 merge dropped the deduped group to a
+   *  SMALLER POT VRAM tier (so crossSheetVramReclaimedBytes > 0). FALSE ⇒ frames were deduped (drop-in, fewer
+   *  pixels on disk) but the POT bin stayed the same tier ⇒ disk-only, NOT a VRAM claim (invariant 5). Present
+   *  only when crossSheetFramesDeduped > 0. */
+  crossSheetPotTierDropped?: boolean;
   /** Trim-on-repack (round20): the total count of UNtrimmed sprites this run tightened to their opaque bounds
    *  during a repack (Σ RepackResult.trimmedSprites — distinct packed rects; aliases inherit the rep's trim but
    *  are not re-counted). Each tightened sprite renders identically in-engine from a smaller sheet (drop-in:

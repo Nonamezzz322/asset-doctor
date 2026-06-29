@@ -59,6 +59,13 @@ import {
   // representative) while every original name still resolves. Single Vitest-covered source so it can't drift.
   buildAtlasAliasMaps,
   type AtlasAliasMap,
+  // Cross-atlas frame dedup during MERGE (round22 #1) — the WHOLE-GROUP analogue of buildAtlasAliasMaps. The
+  // merge branch lazily hashes any group sheet missing from frameHashByRef, then builds ONE flat (atlasName,
+  // frameName) alias map so byte-identical frames spanning MULTIPLE merged sheets pack ONE region (every name
+  // resolves; one Blit per representative). EXACT VRAM delta comes from the real repackAtlases baseline. Same
+  // Vitest-covered pure source the within-atlas path uses ⇒ no drift.
+  buildMergeAliasMap,
+  type MergeAliasMap,
   // PURE edge-extrude (bleed) geometry (design OPTION A / docs/improvements/edge-extrude.md). The worker
   // reserves a symmetric gutter in pack()/packLoose()/repackAtlases() via `gutter`, then turns each
   // ExtrudeRect into ONE drawImage AFTER the main blit. effectiveExtrude clamps the bleed to the op's
@@ -618,6 +625,11 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
             aliasMinDistinct,
           )
         : new Map();
+    // Cross-atlas frame dedup during MERGE (round22 #1): the gate is the CROSS-ATLAS detector's minDuplicates
+    // (cross-sheet duplicate COPIES, default 2 — distinct units beyond the one kept), NOT the within-atlas one.
+    // The merge map is built per-op in the merge branch (the group is known there); this is just the shared gate.
+    const crossAtlasMinDistinct =
+      report.thresholds.crossAtlasRedundancy?.minDuplicates ?? Infinity;
 
     // ── SELECTIVE FIX (docs/improvements/selective-fix.md) ────────────────────────────────────────────
     // The dev can DESELECT op categories in the dry-run Plan card; the deselected OpKinds arrive in
@@ -1472,6 +1484,13 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     let trimmedSpritesTotal = 0; // round20: Σ untrimmed sprites tightened to their opaque bounds across repacks
     let trimmedAreaTotal = 0; // round20: Σ MEASURED atlas px reclaimed by those trims (frame − bbox, exact)
     let framesAliasedTotal = 0; // round19: Σ byte-identical frames aliased onto a shared region across repacks
+    // Cross-atlas frame dedup during MERGE (round22 #1): Σ byte-identical frames that spanned ≥2 SOURCE sheets
+    // and were deduped onto one merged region (the headline cross-sheet figure) + the EXACT VRAM reclaimed by
+    // those dedups (Σ RepackResult.vramReclaimedBytes — a real measured delta from the merge's actual bin) +
+    // whether ANY merge dropped a POT VRAM tier (else the win is disk-only, invariant 5). 0/false ⇒ omitted.
+    let crossSheetFramesTotal = 0;
+    let crossSheetVramReclaimed = 0;
+    let crossSheetPotTierDropped = false;
     let meshSpritesTotal = 0; // Σ sprites carrying a mesh in the SELECTED polygon results (0 on fallback)
     let polyVramBefore = 0; // Σ vramBytesBefore of polygon-WON ops (basis for the honest saved-% figure)
     let polyVramAfter = 0; // Σ vramBytesAfter of those same ops
@@ -1783,6 +1802,29 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         // before the next op. A single-atlas repack pins one ref ⇒ a trivial no-op (nothing to evict it for).
         bmpBudget!.pin(group.map((a) => a.name));
 
+        // ── Cross-atlas frame dedup during MERGE (round22 #1) ─────────────────────────────────────────────
+        // For a MULTI-sheet merge, dedup byte-identical frames that span MULTIPLE source sheets: pack ONE
+        // region per cross-sheet cluster, point every duplicate name (across all merged sheets) at it in the
+        // merged manifest. B2 (lazy hash-on-demand): the upfront frame-redundancy pass only hashes a sheet with
+        // ≥minDuplicates sprites, so the headline many-small-sheets case (e.g. 2-in-A + 1-in-B) never gets B's
+        // hashes — starving the feature. Here, with the group known, hash ANY group sheet still missing from
+        // frameHashByRef (its source bytes are pinned above) and CACHE it back so a later op reuses it. Then
+        // build ONE flat (atlasName,frameName) alias map over the whole group (atlas-qualified distinct-rect
+        // guard — B1). frameRedundancy OFF ⇒ no hashing, no map ⇒ byte-identical. Single-atlas repack ⇒ no map
+        // (a within-atlas dupe is the round19 path's job, threaded via aliasMaps). Respect cancelled.
+        let mergeAliasMap: MergeAliasMap | undefined;
+        if (merge && frameRedundancyOn) {
+          for (const a of group) {
+            if (frameHashByRef.has(a.name)) continue; // already hashed upfront (≥minDuplicates) or by a prior op
+            if (cancelled) return;
+            const bytes = bytesByRef.get(a.name);
+            if (!bytes) continue; // missing source — its frames contribute null hashes (never cluster), fail-safe
+            const res = await hashAtlasFrames(bytes, a.sprites);
+            if (res) frameHashByRef.set(a.name, res.hashes); // cache back: a later merge/repack reuses it
+          }
+          mergeAliasMap = buildMergeAliasMap(group, frameHashByRef, crossAtlasMinDistinct);
+        }
+
         // Edge-extrude (bleed): reserve a symmetric gutter for the RECTANGLE repack path. Polygon mode emits
         // meshed blits that are never extruded (the design's rectangle-only scope), so its nester takes no
         // gutter; `eff` is only fed to compose when the selected result is the rectangle path (below).
@@ -1843,6 +1885,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
               ...trimOpt,
             },
             aliasMaps,
+            mergeAliasMap,
           );
           if (polygonWins(poly, rect)) {
             r = poly;
@@ -1866,6 +1909,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
               ...trimOpt,
             },
             aliasMaps,
+            mergeAliasMap,
           );
         }
 
@@ -2015,6 +2059,15 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         }
         // repacked/merged refs → tier loop surfaces an honest skip rather than a silent no-op (§7 v1 scope).
         if (tieringOn) for (const rf of refs) tierTransformed.add(rf);
+        // Cross-atlas dedup (round22 #1): the subset of aliases that spanned ≥2 SOURCE sheets. Computed ONCE
+        // here so the merge note (below) and the run accumulator (further below, outside the `if (merge)` block)
+        // read the SAME gated value. mergeAliasMap is undefined for a single-atlas repack ⇒ 0 ⇒ no change there.
+        // HONESTY (R22 #0): read from the SELECTED result, never the map. repackAtlasesPolygon never consumes
+        // mergeAliasMap (no param) ⇒ a SELECTED polygon page physically wrote every cross-sheet duplicate
+        // separately and carries no aliasedFrames/vramReclaimedBytes/potTierDropped. Gate crossN on !polySelected
+        // so the note + accumulator stay consistent with what shipped (mirrors r.aliasedFrames, already absent
+        // for poly — the receipt must reflect the emitted output).
+        const crossN = polySelected ? 0 : (mergeAliasMap?.crossSheetFrames ?? 0);
         if (merge) {
           for (const rf of refs) {
             const ip = pathByRef.get(rf);
@@ -2023,8 +2076,15 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
             if (mp) dropped.add(mp);
           }
           referencesChanged = true;
+          // potTierDropped FALSE ⇒ the bin stayed the same POT tier ⇒ the win is DISK-only (invariant 5),
+          // disclosed in the string (and the receipt's exact vramReclaimedBytes is 0). r.aliasedFrames already
+          // covers the headline "(N frames aliased)" — this notes how many of those crossed a sheet boundary.
+          const crossNote =
+            crossN > 0
+              ? ` (${crossN} across sheets${r.potTierDropped ? '' : ', same tier, disk only'})`
+              : '';
           operations.push(
-            `merge ${refs.length} atlases → ${r.atlases.length} sheet${r.atlases.length === 1 ? '' : 's'}${r.aliasedFrames ? ` (${r.aliasedFrames} frames aliased)` : ''}${r.trimmedSprites ? ` (${r.trimmedSprites} sprites trimmed, ${r.trimmedAreaReclaimed}px reclaimed)` : ''}`,
+            `merge ${refs.length} atlases → ${r.atlases.length} sheet${r.atlases.length === 1 ? '' : 's'}${r.aliasedFrames ? ` (${r.aliasedFrames} frames aliased)` : ''}${crossNote}${r.trimmedSprites ? ` (${r.trimmedSprites} sprites trimmed, ${r.trimmedAreaReclaimed}px reclaimed)` : ''}`,
           );
           // Loader-migration (SET→SET): each OLD atlas manifest the game loaded → the merged manifest set.
           changeRows.push(
@@ -2039,6 +2099,16 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         // Frame-redundancy (round19): count the byte-identical frames this repack/merge aliased (the
         // smaller-sheet VRAM win is ALREADY inside vramSaved). 0/absent ⇒ no change to the receipt.
         framesAliasedTotal += r.aliasedFrames ?? 0;
+        // Cross-atlas frame dedup during MERGE (round22 #1): the subset of those aliases that spanned ≥2 SOURCE
+        // sheets (the headline cross-sheet figure) + the EXACT VRAM reclaimed (r.vramReclaimedBytes — already
+        // inside vramSaved) + whether ANY merge dropped a POT tier. mergeAliasMap is undefined for a single-atlas
+        // repack ⇒ contributes 0/false ⇒ receipt byte-identical to today there.
+        // HONESTY (R22 #0): crossN already zeroes when a polygon page was SELECTED (it never consumed
+        // mergeAliasMap, so it wrote those duplicates separately) ⇒ the accumulator stays consistent with the
+        // companion crossSheetVramReclaimed/crossSheetPotTierDropped, which read from r (0/false for poly).
+        crossSheetFramesTotal += crossN;
+        crossSheetVramReclaimed += r.vramReclaimedBytes ?? 0;
+        if (r.potTierDropped) crossSheetPotTierDropped = true;
         // Trim-on-repack (round20): count + measure the untrimmed sprites this repack/merge tightened (the VRAM
         // win is ALREADY inside vramSaved). A SELECTED polygon result carries no trim fields ⇒ 0 (polygon path
         // is never trimmed). 0/absent ⇒ no receipt field.
@@ -2049,6 +2119,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         // pack with no gutter). The growth is ALSO already inside vramSaved/vramBytes* — never claimed free.
         // B3: the baseline MUST carry the IDENTICAL trim so the delta isolates ONLY the gutter (else a trimmed
         // main pack vs an untrimmed baseline flips the sign and the readout lies).
+        // B3 (round22 #1): the no-gutter baseline MUST also carry the SAME mergeAliasMap so the delta isolates
+        // ONLY the gutter — an aliased main pack vs a non-aliased baseline would conflate the dedup win with the
+        // gutter growth and the readout would lie.
         if (composeExtrude > 0 && gutter > 0)
           extrudeVramDelta +=
             r.vramBytesAfter -
@@ -2056,6 +2129,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
               group,
               { allowRotation: false, padding: op.padding, maxSize: op.maxSize, ...trimOpt },
               aliasMaps,
+              mergeAliasMap,
             ).vramBytesAfter;
         // Accrue polygon receipt stats only now that the op has fully composed (skips above never reach here),
         // so meshSprites / polygonAreaSavedPct reflect ONLY sheets that actually shipped.
@@ -3735,6 +3809,18 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       // shared region. The smaller-sheet VRAM win is ALREADY inside vramBytesBefore/After (exact). 0 ⇒ omitted
       // ⇒ receipt byte-identical to today (no frame-redundancy finding, or the toggle was off).
       ...(framesAliasedTotal > 0 ? { framesAliased: framesAliasedTotal } : {}),
+      // Cross-atlas frame dedup during MERGE (round22 #1, additive/optional): byte-identical frames that spanned
+      // MULTIPLE source sheets, deduped onto ONE merged region. crossSheetFramesDeduped = the headline count
+      // (subset of framesAliased); crossSheetVramReclaimedBytes = the EXACT measured VRAM delta (0 ⇒ disk-only,
+      // POT tier unchanged — invariant 5); crossSheetPotTierDropped = TRUE iff a POT tier actually dropped. The
+      // VRAM win is ALSO already inside vramBytesBefore/After. 0 ⇒ omitted ⇒ receipt byte-identical to today.
+      ...(crossSheetFramesTotal > 0
+        ? {
+            crossSheetFramesDeduped: crossSheetFramesTotal,
+            crossSheetVramReclaimedBytes: crossSheetVramReclaimed,
+            crossSheetPotTierDropped: crossSheetPotTierDropped,
+          }
+        : {}),
       // Trim-on-repack (round20, additive/optional): the count of UNtrimmed sprites tightened to their opaque
       // bounds across every repack this run + the MEASURED atlas px reclaimed (Σ frame − bbox). Every tightened
       // sprite renders identically in-engine from a smaller sheet (drop-in: name resolves; manifest carries

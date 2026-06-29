@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import type { AnalysisReport, Atlas, AtlasFrameTrims, Blit, DedupGroup, FixOp, PackGroup, TrimRect } from '@asset-doctor/core';
 import { parseAtlas, parseAtlasManifest, parseSpineAtlasText, parseSpinePage } from '@asset-doctor/parsers';
 import { analyze, DEFAULT_THRESHOLDS } from '@asset-doctor/analysis';
-import { ACC_CELL, alphaBBox, buildAtlasAliasMap, emitSpineAtlasText, emitTexturePackerJson, pack, planFix, repackAtlases, repackAtlasesPolygon, scaleAtlas, type AtlasAliasMap, type MaskItem, type Placement, type RawMesh } from '../src/index';
+import { ACC_CELL, alphaBBox, buildAtlasAliasMap, buildMergeAliasMap, emitSpineAtlasText, emitTexturePackerJson, pack, planFix, repackAtlases, repackAtlasesPolygon, scaleAtlas, type AtlasAliasMap, type MaskItem, type Placement, type RawMesh } from '../src/index';
 
 const fixDir = fileURLToPath(new URL('../../../fixtures/sample-projects/tp-hash-symbols/', import.meta.url));
 function loadAtlas(): Atlas {
@@ -278,6 +278,132 @@ describe('trim-on-repack (round20)', () => {
     }
     // Drop-in: every original name resolves.
     expect(out.size).toBe(atlas.sprites.length);
+  });
+});
+
+// ── Cross-atlas frame dedup during MERGE (round22 #1) ─────────────────────────────────────────────────────
+// repackAtlases(group, opts, undefined, mergeAliasMap) packs ONE region per cross-sheet cluster and emits a
+// Sprite for EACH duplicate name (across all merged sheets) at that region; one Blit per representative; EXACT
+// vramReclaimedBytes/potTierDropped from the real no-alias baseline pack of the same group.
+describe('cross-atlas merge dedup (round22 #1)', () => {
+  const sprite = (name: string, x: number, w = 32, h = 32): Atlas['sprites'][number] => ({
+    name, frame: { x, y: 0, w, h }, rotated: false, trimmed: false, sourceSize: { w, h },
+  });
+  const atl = (name: string, sprites: Atlas['sprites'], w = 512, h = 512): Atlas => ({
+    name, imageRef: name, size: { w, h }, sprites, source: { kind: 'texturepacker-hash' },
+  });
+  const byName = (r: ReturnType<typeof repackAtlases>): Map<string, Atlas['sprites'][number]> =>
+    new Map(r.atlases.flatMap((a) => a.sprites.map((s) => [s.name, s] as const)));
+
+  it('T2: two merged sheets with byte-identical frames (distinct names) ⇒ ONE region, every name resolves, one Blit per rep', () => {
+    // Sheet A: coinA + uniqA ; Sheet B: coinB (byte-identical to coinA) + uniqB. DISTINCT names on each sheet
+    // (the realistic cross-sheet dup — same name on two sheets is blocked by the worker's collision guard).
+    const a = atl('a.png', [sprite('coinA', 0), sprite('uniqA', 32)]);
+    const b = atl('b.png', [sprite('coinB', 0), sprite('uniqB', 32)]);
+    const group = [a, b];
+    const hashes = new Map<string, (string | null)[]>([
+      ['a.png', ['coin', 'A']],
+      ['b.png', ['coin', 'B']],
+    ]);
+    const mam = buildMergeAliasMap(group, hashes, 2);
+    expect(mam.aliasedFrames).toBe(1);
+    expect(mam.crossSheetFrames).toBe(1);
+
+    const opts = { allowRotation: false, padding: 2, maxSize: 4096 };
+    const totalSprites = a.sprites.length + b.sprites.length; // 4
+    const r = repackAtlases(group, opts, undefined, mam);
+    // One Blit per representative: 4 sprites − 1 aliased = 3 distinct packed regions/blits.
+    expect(r.blits.length).toBe(totalSprites - mam.aliasedFrames);
+    // EVERY original name from EVERY merged sheet resolves in the emitted manifest (no dangling ref).
+    const out = byName(r);
+    for (const name of ['coinA', 'coinB', 'uniqA', 'uniqB']) expect(out.has(name), `${name} resolves`).toBe(true);
+    expect(out.size).toBe(totalSprites);
+    // coinB (the alias) lands at coinA's (the rep's) EXACT rect — the shared region, pixels written once.
+    expect(out.get('coinB')!.frame).toEqual(out.get('coinA')!.frame);
+    // Pixels written ONCE: a Blit for the rep (coinA), none for the alias (coinB).
+    expect(r.blits.some((bl) => bl.name === 'coinA')).toBe(true);
+    expect(r.blits.some((bl) => bl.name === 'coinB')).toBe(false);
+    expect(r.aliasedFrames).toBe(1);
+
+    // CONTRAST: mergeAliasMap=undefined packs ALL 4 sprites (the literal defect — the coin packed twice).
+    const noAlias = repackAtlases(group, opts);
+    expect(noAlias.blits.length).toBe(totalSprites);
+  });
+
+  it('T3: POT-tier honesty — a tier-drop group reports EXACT vramReclaimedBytes + potTierDropped:true', () => {
+    // Five 256×256 dup copies across two sheets (one cluster). With aliasing only ONE 256² region packs ⇒ a
+    // 256×256 bin (256·256·4 = 262144). Without aliasing five 256² tiles need a much bigger POT bin ⇒ a real
+    // measured tier drop. gate=2.
+    const a2 = atl('a.png', [sprite('d0', 0, 256, 256), sprite('d1', 256, 256, 256)], 1024, 1024);
+    const b2 = atl('b.png', [sprite('d2', 0, 256, 256), sprite('d3', 256, 256, 256), sprite('d4', 512, 256, 256)], 1024, 1024);
+    const group = [a2, b2];
+    const hashes = new Map<string, (string | null)[]>([
+      ['a.png', ['dup', 'dup']],
+      ['b.png', ['dup', 'dup', 'dup']],
+    ]);
+    const mam = buildMergeAliasMap(group, hashes, 2);
+    expect(mam.aliasedFrames).toBe(4); // 5 distinct rects − 1 rep
+    const opts = { allowRotation: false, padding: 0, maxSize: 4096 };
+    const r = repackAtlases(group, opts, undefined, mam);
+    // Aliased ⇒ one 256² region ⇒ 256×256 POT bin.
+    expect(r.vramBytesAfter).toBe(256 * 256 * 4);
+    // The no-alias baseline packs five 256² tiles ⇒ a strictly larger POT bin ⇒ a real measured tier drop.
+    const baseline = repackAtlases(group, opts);
+    expect(baseline.vramBytesAfter).toBeGreaterThan(r.vramBytesAfter);
+    expect(r.potTierDropped).toBe(true);
+    expect(r.vramReclaimedBytes).toBe(baseline.vramBytesAfter - r.vramBytesAfter);
+    expect(r.vramReclaimedBytes).toBeGreaterThan(0);
+  });
+
+  it('T3: same-tier group reports potTierDropped:false + vramReclaimedBytes:0 (disk-only, still aliased)', () => {
+    // Two tiny dup frames across two sheets: aliasing them away leaves the rest of the pack on the SAME POT
+    // tier ⇒ no VRAM win, but the dedup IS real (drop-in, disk-only). aliasedFrames>0, potTierDropped:false.
+    const a = atl('a.png', [sprite('dotA', 0, 4, 4), sprite('uniqA', 8, 256, 256)], 512, 512);
+    const b = atl('b.png', [sprite('dotB', 0, 4, 4), sprite('uniqB', 8, 256, 256)], 512, 512);
+    const group = [a, b];
+    const hashes = new Map<string, (string | null)[]>([
+      ['a.png', ['dot', 'A']],
+      ['b.png', ['dot', 'B']],
+    ]);
+    const mam = buildMergeAliasMap(group, hashes, 2);
+    expect(mam.aliasedFrames).toBe(1);
+    const opts = { allowRotation: false, padding: 0, maxSize: 4096 };
+    const r = repackAtlases(group, opts, undefined, mam);
+    const baseline = repackAtlases(group, opts);
+    // The two 256² uniques dominate the POT tier; removing one 4×4 dup does not shrink the bin.
+    expect(r.vramBytesAfter).toBe(baseline.vramBytesAfter);
+    expect(r.potTierDropped).toBe(false);
+    expect(r.vramReclaimedBytes).toBe(0);
+    expect(r.aliasedFrames).toBe(1); // still deduped (drop-in), just disk-only
+  });
+
+  it('T2-roundtrip: the merged manifest round-trips (TexturePacker JSON) with every name resolving', () => {
+    const a = atl('a.png', [sprite('coinA', 0), sprite('uniqA', 32)]);
+    const b = atl('b.png', [sprite('coinB', 0), sprite('uniqB', 32)]);
+    const group = [a, b];
+    const hashes = new Map<string, (string | null)[]>([['a.png', ['coin', 'A']], ['b.png', ['coin', 'B']]]);
+    const mam = buildMergeAliasMap(group, hashes, 2);
+    const r = repackAtlases(group, { allowRotation: false, padding: 2, maxSize: 4096 }, undefined, mam);
+    expect(r.atlases.length).toBe(1); // merged into ONE sheet
+    const json = emitTexturePackerJson(r.atlases[0]!);
+    const res = parseAtlasManifest(JSON.parse(json) as unknown, { imageRef: r.atlases[0]!.imageRef });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      const names = res.atlas.sprites.map((s) => s.name).sort();
+      expect(names).toEqual(['coinA', 'coinB', 'uniqA', 'uniqB']); // every original name from BOTH sheets resolves
+    }
+  });
+
+  it('T4 ADDITIVITY: no cross-sheet dupes ⇒ identity map ⇒ deep-equal to repackAtlases(group, opts)', () => {
+    const a = atl('a.png', [sprite('a0', 0), sprite('a1', 32)]);
+    const b = atl('b.png', [sprite('b0', 0), sprite('b1', 32)]);
+    const group = [a, b];
+    const hashes = new Map<string, (string | null)[]>([['a.png', ['p', 'q']], ['b.png', ['r', 's']]]);
+    const mam = buildMergeAliasMap(group, hashes, 2);
+    expect(mam.aliasedFrames).toBe(0); // no cross-sheet cluster ⇒ identity
+    const opts = { allowRotation: false, padding: 2, maxSize: 4096 };
+    // No-alias fields (vramReclaimedBytes/potTierDropped) are omitted when nothing aliased ⇒ byte-identical.
+    expect(repackAtlases(group, opts, undefined, mam)).toEqual(repackAtlases(group, opts));
   });
 });
 

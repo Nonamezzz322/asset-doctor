@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Sprite } from '@asset-doctor/core';
-import { buildAtlasAliasMap, buildAtlasAliasMaps } from '../src/index';
+import type { Atlas, Sprite } from '@asset-doctor/core';
+import { buildAtlasAliasMap, buildAtlasAliasMaps, buildMergeAliasMap } from '../src/index';
 
 // A 32×32 frame at a given x — distinct rects per sprite unless `x` collides (the pre-aliased case).
 const sp = (name: string, x: number): Sprite => ({
@@ -90,5 +90,99 @@ describe('buildAtlasAliasMaps (keyed by Atlas.name)', () => {
     const maps = buildAtlasAliasMaps([a, b], hashes, 3);
     expect([...maps.keys()]).toEqual(['anim.png']); // clean.png has no duplicates ⇒ absent
     expect(maps.get('anim.png')!.aliasedFrames).toBe(3);
+  });
+});
+
+describe('buildMergeAliasMap (round22 #1 — cross-atlas frame dedup during merge)', () => {
+  const atl = (name: string, sprites: Sprite[]): Atlas => ({
+    name, imageRef: name, size: { w: 256, h: 256 }, sprites, source: { kind: 'pixi' },
+  });
+
+  it('T1: clusters byte-identical frames ACROSS sheets in one flat keyspace ⇒ one rep, the rest aliased', () => {
+    // Sheet A holds idle_0/idle_1 (byte-identical), sheet B holds idle_b (same pixels). gate=2 (cross-atlas).
+    // The WHOLE group is one cluster of 3 DISTINCT rects (A@0, A@32, B@0) ⇒ rep = flat 0, aliasedFrames = 2,
+    // crossSheetFrames = 1 (only B@0 sits on a different sheet than the rep on A).
+    const a = atl('a.png', [sp('idle_0', 0), sp('idle_1', 32)]);
+    const b = atl('b.png', [sp('idle_b', 0)]);
+    const hashes = new Map<string, (string | null)[]>([
+      ['a.png', ['h', 'h']],
+      ['b.png', ['h']],
+    ]);
+    const m = buildMergeAliasMap([a, b], hashes, 2);
+    expect(m.flat.map((f) => `${f.atlasName} ${f.sprite.name}`)).toEqual(['a.png idle_0', 'a.png idle_1', 'b.png idle_b']);
+    expect(m.repOf).toEqual([0, 0, 0]); // every flat index points at flat 0 (a.png idle_0)
+    expect(m.representatives).toEqual([0]);
+    expect(m.aliasedFrames).toBe(2); // distinctRects(3) − 1
+    expect(m.crossSheetFrames).toBe(1); // only b.png idle_b crossed a sheet boundary from the rep
+  });
+
+  it('T1: a per-atlas map UNDER-aliases vs the group map (the literal defect this fixes)', () => {
+    // The SAME frame on two sheets: per-atlas clustering sees 1 frame per sheet ⇒ NO within-atlas dupe at all
+    // (each sheet has a single distinct rect). Only the GROUP keyspace clusters them across sheets.
+    const a = atl('a.png', [sp('shared', 0)]);
+    const b = atl('b.png', [sp('shared', 0)]);
+    const hashes = new Map<string, (string | null)[]>([['a.png', ['h']], ['b.png', ['h']]]);
+    // per-atlas: each atlas alone has 1 sprite ⇒ no cluster ⇒ 0 aliased.
+    expect(buildAtlasAliasMap(a.sprites, ['h'], 2).aliasedFrames).toBe(0);
+    expect(buildAtlasAliasMap(b.sprites, ['h'], 2).aliasedFrames).toBe(0);
+    // group: 2 distinct rects across sheets ⇒ gate(2) met ⇒ 1 aliased, 1 cross-sheet.
+    const m = buildMergeAliasMap([a, b], hashes, 2);
+    expect(m.aliasedFrames).toBe(1);
+    expect(m.crossSheetFrames).toBe(1);
+    expect(m.repOf).toEqual([0, 0]);
+  });
+
+  it('T1b (B1): two byte-identical frames at IDENTICAL (x,y,w,h) on DIFFERENT sheets count as 2 distinct rects', () => {
+    // Both frames at (0,0,32,32) but on different textures — physically distinct copies. The ATLAS-QUALIFIED
+    // key keeps them distinct ⇒ aliasedFrames === 1 (a BARE rectKey would wrongly collapse to 0).
+    const a = atl('a.png', [sp('f', 0)]);
+    const b = atl('b.png', [sp('f', 0)]); // same coords, different sheet
+    const hashes = new Map<string, (string | null)[]>([['a.png', ['h']], ['b.png', ['h']]]);
+    const m = buildMergeAliasMap([a, b], hashes, 2);
+    expect(m.aliasedFrames).toBe(1);
+    expect(m.crossSheetFrames).toBe(1);
+  });
+
+  it('within-atlas pre-aliased rect still collapses (same atlas + same coords ⇒ one unit, no double-count)', () => {
+    // Sheet A has two names at the SAME rect (x=0) — a pre-aliased rect = ONE GPU region ⇒ one distinct unit.
+    // Sheet B has one copy at x=0 (different sheet). Group distinct rects = {A@0, B@0} = 2 ⇒ gate(2) ⇒ 1 aliased.
+    const a = atl('a.png', [sp('a0', 0), sp('a0_alias', 0)]); // same rect within A
+    const b = atl('b.png', [sp('b0', 0)]);
+    const hashes = new Map<string, (string | null)[]>([['a.png', ['h', 'h']], ['b.png', ['h']]]);
+    const m = buildMergeAliasMap([a, b], hashes, 2);
+    expect(m.aliasedFrames).toBe(1); // NOT 2 — the within-A pre-aliased pair collapses to one unit
+    expect(m.crossSheetFrames).toBe(1);
+    expect(m.repOf).toEqual([0, 0, 0]); // all three point at flat 0 (the lowest index of the rep rect)
+  });
+
+  it('T5 (carve-out): a sub-gate group (only 1 distinct cross-sheet rect) is NOT aliased', () => {
+    // A single distinct rect across the group cannot meet gate=2 ⇒ identity.
+    const a = atl('a.png', [sp('only', 0)]);
+    const b = atl('b.png', [sp('other', 0)]);
+    const hashes = new Map<string, (string | null)[]>([['a.png', ['x']], ['b.png', ['y']]]);
+    const m = buildMergeAliasMap([a, b], hashes, 2);
+    expect(m.aliasedFrames).toBe(0);
+    expect(m.crossSheetFrames).toBe(0);
+    expect(m.repOf).toEqual([0, 1]);
+  });
+
+  it('a missing/length-mismatched group sheet contributes null hashes (fail-safe, never clusters)', () => {
+    const a = atl('a.png', [sp('idle_0', 0), sp('idle_1', 32)]);
+    const b = atl('b.png', [sp('idle_b', 0)]);
+    // b.png absent from hashes ⇒ its frame never clusters. a.png alone has 2 distinct rects same hash ⇒ gate(2).
+    const hashes = new Map<string, (string | null)[]>([['a.png', ['h', 'h']]]);
+    const m = buildMergeAliasMap([a, b], hashes, 2);
+    expect(m.aliasedFrames).toBe(1); // only A's two frames cluster
+    expect(m.crossSheetFrames).toBe(0); // both freed rects are on the SAME sheet as the rep (within A)
+    expect(m.repOf).toEqual([0, 0, 2]); // b.png idle_b (flat 2) is its own rep
+  });
+
+  it('null hashes never cluster across sheets', () => {
+    const a = atl('a.png', [sp('x', 0)]);
+    const b = atl('b.png', [sp('y', 0)]);
+    const hashes = new Map<string, (string | null)[]>([['a.png', [null]], ['b.png', [null]]]);
+    const m = buildMergeAliasMap([a, b], hashes, 2);
+    expect(m.aliasedFrames).toBe(0);
+    expect(m.repOf).toEqual([0, 1]);
   });
 });

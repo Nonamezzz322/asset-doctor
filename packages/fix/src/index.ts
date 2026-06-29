@@ -13,8 +13,8 @@ export type { RepackOptions, PolygonRepackOptions } from './repack';
 // Frame-redundancy aliasing (round19) — PURE byte-identical-frame clustering that mirrors the detector's
 // distinct-rect logic. The worker feeds the result into repackAtlases so duplicate frames share ONE packed
 // region (one Blit per representative) while EVERY original name still resolves in the emitted manifest.
-export { buildAtlasAliasMap, buildAtlasAliasMaps } from './alias';
-export type { AtlasAliasMap } from './alias';
+export { buildAtlasAliasMap, buildAtlasAliasMaps, buildMergeAliasMap } from './alias';
+export type { AtlasAliasMap, MergeAliasMap } from './alias';
 export { emitTexturePackerJson, emitSpineAtlasText } from './manifest';
 // PURE atlas-sidecar repoint for the prebuilt-atlas passthrough transcode (round20 #1) — re-encoding an atlas
 // PAGE renames it (sheet.png → sheet.webp), so the sidecar meta.image / Spine texture line is repointed at the

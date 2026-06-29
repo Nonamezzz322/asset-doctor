@@ -741,6 +741,19 @@ export interface RepackResult {
    *  MEASURED atlas px reclaimed by tightening untrimmed frames (exact, never the detector's "up to" estimate).
    *  Absent/0 ⇒ nothing was trimmed ⇒ byte-identical to today. */
   trimmedAreaReclaimed?: number;
+  /** Cross-atlas frame dedup during MERGE (round22 #1): the EXACT VRAM bytes reclaimed by aliasing byte-
+   *  identical frames that spanned MULTIPLE source sheets onto ONE shared region — measured as the no-alias
+   *  baseline pack of the SAME group's POT bin(s) (`vram(w,h)` summed) MINUS this result's `vramBytesAfter`.
+   *  This is a REAL measured delta (the merge actually produces the deduped bin), never an area-floor or POT-
+   *  gate estimate. `0` when the smaller alias pack did NOT drop a POT tier (the aliasing was still drop-in and
+   *  correct — fewer pixels written — but the bin landed on the same tier ⇒ same VRAM; the win is disk-only and
+   *  honestly reported as such). Absent ⇒ no `mergeAliasMap` was supplied ⇒ byte-identical to today. */
+  vramReclaimedBytes?: number;
+  /** Cross-atlas frame dedup during MERGE (round22 #1): TRUE iff the cross-sheet aliasing dropped the merged
+   *  group to a SMALLER POT VRAM tier (`vramBytesAfter < the no-alias baseline pack of the same group`). FALSE
+   *  ⇒ frames were still aliased (drop-in, fewer pixels on disk) but the POT bin stayed the same tier ⇒ the win
+   *  is disk-only, NOT a VRAM claim (invariant 5: disk ≠ VRAM). Absent ⇒ no `mergeAliasMap` supplied. */
+  potTierDropped?: boolean;
 }
 
 /** One emitted file in the optimized download. `originalPath` drives the zip tree; `bytes` is the new

@@ -41,6 +41,39 @@ per-atlas, discarding the cross-atlas comparison; this clusters them across ALL 
   (lowest `(atlasName, spriteIndex)`) + sorted ref/atlas lists. Honesty pin: `dupes = Σ(distinctUnits − 1)` =
   the exact `framesAliased` a future cross-atlas fix would report.
 
+- **#1 Cross-atlas frame dedup during MERGE** (`docs/improvements/round22-cross-atlas-frame-dedup-during-mer.md`)
+  — the Pro FIX for #0's detector: during an aggressive atlas-MERGE, dedup byte-identical frames that span
+  MULTIPLE source sheets — pack ONE region per cross-sheet cluster and point every duplicate frame name (across
+  ALL merged sheets) at that one region in the merged manifest. New pure `buildMergeAliasMap(group,
+  frameHashByRef, minDistinctRects)` (`packages/fix/src/alias.ts`) — the WHOLE-GROUP analogue of the within-atlas
+  `buildAtlasAliasMap`: clusters region hashes across the group in ONE flat `(atlasName, frameName)` keyspace.
+  **B1 (load-bearing):** the distinct-rect guard is **ATLAS-QUALIFIED** (`${atlasName}|x,y,w,h`, mirroring the
+  detector at `folder.ts:365`) — two byte-identical frames at coincidentally-equal coords on DIFFERENT sheets are
+  two physically-distinct copies ⇒ two distinct rects (the bare within-atlas rectKey would wrongly collapse them
+  to one and never fire); a pre-aliased rect WITHIN one atlas still collapses (no double-count). `repackAtlases`
+  gains an optional flat `mergeAliasMap` arg (`packages/fix/src/repack.ts`): it packs ONE rep per cross-sheet
+  cluster, emits a Sprite for EACH duplicate name at the rep's final rect (copying that name's OWN
+  trim/pivot/sourceSize), one Blit per rep. **HONESTY:** `vramBytesBefore/After` are EXACT from the real
+  `repackAtlases` of the merged group; new `RepackResult.vramReclaimedBytes` (= a no-alias BASELINE pack of the
+  same group's full item set − the deduped bin) + `potTierDropped` isolate the merge's REAL measured VRAM delta —
+  NOT the area-floor/POT-gate the DETECTOR (#0) avoided, because the merge actually produces the bin. When the
+  dedup does NOT drop a POT tier the win is disk-only and reported as such (`crossSheetVramReclaimedBytes:0`,
+  invariant 5). **B2 (worker):** `fix.worker.ts` lazily hashes any group sheet missing from `frameHashByRef` in
+  the merge branch (the upfront `≥minDuplicates` pre-filter starves the headline many-small-sheets case) and
+  caches it back, then builds the merge map on the cross-atlas `minDuplicates` gate (default 2) and threads it
+  into both merge `repackAtlases` calls + the extrude no-gutter baseline (B3). New receipt fields
+  `crossSheetFramesDeduped` / `crossSheetVramReclaimedBytes` / `crossSheetPotTierDropped` + `App.tsx` render
+  (VRAM-tier vs disk-only copy) + 2 new i18n keys × 9 catalogs. **DROP-IN / NO DANGLING REF:** every original
+  frame name from every merged sheet still resolves in the emitted TexturePacker JSON (round-trip tested); a
+  frame whose sheet is dropped resolves to the merged region. **ADDITIVITY:** no merge / no cross-sheet dupes /
+  aggressive-merge off / `mergeAliasMap` absent ⇒ byte-identical (the no-alias fields are omitted; a no-op map
+  deep-equals `repackAtlases(group, opts)`). **DETERMINISM:** stable rep (lowest flat index) + sorted emit.
+  Tests: `alias.test.ts` (T1 group clustering + per-atlas under-alias contrast, T1b atlas-qualified key, pre-
+  aliased collapse, sub-gate carve-out, fail-safe missing hashes) + `fix.test.ts` (T2 one-region-every-name-
+  resolves + one-Blit-per-rep + no-alias contrast, T2-roundtrip, T3 POT-tier-drop EXACT vram vs same-tier
+  disk-only, T4 additivity deep-equal). Rides the existing aggressive atlas-merge path; rotated-mismatch +
+  name-collision guards inherited from the merge path unchanged.
+
 ---
 
 ## Round 21 — selection (#0 shipped) — 2026-06-29
