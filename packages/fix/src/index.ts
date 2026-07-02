@@ -62,6 +62,12 @@ export type { OwnerFinalName, OwnerPlanInput } from './dedup-exec';
 // new atlas-force driver and a Node test share ONE decision (no drift).
 export { atlasNeedsForcedFormat } from './atlasProfileForce';
 export type { AtlasForceArgs, AtlasForceDecision } from './atlasProfileForce';
+// PURE sheet-page format decision (settings-page design §0.1/§4): the ONE rule mapping {site, isSpine,
+// spinePageFormat, resolved profile formats, legacy target} → the encode target for a freshly-composed
+// repack/merge/Spine/pack sheet page. Imported by the fix worker at ALL its compose sites so the format
+// choice (incl. the profile-OFF lossless-WebP repack hardcode and the Spine PNG default) can't drift.
+export { sheetPageTarget } from './sheetTarget';
+export type { SheetTargetArgs, SheetTargetDecision, SpinePageFormat } from './sheetTarget';
 
 // ── GPU-residency CEILING (round12 backend-processing §7) ──────────────────────────────────────
 // PURE worst-case VRAM helper: raster ⇒ w·h·4 (today's model); KTX2/compressed ⇒ ≤ ~1 B/px CEILING

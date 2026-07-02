@@ -157,6 +157,13 @@ import {
   // format onto every eligible PREBUILT atlas page (closing the last findings-gated residual). Lifts the
   // prebuilt-atlas passthrough gate logic so the new driver + a Node test share ONE decision (no drift).
   atlasNeedsForcedFormat,
+  // PURE sheet-page format decision (settings design §0.1/§4): the ONE rule for what format a freshly-
+  // composed repack/merge/Spine/pack page encodes to (profile formats[0] / lossless-WebP hardcode / Spine
+  // PNG default / legacy resolved target). Node-tested in packages/fix; the worker maps decisions onto its
+  // existing encOptsFor/feToEncodeOpts closures via sheetEnc below — no encode logic duplicated (no drift).
+  sheetPageTarget,
+  type SheetTargetDecision,
+  type SpinePageFormat,
   type ManifestAsset,
   type EmittedVariant,
   type ManifestAssetKind,
@@ -734,6 +741,51 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       pngRecompressLevel: fe.pngRecompressLevel,
       allowPngFallback: true,
     });
+    // ── Sheet-page format decision (settings design §0.1/§4) ─────────────────────────────────────────
+    // ONE pure rule (sheetPageTarget, Node-tested in packages/fix) decides what format every freshly-
+    // composed sheet page encodes to — STATIC repack/merge, SPINE repack, and the Feature-4 pack all
+    // consume it via sheetEnc, which maps the decision onto the EXISTING encode closures (no duplication):
+    //   spine-png     ⇒ today's Spine literal  ('image/png' + {allowPngFallback:true})
+    //   webp-lossless ⇒ today's repack literal ('image/webp' + {lossless:true, allowPngFallback:true})
+    //   legacy        ⇒ the resolved legacy target (identical to today's resolveOptions pack path — feeding
+    //                   the already-resolved mime back as the base re-folds to the SAME EffectiveOptions)
+    //   profile       ⇒ resolveProfile(ref).formats[0] via formatEncode(fmt, 1, rp.global) → feToEncodeOpts
+    // ADDITIVE: absent opts.spinePageFormat ⇒ 'png'; profile OFF ⇒ the hardcode/legacy rows ⇒ every default
+    // run is byte-identical to today. scale=1 ⇒ scaleAwareQuality is a no-op for sheets (settings.ts).
+    const spinePageFormat: SpinePageFormat =
+      opts.spinePageFormat === 'profile' ? 'profile' : 'png';
+    const sheetEnc = (
+      d: SheetTargetDecision,
+      ref: string,
+      kindForLegacy: FixAssetKind,
+    ): { mime: ImageMime; encOpts: EncodeOpts } => {
+      switch (d.kind) {
+        case 'spine-png':
+          return { mime: 'image/png', encOpts: { allowPngFallback: true } };
+        case 'webp-lossless':
+          return { mime: 'image/webp', encOpts: { lossless: true, allowPngFallback: true } };
+        case 'legacy':
+          return {
+            mime: d.mime,
+            encOpts: encOptsFor(
+              resolveOptions(ref, kindForLegacy, { ...baseEffective, targetMime: d.mime }, opts.overrides),
+              true,
+            ),
+          };
+        case 'profile': {
+          const rp = resolveProfile(ref);
+          return { mime: d.format.format, encOpts: feToEncodeOpts(formatEncode(d.format, 1, rp.global)) };
+        }
+      }
+    };
+    /** The honest multi-format note (one per emitted sheet): a profile with >1 format still ships ONE page
+     *  per sidecar (formats[0]) — fan-out is impossible, and silence would hide the un-emitted formats. */
+    const multiFormatSheetNote = (assetRef: string, mime: ImageMime): void => {
+      skipped.push({
+        assetRef,
+        reason: `export profile: sheet page emitted as ${mime.replace('image/', '')} only (one sidecar references one page)`,
+      });
+    };
 
     // ── DRY-RUN PLAN SHORT-CIRCUIT (docs/improvements/dry-run-plan-preview.md) ──────────────────────────
     // mode 'plan': everything above (parse + analyze + planFix + the PIXEL-FREE gates) has already run. NOTE
@@ -1911,7 +1963,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       post({ type: 'fix-progress', label: op.kind, done: done++, total });
 
       if (op.kind === 'repack') {
-        // Spine single-page repack: emit a .atlas (not JSON) and keep PNG (Spine-runtime safe). Drop-in.
+        // Spine single-page repack: emit a .atlas (not JSON). Pages keep PNG (Spine-runtime safe) unless
+        // opts.spinePageFormat === 'profile' opts them into the profile/legacy target (sheetPageTarget). Drop-in.
         if (op.atlasRefs.length === 1 && spineRefs.has(op.atlasRefs[0]!)) {
           const ref = op.atlasRefs[0]!;
           const info = spineInfoOf(ref);
@@ -1955,26 +2008,56 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
             continue;
           }
           const na = r.atlases[0]!;
-          // Compose + encode via the shared helper (Spine pages stay PNG, runtime-safe). encodeCanvas for PNG
-          // with no recompress level returns the native PNG bytes — same result as the prior convertToBlob.
+          // Sheet-page format (settings design §0.1/§4, sheetPageTarget): default spinePageFormat 'png' ⇒
+          // the spine-png decision ⇒ today's PNG literal, byte-identical (encodeCanvas for PNG with no
+          // recompress level returns the native PNG bytes — same result as the prior convertToBlob).
+          // 'profile' ⇒ resolved profile formats[0] (or the legacy resolved Spine target when no profile).
           // eff>0 ⇒ each rectangle blit's edge pixels are replicated into the reserved gutter (seam fix).
+          const dec = sheetPageTarget({
+            site: 'repack',
+            isSpine: true,
+            spinePageFormat,
+            profileFormats: profileOn ? resolveProfile(ref).formats : [],
+            legacyMime: resolveOptions(ref, 'spine', baseEffective, opts.overrides).targetMime,
+          });
+          const pageEnc = sheetEnc(dec, ref, 'spine');
           const enc = await composePageEncode(
             r.blits,
             na.size.w,
             na.size.h,
-            'image/png',
-            { allowPngFallback: true },
+            pageEnc.mime,
+            pageEnc.encOpts,
             eff,
           );
           if (!enc) {
             skipped.push({ assetRef: ref, reason: 'source sheet unavailable' });
             continue;
           }
-          const imagePath = pathByRef.get(ref)!;
-          // Cache-bust chain (round9 K6): hash the PNG bytes → patch na.imageRef (the .atlas texture line, line 0)
-          // to the hashed basename → emit the .atlas (it now points at the hashed PNG) → hash the joined .atlas.
-          // PNG bytes are preserved (Spine pages stay PNG). hashOff ⇒ emittedImage===imagePath, emittedAtlas===
-          // info.path, no row ⇒ byte-identical drop-in to today.
+          const origImagePath = pathByRef.get(ref)!;
+          let imagePath = origImagePath;
+          if (dec.kind !== 'spine-png') {
+            // Non-default Spine page format: rename the page by the ACTUAL emitted mime's extension (a PNG
+            // fallback keeps a .png source's name) and repoint the .atlas texture line (line 0) BEFORE
+            // emitSpineAtlasText — mirrors the static repack ext repoint. Surface the honest runtime note
+            // (the game's loader must decode this format — Pixi does) + the multi-format note (formats[0]
+            // shipped; one sidecar references one page). Default 'png' never enters this branch.
+            const newExt = EXT[enc.mime] ?? '.png';
+            const renamed = origImagePath.replace(/\.[a-z0-9]+$/i, newExt);
+            if (renamed !== origImagePath) {
+              imagePath = renamed;
+              na.imageRef = na.imageRef.replace(/\.[a-z0-9]+$/i, newExt);
+            }
+            if (enc.mime !== 'image/png')
+              skipped.push({
+                assetRef: ref,
+                reason: `spine pages emitted as ${enc.mime.replace('image/', '')} — requires a loader that decodes it (Pixi does)`,
+              });
+            if (dec.kind === 'profile' && dec.multiNote) multiFormatSheetNote(ref, enc.mime);
+          }
+          // Cache-bust chain (round9 K6): hash the page bytes → patch na.imageRef (the .atlas texture line,
+          // line 0) to the hashed basename → emit the .atlas (it now points at the hashed page) → hash the
+          // joined .atlas. hashOff ⇒ emittedImage===imagePath, emittedAtlas===info.path, no row ⇒ drop-in
+          // (byte-identical to today on the default PNG path).
           const emittedImage = await hashEmit(imagePath, enc.bytes);
           if (hashOn) na.imageRef = basename(emittedImage);
           out.push({ path: emittedImage, bytes: enc.bytes });
@@ -1991,7 +2074,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
             changeRows.push(...repackChanges(info.path, emittedAtlas));
           }
           captureSheetDiff(ref, atlas.size, na, enc.bytes, basename(emittedImage), atlas);
-          replaced.add(imagePath);
+          replaced.add(origImagePath); // the source page never passes through (renamed or rewritten in place)
+          replaced.add(imagePath); // === origImagePath on the default PNG path (set semantics — no change)
           replaced.add(info.path);
           vramSaved += r.vramBytesBefore - r.vramBytesAfter;
           // HONESTY (invariant 5): if the gutter grew this sheet's POT, the .atlas `size:` line + PNG dims
@@ -2175,6 +2259,18 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         // Extrude only the RECTANGLE result — a selected polygon result emits meshed blits (never extruded);
         // feeding eff there would just surface a meshed no-op skip per sprite. eff already gated the gutter.
         const composeExtrude = polySelected ? 0 : eff;
+        // Sheet-page format (settings design §0.1, sheetPageTarget): profile ON ⇒ resolveProfile(refs[0])
+        // .formats[0] (refs[0] = the SAME representative baseDir/captureSheetDiff already use; documented v1
+        // rule for a merge group); profile OFF ⇒ today's lossless-WebP hardcode UNCONDITIONALLY (a geometry
+        // fix is never silently routed through the lossy loose default — the profile is the format vehicle).
+        const dec = sheetPageTarget({
+          site: 'repack',
+          isSpine: false,
+          spinePageFormat,
+          profileFormats: profileOn ? resolveProfile(refs[0]!).formats : [],
+          legacyMime: 'image/webp', // unused for static repack/merge (profile-OFF ⇒ 'webp-lossless')
+        });
+        const pageEnc = sheetEnc(dec, refs[0]!, 'pixi');
         for (let i = 0; i < r.atlases.length && composeOk; i++) {
           const na = r.atlases[i]!;
           const naNames = new Set(na.sprites.map((s) => s.name));
@@ -2185,8 +2281,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
             r.blits.filter((b) => naNames.has(b.name)),
             na.size.w,
             na.size.h,
-            'image/webp',
-            { lossless: true, allowPngFallback: true },
+            pageEnc.mime,
+            pageEnc.encOpts,
             composeExtrude,
           );
           if (!sheet) {
@@ -2194,6 +2290,8 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
             break;
           }
           const ext = EXT[sheet!.mime] ?? '.png';
+          // Multi-format profile ⇒ formats[0] shipped — one honest note per emitted sheet (never silent).
+          if (dec.kind === 'profile' && dec.multiNote) multiFormatSheetNote(refs[0]!, sheet!.mime);
           if (merge) {
             const stem = `atlas-merged${r.atlases.length > 1 ? `-${i}` : ''}`;
             // Cache-bust chain (round9 K5): hash the IMAGE bytes → patch na.imageRef to the hashed basename →
@@ -2236,10 +2334,15 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           } else {
             const ref = refs[0]!;
             const origPath = pathByRef.get(ref)!;
-            const imagePath =
-              sheet!.mime === 'image/webp' ? origPath.replace(/\.[a-z0-9]+$/i, '.webp') : origPath;
-            if (sheet!.mime === 'image/webp')
-              na.imageRef = na.imageRef.replace(/\.[a-z0-9]+$/i, '.webp');
+            // Generalized ext repoint (settings design §0.1 correction — was two hardcoded
+            // `=== 'image/webp'` checks): rename the page by the ACTUAL emitted mime's extension and
+            // repoint na.imageRef in step; skip when the extension is unchanged. Behavior-identical for
+            // today's webp emit (.png→.webp renamed, .webp stays, a PNG fallback from a .png source keeps
+            // its name) and mime-correct for profile formats (avif/png).
+            const newSheetExt = EXT[sheet!.mime] ?? '.png';
+            const imagePath = origPath.replace(/\.[a-z0-9]+$/i, newSheetExt);
+            if (imagePath !== origPath)
+              na.imageRef = na.imageRef.replace(/\.[a-z0-9]+$/i, newSheetExt);
             // Cache-bust chain (round9 K5): hash the IMAGE bytes → patch na.imageRef to the hashed basename →
             // emit the sidecar → hash it. hashOff ⇒ emittedImage === imagePath, emittedJson === mPath (identical).
             const emittedImage = await hashEmit(imagePath, sheet!.bytes);
@@ -2733,6 +2836,20 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         // a group large enough to exceed the budget — and then it prevents a re-decode storm, never wrong pixels.
         bmpBudget!.pin(group.regions.map((r) => r.ref));
 
+        // Sheet-page format (settings design §0.1/§4.2.3, sheetPageTarget): resolve by the group's OUTPUT
+        // folder with kind 'loose' — the SAME key the legacy path resolves by — so folder-prefix profile
+        // overrides match by output folder (deterministic, mirrors legacy). Spine default 'png' + static
+        // profile-OFF legacy target ⇒ byte-identical to today; profile ON ⇒ static pages emit formats[0].
+        const packDec = sheetPageTarget({
+          site: 'pack',
+          isSpine,
+          spinePageFormat,
+          profileFormats: profileOn ? resolveProfile(group.outDir).formats : [],
+          legacyMime: resolveOptions(group.outDir, 'loose', baseEffective, opts.overrides)
+            .targetMime,
+        });
+        const packEnc = sheetEnc(packDec, group.outDir, 'loose');
+
         // (1) Collision pre-check — synthesize every page/JSON/.atlas path this op would write and assert
         // none overwrites an input file or an already-emitted output. On collision, disambiguate the stem to
         // `${stem}.packed`; if THAT still collides, skip the whole group + surface (never overwrite).
@@ -2742,10 +2859,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         // Probe with the REQUESTED target ext (a later AVIF→WebP/PNG fallback only narrows the real set, so
         // probing the requested ext is a superset — safe). Worst case = one page per region (the real page
         // count from packLoose is ≤ this); we probe every candidate page name + its manifest.
-        const probeExt = isSpine
-          ? '.png'
-          : (EXT[resolveOptions(group.outDir, 'loose', baseEffective, opts.overrides).targetMime] ??
-            '.png');
+        const probeExt = EXT[packEnc.mime] ?? '.png';
         const synthFor = (s: string): string[] => {
           const paths: string[] = [];
           for (let i = 0; i < group.regions.length; i++) {
@@ -2841,10 +2955,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         if (bitmapMissing) continue; // a source image was unavailable — surfaced above, skip the group
         if (regions.length === 0) continue; // every region was a transparent decoy — nothing to pack
 
-        // (3) Pack (pure). Spine sheets default to PNG (runtime-safe); static uses the effective target.
-        const effTarget = isSpine
-          ? 'image/png'
-          : resolveOptions(group.outDir, 'loose', baseEffective, opts.overrides).targetMime;
+        // (3) Pack (pure). The page target comes from the ONE sheet-format decision above (packDec/packEnc):
+        // Spine default 'png' ⇒ PNG (runtime-safe); static profile-OFF ⇒ the legacy effective target;
+        // profile ON (or spinePageFormat 'profile') ⇒ the resolved profile's formats[0].
+        const effTarget = packEnc.mime;
         // Edge-extrude (bleed): reserve a symmetric gutter so each packed region's edge pixels have room to
         // replicate into. gutter=0 ⇒ today's pack exactly (byte-identical placements + output).
         const { gutter: extGutter, eff: extEff } = extrudeOf(op);
@@ -2863,13 +2977,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         // (4–6) Compose + encode + emit each page. Static: sheet image + ONE TP JSON per bin (meta.image =
         // that page's basename). Spine: each page image + ONE `.atlas` concatenating emitSpineAtlasText per
         // page (each region under ITS page header, via pl.pageOfName built into the per-bin atlases).
-        const eff = resolveOptions(
-          group.outDir,
-          isSpine ? 'spine' : 'loose',
-          baseEffective,
-          opts.overrides,
-        );
-        const encOpts: EncodeOpts = isSpine ? { allowPngFallback: true } : encOptsFor(eff, true);
+        const encOpts: EncodeOpts = packEnc.encOpts;
         const emitted: { path: string; bytes: Uint8Array }[] = [];
         const spineBlocks: string[] = [];
         // Loader-migration: the NEW manifest(s) the game must load instead of the loose files — one TP JSON
@@ -2895,6 +3003,14 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
             break;
           }
           const ext = EXT[enc.mime] ?? '.png';
+          // Sheet-format honesty (settings design §4.2): multi-format profile ⇒ formats[0] shipped — one
+          // note per emitted sheet; a non-PNG Spine page (opt-in 'profile') carries the runtime note.
+          if (packDec.kind === 'profile' && packDec.multiNote) multiFormatSheetNote(group.id, enc.mime);
+          if (isSpine && packDec.kind !== 'spine-png' && enc.mime !== 'image/png')
+            skipped.push({
+              assetRef: group.id,
+              reason: `spine pages emitted as ${enc.mime.replace('image/', '')} — requires a loader that decodes it (Pixi does)`,
+            });
           // packLoose synthesized imageRef from the *requested* target ext; re-point it at the ACTUAL emitted
           // mime (e.g. AVIF→WebP/PNG fallback) so meta.image / the page header name matches the real file.
           const pageBase = i === 0 ? stem : `${stem}_${i}`;

@@ -90,8 +90,12 @@ export interface FixOptions {
   /** Config-driven export profile (round7-export-profile.md §2/§3). ADDITIVE: absent ⇒ byte-identical to
    *  today. When present it is the SOLE source of formats + resolutions + per-format compression for the
    *  loose-transcode / loose-resize / tier paths; SUPERSEDES the legacy targetMime + scaleTiers +
-   *  webpNearLossless for THOSE paths only. Repack/merge sheets (lossless WebP) + Spine pages (PNG) are
-   *  UNCHANGED. Validated fail-closed (validateProfile): ≥1 format, ≥1 tier with a scale===1 top, no
+   *  webpNearLossless for THOSE paths only. Freshly-composed SHEET pages follow it too (settings design
+   *  §0.1, decided by the pure sheetPageTarget): STATIC repack/merge + pack pages emit the profile's
+   *  formats[0] (multi-format ⇒ STILL formats[0] + one honest skipped[] note per sheet — one sidecar
+   *  references one page); with NO profile, repack/merge keeps lossless WebP and pack keeps the legacy
+   *  target. Spine pages stay PNG unless `spinePageFormat: 'profile'` opts them in.
+   *  Validated fail-closed (validateProfile): ≥1 format, ≥1 tier with a scale===1 top, no
    *  lossless-AVIF, valid suffix tokens, no duplicate targets; invalid ⇒ NO emit + an honest skipped[]
    *  entry. MUTUALLY EXCLUSIVE with scaleTiers (buildOptions omits scaleTiers when a profile is sent —
    *  never both). Per-folder/prefix/type OVERRIDES (round10-profile-overrides.md) ride INSIDE this object as
@@ -113,6 +117,14 @@ export interface FixOptions {
   packTrim?: boolean;
   /** Bypass the minLooseImages floor (a forced 1-region sheet is valid). Default false. */
   packForced?: boolean;
+  /** Spine PAGE encode target for the SPINE repack + SPINE pack sites (settings design §0.1, decided by
+   *  the pure sheetPageTarget). ABSENT/'png' (the DEFAULT) ⇒ PNG pages, byte-identical to today (the whole
+   *  branch is dead). 'profile' ⇒ pages follow the resolved export profile's formats[0] (multi-format ⇒
+   *  formats[0] + an honest note), or the LEGACY resolved target when no profile is active; the emitted
+   *  `.atlas` texture line is repointed at the renamed page and an honest runtime note is surfaced
+   *  ("requires a loader that decodes it — Pixi does"). Tier-loop Spine pages stay PNG in v1 (this option
+   *  governs the repack/pack compose sites only). PNG-fallback honesty unchanged (allowPngFallback). */
+  spinePageFormat?: 'png' | 'profile';
 
   // ── Frame-redundancy aliasing (round19) — DEFAULT ON (drop-in, lossless, shrinks the sheet). ──
   /** Alias byte-identical animation frames within an atlas onto ONE shared packed region (round19). The
