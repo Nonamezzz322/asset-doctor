@@ -12,6 +12,7 @@ import type {
   AtlasFrameTrims,
   ContentClass,
   Finding,
+  FindingParams,
   ImageAsset,
   ImageFeatures,
   Rect,
@@ -50,7 +51,7 @@ import {
   shouldAtlasFinding,
   strippableMetadataAggregateFinding,
 } from './folder';
-import { groupVariants, variantsFinding } from './variants';
+import { groupVariants, redundantFormatRefs, variantsFinding } from './variants';
 import { fontGlyphPageFinding } from './font';
 
 export interface AnalyzeDeps {
@@ -292,6 +293,19 @@ export async function analyze(
       // Strippable ancillary metadata on the loose image. De-overlapped with format/wasted-alpha via bumpBest
       // (one re-encode transcodes / drops-alpha AND strips this metadata — three-way MAX, never the sum).
       addStrippable(image.name, image);
+    }
+  }
+
+  // Presentation-only DEMOTION marker (invariant 3): a per-file `format` suggestion is REDUNDANT when a
+  // sibling in the SAME format-only cluster (same stem, exact dims, no resolution token) already ships in
+  // the recommended target format. We MEASURE that and mark the finding; we do NOT change its estimate,
+  // severity, or potentialDiskSaved (the png→avif saving stays counted — reverting it would UNDER-state a
+  // real recoverable saving). Guarded on there being format findings, so the CLI (which produces none —
+  // no encodeImage ⇒ no format findings) is byte-identical. Additive metadata; consumed only by the browser.
+  if (formatFindings.length > 0) {
+    const redundant = redundantFormatRefs(assets, formatFindings);
+    for (const f of formatFindings) {
+      if (redundant.has(f.assetRef)) (f.params as FindingParams).redundantSibling = 1;
     }
   }
 

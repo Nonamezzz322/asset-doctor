@@ -5,7 +5,7 @@
 // the realistic loaded VRAM as a range: format variants are VRAM-identical (counted once);
 // resolution variants load one tier per device (min..max across the group).
 
-import type { Asset, Finding, Size } from '@asset-doctor/core';
+import type { Asset, Finding, ImageMime, Size } from '@asset-doctor/core';
 import { fmtBytes, vramBytes } from './rules';
 
 // Strip the extension, then peel resolution/format tokens off the end (in any order).
@@ -119,4 +119,82 @@ export function variantsFinding(v: VariantGroups): Finding | null {
     messageKey: 'variants',
     params: { variantFiles: v.variantFiles, groups: v.groups.length, loadedMin: v.loadedVramMin, loadedMax: v.loadedVramMax, summed: v.summedVram },
   };
+}
+
+/* ── Format-only sibling clusters (browser-only presentation input) ──────────────────────────────
+ * A TIGHTER cousin of groupVariants used ONLY by the presentation-layer format-demotion marker: it
+ * clusters files that are the SAME logical image shipped in ≥2 formats (icon.png + icon.avif). Unlike
+ * groupVariants (which tolerates aspect-bucket rounding to keep resolution TIERS together), a format
+ * sibling must match on EXACT w×h — two files sharing a stem but differing in dimensions are NOT the
+ * same image. Resolution-tier files (hasResolutionToken) are excluded outright: a _540p/_1080p pair is
+ * a real ladder, not a redundant format pair. Pure, worker-safe, ZERO finding/estimate side effects. */
+
+/** One format-only variant cluster: the SAME logical image (same dir-aware stem, exact dims, no
+ *  resolution token) shipped in ≥2 distinct image formats. */
+export interface FormatSiblingGroup {
+  /** Dir-aware stem (via the existing stemOf), shared by every member. */
+  stem: string;
+  /** Members carrying each file's ref + on-disk mime (the demotion guard reads the mime). Sorted by ref. */
+  members: { ref: string; mime: ImageMime }[];
+}
+
+interface FItem {
+  ref: string;
+  mime: ImageMime;
+  size: Size;
+}
+
+/** Format-ONLY variant clusters: same dir-aware stem (existing stemOf), hasResolutionToken === false for
+ *  ALL members, EXACT w==w && h==h for ALL members, and ≥2 DISTINCT image mimes. Each member maps to
+ *  { ref, mime: image.mime, size } exactly as groupVariants does (atlas → atlas.name + atlas.size; loose →
+ *  image.name + image.size). Members within a group are sorted by ref.localeCompare, and the group list is
+ *  itself deterministically ordered (stem then first ref). Pure. */
+export function formatSiblingGroups(assets: Asset[]): FormatSiblingGroup[] {
+  const items: FItem[] = assets
+    .map((a) =>
+      a.kind === 'atlas'
+        ? { ref: a.atlas.name, mime: a.image.mime, size: a.atlas.size }
+        : { ref: a.image.name, mime: a.image.mime, size: a.image.size },
+    )
+    .filter((it) => !hasResolutionToken(it.ref));
+
+  // Bucket by dir-aware stem + EXACT w×h (the exact-dims sub-bucket is the tightening over
+  // groupVariants' aspectBucket: a 100×50 and a 50×100 share a stem but are not the same image).
+  const buckets = new Map<string, FItem[]>();
+  for (const it of items) {
+    const key = `${stemOf(it.ref)}|${it.size.w}x${it.size.h}`;
+    const arr = buckets.get(key);
+    if (arr) arr.push(it);
+    else buckets.set(key, [it]);
+  }
+
+  const groups: FormatSiblingGroup[] = [];
+  for (const members of buckets.values()) {
+    const mimes = new Set(members.map((m) => m.mime));
+    if (mimes.size < 2) continue; // needs ≥2 DISTINCT formats to be a format-sibling cluster
+    const sorted = [...members].sort((a, b) => a.ref.localeCompare(b.ref));
+    groups.push({ stem: stemOf(sorted[0]!.ref), members: sorted.map((m) => ({ ref: m.ref, mime: m.mime })) });
+  }
+  groups.sort((a, b) => a.stem.localeCompare(b.stem) || a.members[0]!.ref.localeCompare(b.members[0]!.ref));
+  return groups;
+}
+
+/** The refs whose per-file `format` finding is REDUNDANT because a sibling in the SAME format-only cluster
+ *  already ships in the format the finding recommends (finding.params.bestMime — the MEASURED smallest-encode
+ *  winner). Consumes the format findings so it reads each one's measured bestMime; returns a Set<assetRef>.
+ *  Pure, deterministic, no side effects. */
+export function redundantFormatRefs(assets: Asset[], formatFindings: Finding[]): Set<string> {
+  // ref → the FULL mime set of the format-only cluster it belongs to (a ref not in any cluster is absent).
+  const mimesByRef = new Map<string, Set<string>>();
+  for (const g of formatSiblingGroups(assets)) {
+    const mimes = new Set<string>(g.members.map((m) => m.mime));
+    for (const m of g.members) mimesByRef.set(m.ref, mimes);
+  }
+  const out = new Set<string>();
+  for (const f of formatFindings) {
+    const best = f.params?.bestMime;
+    if (typeof best !== 'string') continue; // only a MEASURED target counts
+    if (mimesByRef.get(f.assetRef)?.has(best)) out.add(f.assetRef);
+  }
+  return out;
 }

@@ -565,7 +565,14 @@ export interface ThresholdConfig {
   npotPadding: { warn: number };
   /** Folder-level checks. */
   duplicates: { similarHammingMax: number };
-  shouldAtlas: { minLooseImages: number; maxSpriteEdgePx: number };
+  /** Loose-sprite packing gate. `minLooseImages` / `maxSpriteEdgePx` drive `shouldAtlasFinding`.
+   *  `dominatedFraction` is a BROWSER-ONLY presentation gate (primary-card prominence + collapse-default):
+   *  the fraction of ALL assets (big loose + every atlas included in the denominator) that must be packable
+   *  loose sprites before the folder reads as "loose-dominated". NOT read by any rule — `shouldAtlasFinding`
+   *  is unchanged and never consults it, so it passes through `resolveThresholds` harmlessly and CLI/budget
+   *  findings stay byte-identical. Optional/additive: absent ⇒ the presentation gate fails closed (no card,
+   *  no collapse). */
+  shouldAtlas: { minLooseImages: number; maxSpriteEdgePx: number; dominatedFraction?: number };
   atlasMerge: { occupancyBelow: number; minAtlases: number };
   /** Total CONDITIONAL mipmap overhead (Σ vramBytesMipmapped − vramBytes) across the folder before the
    *  aggregate mipmap-cost info finding fires. Geometry only; no pixel read. Optional: absent ⇒ the

@@ -8,7 +8,12 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   formatSaving: { warn: 0.25 }, // fraction of disk bytes a better format could save
   npotPadding: { warn: 0.25 }, // POT-padding waste before an NPOT finding fires (NPOT alone is fine on WebGL2/Pixi)
   duplicates: { similarHammingMax: 6 }, // dHash bits that may differ for "near-identical"
-  shouldAtlas: { minLooseImages: 8, maxSpriteEdgePx: 512 }, // loose sprites worth packing
+  shouldAtlas: { minLooseImages: 8, maxSpriteEdgePx: 512, dominatedFraction: 0.5 }, // loose sprites worth packing.
+  // dominatedFraction (0.5 — PROVISIONAL, calibrate): BROWSER-ONLY presentation gate (primary-card prominence +
+  // collapse-default). Fraction of ALL assets (big loose + every atlas in the denominator) that must be packable
+  // loose sprites before the folder reads as loose-dominated — so a background/atlas-heavy folder (8 loose beside
+  // 500 atlases) scores LOW and is NOT promoted/collapsed. NO rule reads it (shouldAtlasFinding is unchanged), so
+  // it passes through resolveThresholds inertly and CLI/budget output stays byte-identical.
   atlasMerge: { occupancyBelow: 0.5, minAtlases: 2 }, // under-filled atlases worth merging
   mipmap: { warn: 4_194_304 }, // total conditional mip overhead (bytes) before the aggregate info fires.
   // One 2048² atlas alone is +5.59 MB and trips it; small UI-only sets (a 1024² page is only +1.33 MB) stay quiet.
