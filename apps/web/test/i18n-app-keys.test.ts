@@ -57,7 +57,11 @@ const appSrc =
   // without scanning SettingsPage a renamed moved key would silently render a raw dotted key.
   comp('SettingsPage.tsx') +
   '\n' +
-  comp('TriageLedger.tsx');
+  comp('TriageLedger.tsx') +
+  '\n' +
+  // PrimaryRecommendation.tsx owns the recommend.pack.* keys (title/body/build/configure), referenced
+  // nowhere else; without scanning it a renamed recommend.pack.* key would silently render a raw dotted key.
+  comp('PrimaryRecommendation.tsx');
 
 // Suffix maps mirrored from App.tsx (modeKey / granKey) so dynamic option keys resolve to concrete keys.
 const MODE_SUFFIXES = ['auto', 'static', 'spine'];

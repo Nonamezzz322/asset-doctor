@@ -33,12 +33,17 @@ import { FilmViewer } from './components/FilmViewer';
 import { Findings } from './components/Findings';
 import { VerdictBar } from './components/VerdictBar';
 import { TriageLedger } from './components/TriageLedger';
+import { PrimaryRecommendation } from './components/PrimaryRecommendation';
 import { useDebounced } from './lib/useDebounced';
-import { buildIndex, countCandidates, defaultSelectOpts, DEFAULT_SEVERITIES, DEFAULT_SORT, selectRows, type LedgerRow, type SelectOpts, type SortKey } from './lib/triage';
+import { buildIndex, countCandidates, defaultSelectOpts, DEFAULT_SEVERITIES, DEFAULT_SORT, foldableFindingIds, isAssetAxis, looseRecommendation, selectRows, type LedgerRow, type SelectOpts, type SortKey } from './lib/triage';
 import { analysisReadyMessage, resultCountMessage } from './lib/announce';
 import { resultsHeading } from './lib/results-heading';
 import { progressView } from './lib/progress-view';
 import { buildTotalsRows } from './lib/totals-rows';
+
+// Stable empty Set (constant identity) so the `foldIds` memo has a fixed reference when there is no report —
+// no fresh object per render, so nothing downstream needlessly recomputes. PRESENTATION only (design §5.1).
+const EMPTY_SET: ReadonlySet<string> = new Set<string>();
 
 type Phase =
   | { t: 'idle' }
@@ -89,6 +94,10 @@ export function App() {
   const [problemsOnly, setProblemsOnly] = useState(true);
   const [groupByFolder, setGroupByFolder] = useState(false);
   const [showClean, setShowClean] = useState(false);
+  // Monotonic "the user asked to build a spritesheet" signal (spritesheet-first design §4.3). The primary
+  // recommendation card's [Build] bumps this AND flips packLoose (via the context patch); the FixCard's
+  // nonce effect reads the increment and previews a pack-inclusive plan. Pure UI state — feeds no analysis.
+  const [buildNonce, setBuildNonce] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   // Tracks the report identity we have already auto-selected a worst offender for, so the async probe
   // re-set (a NEW report object with the same findings) can never yank the user's selection back to row 0
@@ -198,6 +207,11 @@ export function App() {
   // selectRows is one pure sort per control change. Search is debounced so keystrokes don't re-sort. ──
   const debouncedSearch = useDebounced(search, 150);
   const index = useMemo(() => (report ? buildIndex(report) : null), [report]);
+  // The spritesheet-first primary recommendation (design §4). null unless the folder is loose-dominated —
+  // reads the single should-atlas finding + report.thresholds, invents nothing. Drives ONLY the card's
+  // presence + its verbatim `n`; the ledger/tally/VerdictBar are untouched (invariant 3). The collapse that
+  // also consumes this signal lands in task C.
+  const rec = useMemo(() => (report ? looseRecommendation(report) : null), [report]);
   // problemsOnly is forced off whenever "show clean" is on, so the synthesized `ok` rows can surface
   // (honest hiding). showClean also drives includeClean — analysis emits no ok finding, so clean assets
   // only become rows when selectRows synthesizes them. Toggling now changes the row set by exactly N clean.
@@ -223,6 +237,42 @@ export function App() {
   const totalRows = useMemo(
     () => (index && selectOpts ? countCandidates(index, selectOpts) : 0),
     [index, selectOpts],
+  );
+  // ── Honest spam-collapse (spritesheet-first design §5.1/§1) — PRESENTATION ONLY (invariant 3). `foldIds` is
+  //    the set of finding ids that MAY fold (loose-fold ∪ redundant format-siblings), computed by
+  //    foldableFindingIds over the FULL report BEFORE any selection — so it can never touch the tally
+  //    (VerdictBar/announce read index.tally, built up-front). Nothing is deleted: folded rows stay in
+  //    index.rows and the raw selected `rows`; they reappear inline in ONE click of the ledger's "show K"
+  //    toggle. `foldOpen` defaults collapsed and RESETS to collapsed on every new analysis. `foldedCount` (K) is
+  //    the count of foldable rows inside the CURRENT (post-search) selected rows — stated verbatim on the
+  //    toggle. `visibleRows` drops them ONLY while collapsed AND only when there is something to fold; with
+  //    nothing to fold it is the SAME array `rows` (===) ⇒ the results view is byte-identical to before.
+  //    `totalRows` (M) stays countCandidates — untouched by the fold (search/fold-independent). ──
+  const foldIds = useMemo<ReadonlySet<string>>(() => (report ? foldableFindingIds(report) : EMPTY_SET), [report]);
+  const [foldOpen, setFoldOpen] = useState(false);
+  // Reset the fold to collapsed at the START of every genuinely new analysis. Keyed on `report === null`
+  // (run() sets the report null before analyzing — the ONLY null transition) rather than on report IDENTITY:
+  // the async render-probe write-back installs a NEW report object for the SAME analysis (attachProbeReadings
+  // returns { ...report, assets, totals } ⇒ probed !== rep, App.tsx:182), which — under a `[report]`-identity
+  // reset — would re-fire this effect and collapse a fold the user had just expanded mid-probe. Gating on the
+  // null transition fires exactly once per new run and NEVER on the probe re-set (mirrors the autoSelectedFor
+  // guard that likewise protects the auto-selection from the probe write-back). PRESENTATION only (invariant 3).
+  useEffect(() => {
+    if (report === null) setFoldOpen(false);
+  }, [report]);
+  // The fold applies ONLY to the FINDING-axis sorts (severity/wastedDisk — one row per finding, where the
+  // per-image format/npot spam actually lives). In an ASSET-axis sort (vram/occupancy) selectRows already
+  // shows ONE row per asset (its worst-severity representative), so there is no per-finding spam to collapse;
+  // worse, folding on the representative id could drop an asset whose representative is a foldable `format`
+  // while it ALSO carries a NON-foldable warn (solid-fill/wasted-alpha) — hiding a first-class finding from
+  // the default view. So K=0 on the asset axis ⇒ nothing folds, every asset stays visible (honest).
+  const foldedCount = useMemo(
+    () => (isAssetAxis(sort) ? 0 : rows.reduce((k, r) => k + (foldIds.has(r.id) ? 1 : 0), 0)),
+    [rows, foldIds, sort],
+  );
+  const visibleRows = useMemo(
+    () => (foldOpen || foldedCount === 0 ? rows : rows.filter((r) => !foldIds.has(r.id))),
+    [rows, foldIds, foldOpen, foldedCount],
   );
   // id → Finding for the ledger's renderFinding titles (O(1), no scan per row).
   const findingById = useMemo(() => {
@@ -284,10 +334,12 @@ export function App() {
     setSelectedFinding(top.scope === 'asset' ? top.id : undefined);
   }, [rows, report, selectedAsset]);
 
-  // a11y: speak the settled "showing N of M" whenever a filter/search/sort changes the visible count. Keyed
-  // on the two integers [rows.length, totalRows] — they only change AFTER the existing 150ms search debounce
-  // settles (debouncedSearch), so this is naturally debounced with zero new timers and no per-keystroke chatter
-  // (PERF: no row iteration). HONEST: announces the EXACT ledger numbers (rows.length / totalRows), never VRAM.
+  // a11y: speak the settled "showing N of M" whenever a filter/search/sort/fold changes the visible count.
+  // Keyed on the two integers [visibleRows.length, totalRows] — the SAME post-fold numbers the ledger prints
+  // (design §1.4/§7: announce what is VISIBLE/navigable, never the pre-fold `rows.length`, which would overstate
+  // the count by K while collapsed). They change AFTER the 150ms search debounce settles (debouncedSearch) or on
+  // a deliberate fold toggle, so this is naturally debounced with zero new timers and no per-keystroke chatter
+  // (PERF: no row iteration). HONEST: announces the EXACT ledger numbers (visibleRows.length / totalRows), never VRAM.
   // The FIRST settle for a fresh report is skipped (countAnnouncedFor guard) because emitLive already spoke
   // "Diagnosis ready. N problems." for that same moment — we only want the count on subsequent control changes.
   const countAnnouncedFor = useRef<AnalysisReport | null>(null);
@@ -298,11 +350,11 @@ export function App() {
       countAnnouncedFor.current = report;
       return;
     }
-    emitLive(resultCountMessage(rows.length, totalRows, t));
+    emitLive(resultCountMessage(visibleRows.length, totalRows, t));
     // Deliberately keyed on the two settled integers (with report/phase as fresh-report guards). `t` and
     // `emitLive` are intentionally NOT deps: keying on `t` would re-announce the count on a mere relocale,
     // and `emitLive` is a per-render closure over the stable setLive — including it would add no signal.
-  }, [rows.length, totalRows, report, phase.t]);
+  }, [visibleRows.length, totalRows, report, phase.t]);
 
   const onRowClick = (row: LedgerRow) => {
     setSelectedAsset(row.assetRef);
@@ -392,6 +444,18 @@ export function App() {
                 DOM/AOM order so the SR rotor reads h1→h2→h2→h3 (monotonic). Same honest crit+warn+info count
                 as VerdictBar/announce.ts; never VRAM/disk. */}
             <h1 className="ad-sr-only">{resultsHeading(index.tally, t)}</h1>
+            {/* The PRIMARY "Build a spritesheet" recommendation (design §4.1) — rendered ONLY when the folder
+                is loose-dominated (`rec`). Sits between the results h1 and the VerdictBar so the heading
+                outline stays monotonic (h1 → this h2 → VerdictBar's h2). Absent when not dominated ⇒ the
+                results view is DOM-identical to before. Invents nothing: `rec.n` is should-atlas's own count.
+                [Build] flips packLoose + bumps buildNonce (the FixCard nonce effect previews a pack plan). */}
+            {rec ? (
+              <PrimaryRecommendation
+                n={rec.n}
+                onBuild={() => setBuildNonce((x) => x + 1)}
+                configureHref={SETTINGS_HASH}
+              />
+            ) : null}
             <VerdictBar tally={index.tally} severityFilter={severityFilter} onToggle={toggleSeverity} />
             {/* Sub-md totals strip — the EXACT inverse breakpoint of the desktop header block (md:flex):
                 below md the header totals are display:none, so without this the disk≠VRAM honesty pin
@@ -415,7 +479,7 @@ export function App() {
               <section className="grid items-start gap-6 lg:grid-cols-[1fr_minmax(320px,420px)]">
                 <TriageLedger
                   index={index}
-                  rows={rows}
+                  rows={visibleRows}
                   findingById={findingById}
                   selectedAsset={selectedAsset}
                   opts={selectOpts}
@@ -427,6 +491,9 @@ export function App() {
                   showClean={showClean}
                   setShowClean={setShowClean}
                   totalRows={totalRows}
+                  foldedCount={foldedCount}
+                  foldOpen={foldOpen}
+                  setFoldOpen={setFoldOpen}
                   onRowClick={onRowClick}
                 />
 
@@ -438,7 +505,7 @@ export function App() {
                   )}
                   <h2 className="font-mono text-xs uppercase tracking-[0.06em] text-teal">{t('findings.title')}</h2>
                   <Findings findings={assetFindings} selectedId={selectedFinding} onSelect={setSelectedFinding} />
-                  <FixCard files={files} />
+                  <FixCard files={files} buildNonce={buildNonce} />
                   {/* AB-R2 → settings-page: first-class deep-link to the build config. Gated on having files
                       (inert otherwise). Now a real hash link to the Settings page, whose FIRST card ("Форматы
                       вывода") carries PROFILE_PANEL_ANCHOR — Formats being the first card IS the landing spot,
@@ -767,7 +834,7 @@ function BundlesPanel({
 // The Phase-2 fix: repack + transcode the loaded folder in a worker, then download a drop-in
 // optimized .zip. Assets never leave the device. The Pro gate is OFF by default (free) and only
 // engages when VITE_PRO_GATE === 'true' — then a valid offline-verified entitlement is required.
-function FixCard({ files }: { files: PickedFile[] }) {
+function FixCard({ files, buildNonce }: { files: PickedFile[]; buildNonce: number }) {
   const { t } = useI18n();
   // The full build-config surface now lives in the shared BuildSettings context (edited on the Settings
   // page). FixCard only READS it — to build the run's FixOptions (buildFixOptions) and to gate two
@@ -775,6 +842,8 @@ function FixCard({ files }: { files: PickedFile[] }) {
   const { settings } = useBuildSettings();
   const [phase, setPhase] = useState<FixPhase>({ t: 'idle' });
   const [unlocked, setUnlocked] = useState(!PRO_GATE_ENABLED);
+  // The card's root — the buildNonce effect scrolls it into view (behavior:'auto' — reduced-motion-safe).
+  const cardRef = useRef<HTMLDivElement>(null);
 
   // Per-run state that STAYS in the FixCard (NOT a setting; never on the Settings page): marking defaults to
   // {} ⇒ every bundle is treated as 'isolated' by buildDedupGroups (same-bundle dedup only). skinGuard is a
@@ -1041,10 +1110,23 @@ function FixCard({ files }: { files: PickedFile[] }) {
     sawPlan.current = phase.t === 'plan';
   }, [phase.t]);
 
+  // [Build] bridge (spritesheet-first design §4.3): the primary recommendation card bumped `buildNonce` in
+  // App (in the SAME commit that flipped packLoose via the context patch), so this effect — firing AFTER that
+  // commit — previews a plan whose closure already reads packLoose:true, then scrolls the card into view. The
+  // prev-value ref skips the initial mount (and any FixCard remount on a fresh report, where buildNonce may
+  // still be >0) so a preview fires ONLY on a genuine increment — never spontaneously on a new analysis.
+  const buildNonceSeen = useRef(buildNonce);
+  useEffect(() => {
+    if (buildNonce === buildNonceSeen.current) return; // mount / unrelated re-render — not a Build click
+    buildNonceSeen.current = buildNonce;
+    void preview();
+    cardRef.current?.scrollIntoView({ behavior: 'auto', block: 'start' });
+  }, [buildNonce]); // fire ONLY on the nonce edge (prev-value ref guards mount); matches the file's other effects
+
   // Gated + not yet unlocked → show activation instead of the run button.
   if (PRO_GATE_ENABLED && !unlocked) {
     return (
-      <div className="rounded-xl border-2 border-teal/70 bg-panel p-4 text-center">
+      <div ref={cardRef} className="rounded-xl border-2 border-teal/70 bg-panel p-4 text-center">
         <p className="font-mono text-xs text-ink-soft">{t('pro.note')}</p>
         <ActivatePanel onUnlocked={() => setUnlocked(true)} />
       </div>
@@ -1052,7 +1134,7 @@ function FixCard({ files }: { files: PickedFile[] }) {
   }
 
   return (
-    <div className="rounded-xl border-2 border-teal/70 bg-panel p-4 text-center">
+    <div ref={cardRef} className="rounded-xl border-2 border-teal/70 bg-panel p-4 text-center">
       {/* AB-R2: first-class "optimize this folder" header — names the capability the SAME Pro fix engine
           already has (convert / scale variants / repack, structure preserved). Honest copy, no new claim;
           pro.note is retained below as the small Phase-2 sub-note. Token-driven (font-display / font-mono /

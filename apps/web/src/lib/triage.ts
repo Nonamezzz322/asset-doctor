@@ -18,7 +18,7 @@
 //   values sort LAST within their bucket. The probe re-set fills only `probe` numbers (it feeds NO sort
 //   key — VRAM sort uses DECLARED vramBytes, never the sparse async probe.vramBytes), so order is stable.
 
-import type { AnalysisReport, AssetMetrics, Severity } from '@asset-doctor/core';
+import type { AnalysisReport, AssetMetrics, Rule, Severity } from '@asset-doctor/core';
 
 export type SortKey = 'severity' | 'wastedDisk' | 'vram' | 'occupancy';
 
@@ -300,4 +300,62 @@ export function countCandidates(index: TriageIndex, opts: SelectOpts): number {
   const refs = new Set<string>();
   for (const r of filtered) refs.add(r.assetRef);
   return refs.size;
+}
+
+/* ── Spritesheet-first presentation predicates (PRESENTATION ONLY — invariant 3) ──────────────────
+ * These drive the primary "build a spritesheet" card AND the honest spam-collapse. They INVENT nothing:
+ * every value is read straight off the MEASURED report (the single should-atlas finding + the analysis
+ * redundantSibling marker + report.thresholds). Nothing here deletes a finding, changes a count, or is
+ * ever consulted BEFORE buildIndex computes the authoritative tally (App wires these AFTER the tally). */
+
+/** The single source for BOTH the primary card (`n`, verbatim) and the loose fold set (`refs`, = the
+ *  should-atlas finding's relatedRefs). null unless the folder is loose-dominated. */
+export interface LooseRecommendation {
+  n: number;
+  refs: string[];
+}
+
+/** Reads the ONE should-atlas finding + report.thresholds — invents nothing. null (fail-closed) unless
+ *  the folder is loose-dominated: should-atlas fired, `dominatedFraction` is set, there is at least one
+ *  asset, the relatedRefs clear the minLooseImages floor, AND they are ≥ dominatedFraction of ALL assets
+ *  (big loose + every atlas in the denominator, so an atlas-heavy folder scores low and is not promoted). */
+export function looseRecommendation(report: AnalysisReport): LooseRecommendation | null {
+  const sa = report.findings.find((f) => f.rule === 'should-atlas'); // the single source
+  if (!sa) return null;
+  const frac = report.thresholds.shouldAtlas.dominatedFraction;
+  if (frac === undefined) return null; // fail-closed (no card, no fold)
+  const total = report.assets.length;
+  if (total <= 0) return null;
+  const refs = sa.relatedRefs ?? [];
+  if (refs.length < report.thresholds.shouldAtlas.minLooseImages) return null; // floor (belt-and-braces)
+  if (refs.length / total < frac) return null; // domination gate
+  const n = typeof sa.params?.n === 'number' ? sa.params.n : refs.length; // verbatim n
+  return { n, refs };
+}
+
+/** True iff loose-dominated (card + collapse-default gate). Thin wrapper over looseRecommendation. */
+export function looseDominated(report: AnalysisReport): boolean {
+  return looseRecommendation(report) !== null;
+}
+
+/** Rules eligible for the LOOSE fold (explicit tested allowlist — NEVER widen without a test). Packing a
+ *  loose sprite fixes its NPOT padding + lets a better format apply, so demoting these under the one
+ *  should-atlas card is honest; every other rule (oversize, solid-fill, wasted-alpha, folder findings…)
+ *  stays first-class because packing does NOT change those pixels/alpha. */
+export const FOLDABLE_RULES: ReadonlySet<Rule> = new Set<Rule>(['dimensions-npot', 'format']);
+
+/** The set of finding IDs that MAY fold (loose-fold ∪ format-sibling demotion). Pure over the FULL report;
+ *  computed BEFORE any selection so it can never influence the tally. Hard guards: a folder-scoped finding
+ *  or a crit NEVER folds. Deterministic (iterates the already-sorted report.findings; returns a Set of ids). */
+export function foldableFindingIds(report: AnalysisReport): Set<string> {
+  const rec = looseRecommendation(report);
+  const looseRefs = rec ? new Set(rec.refs) : new Set<string>();
+  const out = new Set<string>();
+  for (const f of report.findings) {
+    if (f.scope === 'folder' || f.severity === 'crit') continue; // hard guards
+    const looseFold = rec !== null && FOLDABLE_RULES.has(f.rule) && looseRefs.has(f.assetRef);
+    const siblingFold = f.rule === 'format' && f.params?.redundantSibling === 1;
+    if (looseFold || siblingFold) out.add(f.id);
+  }
+  return out;
 }

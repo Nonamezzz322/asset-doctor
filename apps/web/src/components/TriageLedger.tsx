@@ -200,6 +200,9 @@ export function TriageLedger({
   showClean,
   setShowClean,
   totalRows,
+  foldedCount,
+  foldOpen,
+  setFoldOpen,
   onRowClick,
 }: {
   index: TriageIndex;
@@ -220,6 +223,13 @@ export function TriageLedger({
   setShowClean: (b: boolean) => void;
   /** Total candidate rows under the current severity/clean policy (for "showing N of M"). */
   totalRows: number;
+  /** Count of foldable rows (K) within the current post-search `rows` — stated verbatim on the toggle. The
+   *  `rows` prop already has them removed while collapsed (App's visibleRows); this K is how many. 0 ⇒ no
+   *  toggle (design §5.2). PRESENTATION only — the honest tally lives in the VerdictBar (index.tally). */
+  foldedCount: number;
+  /** True ⇒ the K folded rows are shown inline (expanded); false ⇒ collapsed. Drives aria-pressed. */
+  foldOpen: boolean;
+  setFoldOpen: (b: boolean) => void;
   onRowClick: (row: LedgerRow) => void;
 }) {
   const { t } = useI18n();
@@ -352,6 +362,23 @@ export function TriageLedger({
             }`}
           >
             {t('triage.showClean', { n: index.cleanAssetCount })}
+          </button>
+        ) : null}
+        {/* Honest spam-collapse toggle (design §5.2 / invariant 3) — sits OUTSIDE the role=listbox below, so the
+            listbox's sole-tab-stop + single-active aria-activedescendant model is untouched (mirrors showClean).
+            The K folded rows are never deleted: they stay in index.rows and reappear inline in ONE click here.
+            aria-pressed announces the collapsed/expanded state; K (foldedCount) is stated verbatim. Hidden when
+            nothing folds (foldedCount===0) ⇒ zero visible effect ⇒ byte-identical to before. */}
+        {foldedCount > 0 ? (
+          <button
+            type="button"
+            aria-pressed={foldOpen}
+            onClick={() => setFoldOpen(!foldOpen)}
+            className={`rounded-lg border px-2.5 py-1 font-mono text-xs transition ${
+              foldOpen ? 'border-teal text-ink' : 'border-line text-ink-soft hover:border-ink-soft'
+            }`}
+          >
+            {foldOpen ? t('triage.foldHide', { n: foldedCount }) : t('triage.foldShow', { n: foldedCount })}
           </button>
         ) : null}
       </div>

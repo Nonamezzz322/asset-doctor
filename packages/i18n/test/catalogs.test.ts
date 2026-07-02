@@ -165,6 +165,23 @@ describe('catalog completeness (all 9 locales)', () => {
     }
   });
 
+  // spritesheet-first (design §6): the primary "Build a spritesheet" card + the honest fold toggle keys
+  // exist in all 9 locales and render brace-free. The three static keys carry no token; the three plural
+  // keys ({n}) render both forms (n=1 singular, n=5 plural) with no leftover braces. Key parity is already
+  // enforced by the `same keys as en` assertion above; this pins the render for the new UI copy.
+  it('every locale renders the spritesheet-first card + fold keys (design §6) without leftover braces', () => {
+    for (const loc of LOCALES) {
+      expect(translate(loc, 'recommend.pack.title')).not.toContain('{');
+      expect(translate(loc, 'recommend.pack.build')).not.toContain('{');
+      expect(translate(loc, 'recommend.pack.configure')).not.toContain('{');
+      for (const n of [1, 5]) {
+        expect(translate(loc, 'recommend.pack.body', { n }), `${loc} recommend.pack.body n=${n}`).not.toContain('{');
+        expect(translate(loc, 'triage.foldShow', { n }), `${loc} triage.foldShow n=${n}`).not.toContain('{');
+        expect(translate(loc, 'triage.foldHide', { n }), `${loc} triage.foldHide n=${n}`).not.toContain('{');
+      }
+    }
+  });
+
   it('whyNoKernel is left untouched (a separate resample key carries the tier hint — B2)', () => {
     expect(translate('en', 'fix.skipped.whyNoKernel')).toBe(
       "Downscale kernel isn't configurable in-browser — the browser's high-quality resampler is used.",
