@@ -52,6 +52,11 @@ const appSrc =
   // nowhere else; without scanning it a renamed license.* key would silently render a raw dotted key.
   comp('LicensePanel.tsx') +
   '\n' +
+  // SettingsPage.tsx owns the moved fix.* panel keys + the new settings.* keys (the whole build-config UI
+  // moved off the FixCard onto the dedicated page). App.tsx only references settings.nav/settings.open, so
+  // without scanning SettingsPage a renamed moved key would silently render a raw dotted key.
+  comp('SettingsPage.tsx') +
+  '\n' +
   comp('TriageLedger.tsx');
 
 // Suffix maps mirrored from App.tsx (modeKey / granKey) so dynamic option keys resolve to concrete keys.

@@ -1,12 +1,19 @@
-// AB-R2 — pure decision module for the first-class "optimize this folder" affordance on the results
-// screen. apps/web has NO React test harness (vitest env=node), so the load-bearing decisions —
-// which copy keys exist and when the deep-link anchor is shown — are extracted here and unit-tested,
-// mirroring the FORMAT_KEYS / OVERRIDE_MODE_KEYS constant pattern in App.tsx. ZERO React, ZERO DOM.
+// AB-R2 (+ settings-page design §2) — pure decision module for the first-class "optimize this folder"
+// affordance on the results screen. apps/web has NO React test harness (vitest env=node), so the
+// load-bearing decisions — which copy keys exist and when the deep-link anchor is shown — are extracted
+// here and unit-tested, mirroring the FORMAT_KEYS / OVERRIDE_MODE_KEYS constant pattern. ZERO React,
+// ZERO DOM.
 //
 // This is presentation discoverability only: the engine, worker, plan/execute, zip and the
 // structure-preserving ExportProfile fan-out are entirely untouched. The constants below merely name a
-// capability the engine already has and give the anchor + panel a single shared DOM id so they cannot
-// drift. No new ops, no new defaults, no over-claim (the copy says EXACTLY what the fix engine does).
+// capability the engine already has and give the deep-link source + target a single shared DOM id so
+// they cannot drift. No new ops, no new defaults, no over-claim (the copy says EXACTLY what the fix
+// engine does).
+//
+// SETTINGS-PAGE UPDATE: the anchor is now a NAVIGATION link — `<a href={SETTINGS_HASH}>` (lib/route.ts)
+// — to the dedicated Settings page, whose FIRST card ("Форматы вывода", the moved ExportProfilePanel)
+// carries PROFILE_PANEL_ANCHOR as its DOM id. No scroll bookkeeping: Formats being the first card IS the
+// landing position. The gate (optimizeEntryEnabled) and the copy keys are unchanged.
 
 /** The three copy keys for the optimize affordance — single source of truth so a test can assert they
  *  exist in all 9 i18n catalogs (the same drift-guard discipline as the catalog completeness test). */
@@ -31,6 +38,8 @@ export function optimizeEntryEnabled(fileCount: number, profileSupported: boolea
   return fileCount > 0;
 }
 
-/** DOM id shared by the anchor button's scrollIntoView target and the ExportProfilePanel's <details>
- *  id attribute, so the deep-link target and the deep-link source can never drift apart. */
+/** DOM id of the deep-link TARGET — the Formats card (the moved ExportProfilePanel content) on the
+ *  Settings page, the FIRST card after the h1. The anchor itself navigates via href={SETTINGS_HASH}
+ *  (lib/route.ts); sharing this id keeps the deep-link source and target from ever drifting apart.
+ *  (Pre-settings-page this was the FixCard ExportProfilePanel <details> id — value unchanged.) */
 export const PROFILE_PANEL_ANCHOR = 'ad-export-profile';

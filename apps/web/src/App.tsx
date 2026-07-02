@@ -1,8 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type SyntheticEvent } from 'react';
-import type { AnalysisReport, AssetMetrics, BundleAvailability, ExportFormat, ExportProfile, Finding, LazyMarking, ResolutionTier, ScaleTier, Severity, SkinGuard } from '@asset-doctor/core';
-import type { PackMode, StaticGranularity } from '@asset-doctor/ingest';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { AnalysisReport, AssetMetrics, BundleAvailability, Finding, LazyMarking, Severity, SkinGuard } from '@asset-doctor/core';
 import { bundleOf, cmp } from '@asset-doctor/analysis';
-import { DEFAULT_SCALE_TIERS, isSafeSuffix } from '@asset-doctor/fix';
 import {
   filesFromDataTransfer,
   filesFromInput,
@@ -11,16 +9,18 @@ import {
   type PickedFile,
 } from './lib/import';
 import { keyOf } from './lib/group';
-import { FORMAT_KEYS, OVERRIDE_MODE_KEYS, type ProfileFormatState, type OverrideMode, type UiOverride } from './lib/profile-ui-types';
-import { serializeBuildConfig, parseBuildConfig, buildProfileFromState, type BuildConfigState } from './lib/build-config';
 import { filmSelectionAction } from './lib/film-selection';
 import { readSourceBytes, sourceReaders } from './lib/source-bytes';
 import { attachProbeReadings } from './lib/probe-run';
 import { runAnalysis, type Progress } from './lib/worker-client';
 import { planFix, runFix, type FixOutcome, type FixProgress } from './lib/fix-client';
-import type { BackendOptions, FixChange, FixOptions, FixPlanSummary, FixReceipt, NativeOpKind, SheetDiff } from './worker/fix-protocol';
+import type { BackendOptions, FixChange, FixPlanSummary, FixReceipt, NativeOpKind, SheetDiff } from './worker/fix-protocol';
+import { buildFixOptions } from './lib/build-settings';
+import { BuildSettingsProvider, useBuildSettings } from './lib/settings-ctx';
+import { viewOfHash, SETTINGS_HASH, type View } from './lib/route';
+import { SettingsPage } from './components/SettingsPage';
 import { fmtBytes } from './lib/format';
-import { OPTIMIZE_ENTRY, optimizeEntryEnabled, PROFILE_PANEL_ANCHOR } from './lib/optimize-entry';
+import { OPTIMIZE_ENTRY, optimizeEntryEnabled } from './lib/optimize-entry';
 import { groupOps, OP_KIND_ORDER, REFERENCE_CHANGING, type OpKind } from './lib/op-manifest';
 import { migrationSnippet, type Engine } from './lib/loader-migration';
 import { LOCALES, NATIVE_NAME, useI18n } from './lib/i18n';
@@ -59,10 +59,16 @@ export function App() {
   const { t } = useI18n();
   const [phase, setPhase] = useState<Phase>({ t: 'idle' });
   const [files, setFiles] = useState<PickedFile[]>([]);
-  // AB-R2: presentation-only deep-link flag for the first-class "optimize this folder" affordance. Lifted
-  // here so the results-aside anchor (below) and FixCard's ExportProfilePanel share ONE source of truth.
-  // Default false ⇒ panel default-collapsed ⇒ render byte-identical to today until the anchor is clicked.
-  const [profilePanelOpen, setProfilePanelOpen] = useState(false);
+  // Settings-page routing (design §5.1): a hash-based view switch (no react-router — repo convention). The
+  // MAIN tree stays MOUNTED (hidden) while the Settings page shows, so all analysis/fix state (report, film
+  // selection, probe readings, FixCard receipt) survives navigation. Initial read + a hashchange listener
+  // keep `view` in sync with location.hash; `hidden` removes the main subtree from the AOM ⇒ exactly one h1.
+  const [view, setView] = useState<View>(() => (typeof location !== 'undefined' ? viewOfHash(location.hash) : 'main'));
+  useEffect(() => {
+    const onHash = (): void => setView(viewOfHash(location.hash));
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
   // Round 21 #2: LAZY dir-aware byte readers for the picked folder — keyed by the SAME keyOf the workers/probe
   // use so a basename collision across folders never resolves the wrong bytes. Replaces the former EAGER byte
   // `map` (which captured `f.bytes` BEFORE runAnalysis transferred — and would hold DETACHED buffers after the
@@ -316,6 +322,7 @@ export function App() {
   const selectedFrameCount = debouncedSelected ? report?.atlasFrames?.[debouncedSelected]?.length ?? 0 : 0;
 
   return (
+    <BuildSettingsProvider>
     <div className="min-h-full bg-bg text-ink">
       <header className="sticky top-0 z-50 border-b border-line bg-bg/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-3">
@@ -342,6 +349,11 @@ export function App() {
                 <HeaderMetric label={t('metric.saveable')} value={`${fmtBytes(totals?.potentialDiskSaved ?? 0)} · ${savedPct}%`} accent />
               </div>
             ) : null}
+            {/* Settings-page nav (design §5.1): a real hash link so the page is reachable from any state and
+                deep-linkable. Styled like the existing mono-teal links. */}
+            <a href={SETTINGS_HASH} className="font-mono text-xs text-teal underline-offset-2 hover:underline">
+              {t('settings.nav')}
+            </a>
             <LanguageSwitcher />
           </div>
         </div>
@@ -358,6 +370,11 @@ export function App() {
           {live.text}
           {live.nudge ? ' ' : ''}
         </span>
+        {/* The main Dropzone/results tree stays MOUNTED but `hidden` while the Settings page shows (design
+            §5.1) — `hidden` ⇒ display:none ⇒ the whole subtree (incl. its h1) leaves the AOM, so exactly one
+            h1 renders per view and no analysis/fix state is lost on navigation. The live region above stays
+            OUTSIDE the wrapper (a display:none live region is not announced by SRs). */}
+        <div hidden={view === 'settings'}>
         {phase.t !== 'done' && (
           <Dropzone
             phase={phase}
@@ -421,23 +438,15 @@ export function App() {
                   )}
                   <h2 className="font-mono text-xs uppercase tracking-[0.06em] text-teal">{t('findings.title')}</h2>
                   <Findings findings={assetFindings} selectedId={selectedFinding} onSelect={setSelectedFinding} />
-                  <FixCard files={files} profilePanelOpen={profilePanelOpen} setProfilePanelOpen={setProfilePanelOpen} />
-                  {/* AB-R2: first-class deep-link to the optimize/build config. Gated on having files (inert
-                      otherwise). Opens the (lifted) ExportProfilePanel and scrolls the FixCard into view; if
-                      the Pro gate is ON + locked, the card shows activation — scrolling there is honest, no
-                      false promise. Smooth scroll is honored unless the user prefers reduced motion. */}
+                  <FixCard files={files} />
+                  {/* AB-R2 → settings-page: first-class deep-link to the build config. Gated on having files
+                      (inert otherwise). Now a real hash link to the Settings page, whose FIRST card ("Форматы
+                      вывода") carries PROFILE_PANEL_ANCHOR — Formats being the first card IS the landing spot,
+                      so no scroll bookkeeping is needed. */}
                   {optimizeEntryEnabled(files.length, true) ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setProfilePanelOpen(true);
-                        const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-                        document.getElementById(PROFILE_PANEL_ANCHOR)?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth' });
-                      }}
-                      className="block font-mono text-xs text-teal underline-offset-2 hover:underline"
-                    >
+                    <a href={SETTINGS_HASH} className="block font-mono text-xs text-teal underline-offset-2 hover:underline">
                       {t(OPTIMIZE_ENTRY.anchorKey)}
-                    </button>
+                    </a>
                   ) : null}
                   <button
                     type="button"
@@ -452,6 +461,8 @@ export function App() {
             {report.unparsed?.length ? <UnparsedNotice items={report.unparsed} /> : null}
           </div>
         )}
+        </div>
+        {view === 'settings' ? <SettingsPage hasResults={!!report} /> : null}
       </main>
 
       <input ref={inputRef} type="file" multiple hidden onChange={(e) => {
@@ -459,6 +470,7 @@ export function App() {
         if (list) void filesFromInput(list).then(run);
       }} />
     </div>
+    </BuildSettingsProvider>
   );
 }
 
@@ -636,15 +648,73 @@ function downloadZip(zip: Blob): void {
   URL.revokeObjectURL(url);
 }
 
-// AB-R5: download an arbitrary text blob (the build-config JSON). Mirrors downloadZip's Blob → object-URL →
-// <a download> → click → revoke; the only NEW thing is the mime + name. Browser-only (no network).
-function downloadText(text: string, filename: string): void {
-  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+// OPT-IN backend consent surface (round12 §4) — the CONSENT half of the old BackendKtx2Panel, kept on the
+// run surface (the op TOGGLES moved to the Settings page). Rendered only once an op is enabled. Surfaces the
+// three honest pre-upload costs (bigger zip / conditional VRAM / transcoder dependency for KTX2; smaller-
+// download-only for pngquant; quality-only for resample), the EXACT upload-count upper bound + a short sample,
+// and the explicit "these images are uploaded" consent checkbox — enabled ONLY when the healthz probe
+// succeeded (reachable), DEFAULT OFF, reset every run (never sticky). Pure presentation of props.
+function BackendConsentPanel({
+  ktx2Enable,
+  pngquantEnable,
+  resampleEnable,
+  ready,
+  consent,
+  setConsent,
+  uploadPreview,
+}: {
+  ktx2Enable: boolean;
+  pngquantEnable: boolean;
+  resampleEnable: boolean;
+  ready: boolean;
+  consent: boolean;
+  setConsent: (b: boolean) => void;
+  uploadPreview: { count: number; sample: string[] };
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="mt-2 rounded-md border border-line bg-bg p-2 text-left">
+      {/* Reachability status from the healthz probe. */}
+      <p className={`font-mono text-[10px] ${ready ? 'text-ok' : 'text-warn'}`}>
+        {ready ? t('fix.backend.reachable') : t('fix.backend.unreachable')}
+      </p>
+      {/* Honest per-op costs — shown only for the op(s) actually enabled. */}
+      <ul className="mt-2 list-disc space-y-1 pl-4 font-mono text-[10px] leading-relaxed text-ink-soft">
+        {ktx2Enable ? (
+          <>
+            <li>{t('fix.backend.costZip')}</li>
+            <li>{t('fix.backend.costVram')}</li>
+            <li>{t('fix.backend.costLoader')}</li>
+          </>
+        ) : null}
+        {pngquantEnable ? <li>{t('fix.backend.costPngquant')}</li> : null}
+        {resampleEnable ? <li>{t('fix.backend.costResample')}</li> : null}
+      </ul>
+      {/* TRANSPARENCY: the EXACT upper-bound count + a short sample of which files would leave the device,
+          shown BEFORE consent. The worker may upload fewer (compose/skip), never more. */}
+      <div className="mt-2 rounded border border-line bg-panel/60 p-1.5">
+        <p className="font-mono text-[10px] font-semibold text-ink">{t('fix.backend.uploadCount', { n: uploadPreview.count })}</p>
+        {uploadPreview.sample.length > 0 ? (
+          <ul className="mt-1 space-y-0.5">
+            {uploadPreview.sample.map((ref) => (
+              <li key={ref} className="truncate font-mono text-[9px] text-ink-soft" title={ref}>
+                {ref}
+              </li>
+            ))}
+            {uploadPreview.count > uploadPreview.sample.length ? (
+              <li className="font-mono text-[9px] text-ink-soft">{t('fix.backend.uploadMore', { n: uploadPreview.count - uploadPreview.sample.length })}</li>
+            ) : null}
+          </ul>
+        ) : null}
+      </div>
+      {/* CONSENT — the explicit "these images are uploaded to the server" acknowledgement. Enabled ONLY when
+          the backend is reachable; DEFAULT OFF, reset every run (never sticky). */}
+      <label className={`mt-2 flex items-start gap-1.5 font-mono text-[10px] ${ready ? 'text-ink' : 'text-ink-soft/50'}`}>
+        <input type="checkbox" checked={consent} disabled={!ready} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5 accent-cta" />
+        <span className="font-semibold">{t('fix.backend.consent')}</span>
+      </label>
+    </div>
+  );
 }
 
 // Per-bundle marking (aggressive dedup only). Marking changes ONLY which copy is chosen as the dedup
@@ -694,984 +764,46 @@ function BundlesPanel({
   );
 }
 
-// Collapsible optimization-settings panel (default collapsed — instant-wow defaults are the fast
-// preset). Only genuinely portable controls ship. Non-portable controls (resampling kernel, pre-blur,
-// pngquant, AVIF chroma) are honestly omitted with a "Why no X?" title explaining browser limits — NOT
-// "coming soon". Defaults (effort 0, all checkboxes off, no overrides) reproduce today's behavior.
-function SettingsPanel({
-  effort,
-  setEffort,
-  scaleAwareQ,
-  setScaleAwareQ,
-  webpNearLossless,
-  setWebpNearLossless,
-  pngRecompress,
-  setPngRecompress,
-  opaqueAlpha,
-  setOpaqueAlpha,
-  bestFormatPerImage,
-  setBestFormatPerImage,
-  frameRedundancy,
-  setFrameRedundancy,
-  trimMargin,
-  setTrimMargin,
-  overrides,
-  setOverrides,
-}: {
-  effort: number;
-  setEffort: (n: number) => void;
-  scaleAwareQ: boolean;
-  setScaleAwareQ: (b: boolean) => void;
-  webpNearLossless: boolean;
-  setWebpNearLossless: (b: boolean) => void;
-  pngRecompress: boolean;
-  setPngRecompress: (b: boolean) => void;
-  opaqueAlpha: boolean;
-  setOpaqueAlpha: (b: boolean) => void;
-  bestFormatPerImage: boolean;
-  setBestFormatPerImage: (b: boolean) => void;
-  frameRedundancy: boolean;
-  setFrameRedundancy: (b: boolean) => void;
-  trimMargin: boolean;
-  setTrimMargin: (b: boolean) => void;
-  overrides: { match: string; quality: number }[];
-  setOverrides: (o: { match: string; quality: number }[]) => void;
-}) {
-  const { t } = useI18n();
-  return (
-    <details className="mt-2 rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
-      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">{t('fix.settings.title')}</summary>
-
-      <label className="mt-2 block font-mono text-[10px] text-ink-soft">
-        <span className="flex items-center justify-between" title={t('fix.settings.effortHint')}>
-          {t('fix.settings.effort')} <span className="text-ink">{effort}</span>
-        </span>
-        <input type="range" min={0} max={6} step={1} value={effort} onChange={(e) => setEffort(Number(e.target.value))} className="mt-1 w-full accent-teal" />
-      </label>
-
-      <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.settings.scaleAwareHint')}>
-        <input type="checkbox" checked={scaleAwareQ} onChange={(e) => setScaleAwareQ(e.target.checked)} className="accent-teal" />
-        {t('fix.settings.scaleAware')}
-      </label>
-      <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.settings.nearLosslessHint')}>
-        <input type="checkbox" checked={webpNearLossless} onChange={(e) => setWebpNearLossless(e.target.checked)} className="accent-teal" />
-        {t('fix.settings.nearLossless')}
-      </label>
-      <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.settings.pngRecompressHint')}>
-        <input type="checkbox" checked={pngRecompress} onChange={(e) => setPngRecompress(e.target.checked)} className="accent-teal" />
-        {t('fix.settings.pngRecompress')}
-      </label>
-      {/* Opaque-alpha (round15): drop the DEAD alpha channel of a fully-opaque image. HONESTY (invariant 5):
-          the title states DISK-only — the GPU still allocates RGBA8888, so this is NEVER a VRAM claim. */}
-      <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.settings.opaqueAlphaHint')}>
-        <input type="checkbox" checked={opaqueAlpha} onChange={(e) => setOpaqueAlpha(e.target.checked)} className="accent-teal" />
-        {t('fix.settings.opaqueAlpha')}
-      </label>
-      {/* Per-image best format (round17): transcode each loose image to the format the audit MEASURED smallest
-          (WebP vs AVIF) instead of one fixed target. HONESTY: bestMime is the measured winner (invariant 3);
-          a format transcode is DISK-only (invariant 5 — never a VRAM claim). */}
-      <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.settings.bestFormatHint')}>
-        <input type="checkbox" checked={bestFormatPerImage} onChange={(e) => setBestFormatPerImage(e.target.checked)} className="accent-teal" />
-        {t('fix.settings.bestFormat')}
-      </label>
-      {/* Frame-redundancy aliasing (round19) — DEFAULT ON. Byte-identical animation frames within an atlas share
-          ONE packed region; every name still resolves, the sheet shrinks, exact VRAM before→after (invariant 5). */}
-      <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.settings.frameRedundancyHint')}>
-        <input type="checkbox" checked={frameRedundancy} onChange={(e) => setFrameRedundancy(e.target.checked)} className="accent-teal" />
-        {t('fix.settings.frameRedundancy')}
-      </label>
-      {/* Trim-margin → repack scheduling (round21 #0) — DEFAULT ON. Untrimmed sprites carrying transparent
-          padding are tightened to their opaque bounds inside a scheduled repack; every name still resolves, the
-          sheet shrinks, exact VRAM before→after (invariant 5). */}
-      <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.settings.trimMarginHint')}>
-        <input type="checkbox" checked={trimMargin} onChange={(e) => setTrimMargin(e.target.checked)} className="accent-teal" />
-        {t('fix.settings.trimMargin')}
-      </label>
-
-      <div className="mt-3 border-t border-line pt-2">
-        <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft" title={t('fix.settings.overridesHint')}>
-          {t('fix.settings.overrides')}
-        </p>
-        {overrides.map((o, i) => (
-          <div key={i} className="mt-1.5 flex items-center gap-1.5">
-            <input
-              value={o.match}
-              placeholder="folder/ · type:spine"
-              aria-label={t('fix.settings.overrides')}
-              onChange={(e) => {
-                const next = overrides.slice();
-                next[i] = { ...o, match: e.target.value };
-                setOverrides(next);
-              }}
-              className="min-w-0 flex-1 rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink focus:border-teal"
-            />
-            <input
-              type="number"
-              min={0}
-              max={100}
-              value={Math.round(o.quality * 100)}
-              aria-label="quality"
-              title="quality 0–100"
-              onChange={(e) => {
-                const next = overrides.slice();
-                next[i] = { ...o, quality: Math.max(0, Math.min(100, Number(e.target.value))) / 100 };
-                setOverrides(next);
-              }}
-              className="w-14 rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink focus:border-teal"
-            />
-            <button type="button" onClick={() => setOverrides(overrides.filter((_, j) => j !== i))} className="font-mono text-[11px] text-ink-soft hover:text-crit" aria-label="remove">
-              ✕
-            </button>
-          </div>
-        ))}
-        <button type="button" onClick={() => setOverrides([...overrides, { match: '', quality: 0.85 }])} className="mt-1.5 font-mono text-[10px] text-teal underline-offset-2 hover:underline">
-          + {t('fix.settings.overrides')}
-        </button>
-      </div>
-
-      {/* "Why no X?" — honest browser-limit notes for the controls we deliberately omit (NOT
-          "coming soon"): resampling kernel, pre-blur, pngquant, AVIF chroma. */}
-      <ul className="mt-3 space-y-1 border-t border-line pt-2 font-mono text-[10px] leading-relaxed text-ink-soft">
-        <li>{t('fix.skipped.whyNoKernel')}</li>
-        <li>{t('fix.skipped.whyNoPreBlur')}</li>
-        <li>{t('fix.skipped.whyNoPngquant')}</li>
-        <li>{t('fix.skipped.whyNoChroma')}</li>
-      </ul>
-    </details>
-  );
-}
-
-// Feature 4 — pack loose images into NEW spritesheets (static TexturePacker JSON / Spine .atlas).
-// Its OWN explicit Pro opt-in, DEFAULT OFF (NOT folded under `aggressive`): a default Pro run never
-// silently reorganizes a folder. Packing is REFERENCE-CHANGING (the game must load the new sheet/atlas,
-// not the loose files) — surfaced INLINE here (not just post-run) and again via fix.packWarn in the
-// receipt. Spine pages are PNG by default for runtime safety; format/quality/effort reuse the shared
-// SettingsPanel controls (no new encode knobs). Off ⇒ no pack groups, byte-identical to today.
-function PackPanel({
-  packLoose,
-  setPackLoose,
-  packMode,
-  setPackMode,
-  packGranularity,
-  setPackGranularity,
-  packTrim,
-  setPackTrim,
-}: {
-  packLoose: boolean;
-  setPackLoose: (b: boolean) => void;
-  packMode: PackMode;
-  setPackMode: (m: PackMode) => void;
-  packGranularity: StaticGranularity;
-  setPackGranularity: (g: StaticGranularity) => void;
-  packTrim: boolean;
-  setPackTrim: (b: boolean) => void;
-}) {
-  const { t } = useI18n();
-  const modes: PackMode[] = ['auto', 'force-static', 'force-spine'];
-  const grans: StaticGranularity[] = ['per-leaf-folder', 'one-sheet-for-all', 'per-top-level-bundle'];
-  const modeKey: Record<PackMode, string> = { auto: 'auto', 'force-static': 'static', 'force-spine': 'spine' };
-  const granKey: Record<StaticGranularity, string> = {
-    'per-leaf-folder': 'folder',
-    'one-sheet-for-all': 'one',
-    'per-top-level-bundle': 'bundle',
-  };
-  return (
-    <details className="mt-2 rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
-      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">{t('fix.pack.title')}</summary>
-
-      <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
-        <input type="checkbox" checked={packLoose} onChange={(e) => setPackLoose(e.target.checked)} className="accent-teal" />
-        {t('fix.pack.enable')}
-      </label>
-
-      {/* Reference-changing warning shown INLINE (before run), not only in the receipt. */}
-      <p className="mt-2 font-mono text-[10px] leading-relaxed text-warn">⚠ {t('fix.pack.inlineWarn')}</p>
-
-      {packLoose ? (
-        <div className="mt-2 space-y-2">
-          <label className="flex items-center justify-between gap-2 font-mono text-[10px] text-ink-soft">
-            {t('fix.pack.mode.label')}
-            <select
-              aria-label={t('fix.pack.mode.label')}
-              value={packMode}
-              onChange={(e) => setPackMode(e.target.value as PackMode)}
-              className="rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink-soft transition hover:border-teal focus:border-teal"
-            >
-              {modes.map((m) => (
-                <option key={m} value={m}>
-                  {t(`fix.pack.mode.${modeKey[m]}`)}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="flex items-center justify-between gap-2 font-mono text-[10px] text-ink-soft">
-            {t('fix.pack.grouping.label')}
-            <select
-              aria-label={t('fix.pack.grouping.label')}
-              value={packGranularity}
-              onChange={(e) => setPackGranularity(e.target.value as StaticGranularity)}
-              className="rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink-soft transition hover:border-teal focus:border-teal"
-            >
-              {grans.map((g) => (
-                <option key={g} value={g}>
-                  {t(`fix.pack.grouping.${granKey[g]}`)}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
-            <input type="checkbox" checked={packTrim} onChange={(e) => setPackTrim(e.target.checked)} className="accent-teal" />
-            {t('fix.pack.trim')}
-          </label>
-
-          {/* Sheet format reuses the shared SettingsPanel target/quality/effort controls; Spine sheets
-              stay PNG by default for runtime safety regardless of that target. */}
-          <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.pack.spinePng')}</p>
-        </div>
-      ) : null}
-    </details>
-  );
-}
-
-// Edge-extrude (bleed) — replicate each rectangle sprite's outermost edge rows/cols into the symmetric
-// packing gutter (pack.ts OPTION A) so bilinear/mipmap filtering can't sample transparent gutter pixels
-// at sprite borders ⇒ no seams. Its OWN Pro knob, DEFAULT OFF (0): off ⇒ no op carries `extrude`, no
-// gutter reserved ⇒ byte-identical to today. HONESTY (invariant 5): a symmetric gutter can push a sheet
-// to the next power-of-two ⇒ MORE VRAM — disclosed inline here and surfaced truthfully in the receipt
-// (extrudeVramDelta), never claimed free. Rectangle sprites only (meshed/rotated blits are skipped and
-// reported). The `{px}` in the hint reflects the current selection.
-function ExtrudePanel({ extrude, setExtrude }: { extrude: number; setExtrude: (n: number) => void }) {
-  const { t } = useI18n();
-  const opts = [0, 1, 2];
-  return (
-    <details className="mt-2 rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
-      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">{t('fix.extrude')}</summary>
-
-      <label className="mt-2 flex items-center justify-between gap-2 font-mono text-[10px] text-ink-soft">
-        {t('fix.extrude')}
-        <select
-          aria-label={t('fix.extrude')}
-          title={t('fix.extrudeHint', { px: extrude || 1 })}
-          value={extrude}
-          onChange={(e) => setExtrude(Number(e.target.value))}
-          className="rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink-soft transition hover:border-teal focus:border-teal"
-        >
-          {opts.map((n) => (
-            <option key={n} value={n}>
-              {n === 0 ? t('fix.extrude.off') : t('fix.extrude.px', { n })}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      {/* Honest disclosure (invariant 5): bleed can grow a sheet to the next POT ⇒ more VRAM. */}
-      <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.extrudeHint', { px: extrude || 1 })}</p>
-    </details>
-  );
-}
-
-// OPT-IN backend native KTX2 (docs/improvements/round12-backend-processing.md, Phase 3) — the user-directed
-// carve-out of invariants 1 & 2. DEFAULT OFF. KTX2/UASTC is impossible in-browser, so it (and ONLY it, v1)
-// moves to an opt-in backend; assets leave the device ONLY on explicit per-run consent. The panel renders
-// nothing actionable unless a backend is configured (an API base + a stored entitlement token). It surfaces
-// THREE honest costs before any upload (round12 B3/B4): the zip gets bigger (ships both KTX2 and the raster
-// page), the VRAM win is conditional (only GPUs with BC7/ASTC/ETC2), and the game must add a KTX2 transcoder
-// bundle + Pixi loader. The consent checkbox is enabled ONLY when the gateway healthz probe succeeded; it is
-// the explicit "these images are uploaded to the server" acknowledgement, reset every run (never sticky).
-function BackendKtx2Panel({
-  configured,
-  ready,
-  ktx2Enable,
-  setKtx2Enable,
-  pngquantEnable,
-  setPngquantEnable,
-  resampleEnable,
-  setResampleEnable,
-  consent,
-  setConsent,
-  uploadPreview,
-}: {
-  configured: boolean;
-  ready: boolean;
-  ktx2Enable: boolean;
-  setKtx2Enable: (b: boolean) => void;
-  pngquantEnable: boolean;
-  setPngquantEnable: (b: boolean) => void;
-  resampleEnable: boolean;
-  setResampleEnable: (b: boolean) => void;
-  consent: boolean;
-  setConsent: (b: boolean) => void;
-  /** HONEST upper-bound of files that would leave the device under the enabled ops (count + short sample),
-   *  surfaced BEFORE consent for transparency (round12). */
-  uploadPreview: { count: number; sample: string[] };
-}) {
-  const { t } = useI18n();
-  const anyEnable = ktx2Enable || pngquantEnable || resampleEnable;
-  return (
-    <details className="mt-2 rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
-      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">{t('fix.backend.title')}</summary>
-
-      <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.backend.hint')}</p>
-
-      {!configured ? (
-        // No API base / no entitlement token ⇒ the whole path is unavailable. Stay honest, don't offer it.
-        <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.backend.unconfigured')}</p>
-      ) : (
-        <>
-          <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.backend.ktx2Hint')}>
-            <input type="checkbox" checked={ktx2Enable} onChange={(e) => setKtx2Enable(e.target.checked)} className="accent-teal" />
-            {t('fix.backend.ktx2')}
-          </label>
-
-          {/* round13: the OPT-IN pngquant op (lossy-indexed PNG → smaller DOWNLOAD only; NO GPU/VRAM change).
-              Shares this panel's host + consent + reachability. Takes effect with the PNG-lossy profile toggle. */}
-          <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.backend.pngquantHint')}>
-            <input type="checkbox" checked={pngquantEnable} onChange={(e) => setPngquantEnable(e.target.checked)} className="accent-teal" />
-            {t('fix.backend.pngquant')}
-          </label>
-
-          {/* round24: the OPT-IN libvips lanczos3 resample op (high-quality tier downscale; DISK/QUALITY-only,
-              NO GPU/VRAM change). Shares this panel's host + consent + reachability. Takes effect on the
-              scale-tier downscale path (a real lower tier); the top tier (scale 1) is never resampled. */}
-          <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.backend.resampleHint')}>
-            <input type="checkbox" checked={resampleEnable} onChange={(e) => setResampleEnable(e.target.checked)} className="accent-teal" />
-            {t('fix.backend.resample')}
-          </label>
-
-          {anyEnable ? (
-            <>
-              {/* Reachability status from the healthz probe (fired only after Pro unlock + a toggle). */}
-              <p className={`mt-2 font-mono text-[10px] ${ready ? 'text-ok' : 'text-warn'}`}>
-                {ready ? t('fix.backend.reachable') : t('fix.backend.unreachable')}
-              </p>
-
-              {/* Honest costs. KTX2 (round12 B3/B4): bigger zip, conditional VRAM, transcoder dependency.
-                  pngquant (round13): a SMALLER DOWNLOAD on disk, but ZERO GPU/VRAM change (it decodes to full
-                  RGBA8888). Each op's costs shown only when that op is on. */}
-              <ul className="mt-2 list-disc space-y-1 pl-4 font-mono text-[10px] leading-relaxed text-ink-soft">
-                {ktx2Enable ? (
-                  <>
-                    <li>{t('fix.backend.costZip')}</li>
-                    <li>{t('fix.backend.costVram')}</li>
-                    <li>{t('fix.backend.costLoader')}</li>
-                  </>
-                ) : null}
-                {pngquantEnable ? <li>{t('fix.backend.costPngquant')}</li> : null}
-                {resampleEnable ? <li>{t('fix.backend.costResample')}</li> : null}
-              </ul>
-
-              {/* TRANSPARENCY (round12): the EXACT upper-bound count + a short sample of which files would
-                  leave the device, shown BEFORE consent. The worker may upload fewer (compose/skip), never
-                  more. "up to" keeps it honest (the loaded set is the ceiling). */}
-              <div className="mt-2 rounded border border-line bg-panel/60 p-1.5">
-                <p className="font-mono text-[10px] font-semibold text-ink">{t('fix.backend.uploadCount', { n: uploadPreview.count })}</p>
-                {uploadPreview.sample.length > 0 ? (
-                  <ul className="mt-1 space-y-0.5">
-                    {uploadPreview.sample.map((ref) => (
-                      <li key={ref} className="truncate font-mono text-[9px] text-ink-soft" title={ref}>
-                        {ref}
-                      </li>
-                    ))}
-                    {uploadPreview.count > uploadPreview.sample.length ? (
-                      <li className="font-mono text-[9px] text-ink-soft">{t('fix.backend.uploadMore', { n: uploadPreview.count - uploadPreview.sample.length })}</li>
-                    ) : null}
-                  </ul>
-                ) : null}
-              </div>
-
-              {/* CONSENT — the explicit "these images are uploaded to the server" acknowledgement. Enabled
-                  ONLY when the backend is reachable; unticking it (or losing the backend) cancels the upload
-                  path entirely. Default OFF, reset every run (never sticky). */}
-              <label className={`mt-2 flex items-start gap-1.5 font-mono text-[10px] ${ready ? 'text-ink' : 'text-ink-soft/50'}`}>
-                <input
-                  type="checkbox"
-                  checked={consent}
-                  disabled={!ready}
-                  onChange={(e) => setConsent(e.target.checked)}
-                  className="mt-0.5 accent-cta"
-                />
-                <span className="font-semibold">{t('fix.backend.consent')}</span>
-              </label>
-            </>
-          ) : null}
-        </>
-      )}
-    </details>
-  );
-}
-
-// Scale-tier export — emit downscaled copies (_1080p/_720p/_540p…) so the game loads the resolution
-// that fits the device. Its OWN explicit Pro opt-in, DEFAULT OFF (NOT under aggressive): a default Pro
-// run never multiplies a folder into resolution variants. Tiering is REFERENCE-CHANGING (the game's
-// loader must pick a tier at runtime; the source is renamed to the top tier) — surfaced INLINE here and
-// again via fix.tierWarn in the receipt. The top tier (scale 1) is always implied: it is the source
-// footprint and validateTiers requires it; the user picks which LOWER tiers to also ship. Downscale
-// uses the browser's resampler (no kernel/pre-blur control) — disclosed via the existing whyNoKernel/
-// whyNoPreBlur honesty notes. Off / no lower tiers checked beyond the implied top ⇒ scaleTiers stays
-// empty ⇒ byte-identical to today.
-function TierPanel({
-  tierEnable,
-  setTierEnable,
-  tierSuffixes,
-  setTierSuffixes,
-  resampleAvailable,
-}: {
-  tierEnable: boolean;
-  setTierEnable: (b: boolean) => void;
-  /** Suffixes of the lower tiers the user opted into (the scale-1 top tier is always implied). */
-  tierSuffixes: Set<string>;
-  setTierSuffixes: (s: Set<string>) => void;
-  /** round24: the OPT-IN lanczos3 resample backend op is enabled+configured+consented this run, so the tier
-   *  DOWNSCALE path will actually use the vips kernel (not the browser resampler). Surfaces a SEPARATE
-   *  tier-only hint key — NEVER retargets the existing `whyNoKernel` note (which stays true at the non-tier
-   *  sites where resample is not routed). False ⇒ the tier downscale uses the browser resampler as today. */
-  resampleAvailable: boolean;
-}) {
-  const { t } = useI18n();
-  // Map each default tier's suffix → a label key ("_720p" → "fix.tier.label.720p").
-  const labelKey = (suffix: string): string => `fix.tier.label.${suffix.replace(/^[_-]/, '')}`;
-  const toggle = (suffix: string, on: boolean): void => {
-    const next = new Set(tierSuffixes);
-    if (on) next.add(suffix);
-    else next.delete(suffix);
-    setTierSuffixes(next);
-  };
-  return (
-    <details className="mt-2 rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
-      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">{t('fix.tier.title')}</summary>
-
-      <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.tier.hint')}</p>
-
-      <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
-        <input type="checkbox" checked={tierEnable} onChange={(e) => setTierEnable(e.target.checked)} className="accent-teal" />
-        {t('fix.tier.enable')}
-      </label>
-
-      {/* Reference-changing warning shown INLINE (before run), not only in the receipt. */}
-      <p className="mt-2 font-mono text-[10px] leading-relaxed text-warn">⚠ {t('fix.tier.inlineWarn')}</p>
-
-      {tierEnable ? (
-        <div className="mt-2 space-y-2">
-          <div className="space-y-1">
-            {DEFAULT_SCALE_TIERS.map((tier) => {
-              const top = tier.scale >= 1; // top tier is implied — always shipped, can't be unchecked.
-              return (
-                <label
-                  key={tier.suffix}
-                  title={top ? t('fix.tier.inlineWarn') : undefined}
-                  className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft"
-                >
-                  <input
-                    type="checkbox"
-                    checked={top || tierSuffixes.has(tier.suffix)}
-                    disabled={top}
-                    onChange={(e) => toggle(tier.suffix, e.target.checked)}
-                    className="accent-teal disabled:opacity-60"
-                  />
-                  {t(labelKey(tier.suffix))}
-                </label>
-              );
-            })}
-          </div>
-
-          {/* Disk-grows note: tiering ships every tier ⇒ total disk increases by design; the win is
-              per-device download + per-device VRAM, never total disk (invariant 5). */}
-          <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.tier.diskNote')}</p>
-
-          {/* v1 scope: an asset that gets repacked/merged/packed is NOT also tiered (its emitted sheet is
-              not re-fed into tiering yet) — surfaced as a skip in the receipt. State it up front so the
-              under-filled-atlas case isn't a confusing silent single-resolution result. */}
-          <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.tier.repackNote')}</p>
-
-          {/* Downscale honesty — REUSE the existing browser-limit notes (no kernel / no pre-blur control).
-              round24: when the OPT-IN lanczos3 resample backend op is live this run, the tier DOWNSCALE will
-              actually use the vips kernel — surface a SEPARATE tier-only hint (NEVER retarget whyNoKernel,
-              which stays true on the non-tier paths where resample is not routed). The whyNoKernel note still
-              applies to the in-browser fallback (resample off / declined / hashFilenames on), so both show. */}
-          <ul className="space-y-1 border-t border-line pt-2 font-mono text-[10px] leading-relaxed text-ink-soft">
-            <li>{t('fix.skipped.whyNoKernel')}</li>
-            <li>{t('fix.skipped.whyNoPreBlur')}</li>
-            {resampleAvailable ? <li className="text-teal">{t('fix.backend.resampleTierHint')}</li> : null}
-          </ul>
-        </div>
-      ) : null}
-    </details>
-  );
-}
-
-// ── Config-driven export profile (round7-export-profile.md §7, T11) — sibling of TierPanel, DEFAULT OFF ──
-// Generalizes the single hardcoded format + closed tier ladder into { formats × resolutions × per-format
-// compression }. OFF ⇒ exportProfile is undefined ⇒ byte-identical to today; the TierPanel above governs
-// tiers. ON ⇒ MUTUALLY EXCLUSIVE with the tier ladder (buildOptions omits scaleTiers + webpNearLossless).
-// AVIF lossless is DISABLED in the UI (no honest in-browser path — avifNoLossless note). Custom tiers add
-// rows on top of the default ladder; the suffix is validated client-side via isSafeSuffix (safe charset
-// [A-Za-z0-9_-], no dot/slash/@, never a format name) so an unsafe suffix is caught before the run (the
-// worker also validates fail-closed). Custom NON-resolution suffixes (e.g. _mobile) build fine but are NOT
-// recognized as tier-variants on re-analysis — a conservative over-count of the advisory variants WARN,
-// never affecting the hard VRAM gate (see docs/improvements/ab-r4-suffix-policy.md). The shared
-// effort/scaleAwareQuality knobs live in SettingsPanel and are folded into the profile's global knobs.
-
-// The per-format UI settings + override-rule types live in ./lib/profile-ui-types so the pure
-// build-config module can reference them without a circular import (App ↔ build-config). Imported at
-// the top of this file (used in-module) and re-exported here so the public surface is byte-identical.
-export { FORMAT_KEYS, OVERRIDE_MODE_KEYS };
-export type { ProfileFormatState, OverrideMode, UiOverride };
-
-function ExportProfilePanel({
-  profileEnable,
-  setProfileEnable,
-  formats,
-  setFormats,
-  customTiers,
-  setCustomTiers,
-  overrides,
-  setOverrides,
-  avifSubsample,
-  setAvifSubsample,
-  onSaveConfig,
-  onLoadConfig,
-  cfgStatus,
-  open,
-  onToggleOpen,
-}: {
-  profileEnable: boolean;
-  setProfileEnable: (b: boolean) => void;
-  formats: Record<ExportFormat, ProfileFormatState>;
-  setFormats: (f: Record<ExportFormat, ProfileFormatState>) => void;
-  /** Extra resolution rows on top of the default ladder (the scale-1 top tier is always implied). */
-  customTiers: ResolutionTier[];
-  setCustomTiers: (t: ResolutionTier[]) => void;
-  /** Per-folder/prefix override rules (round10). Empty ⇒ no `overrides` ⇒ additive (byte-identical). */
-  overrides: UiOverride[];
-  setOverrides: (o: UiOverride[]) => void;
-  /** Profile-wide AVIF chroma subsample (3=4:4:4, 1=4:2:2, 0=4:2:0). undefined ⇒ @jsquash default (omit). */
-  avifSubsample: number | undefined;
-  setAvifSubsample: (s: number | undefined) => void;
-  /** AB-R5: download the current granular UI state as a versioned build-config JSON (browser-only). */
-  onSaveConfig: () => void;
-  /** AB-R5: load a build-config JSON file (fail-closed parse → apply setters, or surface a parse error). */
-  onLoadConfig: (file: File) => void;
-  /** AB-R5: the load status message (success or fail-closed reason). '' ⇒ nothing surfaced. */
-  cfgStatus: string;
-  /** AB-R2 deep-link: when defined, the outer <details> becomes CONTROLLED so the results-aside anchor can
-   *  open it. undefined ⇒ uncontrolled, default-collapsed (today's render is byte-identical). onToggleOpen
-   *  fires on native disclosure clicks so a manual collapse keeps the lifted state in sync (no desync). */
-  open?: boolean;
-  onToggleOpen?: () => void;
-}) {
-  const { t } = useI18n();
-  // AB-R5: hidden file input for Load config — mirrors the folder <input> at the top of App (ref.click()).
-  const cfgInputRef = useRef<HTMLInputElement>(null);
-  const patch = (mime: ExportFormat, p: Partial<ProfileFormatState>): void => setFormats({ ...formats, [mime]: { ...formats[mime], ...p } });
-  const addTier = (): void => setCustomTiers([...customTiers, { label: '0.5×', scale: 0.5, suffix: '_540p' }]);
-  const patchTier = (i: number, p: Partial<ResolutionTier>): void => setCustomTiers(customTiers.map((tt, j) => (j === i ? { ...tt, ...p } : tt)));
-  const removeTier = (i: number): void => setCustomTiers(customTiers.filter((_, j) => j !== i));
-  // round10 override-rule editor: the fonts-444 preset + generic add/remove rows. Opt-in only — the default
-  // is [] (a non-empty default would break byte-identity). A fonts-444 preset row is the headline use.
-  const addFonts444 = (): void => setOverrides([...overrides, { match: 'fonts', mode: 'fonts444', quality: 85 }]);
-  const addOverride = (): void => setOverrides([...overrides, { match: '', mode: 'quality', quality: 85 }]);
-  const patchOverride = (i: number, p: Partial<UiOverride>): void => setOverrides(overrides.map((o, j) => (j === i ? { ...o, ...p } : o)));
-  const removeOverride = (i: number): void => setOverrides(overrides.filter((_, j) => j !== i));
-
-  // AB-R2: controlled only when `open` is supplied (deep-link from the results-aside anchor). undefined ⇒
-  // omit the prop entirely ⇒ native uncontrolled <details>, default-collapsed — byte-identical to today.
-  // onToggle keeps the lifted state in sync with native disclosure clicks (open OR manual collapse), and
-  // only fires the callback when the DOM open-state actually diverges from the controlled value, so a
-  // controlled re-render that re-asserts the same state never loops.
-  const onToggle = onToggleOpen
-    ? (e: SyntheticEvent<HTMLDetailsElement>): void => {
-        if (open === undefined || e.currentTarget.open !== open) onToggleOpen();
-      }
-    : undefined;
-  return (
-    <details
-      id={PROFILE_PANEL_ANCHOR}
-      {...(open !== undefined ? { open } : {})}
-      onToggle={onToggle}
-      className="mt-2 rounded-md border border-line bg-bg p-2 text-left open:pb-2.5"
-    >
-      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">{t('fix.profile.title')}</summary>
-
-      <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.profile.hint')}</p>
-
-      {/* AB-R5: save/load the granular UI state as a versioned build-config JSON. Browser-only (zero asset
-          bytes, no network — invariant 1). Token-driven like the receipt download button (border-line →
-          hover:border-teal, font-mono text-[11px] text-teal). Load uses a hidden file input + ref.click(),
-          mirroring the folder <input> at the top of App. Errors surface via the live region (no alert/crash). */}
-      <div className="mt-2 flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={onSaveConfig}
-          className="rounded border border-line px-2 py-1 font-mono text-[11px] text-teal transition hover:border-teal"
-        >
-          ↓ {t('fix.config.save')}
-        </button>
-        <button
-          type="button"
-          onClick={() => cfgInputRef.current?.click()}
-          className="rounded border border-line px-2 py-1 font-mono text-[11px] text-teal transition hover:border-teal"
-        >
-          ↑ {t('fix.config.load')}
-        </button>
-        <input
-          ref={cfgInputRef}
-          type="file"
-          accept=".json,application/json"
-          hidden
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) onLoadConfig(f);
-            e.target.value = ''; // allow re-loading the SAME file (change fires only on a value change)
-          }}
-        />
-      </div>
-      <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.config.hint')}</p>
-      {/* Polite live region: success ("loaded") OR a fail-closed parse-error reason. NO alert, NO crash. */}
-      {cfgStatus ? (
-        <p role="status" aria-live="polite" className="mt-1 font-mono text-[10px] leading-relaxed text-ink">
-          {cfgStatus}
-        </p>
-      ) : (
-        <p role="status" aria-live="polite" className="sr-only" />
-      )}
-
-      <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
-        <input type="checkbox" checked={profileEnable} onChange={(e) => setProfileEnable(e.target.checked)} className="accent-teal" />
-        {t('fix.profile.enable')}
-      </label>
-
-      {profileEnable ? (
-        <div className="mt-2 space-y-3">
-          {/* ── Formats ── */}
-          <div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">{t('fix.profile.formats')}</p>
-            <div className="mt-1 space-y-2">
-              {FORMAT_KEYS.map(({ mime, key }) => {
-                const f = formats[mime];
-                const isAvif = mime === 'image/avif';
-                const isPng = mime === 'image/png';
-                return (
-                  <div key={mime} className="rounded border border-line/70 p-1.5">
-                    <label className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
-                      <input type="checkbox" checked={f.enabled} onChange={(e) => patch(mime, { enabled: e.target.checked })} className="accent-teal" />
-                      {t(key)}
-                    </label>
-                    {f.enabled ? (
-                      <div className="mt-1.5 space-y-1 pl-4">
-                        {/* PNG is native-lossless; quality slider hidden. WebP/AVIF: hide quality when lossless. */}
-                        {!isPng && !f.lossless ? (
-                          <label className="flex items-center justify-between font-mono text-[10px] text-ink-soft">
-                            <span>
-                              {t('fix.profile.quality')} <span className="text-ink">{f.quality}</span>
-                            </span>
-                            <input type="range" min={0} max={100} step={1} value={f.quality} onChange={(e) => patch(mime, { quality: Number(e.target.value) })} className="ml-2 w-1/2 accent-teal" />
-                          </label>
-                        ) : null}
-                        {/* Lossless — DISABLED for AVIF (no honest path; avifNoLossless note). */}
-                        <label className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={isAvif ? t('fix.profile.avifNoLossless') : undefined}>
-                          <input type="checkbox" checked={!isAvif && f.lossless} disabled={isAvif} onChange={(e) => patch(mime, { lossless: e.target.checked })} className="accent-teal disabled:opacity-60" />
-                          {t('fix.profile.lossless')}
-                        </label>
-                        {/* PNG lossy (round13 pngquant) — the OPT-IN backend-routed lossy-indexed PNG (smaller
-                            download, NO VRAM change). Sibling to the AVIF-4:4:4 override preset. Effective only
-                            when the pngquant backend op is also enabled + consented; else a lossless PNG ships. */}
-                        {isPng ? (
-                          <label className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.profile.pngLossyHint')}>
-                            <input type="checkbox" checked={!!f.pngLossy} onChange={(e) => patch(mime, { pngLossy: e.target.checked })} className="accent-teal" />
-                            {t('fix.profile.pngLossy')}
-                          </label>
-                        ) : null}
-                        {/* WebP near-lossless (ignored when lossless on). */}
-                        {mime === 'image/webp' && !f.lossless ? (
-                          <label className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
-                            <input type="checkbox" checked={f.near} onChange={(e) => patch(mime, { near: e.target.checked })} className="accent-teal" />
-                            {t('fix.profile.nearLossless')}
-                          </label>
-                        ) : null}
-                        {isAvif ? <p className="font-mono text-[9px] leading-relaxed text-ink-soft">{t('fix.profile.avifNoLossless')}</p> : null}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* ── AVIF chroma subsample (round7 §4d, Task 14) — profile-wide, AVIF-gated. DEFAULT ⇒ omit ⇒
-              @jsquash default ⇒ byte-identical. DISK-only (chroma subsample changes file bytes; the GPU still
-              decodes RGBA8888 — NO VRAM claim). 4:4:0(=2) deferred (only 0/1/3 verified). ── */}
-          {formats['image/avif'].enabled ? (
-            <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">{t('fix.profile.avifSubsample')}</p>
-              <select
-                value={avifSubsample === undefined ? 'default' : String(avifSubsample)}
-                onChange={(e) => setAvifSubsample(e.target.value === 'default' ? undefined : Number(e.target.value))}
-                className="mt-1 rounded border border-line bg-panel px-1 py-0.5 font-mono text-[10px] text-ink"
-              >
-                <option value="default">{t('fix.profile.avifSubsample.default')}</option>
-                <option value="3">{t('fix.profile.avifSubsample.444')}</option>
-                <option value="1">{t('fix.profile.avifSubsample.422')}</option>
-                <option value="0">{t('fix.profile.avifSubsample.420')}</option>
-              </select>
-            </div>
-          ) : null}
-
-          {/* ── Resolutions: the default ladder is always available; custom rows add to it ── */}
-          <div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">{t('fix.profile.resolutions')}</p>
-            <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-soft">
-              {DEFAULT_SCALE_TIERS.map((tt) => tt.suffix).join('  ')}
-            </p>
-            {customTiers.map((tt, i) => {
-              const validSuffix = isSafeSuffix(tt.suffix);
-              return (
-                <div key={i} className="mt-1 flex items-center gap-1.5">
-                  <span className="font-mono text-[10px] text-ink-soft">{t('fix.profile.tierScale')}</span>
-                  <input
-                    type="number"
-                    min={0.05}
-                    max={1}
-                    step={0.05}
-                    value={tt.scale}
-                    onChange={(e) => patchTier(i, { scale: Number(e.target.value) })}
-                    className="w-16 rounded border border-line bg-panel px-1 font-mono text-[10px] text-ink"
-                  />
-                  <input
-                    type="text"
-                    value={tt.suffix}
-                    onChange={(e) => patchTier(i, { suffix: e.target.value })}
-                    placeholder="_540p"
-                    className={`w-20 rounded border bg-panel px-1 font-mono text-[10px] text-ink ${validSuffix ? 'border-line' : 'border-crit'}`}
-                  />
-                  <button type="button" onClick={() => removeTier(i)} className="font-mono text-[10px] text-crit hover:underline" aria-label="remove">
-                    ✕
-                  </button>
-                  {!validSuffix ? <span className="font-mono text-[9px] text-crit">{t('fix.profile.tierBadSuffix', { suffix: tt.suffix })}</span> : null}
-                </div>
-              );
-            })}
-            <button type="button" onClick={addTier} className="mt-1 font-mono text-[10px] text-teal hover:underline">
-              + {t('fix.profile.addTier')}
-            </button>
-          </div>
-
-          {/* ── Per-folder overrides (round10) — opt-in rules: a fonts→AVIF 4:4:4 preset + generic rows ── */}
-          <div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">{t('fix.profile.overrides')}</p>
-            <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.profile.overridesHint')}</p>
-            {overrides.map((o, i) => (
-              <div key={i} className="mt-1 flex flex-wrap items-center gap-1.5">
-                <input
-                  type="text"
-                  value={o.match}
-                  onChange={(e) => patchOverride(i, { match: e.target.value })}
-                  placeholder={t('fix.profile.overrideMatchPlaceholder')}
-                  className="w-28 rounded border border-line bg-panel px-1 font-mono text-[10px] text-ink"
-                />
-                <select
-                  value={o.mode}
-                  onChange={(e) => patchOverride(i, { mode: e.target.value as OverrideMode })}
-                  className="rounded border border-line bg-panel px-1 font-mono text-[10px] text-ink"
-                >
-                  {OVERRIDE_MODE_KEYS.map(({ mode, key }) => (
-                    <option key={mode} value={mode}>
-                      {t(key)}
-                    </option>
-                  ))}
-                </select>
-                {o.mode !== 'lossless' ? (
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={o.quality ?? 85}
-                    onChange={(e) => patchOverride(i, { quality: Number(e.target.value) })}
-                    className="w-14 rounded border border-line bg-panel px-1 font-mono text-[10px] text-ink"
-                  />
-                ) : null}
-                <button type="button" onClick={() => removeOverride(i)} className="font-mono text-[10px] text-crit hover:underline" aria-label="remove">
-                  ✕
-                </button>
-              </div>
-            ))}
-            <div className="mt-1 flex flex-wrap gap-3">
-              <button type="button" onClick={addFonts444} className="font-mono text-[10px] text-teal hover:underline">
-                + {t('fix.profile.overrideFonts444')}
-              </button>
-              <button type="button" onClick={addOverride} className="font-mono text-[10px] text-teal hover:underline">
-                + {t('fix.profile.addOverride')}
-              </button>
-            </div>
-          </div>
-
-          {/* Honesty notes — reuse browser-limit disclosures + the profile-specific bundle/disk notes. */}
-          <ul className="space-y-1 border-t border-line pt-2 font-mono text-[10px] leading-relaxed text-ink-soft">
-            <li>{t('fix.profile.noBundleNote')}</li>
-            <li>{t('fix.profile.diskNote')}</li>
-            <li>{t('fix.skipped.whyNoKernel')}</li>
-            <li>{t('fix.skipped.whyNoPreBlur')}</li>
-            <li>{t('fix.skipped.whyNoPngquant')}</li>
-          </ul>
-        </div>
-      ) : null}
-    </details>
-  );
-}
-
 // The Phase-2 fix: repack + transcode the loaded folder in a worker, then download a drop-in
 // optimized .zip. Assets never leave the device. The Pro gate is OFF by default (free) and only
 // engages when VITE_PRO_GATE === 'true' — then a valid offline-verified entitlement is required.
-function FixCard({ files, profilePanelOpen, setProfilePanelOpen }: { files: PickedFile[]; profilePanelOpen: boolean; setProfilePanelOpen: (b: boolean) => void }) {
+function FixCard({ files }: { files: PickedFile[] }) {
   const { t } = useI18n();
+  // The full build-config surface now lives in the shared BuildSettings context (edited on the Settings
+  // page). FixCard only READS it — to build the run's FixOptions (buildFixOptions) and to gate two
+  // run-surface UI decisions (aggressive → BundlesPanel; the manifest auto-pair note).
+  const { settings } = useBuildSettings();
   const [phase, setPhase] = useState<FixPhase>({ t: 'idle' });
-  const [aggressive, setAggressive] = useState(false);
-  const [polygon, setPolygon] = useState(false);
   const [unlocked, setUnlocked] = useState(!PRO_GATE_ENABLED);
 
-  // Feature 2/3 settings (all default to today's behavior when untouched). Marking defaults to {} ⇒
-  // every bundle is treated as 'isolated' by buildDedupGroups (same-bundle dedup only).
+  // Per-run state that STAYS in the FixCard (NOT a setting; never on the Settings page): marking defaults to
+  // {} ⇒ every bundle is treated as 'isolated' by buildDedupGroups (same-bundle dedup only). skinGuard is a
+  // const {} MVP (design §5b). Both ride only under `settings.aggressive` (the gate lives in buildFixOptions).
   const [marking, setMarking] = useState<LazyMarking>({});
-  // SkinGuard MVP: threaded through runFix but defaults to {} — the key/value-skin rows are a follow-up
-  // (design §5b). Empty ⇒ buildDedupGroups treats every asset as skinGroup 'general' (today's behavior).
   const skinGuard: SkinGuard = {};
-  const [effort, setEffort] = useState(0);
-  const [scaleAwareQ, setScaleAwareQ] = useState(false);
-  const [webpNearLossless, setWebpNearLossless] = useState(false);
-  const [pngRecompress, setPngRecompress] = useState(false);
-  // Opaque-alpha (round15) — own Pro toggle, DEFAULT OFF. The fix for `wasted-alpha` findings: re-encode a
-  // fully-opaque image WITHOUT its dead alpha channel for a DISK saving (invariant 5 — NEVER a VRAM claim;
-  // the GPU still allocates RGBA8888). Off ⇒ no transcode op carries `opaque` ⇒ byte-identical to today.
-  const [opaqueAlpha, setOpaqueAlpha] = useState(false);
-  // Per-image MEASURED best-format pick (round17) — own Pro toggle, DEFAULT OFF. The diagnosis ALREADY
-  // measured the smallest real encode per loose image (WebP vs AVIF); when ON the fix transcodes each image
-  // to its measured winner instead of one fixed format for all. HONESTY: bestMime is the MEASURED winner
-  // (invariant 3); a format transcode is DISK-only (invariant 5). Off ⇒ every op carries the global target
-  // ⇒ byte-identical to today. An active export profile / a per-folder override still take precedence.
-  const [bestFormatPerImage, setBestFormatPerImage] = useState(false);
-  // Frame-redundancy aliasing (round19) — DEFAULT ON (drop-in, lossless, shrinks the sheet). Byte-identical
-  // animation frames within an atlas are aliased onto ONE shared packed region — every original name still
-  // resolves, the sheet is smaller, exact VRAM before→after (invariant 5, no estimate). Off ⇒ no hashing, no
-  // new op, no aliasing ⇒ byte-identical to today (the frame-redundancy finding stays a diagnosis-only verdict).
-  const [frameRedundancy, setFrameRedundancy] = useState(true);
-  // Trim-margin → repack scheduling (round21 #0) — DEFAULT ON (drop-in, lossless, shrinks the sheet). UNtrimmed
-  // sprites carrying transparent padding get tightened to their opaque bounds inside a scheduled repack — every
-  // name still resolves (trimmed:true + spriteSourceSize), the sheet is smaller, exact VRAM before→after
-  // (invariant 5, no estimate). Off ⇒ no bboxes fed, no new op, no trim ⇒ byte-identical to today (the
-  // trim-margin finding stays a diagnosis-only verdict).
-  const [trimMargin, setTrimMargin] = useState(true);
-  const [overrides, setOverrides] = useState<{ match: string; quality: number }[]>([]);
-
-  // Feature 4 — own Pro opt-in, DEFAULT OFF (NOT under aggressive). Defaults reproduce today: off ⇒ no
-  // pack groups, no pack ops. When on: Auto mode, per-leaf-folder grouping, trim ON (matching design §9).
-  const [packLoose, setPackLoose] = useState(false);
-  const [packMode, setPackMode] = useState<PackMode>('auto');
-  const [packGranularity, setPackGranularity] = useState<StaticGranularity>('per-leaf-folder');
-  const [packTrim, setPackTrim] = useState(true);
-
-  // Edge-extrude (bleed) — own Pro knob, DEFAULT OFF (0). 0 ⇒ no op carries `extrude`, no gutter
-  // reserved ⇒ byte-identical to today. >0 ⇒ the worker reserves a symmetric gutter and bleeds rect
-  // sprite edges into it (kills bilinear/mipmap seams); a gutter bump can grow a sheet to the next POT
-  // ⇒ more VRAM, surfaced honestly in the receipt (invariant 5).
-  const [extrude, setExtrude] = useState(0);
-
-  // Selective fix (docs/improvements/selective-fix.md) — the OpKinds the user DESELECTED in the Plan card.
-  // INTRA-PLAN state (a per-row checkbox; default = nothing excluded ⇒ full fix). Forwarded VERBATIM through
-  // buildOptions to BOTH plan and execute as `excludeKinds`, so a re-previewed plan and its committed run
-  // share the mask byte-for-byte. DELIBERATELY ABSENT from the stale-plan reset deps below: toggling a row
-  // re-previews IN PLACE via togglePlanKind (it does NOT invalidate the plan), unlike every other option.
-  // Reset to empty on every fresh preview(). Empty ⇒ byte-identical to today (no excludeKinds forwarded).
+  // Selective fix — the OpKinds the user DESELECTED in the Plan card. INTRA-PLAN (a per-row checkbox; default
+  // = nothing excluded ⇒ full fix). Forwarded VERBATIM to BOTH plan and execute so a re-previewed plan and
+  // its committed run share the mask byte-for-byte. DELIBERATELY ABSENT from the stale-plan reset deps below:
+  // a row toggle re-previews IN PLACE via togglePlanKind. Reset on every fresh preview(). Empty ⇒ byte-identical.
   const [excludeKinds, setExcludeKinds] = useState<Set<OpKind>>(() => new Set());
 
-  // Scale-tier export — own Pro opt-in, DEFAULT OFF (NOT under aggressive). `tierSuffixes` holds the
-  // LOWER tiers the user opted into; the scale-1 top tier is always implied (added when building the
-  // ladder). Default selection mirrors the design preset (720p + 540p). Off OR no enabled tier beyond
-  // the implied top ⇒ scaleTiers stays empty ⇒ no tiering ⇒ byte-identical to today.
-  const [tierEnable, setTierEnable] = useState(false);
-  const [tierSuffixes, setTierSuffixes] = useState<Set<string>>(
-    () => new Set(DEFAULT_SCALE_TIERS.filter((tt) => tt.scale < 1).map((tt) => tt.suffix)),
-  );
-  // The validated ladder: always include the scale-1 top tier (validateTiers requires it) plus every
-  // checked lower tier, in the canonical high→low order of DEFAULT_SCALE_TIERS. Empty when disabled.
-  const scaleTiers: ScaleTier[] = useMemo(
-    () => (tierEnable ? DEFAULT_SCALE_TIERS.filter((tt) => tt.scale >= 1 || tierSuffixes.has(tt.suffix)) : []),
-    [tierEnable, tierSuffixes],
-  );
-
-  // Config-driven export profile (round7-export-profile.md §7, T11/T12) — own Pro opt-in, DEFAULT OFF.
-  // OFF ⇒ exportProfile is undefined ⇒ byte-identical to today (the tier ladder above governs tiers). ON
-  // ⇒ MUTUALLY EXCLUSIVE with scaleTiers + webpNearLossless (omitted in buildOptions). Defaults reproduce
-  // today's single emit (AVIF q85) so a freshly-enabled profile with no edits is a no-surprise baseline.
-  const [profileEnable, setProfileEnable] = useState(false);
-  const [profileFormats, setProfileFormats] = useState<Record<ExportFormat, ProfileFormatState>>(() => ({
-    'image/png': { enabled: false, quality: 85, lossless: true, near: false, pngLossy: false },
-    'image/webp': { enabled: false, quality: 85, lossless: false, near: false },
-    'image/avif': { enabled: true, quality: 85, lossless: false, near: false },
-  }));
-  const [customTiers, setCustomTiers] = useState<ResolutionTier[]>([]);
-  // round10-profile-overrides.md §6: per-folder override RULES (the fonts→AVIF 4:4:4 preset + generic rows).
-  // DEFAULT [] (opt-in only — a non-empty default would break byte-identity). Mapped to ProfileOverride[] in
-  // the exportProfile memo; empty ⇒ no `overrides` field ⇒ additive (byte-identical to a no-override run).
-  const [profileOverrides, setProfileOverrides] = useState<UiOverride[]>([]);
-  // Profile-wide AVIF chroma subsample picker (round7-export-profile.md §4d, Task 14). DEFAULT undefined ⇒
-  // the memo OMITS avifSubsample ⇒ @jsquash's own default ⇒ byte-identical to today. Maps to the verified
-  // @jsquash subsample integers (3=4:4:4, 1=4:2:2, 0=4:2:0); 4:4:0(=2) is deferred (only 0/1/3 verified per
-  // fix-protocol.ts:43). DISK-only (chroma subsample changes file bytes; the GPU still decodes RGBA8888 —
-  // invariant 5, NO VRAM claim). The picker is AVIF-gated in the panel; a stray value on a non-AVIF profile
-  // is inert (formatEncode only stamps avifSubsample onto AVIF targets).
-  const [profileAvifSubsample, setProfileAvifSubsample] = useState<number | undefined>(undefined);
-  // AB-R5: the build-config load status (success message OR a fail-closed parse-error reason). Surfaced via a
-  // polite live region in the ExportProfilePanel — NO alert, NO crash. Empty ⇒ nothing announced (default).
-  const [cfgStatus, setCfgStatus] = useState('');
-  // PixiJS-v8 asset manifest (round8-pixi-manifest.md C6) — its OWN Pro opt-in, DEFAULT OFF. ON ⇒ the fix
-  // output gains an additive `manifest.json` mapping every emitted image/sheet so a PixiJS game can load the
-  // whole folder with one Assets.init({ manifest }). OFF ⇒ buildOptions omits it ⇒ zip byte-identical to today.
-  const [emitPixiManifest, setEmitPixiManifest] = useState(false);
-  // AssetPack includeFileSizes parity (round23 #2) — adds `progressSize` (KB, 2dp) to each manifest src so
-  // PixiJS shows accurate load progress. DEFAULT OFF ('off' ⇒ buildOptions omits it ⇒ bare-string src ⇒
-  // manifest byte-identical to today). 'raw' = uncompressed KB; 'gzip' = REAL gzipped KB. Gated on the Pixi
-  // manifest being emitted (a bare-string manifest has no src objects to carry a size).
-  const [includeFileSizes, setIncludeFileSizes] = useState<'off' | 'raw' | 'gzip'>('off');
-  // Content-hash cache-busting (round9-cache-busting.md K9) — its OWN Pro opt-in, DEFAULT OFF. ON ⇒ every
-  // emitted image/sheet AD references is renamed name.<hash>.ext (hash = sha256 of the final bytes) and every
-  // referrer is repointed (atlas meta.image / Spine .atlas line 0 / the Pixi manifest src[] / dedup consumer
-  // meta.image / the loader-migration rows). Pairs with emitPixiManifest (the manifest is the guaranteed
-  // referrer for pass-through loose images). OFF ⇒ buildOptions omits it ⇒ zip byte-identical to today.
-  const [hashFilenames, setHashFilenames] = useState(false);
-
-  // ── OPT-IN backend native KTX2 (docs/improvements/round12-backend-processing.md, Phase 3) ───────────
-  // The user-directed amendment of invariants 1 & 2: native-only ops (KTX2/UASTC, impossible in-browser)
-  // move to an OPT-IN backend; assets leave the device ONLY on explicit per-run consent. SAFETY: when the
-  // backend is unconfigured (no VITE_API_BASE) OR not opted-in OR not consented, buildOptions omits the
-  // `backend` field ⇒ the worker's whole KTX2 path is dead ⇒ zip BYTE-IDENTICAL to today.
-  //
-  // `ktx2Enable` = the user turned the KTX2 toggle on (offer native compression). `backendConsent` = the
-  // per-run "these images are sent to the server" acknowledgement — RESET to false on every option change
-  // (and on a fresh preview) so consent is never sticky across runs. `backendReady` = the gateway healthz
-  // probe succeeded (fired ONLY after Pro unlock + a configured host). A backend is "configured" when an
-  // API base is set AND we hold a stored entitlement token (the gateway requires the Bearer token).
+  // ── OPT-IN backend native ops (round12 §4) — the op TOGGLES live in settings now (Settings page → Backend
+  // card); the per-run CONSENT + healthz result stay HERE (invariant 1/2 — consent is never sticky, never a
+  // setting). A backend is "configured" when an API base is set AND we hold a stored entitlement token.
+  // `backendAnyEnable` opens the shared healthz-probe + consent path. When any precondition is unmet
+  // buildFixOptions omits the `backend` field ⇒ the worker's whole backend path is dead ⇒ zip BYTE-IDENTICAL
+  // to today. `backendConsent` = the per-run "these images are uploaded" acknowledgement (reset when the path
+  // can't engage). `backendReady` = the gateway healthz probe succeeded (fired only after unlock + config + op).
   const backendConfigured = API_BASE !== '' && loadStoredEntitlement() != null;
-  const [ktx2Enable, setKtx2Enable] = useState(false);
-  // round13: the OPT-IN pngquant op (lossy-indexed PNG → smaller download, DISK-ONLY). Shares the SAME
-  // backend host + consent + healthz gate as KTX2 (no new privacy surface). DEFAULT OFF ⇒ no `pngquant` op
-  // forwarded ⇒ the worker's pngquant path is dead ⇒ byte-identical to today.
-  const [pngquantEnable, setPngquantEnable] = useState(false);
-  // round24: the OPT-IN libvips lanczos3 resample op (high-quality tier DOWNSCALE → measured high-frequency
-  // retention; DISK/QUALITY-only, NO GPU/VRAM change). Shares the SAME backend host + consent + healthz gate.
-  // DEFAULT OFF ⇒ no `resample` op forwarded ⇒ the worker's resample path is dead ⇒ byte-identical to today.
-  const [resampleEnable, setResampleEnable] = useState(false);
-  // Any backend op being enabled opens the shared backend path (healthz probe + consent).
-  const backendAnyEnable = ktx2Enable || pngquantEnable || resampleEnable;
+  const backendAnyEnable = settings.ktx2Enable || settings.pngquantEnable || settings.resampleEnable;
   const [backendConsent, setBackendConsent] = useState(false);
   const [backendReady, setBackendReady] = useState(false);
 
-  // round12 B-transparency: BEFORE the user consents, surface the EXACT count + a short sample of which
-  // files would leave the device. This is an HONEST UPPER BOUND from the loaded folder (the worker may
-  // compose/skip fewer at execute, never more): KTX2 can transcode any raster page (every image file);
-  // pngquant only re-compresses PNG pages. The union of the enabled ops' candidate sets — deterministic,
-  // dir-aware (the SAME keyOf the worker keys by), pure presentation (no bytes read, no network).
+  // round12 B-transparency: BEFORE consent, surface the EXACT count + a short sample of which files would
+  // leave the device — an HONEST UPPER BOUND from the loaded folder (the worker may compose/skip fewer, never
+  // more): KTX2 ⇒ any raster page; pngquant ⇒ PNG only; resample ⇒ any raster page a tier downscale could
+  // emit. Union of the enabled ops' candidate sets — deterministic, dir-aware (the SAME keyOf the worker keys
+  // by), pure presentation (no bytes read, no network).
   const uploadPreview = useMemo(() => {
     if (!backendAnyEnable) return { count: 0, sample: [] as string[] };
     const refs: string[] = [];
@@ -1679,73 +811,11 @@ function FixCard({ files, profilePanelOpen, setProfilePanelOpen }: { files: Pick
       const ref = keyOf(f);
       const isPng = /\.png$/i.test(ref);
       const isImage = /\.(png|webp|jpe?g|avif)$/i.test(ref);
-      // KTX2 ⇒ any raster page; pngquant ⇒ PNG only; resample ⇒ any raster page that a tier downscale could
-      // emit (honest UPPER bound — the worker uploads only the actually-tiered, hashFilenames-off refs at
-      // execute, never more). Union when multiple ops are enabled.
-      if ((ktx2Enable && isImage) || (pngquantEnable && isPng) || (resampleEnable && isImage)) refs.push(ref);
+      if ((settings.ktx2Enable && isImage) || (settings.pngquantEnable && isPng) || (settings.resampleEnable && isImage)) refs.push(ref);
     }
     refs.sort(cmp);
     return { count: refs.length, sample: refs.slice(0, 8) };
-  }, [files, backendAnyEnable, ktx2Enable, pngquantEnable, resampleEnable]);
-  // Derive the ExportProfile the worker consumes. AB-R5: the mapping body now lives in the PURE
-  // buildProfileFromState (./lib/build-config) so save/validate (the build-config file) and the live run
-  // share ONE mapping — no drift ("exactly what will be applied"). Formats kept in canonical FORMAT_KEYS
-  // order; tiers = implied scale-1 top + custom rows; WebP `near`→60; global knobs folded at their exact
-  // legacy predicate; undefined when disabled OR no format selected (never a known-bad empty-formats profile).
-  const exportProfile: ExportProfile | undefined = useMemo(
-    () =>
-      buildProfileFromState({
-        profileEnable,
-        profileFormats,
-        customTiers,
-        profileOverrides,
-        profileAvifSubsample,
-        effort,
-        scaleAwareQ,
-        pngRecompress,
-      }),
-    [profileEnable, profileFormats, customTiers, profileOverrides, effort, scaleAwareQ, pngRecompress, profileAvifSubsample],
-  );
-
-  // ── AB-R5: build-config save / load (browser-only; zero asset bytes — invariant 1) ─────────────────
-  // The current granular UI slice the build-config serializes (the SAME object buildProfileFromState +
-  // serializeBuildConfig consume — one source of truth, no save/run drift). Backend-op toggles +
-  // backendConsent are DELIBERATELY excluded (consent must be per-run); the separate Pro toggles are v1-out.
-  const buildConfigState: BuildConfigState = {
-    profileEnable,
-    profileFormats,
-    customTiers,
-    profileOverrides,
-    profileAvifSubsample,
-    effort,
-    scaleAwareQ,
-    pngRecompress,
-  };
-  const onSaveConfig = (): void => downloadText(serializeBuildConfig(buildConfigState), 'asset-doctor-build-config.json');
-  // Apply a VALID parse atomically (all-or-nothing): every setter fires, surfacing success via the live
-  // region. A fail-closed parse surfaces t(reasonKey) (+ detail) via the SAME live region — NO alert, NO
-  // crash. The file read is local (no network).
-  const applyBuildConfig = (s: BuildConfigState): void => {
-    setProfileEnable(s.profileEnable);
-    setProfileFormats(s.profileFormats);
-    setCustomTiers(s.customTiers);
-    setProfileOverrides(s.profileOverrides);
-    setProfileAvifSubsample(s.profileAvifSubsample);
-    setEffort(s.effort);
-    setScaleAwareQ(s.scaleAwareQ);
-    setPngRecompress(s.pngRecompress);
-  };
-  const onLoadConfig = (file: File): void => {
-    void file.text().then((text) => {
-      const res = parseBuildConfig(text);
-      if (res.ok) {
-        applyBuildConfig(res.state);
-        setCfgStatus(t('fix.config.loaded'));
-      } else {
-        setCfgStatus(res.detail ? `${t(res.reasonKey)} — ${res.detail}` : t(res.reasonKey));
-      }
-    });
-  };
+  }, [files, backendAnyEnable, settings.ktx2Enable, settings.pngquantEnable, settings.resampleEnable]);
 
   // Top-level bundles with REAL folder structure: a ref with no "/" is its own singleton (a flat,
   // root-level loose file), which makes per-bundle marking meaningless noise. We collect only segments
@@ -1799,88 +869,25 @@ function FixCard({ files, profilePanelOpen, setProfilePanelOpen }: { files: Pick
   }, [unlocked, backendAnyEnable, backendConfigured]);
 
   // ONE source of truth for the FixOptions both the dry-run preview (mode:'plan') and the execute run
-  // (mode:'execute') send — so "Run fix" commits the EXACT plan the preview described, byte-for-byte.
-  // All omitted/false/empty values reproduce today's behavior in the worker. `over` lets a toggle pass the
-  // NEXT exclude set explicitly (no async setState-batching dependency); absent ⇒ the live `excludeKinds`.
-  function buildOptions(over?: Set<OpKind>): FixOptions {
-    const exclude = over ?? excludeKinds;
-    return {
-      targetMime: 'image/avif',
-      quality: 0.85,
-      padding: 2,
-      maxSize: 4096,
-      maxEdge: 2048,
-      aggressive,
-      polygon,
-      // Feature 2/3 — omitted/false/empty values reproduce today's behavior in the worker.
-      effort: effort > 0 ? effort : undefined,
-      scaleAwareQuality: scaleAwareQ || undefined,
-      // ROUND7 T12: webpNearLossless is MUTUALLY EXCLUSIVE with an export profile — the profile carries its
-      // own per-format near-lossless, so omit the legacy global knob when a profile is sent (no double-source).
-      webpNearLossless: !exportProfile && webpNearLossless ? 60 : undefined,
-      pngRecompressLevel: pngRecompress ? 2 : undefined,
-      // Opaque-alpha (round15) — forwarded only when enabled; off ⇒ undefined ⇒ no transcode op carries
-      // `opaque` ⇒ byte-identical to today. DISK-only saving (invariant 5 — never a VRAM claim).
-      opaqueAlpha: opaqueAlpha || undefined,
-      // Per-image MEASURED best-format pick (round17) — forwarded only when enabled; off ⇒ undefined ⇒ every
-      // loose transcode op carries the global targetMime ⇒ byte-identical to today (the fixed-target path).
-      // When ON, the plan routes each loose `format` transcode to the diagnosis-measured winner (params.
-      // bestMime). An active exportProfile / a per-folder override still take precedence (worker-side). DISK-
-      // only (invariant 5 — both formats decode to RGBA8888); honest (invariant 3 — bestMime is measured).
-      bestFormatPerImage: bestFormatPerImage || undefined,
-      // Frame-redundancy aliasing (round19) — DEFAULT ON. The worker treats undefined as ON, so we only send
-      // `false` when the user opts OUT (keeps a default run's option bag byte-identical to today's absent
-      // field). ON ⇒ duplicate frames alias onto one packed region (drop-in, exact VRAM before→after).
-      frameRedundancy: frameRedundancy ? undefined : false,
-      // Trim-margin → repack scheduling (round21 #0) — DEFAULT ON. The worker treats undefined as ON, so we
-      // only send `false` when the user opts OUT (keeps a default run's option bag byte-identical to today's
-      // absent field). ON ⇒ untrimmed sprites are tightened to their opaque bounds inside a scheduled repack
-      // (drop-in, exact VRAM before→after).
-      trimMargin: trimMargin ? undefined : false,
-      marking: aggressive && Object.keys(marking).length > 0 ? marking : undefined,
-      skinGuard: aggressive && Object.keys(skinGuard).length > 0 ? skinGuard : undefined,
-      overrides: overrides.length > 0 ? overrides.filter((o) => o.match.trim() !== '') : undefined,
-      // Feature 4 — only forwarded when explicitly enabled; off ⇒ undefined ⇒ no pack ops (today).
-      packLoose: packLoose || undefined,
-      packMode: packLoose ? packMode : undefined,
-      packGranularity: packLoose ? packGranularity : undefined,
-      packTrim: packLoose ? packTrim : undefined,
-      // Scale-tier export — only forwarded when enabled AND a real lower tier is selected (the
-      // implied scale-1 top tier alone would just rename, not downscale). Off / top-only ⇒ undefined
-      // ⇒ no tiering ⇒ byte-identical to today. The worker validates the ladder fail-closed.
-      // ROUND7 T12: MUTUALLY EXCLUSIVE with the export profile — when a profile is sent it is the SOLE
-      // source of formats + resolutions, so scaleTiers is omitted (never both feed the tier axis, B3).
-      scaleTiers: !exportProfile && scaleTiers.length > 1 ? scaleTiers : undefined,
-      // Config-driven export profile (round7-export-profile.md §7) — forwarded only when enabled with ≥1
-      // format. Undefined ⇒ byte-identical to today. When sent it SUPERSEDES targetMime/scaleTiers/
-      // webpNearLossless for the loose/tier paths; the worker validates it fail-closed.
-      exportProfile,
-      // Edge-extrude (bleed) — only forwarded when > 0; off ⇒ undefined ⇒ no gutter, byte-identical
-      // to today. The plan sets each repack/pack op's symmetric gutter >= extrude (invariant 5: a
-      // gutter can grow a sheet ⇒ VRAM reported honestly via extrudeVramDelta).
-      extrude: extrude > 0 ? extrude : undefined,
-      // Selective fix — the deselected OpKinds (empty ⇒ undefined ⇒ full fix, byte-identical to today).
-      // The worker SKIPS each excluded kind and surfaces an honest skipped[] note (never a silent drop).
-      excludeKinds: exclude.size > 0 ? [...exclude] : undefined,
-      // PixiJS-v8 asset manifest (round8-pixi-manifest.md) — forwarded when the user enabled it OR a backend
-      // op will engage (round12 auto-pair: the .ktx2 sibling / re-compressed PNG needs loader wiring, else it
-      // ships orphaned). Off + no consented backend ⇒ undefined ⇒ no manifest ⇒ zip byte-identical to today.
-      emitPixiManifest: effectiveEmitManifest || undefined,
-      // AssetPack includeFileSizes parity (round23 #2) — forwarded only when the manifest is actually emitted
-      // AND the user picked a real mode. UI values ARE the contract values ('raw'/'gzip') — no remap. 'off' or
-      // no manifest ⇒ undefined ⇒ bare-string src ⇒ manifest byte-identical to today.
-      includeFileSizes: effectiveEmitManifest && includeFileSizes !== 'off' ? includeFileSizes : undefined,
-      // Content-hash cache-busting (round9-cache-busting.md) — forwarded only when enabled; off ⇒ undefined
-      // ⇒ no hashing branch runs in the worker ⇒ zip byte-identical to today.
-      hashFilenames: hashFilenames || undefined,
-      // OPT-IN backend native KTX2 (round12-backend-processing.md, Phase 3) — the SOLE place a `backend`
-      // field is set. Forwarded ONLY when ALL of: KTX2 enabled, a backend configured (API base + stored
-      // token), the healthz probe succeeded, AND the user ticked per-run consent. Any missing precondition ⇒
-      // omitted ⇒ the worker's KTX2 path is dead ⇒ zip BYTE-IDENTICAL to today (the default browser fix).
-      // `consent` carries the explicit "these images are uploaded" acknowledgement to the worker; the worker
-      // double-checks it before any upload (defense in depth).
+  // (mode:'execute') send — the EXTRACTED, Node-tested buildFixOptions(settings, perRun) (lib/build-settings).
+  // The full build-config surface comes from `settings` (edited on the Settings page); the per-run inputs
+  // (the deselection mask, marking/skinGuard, the consent-gated backend, whether the backend will upload)
+  // come from the FixCard. The mutual exclusions (webpNearLossless / scaleTiers omitted when an export
+  // profile is sent) are decided against ONE settings snapshot inside the helper — strictly stronger than the
+  // old separate useStates; a default run is pinned byte-identical by build-settings.test.ts. `over` lets a
+  // PlanCard toggle pass the NEXT exclude set explicitly (no async setState-batching dependency).
+  function buildOptions(over?: Set<OpKind>) {
+    return buildFixOptions(settings, {
+      excludeKinds: over ?? excludeKinds,
+      marking,
+      skinGuard,
+      // The SOLE place a consent-gated `backend` field is built (undefined unless every precondition holds ⇒
+      // the worker's backend path stays dead ⇒ zip byte-identical to today).
       backend: buildBackendOptions(),
-    };
+      // round12 auto-pair: a consented backend run forces the Pixi manifest ON inside the helper so the
+      // .ktx2/re-compressed pages never ship without loader wiring.
+      backendWillUpload,
+    });
   }
 
   /** The `backend` FixOptions field, or undefined when ANY precondition is unmet (default OFF). HONESTY: the
@@ -1892,9 +899,9 @@ function FixCard({ files, profilePanelOpen, setProfilePanelOpen }: { files: Pick
     const stored = loadStoredEntitlement();
     if (!stored) return undefined; // configured implies a token, but never send without one
     const ops: NativeOpKind[] = [];
-    if (ktx2Enable) ops.push('ktx2');
-    if (pngquantEnable) ops.push('pngquant');
-    if (resampleEnable) ops.push('resample');
+    if (settings.ktx2Enable) ops.push('ktx2');
+    if (settings.pngquantEnable) ops.push('pngquant');
+    if (settings.resampleEnable) ops.push('resample');
     if (ops.length === 0) return undefined; // nothing opted in ⇒ dead path
     return { apiBase: API_BASE, token: stored.token, ops, consent: true };
   }
@@ -1906,7 +913,6 @@ function FixCard({ files, profilePanelOpen, setProfilePanelOpen }: { files: Pick
   // emitPixiManifest exactly as the user set it ⇒ byte-identical to today. Surfaced visibly (forced checkbox
   // + note) so the auto-enable is never silent.
   const backendWillUpload = backendAnyEnable && backendConfigured && backendReady && backendConsent && loadStoredEntitlement() != null;
-  const effectiveEmitManifest = emitPixiManifest || backendWillUpload;
 
   // Monotonic preview request id — guards against an out-of-order worker resolve when rapid toggles spawn
   // overlapping plan passes (each toggle starts one planFix; only the LATEST resolve may write the phase).
@@ -2014,15 +1020,17 @@ function FixCard({ files, profilePanelOpen, setProfilePanelOpen }: { files: Pick
     }
   }
 
-  // Stale-plan invalidation: if any option toggle changes after a preview, the shown plan no longer
-  // matches what "Run fix" would commit — reset to the options view so the user re-previews. Deps are
-  // EXACTLY the live FixCard option state (skinGuard is a const {}, not state). Skips the first render.
-  // `excludeKinds` is DELIBERATELY ABSENT here (selective fix): a Plan-card row toggle re-previews IN PLACE
-  // via togglePlanKind — it does NOT invalidate the plan. Do NOT add it, or every toggle resets to idle.
+  // Stale-plan invalidation: if any option changes after a preview, the shown plan no longer matches what
+  // "Run fix" would commit — reset to the options view so the user re-previews. The whole build-config
+  // surface now lives in ONE `settings` object whose identity changes on every edit (patchSettings spreads),
+  // so keying on `[settings, marking]` invalidates a pending plan on ANY setting change — including edits made
+  // on the Settings page while this card is hidden (this implements "settings apply to the NEXT run"). Skips
+  // the first render. `excludeKinds` is DELIBERATELY ABSENT (selective fix): a Plan-card row toggle re-previews
+  // IN PLACE via togglePlanKind — it does NOT invalidate the plan. Do NOT add it, or every toggle resets to idle.
   const sawPlan = useRef(false);
   useEffect(() => {
     if (sawPlan.current) setPhase({ t: 'idle' });
-  }, [aggressive, polygon, marking, effort, scaleAwareQ, webpNearLossless, pngRecompress, opaqueAlpha, bestFormatPerImage, frameRedundancy, trimMargin, overrides, packLoose, packMode, packGranularity, packTrim, extrude, tierEnable, tierSuffixes, profileEnable, profileFormats, customTiers, profileOverrides, ktx2Enable, pngquantEnable, resampleEnable]);
+  }, [settings, marking]);
   // Consent is NEVER sticky: drop the per-run "uploaded to server" acknowledgement the moment BOTH backend
   // ops are disabled OR the backend becomes unreachable, so a fresh run can't inherit a prior tick. The user
   // must re-consent each time the upload path could engage.
@@ -2062,138 +1070,39 @@ function FixCard({ files, profilePanelOpen, setProfilePanelOpen }: { files: Pick
         <Receipt receipt={phase.out.receipt} onRedownload={() => downloadZip(phase.out.zip)} />
       ) : (
         <>
-          <label className="mt-2 flex items-center justify-center gap-1.5 font-mono text-[10px] text-ink-soft">
-            <input type="checkbox" checked={aggressive} onChange={(e) => setAggressive(e.target.checked)} className="accent-teal" />
-            {t('fix.merge')}
-          </label>
-          <label title={t('fix.polygonHint')} className="mt-2 flex items-center justify-center gap-1.5 font-mono text-[10px] text-ink-soft">
-            <input type="checkbox" checked={polygon} onChange={(e) => setPolygon(e.target.checked)} className="accent-teal" />
-            {t('fix.polygon')}
-          </label>
+          {/* The build config lives on the dedicated Settings page now — a real hash link jumps there
+              (design §5.2: FixCard points at the config, doesn't host it). */}
+          <a href={SETTINGS_HASH} className="mt-2 inline-block font-mono text-[11px] text-teal underline-offset-2 hover:underline">
+            {t('settings.open')}
+          </a>
 
-          {aggressive && showBundles ? (
+          {/* Per-bundle marking (aggressive dedup) needs the loaded folder, so it stays on the run surface —
+              shown only when the aggressive/merge setting is on AND there are ≥2 multi-file folder bundles. */}
+          {settings.aggressive && showBundles ? (
             <BundlesPanel folders={bundles.folders} rootLoose={bundles.rootLoose} marking={marking} setMarking={setMarking} />
           ) : null}
 
-          <SettingsPanel
-            effort={effort}
-            setEffort={setEffort}
-            scaleAwareQ={scaleAwareQ}
-            setScaleAwareQ={setScaleAwareQ}
-            webpNearLossless={webpNearLossless}
-            setWebpNearLossless={setWebpNearLossless}
-            pngRecompress={pngRecompress}
-            setPngRecompress={setPngRecompress}
-            opaqueAlpha={opaqueAlpha}
-            setOpaqueAlpha={setOpaqueAlpha}
-            bestFormatPerImage={bestFormatPerImage}
-            setBestFormatPerImage={setBestFormatPerImage}
-            frameRedundancy={frameRedundancy}
-            setFrameRedundancy={setFrameRedundancy}
-            trimMargin={trimMargin}
-            setTrimMargin={setTrimMargin}
-            overrides={overrides}
-            setOverrides={setOverrides}
-          />
-
-          <PackPanel
-            packLoose={packLoose}
-            setPackLoose={setPackLoose}
-            packMode={packMode}
-            setPackMode={setPackMode}
-            packGranularity={packGranularity}
-            setPackGranularity={setPackGranularity}
-            packTrim={packTrim}
-            setPackTrim={setPackTrim}
-          />
-
-          <ExtrudePanel extrude={extrude} setExtrude={setExtrude} />
-
-          <TierPanel
-            tierEnable={tierEnable}
-            setTierEnable={setTierEnable}
-            tierSuffixes={tierSuffixes}
-            setTierSuffixes={setTierSuffixes}
-            resampleAvailable={resampleEnable && backendWillUpload}
-          />
-
-          <ExportProfilePanel
-            profileEnable={profileEnable}
-            setProfileEnable={setProfileEnable}
-            formats={profileFormats}
-            setFormats={setProfileFormats}
-            customTiers={customTiers}
-            setCustomTiers={setCustomTiers}
-            overrides={profileOverrides}
-            setOverrides={setProfileOverrides}
-            avifSubsample={profileAvifSubsample}
-            setAvifSubsample={setProfileAvifSubsample}
-            onSaveConfig={onSaveConfig}
-            onLoadConfig={onLoadConfig}
-            cfgStatus={cfgStatus}
-            open={profilePanelOpen}
-            onToggleOpen={() => setProfilePanelOpen(!profilePanelOpen)}
-          />
-
-          {/* PixiJS-v8 asset manifest (round8-pixi-manifest.md C6) — additive, DEFAULT OFF. Off ⇒ no extra
-              file ⇒ zip byte-identical to today. round12 auto-pair: when a backend op will upload, the manifest
-              is FORCED ON (the .ktx2/re-compressed page needs loader wiring) — shown as a checked+disabled box
-              with an honest note so the auto-enable is visible, never silent. */}
-          <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.pixiManifestHint')}>
-            <input
-              type="checkbox"
-              checked={effectiveEmitManifest}
-              disabled={backendWillUpload}
-              onChange={(e) => setEmitPixiManifest(e.target.checked)}
-              className="accent-teal disabled:opacity-60"
-            />
-            {t('fix.pixiManifest')}
-          </label>
-          {backendWillUpload && !emitPixiManifest ? (
-            <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.backend.manifestAutoPaired')}</p>
+          {/* round12 auto-pair note: a consented backend run FORCES the Pixi manifest ON (the .ktx2/re-
+              compressed pages need loader wiring). Shown HERE where the per-run backendWillUpload is known;
+              the manifest checkbox itself lives on the Settings page. */}
+          {backendWillUpload && !settings.emitPixiManifest ? (
+            <p className="mt-2 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.backend.manifestAutoPaired')}</p>
           ) : null}
 
-          {/* AssetPack includeFileSizes parity (round23 #2) — adds `progressSize` (KB) to each manifest src so
-              PixiJS shows accurate load progress. DEFAULT 'off' ⇒ buildOptions omits it ⇒ bare-string src ⇒
-              manifest byte-identical to today. DISABLED unless the Pixi manifest is actually emitted (a
-              bare-string manifest has no src objects to carry a size). */}
-          <label className="mt-1 ml-5 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.includeFileSizesHint')}>
-            {t('fix.includeFileSizes')}
-            <select
-              value={includeFileSizes}
-              disabled={!effectiveEmitManifest}
-              onChange={(e) => setIncludeFileSizes(e.target.value as 'off' | 'raw' | 'gzip')}
-              className="rounded border border-line bg-panel px-1 py-0.5 font-mono text-[10px] text-ink disabled:opacity-60"
-            >
-              <option value="off">{t('fix.includeFileSizes.off')}</option>
-              <option value="raw">{t('fix.includeFileSizes.raw')}</option>
-              <option value="gzip">{t('fix.includeFileSizes.gzip')}</option>
-            </select>
-          </label>
-
-          {/* Content-hash cache-busting (round9-cache-busting.md K9) — additive, DEFAULT OFF. Pairs with the
-              Pixi manifest (the guaranteed referrer for pass-through loose images). Off ⇒ zip byte-identical. */}
-          <label className="mt-2 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.hashFilenamesHint')}>
-            <input type="checkbox" checked={hashFilenames} onChange={(e) => setHashFilenames(e.target.checked)} className="accent-teal" />
-            {t('fix.hashFilenames')}
-          </label>
-
-          {/* OPT-IN backend native KTX2 (round12-backend-processing.md, Phase 3) — DEFAULT OFF, gated behind
-              a configured backend + per-run consent. When unconfigured/unconsented, buildOptions omits the
-              `backend` field ⇒ the worker's KTX2 path is dead ⇒ zip byte-identical to today. */}
-          <BackendKtx2Panel
-            configured={backendConfigured}
-            ready={backendReady}
-            ktx2Enable={ktx2Enable}
-            setKtx2Enable={setKtx2Enable}
-            pngquantEnable={pngquantEnable}
-            setPngquantEnable={setPngquantEnable}
-            resampleEnable={resampleEnable}
-            setResampleEnable={setResampleEnable}
-            consent={backendConsent}
-            setConsent={setBackendConsent}
-            uploadPreview={uploadPreview}
-          />
+          {/* OPT-IN backend consent (round12) — the op TOGGLES live on the Settings page; the per-run CONSENT,
+              reachability status, honest costs and upload preview stay HERE, next to Run (invariant 1/2 —
+              consent is never sticky, never a setting). Shown only once an op is enabled. */}
+          {backendAnyEnable ? (
+            <BackendConsentPanel
+              ktx2Enable={settings.ktx2Enable}
+              pngquantEnable={settings.pngquantEnable}
+              resampleEnable={settings.resampleEnable}
+              ready={backendReady}
+              consent={backendConsent}
+              setConsent={setBackendConsent}
+              uploadPreview={uploadPreview}
+            />
+          ) : null}
 
           {/* Default flow: PREVIEW the plan first (mode:'plan', cheap/pure) — a reference-changing paid
               fix shouldn't run blind. "Run fix" in the Plan card then commits the IDENTICAL options. */}
