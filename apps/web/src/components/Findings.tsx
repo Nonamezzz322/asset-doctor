@@ -37,7 +37,7 @@ export function Findings({
             >
               <div className="mb-2 flex items-center gap-2">
                 <span className={`ad-pulse-dot h-2 w-2 rounded-full ${DOT[f.severity]}`} />
-                <span className={`font-mono text-[10px] uppercase tracking-[0.06em] ${severityLabelClass(f.severity)}`}>{t(`severity.${f.severity}`)}</span>
+                <span className={`ad-label ${severityLabelClass(f.severity)}`}>{t(`severity.${f.severity}`)}</span>
               </div>
               <h3 className="font-display text-[15px] font-semibold leading-snug text-ink">{r.title}</h3>
               <p className="mt-1 text-[13px] leading-snug text-ink-soft">{r.detail}</p>

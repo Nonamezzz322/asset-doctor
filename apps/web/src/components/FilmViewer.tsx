@@ -167,7 +167,7 @@ export function FilmViewer({
         <div className="mt-2.5">
           <div
             id={legendHeadingId}
-            className="mb-1.5 px-1 font-mono text-[9px] uppercase tracking-[0.08em] text-film-soft"
+            className="mb-1.5 px-1 ad-label-sm text-film-soft"
           >
             {t('legend.heading')}
           </div>
@@ -215,7 +215,7 @@ export function FilmViewer({
           Declared/measured themselves are already on the card above and are NOT re-printed here. */}
       {m && (showMip || probe) ? (
         <div className="mt-2.5">
-          <div className="mb-1.5 px-1 font-mono text-[9px] uppercase tracking-[0.08em] text-film-soft">
+          <div className="mb-1.5 px-1 ad-label-sm text-film-soft">
             {t('readout.breakdown')}
           </div>
 
@@ -304,7 +304,7 @@ export function FilmViewer({
           >
             {explainers.map((row) => (
               <div key={row.key}>
-                <dt className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-film-soft">
+                <dt className="ad-label-sm text-film-soft">
                   {'i18nKey' in row.term ? t(row.term.i18nKey) : row.term.literal}
                 </dt>
                 <dd className="mt-0.5 text-[11px] leading-relaxed text-film-soft">{t(row.bodyKey)}</dd>
@@ -333,8 +333,8 @@ function ReadCell({
   title?: string;
 }) {
   return (
-    <div className="bg-film px-3 py-2.5" title={title}>
-      <div className="mb-1 font-mono text-[9.5px] uppercase tracking-[0.08em] text-film-soft">{label}</div>
+    <div className="min-w-0 bg-film px-3 py-2.5" title={title}>
+      <div className="ad-label-sm mb-1 break-words leading-tight text-film-soft">{label}</div>
       <div className={`font-mono text-[17px] font-semibold leading-none ${color}`}>{value}</div>
       {sub ? <div className="mt-1 font-mono text-[9px] leading-tight text-film-soft">{sub}</div> : null}
     </div>

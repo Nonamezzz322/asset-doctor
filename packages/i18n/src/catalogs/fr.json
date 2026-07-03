@@ -46,6 +46,9 @@
   "dropzone.progress": "{done}/{total} · {label}",
   "dropzone.footnote": "poids disque ≠ empreinte GPU · VRAM = w × h × 4",
   "error.noFiles": "Aucun fichier .json ou image trouvé ici.",
+  "error.analysisFailed": "Impossible d'analyser ce dossier.",
+  "error.fixFailed": "Impossible d'optimiser ce dossier.",
+  "error.detailsLabel": "Détails de l'erreur",
   "folder.title": "Rapport du dossier",
   "folder.issues": {
     "$count": "n",

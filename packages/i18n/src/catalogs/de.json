@@ -46,6 +46,9 @@
   "dropzone.progress": "{done}/{total} · {label}",
   "dropzone.footnote": "Disk-Gewicht ≠ GPU-Footprint · VRAM = w × h × 4",
   "error.noFiles": "Dort wurden keine .json- oder Bilddateien gefunden.",
+  "error.analysisFailed": "Ordner konnte nicht analysiert werden.",
+  "error.fixFailed": "Ordner konnte nicht optimiert werden.",
+  "error.detailsLabel": "Fehlerdetails",
   "folder.title": "Ordner-Report",
   "folder.issues": {
     "$count": "n",

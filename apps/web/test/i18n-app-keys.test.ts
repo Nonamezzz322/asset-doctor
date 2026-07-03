@@ -71,6 +71,10 @@ const appSrc =
   '\n' +
   lib('skipped-chip.ts') +
   '\n' +
+  // error-view.ts owns the error.* card keys (noFiles/analysisFailed/fixFailed/detailsLabel) — the t()
+  // literals live in the PURE mapper, not App.tsx — so it must be scanned or a renamed key would render raw.
+  lib('error-view.ts') +
+  '\n' +
   // Landing.tsx owns every landing.* t() literal (the whole idle-screen landing below the Dropzone). Its
   // nav labels + the pricing-status line resolve through registry/gate constants (landing-nav.ts, pinned by
   // landing-nav.test.ts + the i18n parity test), but the section copy is static t('landing.*') and must
@@ -258,5 +262,10 @@ describe('app i18n keys exist in the en catalog', () => {
     ]) {
       expect(CATALOGS.en[k], `${k} must exist in en.json`).toBeDefined();
     }
+  });
+
+  it('the error-card keys are catalogued (error-view.ts drift)', () => {
+    for (const k of ['error.noFiles', 'error.analysisFailed', 'error.fixFailed', 'error.detailsLabel'])
+      expect(CATALOGS.en[k], `${k} must exist in en.json`).toBeDefined();
   });
 });

@@ -46,6 +46,9 @@
   "dropzone.progress": "{done}/{total} · {label}",
   "dropzone.footnote": "डिस्क वज़न ≠ GPU फ़ुटप्रिंट · VRAM = w × h × 4",
   "error.noFiles": "वहाँ कोई .json या इमेज फ़ाइल नहीं मिली।",
+  "error.analysisFailed": "उस फ़ोल्डर का विश्लेषण नहीं हो सका।",
+  "error.fixFailed": "उस फ़ोल्डर को ऑप्टिमाइज़ नहीं किया जा सका।",
+  "error.detailsLabel": "त्रुटि विवरण",
   "folder.title": "फ़ोल्डर रिपोर्ट",
   "folder.issues": {
     "$count": "n",

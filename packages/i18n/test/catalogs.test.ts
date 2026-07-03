@@ -254,4 +254,13 @@ describe('catalog completeness (all 9 locales)', () => {
     // The resample tier hint is a DISTINCT key, never the same string as whyNoKernel.
     expect(translate('en', 'fix.backend.resampleTierHint')).not.toBe(translate('en', 'fix.skipped.whyNoKernel'));
   });
+
+  // UX-5: the localized error-card keys (noFiles + the two failure titles + the disclosure label) exist in
+  // all 9 locales and render brace-free. They carry NO placeholder token (static copy), so the render lock is
+  // trivially satisfied; key/token parity is already enforced by `same keys as en` above.
+  it('every locale renders the error-card keys (UX-5) without leftover braces', () => {
+    for (const loc of LOCALES)
+      for (const k of ['error.noFiles', 'error.analysisFailed', 'error.fixFailed', 'error.detailsLabel'])
+        expect(translate(loc, k), `${loc} ${k}`).not.toContain('{');
+  });
 });

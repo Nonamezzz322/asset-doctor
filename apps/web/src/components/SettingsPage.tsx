@@ -49,7 +49,7 @@ interface Sect {
 function Card({ id, title, children }: { id?: string; title: string; children: ReactNode }) {
   return (
     <section id={id} className="rounded-xl border border-line bg-panel p-4 text-left">
-      <h2 className="font-mono text-[10px] uppercase tracking-[0.06em] text-teal-text">{title}</h2>
+      <h2 className="ad-label text-teal-text">{title}</h2>
       <div className="mt-3 space-y-2">{children}</div>
     </section>
   );
@@ -148,7 +148,7 @@ function DiagnosisCard({ hidden, onChange }: { hidden: ReadonlySet<Rule>; onChan
           const groupName = t(`settings.diagnosis.group.${g}`);
           return (
             <fieldset key={g} className="rounded border border-line/70 p-2">
-              <legend className="flex items-center gap-1.5 px-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">
+              <legend className="flex items-center gap-1.5 px-1 ad-label text-ink-soft">
                 {/* Group show-all / hide-all: a tri-state checkbox. checked ⇔ the whole group is shown;
                     indeterminate ⇔ mixed. Clicking a fully-shown group hides it; clicking a partial/hidden
                     group shows it (setGroupHidden hides iff state was 'all'). Its own aria-label keeps it
@@ -234,7 +234,7 @@ function FormatsCard({ s, patch }: Sect) {
         <div className="mt-1 space-y-3">
           {/* ── Formats ── */}
           <div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">{t('fix.profile.formats')}</p>
+            <p className="ad-label text-ink-soft">{t('fix.profile.formats')}</p>
             <div className="mt-1 space-y-2">
               {FORMAT_KEYS.map(({ mime, key }) => {
                 const f = formats[mime];
@@ -283,7 +283,7 @@ function FormatsCard({ s, patch }: Sect) {
 
           {formats['image/avif'].enabled ? (
             <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">{t('fix.profile.avifSubsample')}</p>
+              <p className="ad-label text-ink-soft">{t('fix.profile.avifSubsample')}</p>
               <select
                 aria-label={t('fix.profile.avifSubsample')}
                 value={s.profileAvifSubsample === undefined ? 'default' : String(s.profileAvifSubsample)}
@@ -300,7 +300,7 @@ function FormatsCard({ s, patch }: Sect) {
 
           {/* ── Resolutions ── */}
           <div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">{t('fix.profile.resolutions')}</p>
+            <p className="ad-label text-ink-soft">{t('fix.profile.resolutions')}</p>
             <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-soft">{DEFAULT_SCALE_TIERS.map((tt) => tt.suffix).join('  ')}</p>
             {s.customTiers.map((tt, i) => {
               const validSuffix = isSafeSuffix(tt.suffix);
@@ -323,7 +323,7 @@ function FormatsCard({ s, patch }: Sect) {
 
           {/* ── Per-folder overrides ── */}
           <div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">{t('fix.profile.overrides')}</p>
+            <p className="ad-label text-ink-soft">{t('fix.profile.overrides')}</p>
             <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.profile.overridesHint')}</p>
             {s.profileOverrides.map((o, i) => (
               <div key={i} className="mt-1 flex flex-wrap items-center gap-1.5">
@@ -539,7 +539,7 @@ function RulesCard({ s, patch }: Sect) {
       <CheckRow label={t('fix.settings.trimMargin')} hint={t('fix.settings.trimMarginHint')} checked={s.trimMargin} onChange={(b) => patch({ trimMargin: b })} />
 
       <div className="border-t border-line pt-2">
-        <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft" title={t('fix.settings.overridesHint')}>
+        <p className="ad-label text-ink-soft" title={t('fix.settings.overridesHint')}>
           {t('fix.settings.overrides')}
         </p>
         {s.overrides.map((o, i) => (

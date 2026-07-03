@@ -41,6 +41,7 @@ import { analysisReadyMessage, resultCountMessage } from './lib/announce';
 import { effectiveSeverityFilter } from './lib/ledger-empty';
 import { UNPARSED_DETAILS_ID, UNPARSED_SUMMARY_ID } from './lib/skipped-chip';
 import { resultsHeading } from './lib/results-heading';
+import { errorCard, errDetail, type ErrorState, type ErrorContext } from './lib/error-view';
 import { progressView } from './lib/progress-view';
 import { buildTotalsRows } from './lib/totals-rows';
 import { focusTargetAfterSwap, type SwapState } from './lib/focus-move';
@@ -56,7 +57,7 @@ type Phase =
   | { t: 'idle' }
   | { t: 'analyzing'; progress?: Progress }
   | { t: 'done' }
-  | { t: 'error'; message: string };
+  | { t: 'error'; error: ErrorState };
 
 function Logo({ size = 22 }: { size?: number }) {
   return (
@@ -168,7 +169,7 @@ export function App() {
 
   async function run(picked: PickedFile[]) {
     if (picked.length === 0) {
-      setPhase({ t: 'error', message: t('error.noFiles') });
+      setPhase({ t: 'error', error: { kind: 'noFiles' } });
       return;
     }
     // Abort any in-flight run from a previous drop (the analysis worker AND its probe) before starting a
@@ -231,7 +232,7 @@ export function App() {
       // A superseded run rejects AbortError — a newer drop now owns the UI, so swallow it (mirrors the
       // openFolder AbortError contract below). round18-abortable-workers.
       if (e instanceof DOMException && e.name === 'AbortError') return;
-      setPhase({ t: 'error', message: e instanceof Error ? e.message : String(e) });
+      setPhase({ t: 'error', error: { kind: 'failed', detail: errDetail(e) } });
     }
   }
 
@@ -241,7 +242,7 @@ export function App() {
       else inputRef.current?.click();
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') return; // user cancelled
-      setPhase({ t: 'error', message: e instanceof Error ? e.message : String(e) });
+      setPhase({ t: 'error', error: { kind: 'failed', detail: errDetail(e) } });
     }
   }
 
@@ -713,7 +714,7 @@ function HeaderMetric({
 }) {
   return (
     <div className="bg-panel px-3 py-1.5" title={explainer}>
-      <div className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-soft">{label}</div>
+      <div className="ad-label-sm text-ink-soft">{label}</div>
       <div className={`font-mono text-xs font-semibold ${accent ? 'text-cta-text' : 'text-ink'}`}>{value}</div>
       {sub ? <div className="mt-0.5 font-mono text-[9px] leading-tight text-ink-soft">{sub}</div> : null}
       {explainer ? <span className="ad-sr-only">{explainer}</span> : null}
@@ -741,7 +742,7 @@ function MobileTotal({
 }) {
   return (
     <div className="flex flex-col" title={explainer}>
-      <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-soft">{label}</span>
+      <span className="ad-label-sm text-ink-soft">{label}</span>
       <span className={`font-mono text-xs font-semibold ${accent ? 'text-cta-text' : 'text-ink'}`}>{value}</span>
       {sub ? <span className="font-mono text-[9px] leading-tight text-ink-soft">{sub}</span> : null}
       {explainer ? <span className="ad-sr-only">{explainer}</span> : null}
@@ -763,7 +764,7 @@ function UnparsedNotice({ items, open, onToggle }: { items: NonNullable<Analysis
       onToggle={(e) => onToggle(e.currentTarget.open)}
       className="scroll-mt-20 rounded-md border border-line bg-bg p-2 text-left open:pb-2.5"
     >
-      <summary id={UNPARSED_SUMMARY_ID} className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">
+      <summary id={UNPARSED_SUMMARY_ID} className="cursor-pointer ad-label text-ink-soft">
         {t('report.unparsed.title', { n: items.length })}
       </summary>
       {/* Cap the 1000-entry case to one screen of scroll instead of a 9000px page append (each entry ~10px). */}
@@ -775,6 +776,32 @@ function UnparsedNotice({ items, open, onToggle }: { items: NonNullable<Analysis
         ))}
       </ul>
     </details>
+  );
+}
+
+// Localized error card: a role=alert TITLE + the raw worker message demoted to a collapsed <details>. The
+// title/label/passthrough split is decided by the PURE errorCard() (error-view.ts); this is a thin render of
+// its output. role=alert (implicit aria-live=assertive) is on the TITLE ONLY, so a failure is announced
+// immediately WITHOUT reading the raw English body assertively. `mt` lets each call site keep its spacing.
+function ErrorNotice({ state, ctx, mt = 'mt-3' }: { state: ErrorState; ctx?: ErrorContext; mt?: string }) {
+  const { t } = useI18n();
+  const card = errorCard(state, t, ctx);
+  return (
+    <div className={`${mt} text-center`}>
+      <p role="alert" className="font-mono text-xs text-crit-text">{card.title}</p>
+      {card.detail && (
+        <details className="mt-1.5 inline-block max-w-full text-left">
+          <summary className="cursor-pointer ad-label text-ink-soft">
+            {card.detail.label}
+          </summary>
+          {/* tabIndex=0 + aria-label so a keyboard-only (non-SR) user can focus and scroll an overlong raw
+              message inside the max-h-40 clip (WCAG 2.1.1); an SR reads the full DOM text regardless. */}
+          <p tabIndex={0} aria-label={card.detail.label} className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[10px] leading-relaxed text-ink-soft">
+            {card.detail.body}
+          </p>
+        </details>
+      )}
+    </div>
   );
 }
 
@@ -866,10 +893,7 @@ function Dropzone({
         </div>
       </div>
 
-      {/* a11y: role=alert (implicit aria-live=assertive) so a failed parse is announced immediately —
-          interrupting is correct for a failure. The message is the existing localized phase.message
-          (e.g. error.noFiles) or the raw worker message; nothing is fabricated. */}
-      {phase.t === 'error' && <p role="alert" className="mt-3 text-center font-mono text-xs text-crit">{phase.message}</p>}
+      {phase.t === 'error' && <ErrorNotice state={phase.error} />}
       <p className="mt-5 text-center font-mono text-[11px] text-ink-soft">{t('dropzone.footnote')}</p>
       {/* Mobile honesty line (visible only < sm). Never promises mobile analysis (WebGL probe / FS Access
           limits) but doesn't say "impossible" either — file-input folder picking exists. */}
@@ -890,7 +914,7 @@ type FixPhase =
   | { t: 'plan'; summary: FixPlanSummary; pending?: boolean }
   | { t: 'running'; p: FixProgress }
   | { t: 'done'; out: FixOutcome }
-  | { t: 'error'; message: string };
+  | { t: 'error'; error: ErrorState };
 
 function downloadZip(zip: Blob): void {
   const url = URL.createObjectURL(zip);
@@ -990,7 +1014,7 @@ function BundlesPanel({
   const states: BundleAvailability[] = ['eager', 'lazy', 'isolated'];
   return (
     <details className="mt-2 rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
-      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal-text">{t('fix.bundles.title')}</summary>
+      <summary className="cursor-pointer ad-label text-teal-text">{t('fix.bundles.title')}</summary>
       <p className="mt-1.5 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.bundles.hint')}</p>
       <div className="mt-2 space-y-1.5">
         {folders.map((b) => (
@@ -1220,7 +1244,7 @@ function FixCard({ files, buildNonce }: { files: PickedFile[]; buildNonce: numbe
       const sourced = await resourceFiles();
       if (seq !== previewSeq.current) return; // a newer toggle superseded this preview during the re-read
       if (!sourced) {
-        setPhase({ t: 'error', message: t('error.noFiles') });
+        setPhase({ t: 'error', error: { kind: 'noFiles' } });
         return;
       }
       const summary = await planFix(sourced, buildOptions(over), ctrl.signal);
@@ -1231,7 +1255,7 @@ function FixCard({ files, buildNonce }: { files: PickedFile[]; buildNonce: numbe
       // return but is unreachable for the aborted promise once a newer preview bumped previewSeq).
       if (e instanceof DOMException && e.name === 'AbortError') return;
       if (seq !== previewSeq.current) return;
-      setPhase({ t: 'error', message: e instanceof Error ? e.message : String(e) });
+      setPhase({ t: 'error', error: { kind: 'failed', detail: errDetail(e) } });
     }
   }
 
@@ -1262,7 +1286,7 @@ function FixCard({ files, buildNonce }: { files: PickedFile[]; buildNonce: numbe
       // the folder is no longer readable → refuse honestly rather than zip detached/empty buffers.
       const sourced = await resourceFiles();
       if (!sourced) {
-        setPhase({ t: 'error', message: t('error.noFiles') });
+        setPhase({ t: 'error', error: { kind: 'noFiles' } });
         return;
       }
       const out = await runFix(sourced, buildOptions(), (p) => setPhase({ t: 'running', p }), ctrl.signal);
@@ -1271,7 +1295,7 @@ function FixCard({ files, buildNonce }: { files: PickedFile[]; buildNonce: numbe
     } catch (e) {
       // A superseded run rejects AbortError — a newer run/preview now owns the card; swallow it.
       if (e instanceof DOMException && e.name === 'AbortError') return;
-      setPhase({ t: 'error', message: e instanceof Error ? e.message : String(e) });
+      setPhase({ t: 'error', error: { kind: 'failed', detail: errDetail(e) } });
     }
   }
 
@@ -1393,7 +1417,7 @@ function FixCard({ files, buildNonce }: { files: PickedFile[]; buildNonce: numbe
           </button>
         </>
       )}
-      {phase.t === 'error' && <p className="mt-2 font-mono text-[11px] text-crit">{phase.message}</p>}
+      {phase.t === 'error' && <ErrorNotice state={phase.error} ctx="fix" mt="mt-2" />}
       {PRO_GATE_ENABLED && unlocked && <ProBadge onDeactivated={() => setUnlocked(false)} />}
     </div>
   );
@@ -1644,7 +1668,7 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
           informational (what the fix REFUSED to touch / couldn't do), not warnings → text-ink-soft. */}
       {receipt.skipped.length > 0 ? (
         <details className="rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
-          <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">
+          <summary className="cursor-pointer ad-label text-ink-soft">
             {t('fix.skipped.title', { n: receipt.skipped.length })}
           </summary>
           <ul className="mt-1.5 space-y-1">
@@ -1699,7 +1723,7 @@ function SheetDiffs({ sheetDiffs, total }: { sheetDiffs: SheetDiff[]; total: num
   const { t } = useI18n();
   return (
     <details className="rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
-      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal-text">
+      <summary className="cursor-pointer ad-label text-teal-text">
         {t('fix.sheetDiff.title', { n: sheetDiffs.length })}
       </summary>
       <p className="mt-1.5 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.sheetDiff.proofNote')}</p>
@@ -1746,11 +1770,11 @@ function SheetDiffView({ diff }: { diff: SheetDiff }) {
     <div className="space-y-1.5">
       <div className="grid grid-cols-2 gap-2">
         <div className="space-y-1">
-          <p className="px-1 font-mono text-[9px] uppercase tracking-[0.08em] text-ink-soft">{t('fix.sheetDiff.before')}</p>
+          <p className="px-1 ad-label-sm text-ink-soft">{t('fix.sheetDiff.before')}</p>
           <FilmViewer bytes={diff.beforeBytes} findings={[]} name={diff.name} metrics={beforeMetrics} />
         </div>
         <div className="space-y-1">
-          <p className="px-1 font-mono text-[9px] uppercase tracking-[0.08em] text-ink-soft">{t('fix.sheetDiff.after')}</p>
+          <p className="px-1 ad-label-sm text-ink-soft">{t('fix.sheetDiff.after')}</p>
           <FilmViewer bytes={diff.afterBytes} findings={[afterFinding]} name={diff.name} metrics={afterMetrics} />
         </div>
       </div>
@@ -1846,7 +1870,7 @@ function PlanCard({ summary, excluded, pending, onToggle, onRun, onBack, disable
                     className="accent-teal"
                   />
                   <span className={`${ref ? 'text-warn' : 'text-ink-soft'} ${off ? 'line-through opacity-55' : ''}`}>{label}</span>
-                  {off ? <span className="text-[9px] uppercase tracking-[0.06em] text-warn">{t('fix.plan.deselected')}</span> : null}
+                  {off ? <span className="ad-label-sm text-warn">{t('fix.plan.deselected')}</span> : null}
                 </span>
                 <span className={`${ref ? 'text-warn' : 'text-ink'} ${off ? 'line-through opacity-55' : ''}`}>{n}</span>
               </label>
@@ -1884,7 +1908,7 @@ function PlanCard({ summary, excluded, pending, onToggle, onRun, onBack, disable
       {/* Pixel-free would-be-skips — REUSED skipped <details> styling (informational, text-ink-soft). */}
       {summary.skipped.length > 0 ? (
         <details className="rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
-          <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">
+          <summary className="cursor-pointer ad-label text-ink-soft">
             {t('fix.skipped.title', { n: summary.skipped.length })}
           </summary>
           <ul className="mt-1.5 space-y-1">
@@ -1928,13 +1952,13 @@ function OpManifest({ operations }: { operations: string[] }) {
   const groups = groupOps(operations);
   return (
     <details className="rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
-      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal-text">
+      <summary className="cursor-pointer ad-label text-teal-text">
         {t('fix.changes.title', { n: operations.length })}
       </summary>
       <div className="mt-1.5 space-y-2">
         {groups.map((g) => (
           <div key={g.kind ?? 'other'}>
-            <p className="font-mono text-[9px] uppercase tracking-[0.06em] text-ink-soft">
+            <p className="ad-label-sm text-ink-soft">
               {t(`fix.op.${g.kind ?? 'other'}`)} · {g.rows.length}
             </p>
             <ul className="mt-0.5 space-y-0.5">
@@ -1979,7 +2003,7 @@ function LoaderMigration({ changes, ktx2 }: { changes: FixChange[]; ktx2: boolea
   };
   return (
     <details className="rounded-md border border-warn/40 bg-bg p-2 text-left open:pb-2.5">
-      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-warn">
+      <summary className="cursor-pointer ad-label text-warn">
         {t('fix.migrate.title')} · {changes.length}
       </summary>
       <p className="mt-1.5 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.migrate.note')}</p>

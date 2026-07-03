@@ -46,6 +46,9 @@
   "dropzone.progress": "{done}/{total} · {label}",
   "dropzone.footnote": "peso en disco ≠ footprint en GPU · VRAM = w × h × 4",
   "error.noFiles": "No se encontraron archivos .json ni imágenes ahí.",
+  "error.analysisFailed": "No se pudo analizar esa carpeta.",
+  "error.fixFailed": "No se pudo optimizar esa carpeta.",
+  "error.detailsLabel": "Detalles del error",
   "folder.title": "Informe de la carpeta",
   "folder.issues": {
     "$count": "n",

@@ -50,6 +50,9 @@
   "dropzone.progress": "{done}/{total} · {label}",
   "dropzone.footnote": "вес на диске ≠ нагрузка на GPU · VRAM = w × h × 4",
   "error.noFiles": "Файлов .json или изображений здесь не найдено.",
+  "error.analysisFailed": "Не удалось проанализировать эту папку.",
+  "error.fixFailed": "Не удалось оптимизировать эту папку.",
+  "error.detailsLabel": "Подробности ошибки",
   "folder.title": "Отчёт по папке",
   "folder.issues": {
     "$count": "n",

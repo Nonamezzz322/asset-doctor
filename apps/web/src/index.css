@@ -22,6 +22,7 @@
   --color-film-mute: #8593a0;
 
   --color-crit: #e5484d;
+  --color-crit-text: #c42b33; /* NEW — AA-safe crit for readable error TITLE text; on panel 5.62 / bg 4.72 (AA). decorative --color-crit stays for dots/overlays */
   --color-warn: #d98a00;
   --color-ok: #1f9d63;
   --color-info: #2b8fc9;
@@ -41,6 +42,29 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+/* ── typography: canonical micro-label tokens (§5 rentgen labels) ─────────────
+   TWO sizes only — retires the 8–10px / 0.06–0.08em drift across HeaderMetric, ReadCell, Settings
+   section titles, fix-plan summaries, severity chips and film readouts. COLOR IS NOT baked (varies:
+   ink-soft / film-soft / teal-text / warn / severity) ⇒ callers keep their color utility (AA contrast
+   unchanged). LINE-HEIGHT IS NOT baked ⇒ swapping a matching `font-mono text-[Npx] uppercase
+   tracking-[…]` stack is byte-identical to today (arbitrary text-[Npx] utilities set font-size only).
+   THREE sites are DELIBERATELY normalized (not byte-identical, on purpose — they were the drift): the
+   ReadCell/dt 9.5px→9px shrink, and two 9px labels (the "deselected" badge + the OpManifest group-count)
+   whose off-stack 0.06em tracking is unified to the .ad-label-sm 0.08em. All negligible + one-time
+   pixel-checked; the point of the token is to retire exactly this drift. No animation ⇒ reduced-motion inert. */
+.ad-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.ad-label-sm {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 /* a11y: one token-driven keyboard-focus ring (WCAG 2.4.7 / 1.4.11). :focus-visible so mouse
