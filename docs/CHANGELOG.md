@@ -10,6 +10,16 @@ GitHub-кредов — пушит пользователь); хэши комм�
 
 ---
 
+## Честность чека Pro-фикса (3 over-claim на платном пути) — 2026-07-03
+Пивот темы «честность измерений» с диагноза на ВЫВОД фикса (чек — платный путь, где over-claim хуже всего; 3 диаг-раунда его не аудировали). Selection `w2mikgmsn` → **3 CONFIRMED** (killed ~6: уже-раскрытое lossless-vs-lossy, presentation-only зелёный-на-росте, честные run-тоталы). Impl `wffu4rge8`; один ревью-агент вернул пусто ⇒ я вручную проверил все 3 изменения (near-dup accounting-split, spine-сниппет, plan-footprint target). Ветка **105 над `origin/main`** (fix 495, web 845, i18n parity).
+
+- **near-dup drop больше не завышает VRAM** (`f6e2409`)
+  — duplicate-similar bare-drop сворачивал полный `w·h·4` удалённой копии в ЕДИНСТВЕННУЮ жёсткую VRAM-экономию чека (`fix.worker.ts:2824`→`vramBytesAfter:4307`), НО bare-drop НЕ репойнтит (ссылка остаётся висячей `to:[]`) ⇒ GPU-экономия НЕ РЕАЛИЗОВАНА (exact-dup owner-aware путь ту же величину уже держит ОТДЕЛЬНОЙ верхней границей и отказывается сворачивать). Фикс: убрал fold из `vramSaved` (⇒ `vramBytesAfter` — консервативная истинная граница), нереализованную величину вынес в ОТДЕЛЬНОЕ `droppedDuplicateVramBytesUpperBound` (явно контингентно на РУЧНОЙ репойнт, НИКОГДА в жёсткой строке). DISK-экономия остаётся честно измеренной. Инв. 3 и 5. Воркер не Node-тестируем ⇒ закреплено preview-parity/accounting тестами.
+- **Phaser Spine loader-сниппет починен** (`f6e2409`)
+  — Эмитил `this.load.atlas` с ВЫДУМАННОЙ ext-swap `.png`-страницей вместо `this.load.spineAtlas` с реальным `.atlas`-url (`.png` висит под `spinePageFormat:'profile'`), нарушая own never-fake инвариант модуля. Теперь корректный spine-phaser вызов (`this.load.spineAtlas(key, url)`, плагин-коммент), без выдуманной страницы; тест перепинен на верный сниппет.
+- **plan-preview кредитует РЕАЛЬНЫЙ таргет, не bestMime** (`f6e2409`)
+  — `plan-footprint.ts:85` кредитовал disk-экономию по strict-smaller FORMAT_TARGETS-победителю (`bestMime`), но при `bestFormatPerImage` OFF (дефолт) прогон кодирует `opts.targetMime` (дефолт AVIF) ⇒ завышал, когда target≠bestMime (deferred-note раскрывал только lossy-vs-lossless, НЕ codec-mismatch). Фикс: кредитует ТОЛЬКО когда op-target == измеренный bestMime, иначе defer (fail-safe) ⇒ консервативно совпадает с execute. Вердикт (моя проверка): **SHIP** (0 serious; 2 MINOR — fail-safe/consistent, оставлены заметкой: pt upper-bound English-плейсхолдер как у сиблинга; VALID_MIMES-гард продублирован в plan+preview). Gate: typecheck + fix 495 + web 845 + i18n parity + lint зелёные.
+
 ## Robustness-parity парсеров — 2026-07-03
 Продолжение темы «качество диагностики»: после 3 раундов правила analysis хорошо откалиброваны, поэтому взял 2 отложенных (round-3 verified, budget-deferred) parity-гарда парсеров — оба чинят FALSE unparsed drop (хороший атлас целиком отвергается на битом манифесте = промах диагноза на краевых входах). Impl — `parsers-engineer` агент, моя независимая проверка (полный gate + чтение гардов). Ветка **103 над `origin/main`**.
 
