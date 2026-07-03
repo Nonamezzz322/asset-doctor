@@ -13,7 +13,7 @@ const tokens = (v: CatalogEntry | undefined): string[] => {
   return [...new Set(grab(String(v ?? '')))].sort();
 };
 
-describe('catalog completeness (all 9 locales)', () => {
+describe('catalog completeness (all 10 locales)', () => {
   for (const loc of LOCALES) {
     it(`${loc}: same keys as en, plural structure intact, placeholders preserved`, () => {
       const c = CATALOGS[loc];
@@ -152,7 +152,7 @@ describe('catalog completeness (all 9 locales)', () => {
   // from measured even when the (probe-gated) measured chip is absent (the honesty correction). Pin that
   // every locale carries the key (no missing-key fallback on mobile) AND that it differs from metric.vram
   // in EN — a bare-vram regression would re-introduce the ambiguity the strip exists to avoid.
-  it('readout.declared exists in all 9 locales and is self-disambiguating (≠ metric.vram in en)', () => {
+  it('readout.declared exists in all 10 locales and is self-disambiguating (≠ metric.vram in en)', () => {
     for (const loc of LOCALES) {
       const v = CATALOGS[loc]['readout.declared'];
       expect(typeof v === 'string' && v.length > 0, `${loc} readout.declared`).toBe(true);
@@ -179,7 +179,7 @@ describe('catalog completeness (all 9 locales)', () => {
     expect(translate('en', 'readout.measuredAggregateTooltip', { n: 5, declared: 16 * 1048576 })).toContain('16.0 MB');
   });
 
-  // AB-R5: the build-config save/load labels + fail-closed parse-error reasons exist in all 9 locales and
+  // AB-R5: the build-config save/load labels + fail-closed parse-error reasons exist in all 10 locales and
   // render brace-free (they are static — no placeholder tokens). Key parity is already enforced by the
   // `same keys as en` assertion above; this pins them as a deliberate, never-silently-dropped contract.
   it('every locale renders the build-config keys (AB-R5) without leftover braces', () => {
@@ -204,7 +204,7 @@ describe('catalog completeness (all 9 locales)', () => {
   });
 
   // spritesheet-first (design §6): the primary "Build a spritesheet" card + the honest fold toggle keys
-  // exist in all 9 locales and render brace-free. The three static keys carry no token; the three plural
+  // exist in all 10 locales and render brace-free. The three static keys carry no token; the three plural
   // keys ({n}) render both forms (n=1 singular, n=5 plural) with no leftover braces. Key parity is already
   // enforced by the `same keys as en` assertion above; this pins the render for the new UI copy.
   it('every locale renders the spritesheet-first card + fold keys (design §6) without leftover braces', () => {
@@ -256,7 +256,7 @@ describe('catalog completeness (all 9 locales)', () => {
   });
 
   // UX-5: the localized error-card keys (noFiles + the two failure titles + the disclosure label) exist in
-  // all 9 locales and render brace-free. They carry NO placeholder token (static copy), so the render lock is
+  // all 10 locales and render brace-free. They carry NO placeholder token (static copy), so the render lock is
   // trivially satisfied; key/token parity is already enforced by `same keys as en` above.
   it('every locale renders the error-card keys (UX-5) without leftover braces', () => {
     for (const loc of LOCALES)

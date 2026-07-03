@@ -17,8 +17,9 @@ import fr from './catalogs/fr.json';
 import it from './catalogs/it.json';
 import zh from './catalogs/zh.json';
 import hi from './catalogs/hi.json';
+import uk from './catalogs/uk.json';
 
-export const LOCALES = ['en', 'ru', 'de', 'es', 'pt', 'fr', 'it', 'zh', 'hi'] as const;
+export const LOCALES = ['en', 'ru', 'de', 'es', 'pt', 'fr', 'it', 'zh', 'hi', 'uk'] as const;
 export type Locale = (typeof LOCALES)[number];
 
 /** Each language's name in its own script (constant across catalogs). */
@@ -32,6 +33,7 @@ export const NATIVE_NAME: Record<Locale, string> = {
   it: 'Italiano',
   zh: '中文',
   hi: 'हिन्दी',
+  uk: 'Українська',
 };
 
 export interface PluralForm {
@@ -57,6 +59,7 @@ const CATALOGS: Record<Locale, Catalog> = {
   it: it as Catalog,
   zh: zh as Catalog,
   hi: hi as Catalog,
+  uk: uk as Catalog,
 };
 
 export const isLocale = (s: string): s is Locale => (LOCALES as readonly string[]).includes(s);
