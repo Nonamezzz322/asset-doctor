@@ -573,7 +573,14 @@ export interface ThresholdConfig {
    *  findings stay byte-identical. Optional/additive: absent ⇒ the presentation gate fails closed (no card,
    *  no collapse). */
   shouldAtlas: { minLooseImages: number; maxSpriteEdgePx: number; dominatedFraction?: number };
-  atlasMerge: { occupancyBelow: number; minAtlases: number };
+  /** Under-filled-atlas merge gate. `occupancyBelow`: an atlas below this occupancy is a merge candidate;
+   *  `minAtlases`: how many such candidates before the finding fires. `packEfficiency` ∈ (0,1]: the realistic
+   *  packing density we CREDIT a merged repack with — the merged-sheet count (and thus the reclaimed VRAM)
+   *  is derived from sprite AREA, and a naive area/capacity ratio assumes a perfect 100% pack, over-stating
+   *  the saving (invariant 3/5 — estimates must be conservative TRUE lower bounds). DISCOUNTING usable
+   *  capacity by this factor (usable = capacity × packEfficiency) rounds the sheet count UP toward a realistic
+   *  repack, so the claimed saving can only shrink. */
+  atlasMerge: { occupancyBelow: number; minAtlases: number; packEfficiency: number };
   /** Total CONDITIONAL mipmap overhead (Σ vramBytesMipmapped − vramBytes) across the folder before the
    *  aggregate mipmap-cost info finding fires. Geometry only; no pixel read. Optional: absent ⇒ the
    *  mipmap-cost finding is suppressed (e.g. a budget/CLI config that doesn't opt into it). */

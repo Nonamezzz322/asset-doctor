@@ -14,7 +14,17 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   // loose sprites before the folder reads as loose-dominated — so a background/atlas-heavy folder (8 loose beside
   // 500 atlases) scores LOW and is NOT promoted/collapsed. NO rule reads it (shouldAtlasFinding is unchanged), so
   // it passes through resolveThresholds inertly and CLI/budget output stays byte-identical.
-  atlasMerge: { occupancyBelow: 0.5, minAtlases: 2 }, // under-filled atlases worth merging
+  atlasMerge: { occupancyBelow: 0.5, minAtlases: 2, packEfficiency: 0.8 }, // under-filled atlases worth merging.
+  // packEfficiency: realistic packing density we credit a merged repack with. The merged-sheet count (and
+  // thus the reclaimed VRAM) is derived from sprite AREA; a naive area/capacity ratio assumes a perfect 100%
+  // pack, over-stating the saving (invariant 3/5 — estimates must be conservative TRUE lower bounds). We
+  // DISCOUNT usable capacity by this factor (usable = capacity × packEfficiency, folder.ts) so the sheet
+  // count rounds UP toward a realistic repack. 0.8 == occupancy.warn:
+  // we credit the merge with reaching at most the density we ourselves call "well-packed", never better. Real
+  // MaxRects/TexturePacker exports land ~0.80-0.92, so 0.8 is the conservative (under-claiming) end. Raising
+  // minAtlases also lets the "no clear win" guard suppress marginal merges. NOT a rigorous adversarial bound
+  // (a few un-co-tileable large rects can still exceed any area formula — out of scope); it removes the
+  // systematic best-case over-claim.
   mipmap: { warn: 4_194_304 }, // total conditional mip overhead (bytes) before the aggregate info fires.
   // One 2048² atlas alone is +5.59 MB and trips it; small UI-only sets (a 1024² page is only +1.33 MB) stay quiet.
   fragmentation: { warn: 0.4 }, // empty-space dispersion (largest hole / total empty) at/below which the

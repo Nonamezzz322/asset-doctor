@@ -8,7 +8,13 @@ export function emitTexturePackerJson(atlas: Atlas): string {
   const frames: Record<string, unknown> = {};
   for (const s of [...atlas.sprites].sort((a, b) => a.name.localeCompare(b.name))) {
     frames[s.name] = {
-      frame: { x: s.frame.x, y: s.frame.y, w: s.frame.w, h: s.frame.h },
+      // `frame` is stored AS PLACED (w/h swapped when rotated). Real TexturePacker/Pixi write it in the
+      // UN-ROTATED (source) orientation and let the loader swap, so swap back here for rotated sprites —
+      // keeps parse↔emit an exact identity and re-emits real-TP-shaped JSON that Pixi loads correctly
+      // (matches emitSpineAtlasText's un-rotated `size:` line). x/y are never swapped.
+      frame: s.rotated
+        ? { x: s.frame.x, y: s.frame.y, w: s.frame.h, h: s.frame.w }
+        : { x: s.frame.x, y: s.frame.y, w: s.frame.w, h: s.frame.h },
       rotated: s.rotated,
       trimmed: s.trimmed,
       ...(s.spriteSourceSize ? { spriteSourceSize: { x: s.spriteSourceSize.x, y: s.spriteSourceSize.y, w: s.spriteSourceSize.w, h: s.spriteSourceSize.h } } : {}),

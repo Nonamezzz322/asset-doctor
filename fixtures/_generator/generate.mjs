@@ -138,11 +138,18 @@ const fr = (name, x, y, w, h, extra = {}) => ({
 });
 
 function tpFrameBody(f) {
+  // fr() authors frame AS PLACED (as-drawn). Real TexturePacker writes frame/spriteSourceSize UN-ROTATED and
+  // sets rotated:true; the loader swaps to the on-page footprint. Emit that swap for rotated sprites (mirrors
+  // the Spine .atlas `size:` line and the parser's placed→un-rotated round-trip). Non-rotated ⇒ byte-identical.
+  const jf = f.rotated ? { x: f.frame.x, y: f.frame.y, w: f.frame.h, h: f.frame.w } : f.frame;
+  const dss = f.rotated
+    ? { x: 0, y: 0, w: f.frame.h, h: f.frame.w }
+    : { x: 0, y: 0, w: f.frame.w, h: f.frame.h };
   return {
-    frame: f.frame,
+    frame: jf,
     rotated: f.rotated,
     trimmed: f.trimmed,
-    spriteSourceSize: f.spriteSourceSize ?? { x: 0, y: 0, w: f.frame.w, h: f.frame.h },
+    spriteSourceSize: f.spriteSourceSize ?? dss,
     sourceSize: f.sourceSize,
   };
 }
@@ -284,7 +291,7 @@ parser fidelity (the packed frame stays as-placed; source size is preserved).
 }
 
 /* ── Case 2: TexturePacker Array, oversize + non-power-of-two (crit/warn) ───
- * Healthy occupancy, but the atlas is 4100×1024: longest edge > 4096 (oversize
+ * Healthy occupancy, but the atlas is 4100×1024: longest edge > 2730 (oversize
  * crit) and 4100 is NPOT (warn). Headline findings = dimensions. */
 {
   const size = { w: 4100, h: 1024 };
@@ -310,13 +317,13 @@ parser fidelity (the packed frame stays as-placed; source size is preserved).
           { rule: 'dimensions-npot', severity: 'info' },
           { rule: 'mipmap-cost', severity: 'info' },
         ],
-        note: 'Occupancy ~86% (ok). Atlas 4100×1024: edge 4100 > 4096 (oversize crit) and NPOT (warn). 16.8MB texture → mipmaps would add ~5.6MB (mipmap-cost info).',
+        note: 'Occupancy ~86% (ok). Atlas 4100×1024: edge 4100 > 2730 (oversize crit) and NPOT (warn). 16.8MB texture → mipmaps would add ~5.6MB (mipmap-cost info).',
       },
     },
     `# tp-array-oversize
 
 TexturePacker **Array** format. Occupancy is healthy (~86%), but the atlas is **4100×1024**:
-the longest edge exceeds the 4096 crit threshold (oversize **crit**) and 4100 is not a power
+the longest edge exceeds the 2730 crit threshold (oversize **crit**) and 4100 is not a power
 of two (NPOT **warn**). No occupancy/wasted finding — dimensions are the story here.
 `,
   );
@@ -398,7 +405,7 @@ the baseline that proves a clean atlas stays clean.
     `# single-images
 
 Standalone PNGs, no atlas/manifest. \`hero.png\` is 2050×2050 → oversize **warn** (edge >
-2048, below the 4096 crit) and **NPOT warn**; its VRAM is 2050×2050×4 = 16,810,000 bytes.
+2048, below the 2730 crit) and **NPOT warn**; its VRAM is 2050×2050×4 = 16,810,000 bytes.
 \`icon.png\` is a clean 256×256. Exercises the single-image parse + dimensions on images.
 `,
   );

@@ -71,6 +71,29 @@ describe('repointAtlasImage — TexturePacker meta.image repoint round-trip', ()
   });
 });
 
+describe('rotated-frame emit/parse round-trip (placed ⇄ un-rotated TexturePacker JSON)', () => {
+  it('rotated frame round-trips: placed → un-rotated JSON → placed', () => {
+    const atlas: Atlas = {
+      name: 's.png', imageRef: 's.png', size: { w: 256, h: 256 },
+      sprites: [{ name: 'r', frame: { x: 2, y: 2, w: 40, h: 100 }, rotated: true, trimmed: false, sourceSize: { w: 100, h: 40 } }],
+      source: { kind: 'texturepacker-hash' },
+    };
+    const json = JSON.parse(emitTexturePackerJson(atlas)) as { frames: Record<string, { frame: unknown }> };
+    expect(json.frames.r!.frame).toEqual({ x: 2, y: 2, w: 100, h: 40 }); // emitted UN-rotated (real-TP shape)
+    const back = parseAtlasManifest(json, {});
+    expect(back.ok).toBe(true);
+    if (back.ok) expect(back.atlas.sprites[0]!.frame).toEqual({ x: 2, y: 2, w: 40, h: 100 }); // back to placed
+  });
+
+  it('non-rotated frame emits w/h verbatim (no swap on the common path)', () => {
+    const json = JSON.parse(emitTexturePackerJson(atlasWith('s.png', { kind: 'texturepacker-hash' }))) as {
+      frames: Record<string, { frame: unknown }>;
+    };
+    expect(json.frames.icon!.frame).toEqual({ x: 0, y: 0, w: 32, h: 32 });
+    expect(json.frames.star!.frame).toEqual({ x: 32, y: 0, w: 16, h: 16 });
+  });
+});
+
 describe('repointAtlasImage — Spine .atlas texture-line repoint round-trip', () => {
   it('emit → parseSpineAtlasText → page image line is the NEW page', () => {
     const src = atlasWith('sheet.png', { kind: 'spine' });

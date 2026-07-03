@@ -138,13 +138,20 @@ function isTexturePackerApp(meta: Record<string, unknown>): boolean {
 }
 
 function bodyToSprite(name: string, body: Record<string, unknown>): Sprite | null {
-  const frame = readRect(body.frame);
-  if (!frame) return null;
-  const sourceSize = readSize(body.sourceSize) ?? { w: frame.w, h: frame.h };
+  const raw = readRect(body.frame);
+  if (!raw) return null;
+  const rotated = body.rotated === true;
+  // TexturePacker/Pixi write frame.w/h in UN-ROTATED (source) orientation and set rotated:true; the loader
+  // swaps to the on-page footprint (PixiJS Spritesheet builds Rectangle(x,y,rect.h,rect.w) when rotated). The
+  // core Atlas contract (core/index.ts:53) stores `frame` AS PLACED, so swap w/h here — exactly like the Spine
+  // parser (spine-atlas.ts toSprite). x/y are placement coords (never swapped); sourceSize/spriteSourceSize
+  // stay in un-rotated source space.
+  const frame: Rect = rotated ? { x: raw.x, y: raw.y, w: raw.h, h: raw.w } : raw;
+  const sourceSize = readSize(body.sourceSize) ?? { w: raw.w, h: raw.h };
   const trimmed = body.trimmed === true;
-  const sprite: Sprite = { name, frame, rotated: body.rotated === true, trimmed, sourceSize };
+  const sprite: Sprite = { name, frame, rotated, trimmed, sourceSize };
   const sss = readRect(body.spriteSourceSize);
-  if (trimmed && sss) sprite.spriteSourceSize = sss;
+  if (trimmed && sss) sprite.spriteSourceSize = sss; // already un-rotated source space — NOT swapped
   if (typeof body.pivot === 'object' && body.pivot !== null) {
     const p = body.pivot as Record<string, unknown>;
     const px = num(p.x);

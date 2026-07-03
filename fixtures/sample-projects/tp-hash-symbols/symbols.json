@@ -64,16 +64,16 @@
       "frame": {
         "x": 220,
         "y": 0,
-        "w": 60,
-        "h": 90
+        "w": 90,
+        "h": 60
       },
       "rotated": true,
       "trimmed": false,
       "spriteSourceSize": {
         "x": 0,
         "y": 0,
-        "w": 60,
-        "h": 90
+        "w": 90,
+        "h": 60
       },
       "sourceSize": {
         "w": 90,

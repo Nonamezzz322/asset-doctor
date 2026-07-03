@@ -1457,6 +1457,25 @@ describe('folder-level findings', () => {
     expect(m?.relatedRefs).toEqual(['a1.png', 'a2.png']);
   });
 
+  it('atlas-merge VRAM saving is a conservative lower bound (packEfficiency, not 100% packing)', async () => {
+    // 4× 1024² atlases, each one 700×700 frame → occupancy 0.467 (< occupancyBelow 0.5), so all 4 merge.
+    // Area/capacity = 1.869. A 100% pack would claim 2 sheets / 8MB saved; a realistic pack (packEfficiency
+    // 0.8) needs ~3 → 4MB. usedArea=1_960_000, usable=838_860.8, minAtlases=ceil(2.336)=3,
+    // currentVram=16_777_216, mergedVram=12_582_912, vramBytesSaved=4_194_304.
+    const frame: Rect[] = [{ x: 0, y: 0, w: 700, h: 700 }];
+    const atlases = ['m1.png', 'm2.png', 'm3.png', 'm4.png'].map((n) => atlasOf(n, 1024, 1024, frame));
+    const rep = await analyze(atlases);
+    const m = rep.findings.find((f) => f.rule === 'atlas-merge');
+    expect(m).toBeDefined();
+    expect(m!.relatedRefs).toEqual(['m1.png', 'm2.png', 'm3.png', 'm4.png']);
+    // conservative: merged count is 3 (not the 100%-packing 2), saving 4MB (not 8MB).
+    expect(m!.params!.merged).toBe(3); // ~3 sheets, not ~2
+    expect(m!.estimate!.vramBytesSaved).toBe(4 * 1024 * 1024); // 4_194_304, i.e. one sheet, not two
+    // calibration-agnostic: strictly more conservative than the old 100%-packing result.
+    expect(m!.params!.merged as number).toBeGreaterThan(2);
+    expect(m!.estimate!.vramBytesSaved).toBeLessThan(8 * 1024 * 1024);
+  });
+
   it('flags a manifest referencing a missing image', async () => {
     const rep = await analyze([], undefined, {
       missingImages: [{ manifest: 'broken.json', image: 'nope.png' }],

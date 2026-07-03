@@ -17,7 +17,7 @@ const DEFAULTS = {
   npotPadding: { warn: 0.25 },
   duplicates: { similarHammingMax: 6 },
   shouldAtlas: { minLooseImages: 8, maxSpriteEdgePx: 512 },
-  atlasMerge: { occupancyBelow: 0.5, minAtlases: 2 },
+  atlasMerge: { occupancyBelow: 0.5, minAtlases: 2, packEfficiency: 0.8 },
 };
 
 const sz = (w: number, h: number): Size => ({ w, h });

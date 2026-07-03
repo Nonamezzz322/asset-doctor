@@ -144,7 +144,12 @@ export function atlasMergeFinding(atlases: Atlas[], cfg: ThresholdConfig): Findi
   );
   const maxDim = Math.max(...under.map((a) => Math.max(a.size.w, a.size.h)));
   const capacity = maxDim * maxDim;
-  const minAtlases = Math.max(1, Math.ceil(usedArea / capacity));
+  // Usable px per merged sheet = capacity discounted by the realistic packing density. A naive
+  // usedArea/capacity assumes a perfect 100% pack, making vramBytesSaved an UPPER bound (over-claim,
+  // invariant 3/5). Dividing by packEfficiency<1 can only RAISE minAtlases ⇒ raise mergedVram ⇒ shrink
+  // the claimed saving — the conservative direction (a true lower bound, not the best case).
+  const usable = capacity * cfg.atlasMerge.packEfficiency;
+  const minAtlases = Math.max(1, Math.ceil(usedArea / usable));
   if (minAtlases >= under.length) return null; // no clear win
   const refs = under.map((a) => a.name).sort();
   const currentVram = under.reduce((s, a) => s + vramBytes(a.size), 0);

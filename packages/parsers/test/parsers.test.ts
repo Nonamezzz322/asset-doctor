@@ -53,6 +53,43 @@ describe('parseAtlas — TexturePacker Hash', () => {
   });
 });
 
+describe('parseAtlasManifest — rotated-frame placed-rect swap (contract: frame is AS PLACED)', () => {
+  it('rotated TP frame: JSON frame.w/h are UN-rotated → stored AS PLACED (swapped)', () => {
+    const res = parseAtlasManifest({
+      frames: { rot: { frame: { x: 2, y: 2, w: 100, h: 40 }, rotated: true, trimmed: false,
+                       spriteSourceSize: { x: 0, y: 0, w: 100, h: 40 }, sourceSize: { w: 100, h: 40 } } },
+      meta: { image: 's.png', size: { w: 256, h: 256 } },
+    }, {});
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const s = res.atlas.sprites[0]!;
+    expect(s.frame).toEqual({ x: 2, y: 2, w: 40, h: 100 }); // placed = swap of the un-rotated 100×40
+    expect(s.sourceSize).toEqual({ w: 100, h: 40 });        // un-rotated, unswapped
+  });
+
+  it('rotated frame near the right edge whose PLACED footprint fits is KEPT (not false-dropped)', () => {
+    const res = parseAtlasManifest({
+      frames: { r: { frame: { x: 440, y: 0, w: 90, h: 60 }, rotated: true, trimmed: false,
+                     spriteSourceSize: { x: 0, y: 0, w: 90, h: 60 }, sourceSize: { w: 90, h: 60 } } },
+      meta: { image: 's.png', size: { w: 512, h: 512 } },
+    }, {});
+    expect(res.ok).toBe(true);                          // pre-fix: un-rotated 440+90=530>512 → dropped
+    if (!res.ok) return;
+    expect(res.atlas.sprites[0]!.frame).toEqual({ x: 440, y: 0, w: 60, h: 90 }); // placed 440+60=500 ≤ 512
+  });
+
+  it('non-rotated frame is byte-identical (no swap on the common path)', () => {
+    const res = parseAtlasManifest({
+      frames: { flat: { frame: { x: 5, y: 6, w: 100, h: 40 }, rotated: false, trimmed: false,
+                        sourceSize: { w: 100, h: 40 } } },
+      meta: { image: 's.png', size: { w: 256, h: 256 } },
+    }, {});
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.atlas.sprites[0]!.frame).toEqual({ x: 5, y: 6, w: 100, h: 40 }); // unchanged
+  });
+});
+
 describe('parseAtlas — TexturePacker Array', () => {
   it('parses the array layout', () => {
     const res = parseAtlas(json('tp-array-oversize/sheet.json'), {
