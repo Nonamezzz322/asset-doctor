@@ -645,7 +645,7 @@ describe('trim-margin END-TO-END: fixture reproduces the defect through the real
       expect(bboxes[i], `${sp.name} bbox`).toEqual(bboxByName.get(sp.name));
     }
 
-    const finding = trimMarginFinding(atlas, DEFAULT_THRESHOLDS, bboxes, atlas.size.w * atlas.size.h);
+    const finding = trimMarginFinding(atlas, DEFAULT_THRESHOLDS, bboxes);
     expect(finding).not.toBeNull();
     expect(finding!.severity).toBe('warn');
     expect(finding!.rule).toBe('trim-margin');

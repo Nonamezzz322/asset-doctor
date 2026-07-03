@@ -56,6 +56,12 @@ export interface VariantGroups {
   loadedVramMin: number;
   loadedVramMax: number;
   variantFiles: number;
+  /** Distinct LOGICAL images = bucket count after variant clustering (one bucket per stem+aspect /
+   *  resolution-stem key). `logicalImages ≤ assets.length` ALWAYS (a partition can only merge). This is
+   *  the runtime-honest count: at runtime ONE variant loads per logical image, so this — not the raw file
+   *  count — is the true texture-bind / draw-call count. Inert to `variantsFinding`/analyze (unread there);
+   *  consumed by `shouldAtlasFinding` to gate & report the loose-sprite count honestly. */
+  logicalImages: number;
 }
 
 export function groupVariants(assets: Asset[]): VariantGroups {
@@ -94,7 +100,7 @@ export function groupVariants(assets: Asset[]): VariantGroups {
     }
   }
 
-  return { groups, summedVram, loadedVramMin, loadedVramMax, variantFiles };
+  return { groups, summedVram, loadedVramMin, loadedVramMax, variantFiles, logicalImages: buckets.size };
 }
 
 export function variantsFinding(v: VariantGroups): Finding | null {

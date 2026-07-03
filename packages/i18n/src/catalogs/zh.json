@@ -174,8 +174,8 @@
   },
   "find.trim-margin.detail": {
     "$count": "sprites",
-    "one": "{sprites} 个未裁剪精灵在其不透明图像周围带有透明边距。该留白占用 {vram:bytes} 显存（{area}px × 4），启用裁剪的重排最多可回收这些空间，另加约 {disk:bytes} 的图集磁盘（按面积估算）。",
-    "other": "{sprites} 个未裁剪精灵在其不透明图像周围带有透明边距。该留白占用 {vram:bytes} 显存（{area}px × 4），启用裁剪的重排最多可回收这些空间，另加约 {disk:bytes} 的图集磁盘（按面积估算）。"
+    "one": "{sprites} 个未裁剪精灵在其不透明图像周围带有透明边距。该留白占用 {vram:bytes} 显存（{area}px × 4），启用裁剪的重排最多可回收这些空间。",
+    "other": "{sprites} 个未裁剪精灵在其不透明图像周围带有透明边距。该留白占用 {vram:bytes} 显存（{area}px × 4），启用裁剪的重排最多可回收这些空间。"
   },
   "find.trim-margin.fix": "启用裁剪后重排，使每帧收紧到其不透明边界。",
   "find.bleeding.title": {
@@ -235,6 +235,12 @@
     "other": "{refs} 各自填充率不足 {pct}%。其内容可装入约 {merged} 个图集 — 合并可减少纹理绑定、draw call 和 VRAM。最大的连续空洞占其图集的 {largestPct:pct}（离散度 {frag:pct}）；离散度越低，越需要完整重新打包，而非裁边。"
   },
   "find.atlas-merge.fix": "将这些图集重新打包到一起。",
+  "find.atlas-merge-batching.title": "{n} 个未填满的图集 → 合并为约 {merged} 个",
+  "find.atlas-merge-batching.detail": {
+    "$count": "merged",
+    "other": "{refs} 各自填充率不足 {pct}%。其内容可装入约 {merged} 个图集 — 合并可减少纹理绑定和 draw call。仅凭这些图集尺寸无法量化 VRAM 的变化，因此可确定的收益是更少的绘制调用 — 紧凑的重新打包也可能减少 GPU 内存。最大的连续空洞占其图集的 {largestPct:pct}（离散度 {frag:pct}）；离散度越低，越需要完整重新打包，而非裁边。"
+  },
+  "find.atlas-merge-batching.fix": "将这些图集重新打包到一起。",
   "find.integrity.title": "缺失图集图片：{image}",
   "find.integrity.detail": "清单 {manifest} 引用了 \"{image}\"，但其不在文件夹中 — 该图集无法加载。",
   "find.integrity.fix": "添加缺失的图片或修正清单路径。",

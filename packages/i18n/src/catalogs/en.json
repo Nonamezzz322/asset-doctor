@@ -173,8 +173,8 @@
   },
   "find.trim-margin.detail": {
     "$count": "sprites",
-    "one": "{sprites} untrimmed sprite carries transparent margins around their opaque art. That padding pins {vram:bytes} of VRAM ({area}px × 4) that a trimmed repack reclaims up to, plus ~{disk:bytes} of atlas disk (area estimate).",
-    "other": "{sprites} untrimmed sprites carry transparent margins around their opaque art. That padding pins {vram:bytes} of VRAM ({area}px × 4) that a trimmed repack reclaims up to, plus ~{disk:bytes} of atlas disk (area estimate)."
+    "one": "{sprites} untrimmed sprite carries transparent margins around their opaque art. That padding pins {vram:bytes} of VRAM ({area}px × 4) that a trimmed repack reclaims up to.",
+    "other": "{sprites} untrimmed sprites carry transparent margins around their opaque art. That padding pins {vram:bytes} of VRAM ({area}px × 4) that a trimmed repack reclaims up to."
   },
   "find.trim-margin.fix": "Repack with trim enabled so each frame is tightened to its opaque bounds.",
   "find.bleeding.title": {
@@ -235,6 +235,13 @@
     "other": "{refs} are each under {pct}% full. Their content fits in ~{merged} sheets — merging cuts texture binds, draw calls and VRAM. Largest contiguous empty hole is {largestPct:pct} of its sheet (dispersion {frag:pct}); the lower the dispersion, the more a full repack — not a trim — is needed."
   },
   "find.atlas-merge.fix": "Re-pack these atlases together.",
+  "find.atlas-merge-batching.title": "{n} under-filled atlases → merge into ~{merged}",
+  "find.atlas-merge-batching.detail": {
+    "$count": "merged",
+    "one": "{refs} are each under {pct}% full. Their content fits in ~{merged} sheet — merging cuts texture binds and draw calls. A VRAM change can't be quantified from these sheet sizes alone, so the guaranteed win here is fewer draws — a tight repack may also cut GPU memory. Largest contiguous empty hole is {largestPct:pct} of its sheet (dispersion {frag:pct}); the lower the dispersion, the more a full repack — not a trim — is needed.",
+    "other": "{refs} are each under {pct}% full. Their content fits in ~{merged} sheets — merging cuts texture binds and draw calls. A VRAM change can't be quantified from these sheet sizes alone, so the guaranteed win here is fewer draws — a tight repack may also cut GPU memory. Largest contiguous empty hole is {largestPct:pct} of its sheet (dispersion {frag:pct}); the lower the dispersion, the more a full repack — not a trim — is needed."
+  },
+  "find.atlas-merge-batching.fix": "Re-pack these atlases together.",
   "find.integrity.title": "Missing atlas image: {image}",
   "find.integrity.detail": "Manifest {manifest} references \"{image}\", which is not in the folder — the atlas can't load.",
   "find.integrity.fix": "Add the missing image or fix the manifest path.",

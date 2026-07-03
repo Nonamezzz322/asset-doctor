@@ -5,6 +5,7 @@
 import type { Asset, AssetMetrics, Atlas, Finding, ImageAsset, ImageFeatures, Rect, ThresholdConfig } from '@asset-doctor/core';
 import { fmtBytes, occupancyValue, vramBytes } from './rules';
 import { buildCoverage, defaultCell, mergeEmptyRects, summarizeEmpty } from './grid';
+import { groupVariants } from './variants';
 
 /** Pure dispersion of one atlas's empty space: { frag, largestPct } over the grid-merged empty rects.
  *  Defaults to frag = 1 (contiguous) / largestPct = wasted-fraction when no empty rects map (B1) —
@@ -116,7 +117,18 @@ export function shouldAtlasFinding(assets: Asset[], cfg: ThresholdConfig): Findi
   const small = assets.filter(
     (a) => a.kind === 'image' && Math.max(a.image.size.w, a.image.size.h) <= cfg.shouldAtlas.maxSpriteEdgePx,
   );
+  // RAW early-out FIRST: logical ≤ raw always, so a raw count below the floor guarantees the logical
+  // count is too — this avoids the groupVariants pass on folders that can't possibly fire.
   if (small.length < cfg.shouldAtlas.minLooseImages) return null;
+  // Count LOGICAL loose images, not raw variant files. A logical image shipped as png/webp/avif ×
+  // resolution tiers is one runtime texture bind + draw call (ONE variant loads per asset), not up to
+  // ~9. `groupVariants` clusters exactly those siblings (the same deterministic, worker-safe clustering
+  // the `variants` rule ships); `logicalImages` = its bucket count ≤ small.length ALWAYS. Gate & report
+  // on this honest count → pure false-positive reduction (a partition can only merge, never split).
+  const logical = groupVariants(small).logicalImages;
+  if (logical < cfg.shouldAtlas.minLooseImages) return null;
+  // relatedRefs stays every raw loose file: it is the fold/highlight set (web loose-fold + domination
+  // gate key off it) and the fix engine's disk-op set — deliberately distinct from the runtime `n`.
   const refs = small.map((a) => a.image.name).sort();
   return {
     id: 'folder:should-atlas',
@@ -125,13 +137,13 @@ export function shouldAtlasFinding(assets: Asset[], cfg: ThresholdConfig): Findi
     scope: 'folder',
     assetRef: refs[0]!,
     relatedRefs: refs,
-    title: `${small.length} loose sprites — pack into an atlas`,
+    title: `${logical} loose sprites — pack into an atlas`,
     detail:
-      `${small.length} standalone images (≤${cfg.shouldAtlas.maxSpriteEdgePx}px). Each is its own ` +
+      `${logical} standalone images (≤${cfg.shouldAtlas.maxSpriteEdgePx}px). Each is its own ` +
       `texture bind + draw call at runtime; packing them into one atlas batches the draws.`,
     fix: 'Pack loose sprites into a TexturePacker / Pixi atlas.',
     messageKey: 'should-atlas',
-    params: { n: small.length, edge: cfg.shouldAtlas.maxSpriteEdgePx },
+    params: { n: logical, edge: cfg.shouldAtlas.maxSpriteEdgePx },
   };
 }
 
@@ -165,6 +177,35 @@ export function atlasMergeFinding(atlases: Atlas[], cfg: ThresholdConfig): Findi
     .reduce((min, d) => (d.frag < min.frag ? d : min), { frag: 1, largestPct: 0 });
   const lp = Math.round(disp.largestPct * 1000) / 10;
   const fr = Math.round(disp.frag * 1000) / 10;
+  // VRAM-DELTA SIGN GUARD (invariant 3/5). The merged sheet is modelled as a SQUARE at maxDim — a
+  // deliberately crude, conservative footprint. On a heterogeneous under-filled set whose largest atlas
+  // is a WIDE (non-square) sheet, that square-at-maxDim model over-allocates so badly that the MODELLED
+  // merged footprint exceeds the current one (vramSaved <= 0) — even though a real tight repack (what the
+  // Pro fix's pass-0 MaxRects POT repack over relatedRefs actually does) would usually SHRINK VRAM. So
+  // the model cannot QUANTIFY the VRAM change here: it cannot prove a positive delta, and is far too
+  // crude to prove a negative one either. The sheet-count guard (line 165) still passed — the BATCHING
+  // win (fewer binds + draw calls) is real and certain. So branch on the SIGN of the measured delta:
+  // only when vramSaved > 0 do we keep the VRAM clause + the `vramBytesSaved` estimate (a true lower
+  // bound); otherwise we emit a batching-only variant (distinct messageKey, NO estimate — mirrors the
+  // estimate-less `should-atlas`) whose prose states the VRAM change is UNQUANTIFIED here — NOT that
+  // there is none (that false certainty is contradicted by our own tight-repack fix). We SUPPRESS a
+  // number the model cannot defend; we never invent one, and never assert a negative we cannot prove.
+  // `rule`/`severity`/`title`/`fix`/`params` are identical in both branches — only detail, estimate-
+  // presence and messageKey differ.
+  const vramSaved = currentVram - mergedVram;
+  const savesVram = vramSaved > 0;
+  const detailPrefix =
+    `${refs.join(', ')} are each under ${Math.round(cfg.atlasMerge.occupancyBelow * 100)}% full. ` +
+    `Their content fits in ~${minAtlases} sheet${minAtlases === 1 ? '' : 's'} — merging cuts `;
+  const detailSuffix =
+    `Largest contiguous empty hole is ${lp}% of its sheet (dispersion ${fr}%); ` +
+    `the lower the dispersion, the more a full repack — not a trim — is needed.`;
+  const detail = savesVram
+    ? detailPrefix + `texture binds, draw calls and VRAM. ` + detailSuffix
+    : detailPrefix +
+      `texture binds and draw calls. A VRAM change can't be quantified from these sheet sizes ` +
+      `alone, so the guaranteed win here is fewer draws — a tight repack may also cut GPU memory. ` +
+      detailSuffix;
   return {
     id: 'folder:atlas-merge',
     rule: 'atlas-merge',
@@ -173,15 +214,10 @@ export function atlasMergeFinding(atlases: Atlas[], cfg: ThresholdConfig): Findi
     assetRef: refs[0]!,
     relatedRefs: refs,
     title: `${under.length} under-filled atlases → merge into ~${minAtlases}`,
-    detail:
-      `${refs.join(', ')} are each under ${Math.round(cfg.atlasMerge.occupancyBelow * 100)}% full. ` +
-      `Their content fits in ~${minAtlases} sheet${minAtlases === 1 ? '' : 's'} — merging cuts ` +
-      `texture binds, draw calls and VRAM. ` +
-      `Largest contiguous empty hole is ${lp}% of its sheet (dispersion ${fr}%); ` +
-      `the lower the dispersion, the more a full repack — not a trim — is needed.`,
+    detail,
     fix: 'Re-pack these atlases together.',
-    estimate: { vramBytesSaved: Math.max(0, currentVram - mergedVram) },
-    messageKey: 'atlas-merge',
+    ...(savesVram ? { estimate: { vramBytesSaved: vramSaved } } : {}),
+    messageKey: savesVram ? 'atlas-merge' : 'atlas-merge-batching',
     params: { n: under.length, merged: minAtlases, refs: refs.join(', '), pct: Math.round(cfg.atlasMerge.occupancyBelow * 100), frag: disp.frag, largestPct: disp.largestPct },
   };
 }

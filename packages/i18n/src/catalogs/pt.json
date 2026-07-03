@@ -180,8 +180,8 @@
   },
   "find.trim-margin.detail": {
     "$count": "sprites",
-    "one": "{sprites} sprite sem recorte carrega margens transparentes ao redor da sua arte opaca. Esse preenchimento prende {vram:bytes} de VRAM ({area}px × 4) que um reempacotamento com recorte recupera até, mais ~{disk:bytes} de disco do atlas (estimativa por área).",
-    "other": "{sprites} sprites sem recorte carregam margens transparentes ao redor da sua arte opaca. Esse preenchimento prende {vram:bytes} de VRAM ({area}px × 4) que um reempacotamento com recorte recupera até, mais ~{disk:bytes} de disco do atlas (estimativa por área)."
+    "one": "{sprites} sprite sem recorte carrega margens transparentes ao redor da sua arte opaca. Esse preenchimento prende {vram:bytes} de VRAM ({area}px × 4) que um reempacotamento com recorte recupera até.",
+    "other": "{sprites} sprites sem recorte carregam margens transparentes ao redor da sua arte opaca. Esse preenchimento prende {vram:bytes} de VRAM ({area}px × 4) que um reempacotamento com recorte recupera até."
   },
   "find.trim-margin.fix": "Reempacote com recorte ativado para que cada quadro seja ajustado aos seus limites opacos.",
   "find.bleeding.title": {
@@ -243,6 +243,14 @@
     "other": "{refs} estão cada um abaixo de {pct}% de preenchimento. O conteúdo deles cabe em ~{merged} folhas — mesclar reduz binds de textura, draw calls e VRAM. O maior buraco vazio contíguo é {largestPct:pct} da folha dele (dispersão {frag:pct}); quanto menor a dispersão, mais é preciso um reempacotamento completo, não um trim."
   },
   "find.atlas-merge.fix": "Reempacote esses atlases juntos.",
+  "find.atlas-merge-batching.title": "{n} atlases subpreenchidos → mesclar em ~{merged}",
+  "find.atlas-merge-batching.detail": {
+    "$count": "merged",
+    "one": "{refs} estão cada um abaixo de {pct}% de preenchimento. O conteúdo deles cabe em ~{merged} folha — mesclar reduz binds de textura e draw calls. Uma mudança de VRAM não pode ser quantificada apenas a partir destes tamanhos de folha, então o ganho garantido são menos draws — um reempacotamento justo também pode reduzir a memória de GPU. O maior buraco vazio contíguo é {largestPct:pct} da folha dele (dispersão {frag:pct}); quanto menor a dispersão, mais é preciso um reempacotamento completo, não um trim.",
+    "many": "{refs} estão cada um abaixo de {pct}% de preenchimento. O conteúdo deles cabe em ~{merged} de folhas — mesclar reduz binds de textura e draw calls. Uma mudança de VRAM não pode ser quantificada apenas a partir destes tamanhos de folha, então o ganho garantido são menos draws — um reempacotamento justo também pode reduzir a memória de GPU. O maior buraco vazio contíguo é {largestPct:pct} da folha dele (dispersão {frag:pct}); quanto menor a dispersão, mais é preciso um reempacotamento completo, não um trim.",
+    "other": "{refs} estão cada um abaixo de {pct}% de preenchimento. O conteúdo deles cabe em ~{merged} folhas — mesclar reduz binds de textura e draw calls. Uma mudança de VRAM não pode ser quantificada apenas a partir destes tamanhos de folha, então o ganho garantido são menos draws — um reempacotamento justo também pode reduzir a memória de GPU. O maior buraco vazio contíguo é {largestPct:pct} da folha dele (dispersão {frag:pct}); quanto menor a dispersão, mais é preciso um reempacotamento completo, não um trim."
+  },
+  "find.atlas-merge-batching.fix": "Reempacote esses atlases juntos.",
   "find.integrity.title": "Imagem de atlas ausente: {image}",
   "find.integrity.detail": "O manifesto {manifest} referencia \"{image}\", que não está na pasta — o atlas não consegue carregar.",
   "find.integrity.fix": "Adicione a imagem ausente ou corrija o caminho no manifesto.",

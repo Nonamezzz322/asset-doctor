@@ -1217,7 +1217,7 @@ describe('trim-margin (untrimmed sprites with reclaimable transparent padding)',
 
   it('untrimmed sprites with padding ⇒ warn, EXACT VRAM, refs, one transparent overlay zone', () => {
     const atlas = padAtlas('pad.png', twoPadded);
-    const f = trimMarginFinding(atlas, DEFAULT_THRESHOLDS, twoBboxes, 8000)!;
+    const f = trimMarginFinding(atlas, DEFAULT_THRESHOLDS, twoBboxes)!;
     expect(f).not.toBeNull();
     expect(f.rule).toBe('trim-margin');
     expect(f.severity).toBe('warn');
@@ -1230,16 +1230,17 @@ describe('trim-margin (untrimmed sprites with reclaimable transparent padding)',
     expect(f.overlay).toHaveLength(1);
     expect(f.overlay?.[0]?.kind).toBe('transparent');
     expect(f.overlay?.[0]?.rects.length).toBeGreaterThan(0); // border strips
-    // disk is area-proportional: 8000 × (6144 / ΣframeArea=8192) = 6000.
-    expect(f.params?.disk).toBe(Math.round((8000 * 6144) / (2 * 64 * 64)));
-    expect(f.estimate?.diskBytesSaved).toBe(Math.round((8000 * 6144) / (2 * 64 * 64)));
+    // No disk estimate: the recoverable area is TRANSPARENT padding (alpha=0), the cheapest-compressing
+    // pixels — an area-proportional byte number would over-state 10x+ (solid-fill precedent).
+    expect(f.params?.disk).toBeUndefined();
+    expect(f.estimate?.diskBytesSaved).toBeUndefined();
   });
 
   it('overlay strips are translated into ATLAS px (frame.xy offset) and cover the four borders', () => {
     const atlas = padAtlas('pad.png', [{ frame: { x: 64, y: 0, w: 64, h: 64 } }]);
     // Need ≥ minRecoverablePct: 1 × 3072 / 65536 = 4.7% < 5% → won't fire. Use a bigger frame.
     const big = padAtlas('big.png', [{ frame: { x: 64, y: 0, w: 100, h: 100 } }]);
-    const f = trimMarginFinding(big, DEFAULT_THRESHOLDS, [{ x: 20, y: 20, w: 40, h: 40 }], 8000)!;
+    const f = trimMarginFinding(big, DEFAULT_THRESHOLDS, [{ x: 20, y: 20, w: 40, h: 40 }])!;
     expect(f).not.toBeNull();
     const rects = f.overlay![0]!.rects;
     // top strip y == frame.y (0); left strip x == frame.x (64). Proves atlas-px translation.
@@ -1255,7 +1256,7 @@ describe('trim-margin (untrimmed sprites with reclaimable transparent padding)',
       { frame: { x: 128, y: 0, w: 64, h: 64 } },
     ]);
     const bboxes: (Bbox | null)[] = [null, { x: 16, y: 16, w: 32, h: 32 }, { x: 16, y: 16, w: 32, h: 32 }];
-    const f = trimMarginFinding(atlas, DEFAULT_THRESHOLDS, bboxes, 8000)!;
+    const f = trimMarginFinding(atlas, DEFAULT_THRESHOLDS, bboxes)!;
     expect(f.params?.sprites).toBe(2); // s1 + s2 only; the trimmed s0 is skipped despite its null bbox
     expect(f.relatedRefs).toEqual(['s1', 's2']);
   });
@@ -1263,7 +1264,7 @@ describe('trim-margin (untrimmed sprites with reclaimable transparent padding)',
   it('a null bbox on an UNtrimmed sprite = fully-transparent frame ⇒ the whole frame is recoverable', () => {
     const atlas = padAtlas('dead.png', [{ frame: { x: 0, y: 0, w: 64, h: 64 } }, { frame: { x: 64, y: 0, w: 64, h: 64 } }]);
     const bboxes: (Bbox | null)[] = [null, { x: 16, y: 16, w: 32, h: 32 }];
-    const f = trimMarginFinding(atlas, DEFAULT_THRESHOLDS, bboxes, 8000)!;
+    const f = trimMarginFinding(atlas, DEFAULT_THRESHOLDS, bboxes)!;
     // s0 (null) whole frame = 4096 px; s1 padding = 3072 px → 7168 px total.
     expect(f.params?.area).toBe(64 * 64 + (64 * 64 - 32 * 32));
   });
@@ -1271,7 +1272,7 @@ describe('trim-margin (untrimmed sprites with reclaimable transparent padding)',
   it('per-side margin below minMarginPx ⇒ that sprite is skipped (thin border is noise)', () => {
     // 2px border per side on a 100×100 frame: margin 2 < minMarginPx (4) → skipped → no qualifying sprite.
     const atlas = padAtlas('thin.png', [{ frame: { x: 0, y: 0, w: 100, h: 100 } }]);
-    const f = trimMarginFinding(atlas, DEFAULT_THRESHOLDS, [{ x: 2, y: 2, w: 96, h: 96 }], 8000);
+    const f = trimMarginFinding(atlas, DEFAULT_THRESHOLDS, [{ x: 2, y: 2, w: 96, h: 96 }]);
     expect(f).toBeNull();
   });
 
@@ -1281,7 +1282,7 @@ describe('trim-margin (untrimmed sprites with reclaimable transparent padding)',
       { frame: { x: 0, y: 0, w: 100, h: 100 } }, // same packed rect → ONE GPU region
     ]);
     const bb: Bbox = { x: 20, y: 20, w: 40, h: 40 };
-    const f = trimMarginFinding(atlas, DEFAULT_THRESHOLDS, [bb, bb], 8000)!;
+    const f = trimMarginFinding(atlas, DEFAULT_THRESHOLDS, [bb, bb])!;
     expect(f.params?.sprites).toBe(1); // one distinct rect
     expect(f.params?.area).toBe(100 * 100 - 40 * 40); // counted once
     expect(f.relatedRefs).toEqual(['s0', 's1']); // both names attributed
@@ -1290,21 +1291,21 @@ describe('trim-margin (untrimmed sprites with reclaimable transparent padding)',
   it('below minRecoverablePct ⇒ null (a single small padded sprite is not a verdict)', () => {
     // 1 × (64²−32²) = 3072 px / 65536 = 4.7% < 5% → null.
     const atlas = padAtlas('small.png', [{ frame: { x: 0, y: 0, w: 64, h: 64 } }]);
-    const f = trimMarginFinding(atlas, DEFAULT_THRESHOLDS, [{ x: 16, y: 16, w: 32, h: 32 }], 8000);
+    const f = trimMarginFinding(atlas, DEFAULT_THRESHOLDS, [{ x: 16, y: 16, w: 32, h: 32 }]);
     expect(f).toBeNull();
   });
 
   it('no trimMargin config ⇒ null (CLI / budget configs that don\'t opt in)', () => {
     const cfg = { ...DEFAULT_THRESHOLDS };
     delete cfg.trimMargin;
-    expect(trimMarginFinding(padAtlas('pad.png', twoPadded), cfg, twoBboxes, 8000)).toBeNull();
+    expect(trimMarginFinding(padAtlas('pad.png', twoPadded), cfg, twoBboxes)).toBeNull();
   });
 
   it('length mismatch ⇒ null (stale/desynced dep, never mis-key a sprite)', () => {
-    expect(trimMarginFinding(padAtlas('pad.png', twoPadded), DEFAULT_THRESHOLDS, [twoBboxes[0]!], 8000)).toBeNull();
+    expect(trimMarginFinding(padAtlas('pad.png', twoPadded), DEFAULT_THRESHOLDS, [twoBboxes[0]!])).toBeNull();
   });
 
-  it('analyze threads frameTrims to an ATLAS and does NOT fold the disk estimate into potentialDiskSaved', async () => {
+  it('analyze threads frameTrims to an ATLAS, reports VRAM only, folds nothing into potentialDiskSaved', async () => {
     const atlas = padAtlas('pad.png', twoPadded);
     const baseline = await analyze([padAsset(atlas)]); // no frameTrims ⇒ rule dormant
     expect(baseline.findings.some((f) => f.rule === 'trim-margin')).toBe(false);
@@ -1315,7 +1316,8 @@ describe('trim-margin (untrimmed sprites with reclaimable transparent padding)',
     const tm = report.findings.find((f) => f.rule === 'trim-margin');
     expect(tm?.assetRef).toBe('pad.png');
     expect(tm?.estimate?.vramBytesSaved).toBe(2 * (64 * 64 - 32 * 32) * 4);
-    // The disk number is an area-proportional ESTIMATE — NEVER folded into the aggregate (invariant 5).
+    // No disk on transparent padding (solid-fill precedent) — nothing to fold into the aggregate (invariant 5).
+    expect(tm?.estimate?.diskBytesSaved).toBeUndefined();
     expect(report.totals.potentialDiskSaved).toBe(baseline.totals.potentialDiskSaved);
   });
 
@@ -1447,7 +1449,35 @@ describe('folder-level findings', () => {
   it('suggests atlasing many loose sprites', async () => {
     const assets = Array.from({ length: 8 }, (_, i) => img(`s${i}.png`, 32, 32));
     const rep = await analyze(assets);
-    expect(rep.findings.some((f) => f.rule === 'should-atlas' && f.scope === 'folder')).toBe(true);
+    const sa = rep.findings.find((f) => f.rule === 'should-atlas' && f.scope === 'folder');
+    expect(sa).toBeDefined();
+    // 8 DISTINCT stems ⇒ logical == raw == 8 (no variant clustering) ⇒ fires exactly as before.
+    expect(sa!.params!.n).toBe(8);
+  });
+
+  it('does NOT fire should-atlas when loose files are format variants of < minLooseImages logical images', async () => {
+    // 3 logical icons × 3 formats (png/webp/avif) = 9 loose files. Raw 9 ≥ 8 fired TODAY, but only 3
+    // textures load at runtime (one format per platform) → logical 3 < 8 must stay SILENT.
+    const names = ['icon1', 'icon2', 'icon3'].flatMap((s) => [`${s}.png`, `${s}.webp`, `${s}.avif`]);
+    const rep = await analyze(names.map((n) => img(n, 64, 64)));
+    expect(rep.findings.some((f) => f.rule === 'should-atlas')).toBe(false);
+    // (a variants finding MAY fire here — they ARE format variants; we assert only should-atlas absence.)
+  });
+
+  it('counts LOGICAL images (not raw variant files) for should-atlas', async () => {
+    // 8 logical icons × 3 formats = 24 loose files. Honest runtime count is 8, not 24.
+    const names = Array.from({ length: 8 }, (_, i) => `ic${i}`).flatMap((s) => [`${s}.png`, `${s}.webp`, `${s}.avif`]);
+    const sa = (await analyze(names.map((n) => img(n, 64, 64)))).findings.find((f) => f.rule === 'should-atlas');
+    expect(sa).toBeDefined();
+    expect(sa!.params!.n).toBe(8); // logical headline, not 24
+    expect(sa!.relatedRefs).toHaveLength(24); // relatedRefs still lists every loose file (fold set preserved)
+  });
+
+  it('clusters resolution tiers as one logical image for should-atlas', async () => {
+    // 3 logical × two ≤512px tiers each = 6 files → logical 3 < 8 → silent (RES_TOKEN clustering path).
+    const names = ['a', 'b', 'c'].flatMap((s) => [`${s}_540p.png`, `${s}_270p.png`]);
+    const rep = await analyze(names.map((n, i) => img(n, i % 2 ? 270 : 512, i % 2 ? 270 : 512)));
+    expect(rep.findings.some((f) => f.rule === 'should-atlas')).toBe(false);
   });
 
   it('suggests merging under-filled atlases', async () => {
@@ -1474,6 +1504,39 @@ describe('folder-level findings', () => {
     // calibration-agnostic: strictly more conservative than the old 100%-packing result.
     expect(m!.params!.merged as number).toBeGreaterThan(2);
     expect(m!.estimate!.vramBytesSaved).toBeLessThan(8 * 1024 * 1024);
+  });
+
+  it('atlas-merge emits a BATCHING-ONLY variant (no VRAM claim) when the merged-square model saves no VRAM', async () => {
+    // Heterogeneous under-filled set whose largest atlas is a WIDE 2048×512 banner. The merged sheet is
+    // modelled as a SQUARE at maxDim (2048²), which over-allocates so badly that the MODELLED merge raises
+    // VRAM: currentVram = 4_194_304 + 4_194_304 + 1_048_576 = 9_437_184; minAtlases = 1 (usedArea 120_000
+    // ÷ usable 3_355_443.2 = 0.036 → 1); mergedVram = 1 × 2048² × 4 = 16_777_216 ⇒ vramSaved = −7_340_032.
+    // (A real tight repack — what the Pro fix's MaxRects POT pass actually does — would SHRINK VRAM here;
+    // the crude square model just can't show it, so the honest read is that the VRAM change is UNQUANTIFIED,
+    // not that there is none.) The batching win (3 sheets → 1, fewer binds/draw calls) is REAL, so the
+    // finding still fires — but the VRAM clause is suppressed and no vramBytesSaved is claimed
+    // (invariant 3/5: never over-claim VRAM, and never assert a negative the model can't prove).
+    const frame: Rect[] = [{ x: 0, y: 0, w: 200, h: 200 }]; // 40_000 px each ⇒ all under 50% full
+    const atlases = [
+      atlasOf('banner.png', 2048, 512, frame), // wide, dominates maxDim
+      atlasOf('sq1.png', 1024, 1024, frame),
+      atlasOf('sq2.png', 512, 512, frame),
+    ];
+    const rep = await analyze(atlases);
+    const m = rep.findings.find((f) => f.rule === 'atlas-merge');
+    expect(m).toBeDefined();
+    expect(m!.messageKey).toBe('atlas-merge-batching'); // VRAM clause suppressed
+    expect(m!.severity).toBe('warn'); // unchanged severity (matches should-atlas, a batching-only warn)
+    expect(m!.estimate).toBeUndefined(); // no vramBytesSaved (it would have been a phantom clamped-0)
+    expect(m!.params!.merged).toBe(1);
+    expect(m!.relatedRefs).toEqual(['banner.png', 'sq1.png', 'sq2.png']);
+    // honesty (invariant 3): the detail must NOT claim a VRAM cut, MUST name fewer draws as the certain
+    // win, and MUST frame the VRAM change as UNQUANTIFIED here — never assert there is none (a false
+    // certainty the product's own tight-repack fix would contradict).
+    expect(m!.detail).not.toMatch(/and VRAM/); // no VRAM-cut clause (that lives in the savesVram branch)
+    expect(m!.detail).toMatch(/fewer draws/); // the certain, guaranteed win
+    expect(m!.detail).toMatch(/can't be quantified/); // uncertainty, not an asserted absence
+    expect(m!.detail).not.toMatch(/No VRAM is reclaimed|not less VRAM/); // the removed false certainty
   });
 
   it('flags a manifest referencing a missing image', async () => {
@@ -1552,6 +1615,8 @@ describe('variant grouping (VRAM inflation)', () => {
     // So this set forms TWO logical groups, each a 540p+1080p resolution pair; 'other' is a singleton.
     expect(v.groups).toHaveLength(2);
     for (const g of v.groups) expect(g.members).toHaveLength(2);
+    // logicalImages = bucket count: {hero res-pair} + {hero format-pair} + {other singleton} = 3 ≤ 5 raw.
+    expect(v.logicalImages).toBe(3);
     expect(v.summedVram).toBe(2 * v540 + 2 * v1080 + v100);
     // One tier loads per group: each group's largest is 1080² → 2·v1080, plus the 'other' singleton.
     expect(v.loadedVramMax).toBe(2 * v1080 + v100);

@@ -180,8 +180,8 @@
   },
   "find.trim-margin.detail": {
     "$count": "sprites",
-    "one": "{sprites} sprite non rogné porte des marges transparentes autour de son art opaque. Cette marge fixe {vram:bytes} de VRAM ({area}px × 4) qu'un réempaquetage avec rognage récupère jusqu'à, plus ~{disk:bytes} de disque d'atlas (estimation par surface).",
-    "other": "{sprites} sprites non rognés portent des marges transparentes autour de leur art opaque. Cette marge fixe {vram:bytes} de VRAM ({area}px × 4) qu'un réempaquetage avec rognage récupère jusqu'à, plus ~{disk:bytes} de disque d'atlas (estimation par surface)."
+    "one": "{sprites} sprite non rogné porte des marges transparentes autour de son art opaque. Cette marge fixe {vram:bytes} de VRAM ({area}px × 4) qu'un réempaquetage avec rognage récupère jusqu'à.",
+    "other": "{sprites} sprites non rognés portent des marges transparentes autour de leur art opaque. Cette marge fixe {vram:bytes} de VRAM ({area}px × 4) qu'un réempaquetage avec rognage récupère jusqu'à."
   },
   "find.trim-margin.fix": "Réempaquetez avec le rognage activé pour que chaque image soit ajustée à ses limites opaques.",
   "find.bleeding.title": {
@@ -243,6 +243,14 @@
     "other": "{refs} sont chacun remplis à moins de {pct}%. Leur contenu tient dans ~{merged} planches — la fusion réduit les binds de texture, les draw calls et la VRAM. Le plus grand trou vide contigu représente {largestPct:pct} de sa planche (dispersion {frag:pct}) ; plus la dispersion est faible, plus un repack complet — et non un simple trim — est nécessaire."
   },
   "find.atlas-merge.fix": "Repackez ces atlas ensemble.",
+  "find.atlas-merge-batching.title": "{n} atlas sous-remplis → fusionner en ~{merged}",
+  "find.atlas-merge-batching.detail": {
+    "$count": "merged",
+    "one": "{refs} sont chacun remplis à moins de {pct}%. Leur contenu tient dans ~{merged} planche — la fusion réduit les binds de texture et les draw calls. Un changement de VRAM ne peut pas être chiffré à partir de ces seules tailles de planche, le gain garanti se limite donc à moins de draws — un repack serré peut aussi réduire la mémoire GPU. Le plus grand trou vide contigu représente {largestPct:pct} de sa planche (dispersion {frag:pct}) ; plus la dispersion est faible, plus un repack complet — et non un simple trim — est nécessaire.",
+    "many": "{refs} sont chacun remplis à moins de {pct}%. Leur contenu tient dans ~{merged} de planches — la fusion réduit les binds de texture et les draw calls. Un changement de VRAM ne peut pas être chiffré à partir de ces seules tailles de planche, le gain garanti se limite donc à moins de draws — un repack serré peut aussi réduire la mémoire GPU. Le plus grand trou vide contigu représente {largestPct:pct} de sa planche (dispersion {frag:pct}) ; plus la dispersion est faible, plus un repack complet — et non un simple trim — est nécessaire.",
+    "other": "{refs} sont chacun remplis à moins de {pct}%. Leur contenu tient dans ~{merged} planches — la fusion réduit les binds de texture et les draw calls. Un changement de VRAM ne peut pas être chiffré à partir de ces seules tailles de planche, le gain garanti se limite donc à moins de draws — un repack serré peut aussi réduire la mémoire GPU. Le plus grand trou vide contigu représente {largestPct:pct} de sa planche (dispersion {frag:pct}) ; plus la dispersion est faible, plus un repack complet — et non un simple trim — est nécessaire."
+  },
+  "find.atlas-merge-batching.fix": "Repackez ces atlas ensemble.",
   "find.integrity.title": "Image d'atlas manquante : {image}",
   "find.integrity.detail": "Le manifeste {manifest} référence « {image} », qui n'est pas dans le dossier — l'atlas ne peut pas se charger.",
   "find.integrity.fix": "Ajoutez l'image manquante ou corrigez le chemin du manifeste.",

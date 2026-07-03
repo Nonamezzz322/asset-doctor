@@ -276,9 +276,10 @@ export function frameRedundancyFinding(
  *  MEASURE the transparent padding it carries (frame area − opaque bbox area) and report:
  *    • VRAM — the recoverable distinct-rect padding area × 4 (the atlas space the margins pin; a trimmed
  *      repack tightens each frame to its opaque bounds and reclaims it). Honest, EXACT area arithmetic.
- *    • DISK — an AREA-PROPORTIONAL ESTIMATE only (no per-region disk bytes exist): the image's byteSize
- *      scaled by recoverableArea / Σ(all frame areas). Guarded on Σ > 0; carried separately, NEVER folded
- *      into the aggregate potentialDiskSaved (invariant 5: VRAM and disk are distinct quantities).
+ *    • DISK is deliberately NOT reported: the recoverable area is TRANSPARENT padding (alpha=0), the
+ *      cheapest-compressing pixels in any PNG/WebP — an area-proportional byte estimate would over-state the
+ *      real disk saving 10x+ (same reason solidFillFinding carries no diskBytesSaved). The honest disk delta
+ *      is measured by the Pro fix after it re-encodes the trimmed repack (invariant 3).
  *  GATE (honesty): qualify a sprite iff `sp.trimmed === false` (its frame is the full untrimmed image, so
  *  any opaque bbox < frame is genuine reclaimable padding). `&& sp.spriteSourceSize === undefined` is kept
  *  ONLY as a defensive guard for hand-built headless callers — it is REDUNDANT by parser construction
@@ -295,7 +296,6 @@ export function trimMarginFinding(
   atlas: Atlas,
   cfg: ThresholdConfig,
   frameTrims: (TrimRect | null)[],
-  imageByteSize: number,
 ): Finding | null {
   if (!cfg.trimMargin) return null;
   // Defensive: the host computes bboxes index-aligned to the SAME (post-merge) sprite list. A mismatch
@@ -364,10 +364,6 @@ export function trimMarginFinding(
   refs.sort();
 
   const vram = recoverableArea * BYTES_PER_PX;
-  // DISK is an area-proportional ESTIMATE (no per-region disk bytes): byteSize × recoverableArea / Σ(all
-  // frame areas). Guard Σ > 0 (qualifying ≥ 1 already implies a non-zero frame area, so Σ > 0 holds here).
-  const allFrameArea = atlas.sprites.reduce((s, s2) => s + s2.frame.w * s2.frame.h, 0);
-  const diskEstimate = allFrameArea > 0 ? Math.round((imageByteSize * recoverableArea) / allFrameArea) : 0;
 
   // Baked English — MUST mirror the en catalog templates byte-for-byte (the renderFinding drift guard). The
   // `sprites` count drives the plural (title + detail); copy says "up to" (upper bound: a trimmed repack may
@@ -384,15 +380,16 @@ export function trimMarginFinding(
     title: `${qualifying} untrimmed ${spriteWord} — ${fmtBytes(vram)} of transparent padding`,
     detail:
       `${qualifying} untrimmed ${spriteWord} ${carryWord} transparent margins around their opaque art. ` +
-      `That padding pins ${fmtBytes(vram)} of VRAM (${recoverableArea}px × 4) that a trimmed repack reclaims ` +
-      `up to, plus ~${fmtBytes(diskEstimate)} of atlas disk (area estimate).`,
+      `That padding pins ${fmtBytes(vram)} of VRAM (${recoverableArea}px × 4) that a trimmed repack reclaims up to.`,
     fix: 'Repack with trim enabled so each frame is tightened to its opaque bounds.',
-    // VRAM is exact area arithmetic; diskBytesSaved is an area-proportional ESTIMATE, kept here for the
-    // finding's own readout but NOT folded into the aggregate potentialDiskSaved (see analyze.ts).
-    estimate: { vramBytesSaved: vram, ...(diskEstimate > 0 ? { diskBytesSaved: diskEstimate } : {}) },
+    // VRAM only (exact area arithmetic). No diskBytesSaved: the recoverable area is TRANSPARENT padding
+    // (alpha=0, the cheapest-compressing pixels), so an area-proportional byte estimate would over-state the
+    // real disk saving 10x+ — same reason solidFillFinding carries none. The honest disk delta is measured by
+    // the Pro fix after it re-encodes the trimmed repack (invariant 3).
+    estimate: { vramBytesSaved: vram },
     overlay: [{ kind: 'transparent', rects: overlay }],
     messageKey: 'trim-margin',
-    params: { sprites: qualifying, vram, area: recoverableArea, disk: diskEstimate },
+    params: { sprites: qualifying, vram, area: recoverableArea },
   };
 }
 

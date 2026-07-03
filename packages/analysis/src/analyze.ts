@@ -241,11 +241,12 @@ export async function analyze(
       }
       // Within-atlas trim-margin: untrimmed sprites carrying reclaimable transparent padding (host-measured
       // opaque bboxes off the SAME decoded page as the frame hashes). Only when the host supplied bboxes for
-      // THIS atlas (absent ⇒ no finding ⇒ byte-identical). Like frame-redundancy, the recoverable disk number
-      // is an area-proportional ESTIMATE, so it is DELIBERATELY NOT folded into potentialDiskSaved (invariant 5).
+      // THIS atlas (absent ⇒ no finding ⇒ byte-identical). Reports EXACT VRAM only — no disk estimate: the
+      // recoverable area is transparent padding (alpha=0), so an area-proportional byte number would over-state
+      // 10x+ (see rules.ts); nothing is folded into potentialDiskSaved (invariant 5).
       const ft = frameTrimByRef.get(atlas.name);
       if (ft) {
-        const tm = trimMarginFinding(atlas, cfg, ft, image.byteSize);
+        const tm = trimMarginFinding(atlas, cfg, ft);
         if (tm) findings.push(tm);
       }
       // BMFont glyph-page readout: a parsed `.fnt` page IS an atlas, so it already tripped the generic

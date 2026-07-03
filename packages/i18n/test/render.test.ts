@@ -62,7 +62,7 @@ async function realFindings(): Promise<Finding[]> {
     name: 'pad.png', imageRef: 'pad.png', size: { w: 256, h: 256 }, source: { kind: 'pixi' },
     sprites: [0, 1].map((i) => ({ name: `p${i}`, frame: { x: i * 64, y: 0, w: 64, h: 64 }, rotated: false, trimmed: false, sourceSize: { w: 64, h: 64 } })),
   };
-  out.push(trimMarginFinding(tmAtlas, cfg, [{ x: 16, y: 16, w: 32, h: 32 }, { x: 16, y: 16, w: 32, h: 32 }], 8000)!);
+  out.push(trimMarginFinding(tmAtlas, cfg, [{ x: 16, y: 16, w: 32, h: 32 }, { x: 16, y: 16, w: 32, h: 32 }])!);
   // bleeding: 2 frames touching with a 0px gutter and vertical overlap ⇒ 1 zero-gutter pair (minPairs:1).
   // A CORRECTNESS finding — plural on {pairs}, NO estimate (invariant 5).
   const blAtlas: Atlas = {
@@ -108,6 +108,21 @@ async function realFindings(): Promise<Finding[]> {
   out.push(duplicateSimilarFindings([{ assetRef: 'x.png', contentHash: 'c1', dHash: 'aaaaaaaaaaaaaaaa' }, { assetRef: 'y.png', contentHash: 'c2', dHash: 'aaaaaaaaaaaaaaab' }], cfg)[0]!);
   out.push(shouldAtlasFinding(Array.from({ length: 8 }, (_, i) => img(`s${i}.png`, 64, 64, 100)), cfg)!);
   out.push(atlasMergeFinding([atlas('m1', 1, 200), atlas('m2', 1, 200)], cfg)!);
+  // atlas-merge-batching: heterogeneous under-filled set whose largest atlas is a WIDE 2048×512 banner.
+  // The merged-square-at-maxDim model (2048²) over-allocates ⇒ currentVram − mergedVram ≤ 0, so the finding
+  // drops the VRAM clause and emits messageKey 'atlas-merge-batching' (merged=1 ⇒ exercises the 'one' plural).
+  const bMerge = atlasMergeFinding(
+    [
+      { name: 'b0', imageRef: 'b0.png', size: { w: 2048, h: 512 }, source: { kind: 'pixi' },
+        sprites: [{ name: 's', frame: { x: 0, y: 0, w: 200, h: 200 }, rotated: false, trimmed: false, sourceSize: { w: 200, h: 200 } }] },
+      { name: 'b1', imageRef: 'b1.png', size: { w: 1024, h: 1024 }, source: { kind: 'pixi' },
+        sprites: [{ name: 's', frame: { x: 0, y: 0, w: 200, h: 200 }, rotated: false, trimmed: false, sourceSize: { w: 200, h: 200 } }] },
+      { name: 'b2', imageRef: 'b2.png', size: { w: 512, h: 512 }, source: { kind: 'pixi' },
+        sprites: [{ name: 's', frame: { x: 0, y: 0, w: 200, h: 200 }, rotated: false, trimmed: false, sourceSize: { w: 200, h: 200 } }] },
+    ],
+    cfg,
+  )!;
+  out.push(bMerge);
   // cross-atlas-redundancy: two atlases sharing ONE byte-identical frame region on a DISTINCT rect each →
   // 1 cluster spanning 2 sheets, 1 recoverable copy. Distinct messageKey (not 'frame-redundancy').
   const caA: Atlas = {
@@ -139,7 +154,7 @@ describe('renderFinding — English catalog reproduces the baked strings (drift 
     const findings = await realFindings();
     const keys = new Set(findings.map((f) => f.messageKey));
     // sanity: we exercised every messageKey family the rules emit
-    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'frame-redundancy', 'trim-margin', 'bleeding', 'dimension-mismatch-shrunk-offedge', 'dimension-mismatch-shrunk', 'dimension-mismatch-grown', 'cross-atlas-redundancy', 'font-glyph-page', 'wasted-alpha', 'strippable-metadata', 'strippable-metadata-aggregate', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'integrity', 'format-aggregate', 'variants']));
+    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'frame-redundancy', 'trim-margin', 'bleeding', 'dimension-mismatch-shrunk-offedge', 'dimension-mismatch-shrunk', 'dimension-mismatch-grown', 'cross-atlas-redundancy', 'font-glyph-page', 'wasted-alpha', 'strippable-metadata', 'strippable-metadata-aggregate', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'atlas-merge-batching', 'integrity', 'format-aggregate', 'variants']));
     for (const f of findings) {
       expect(f.messageKey, `${f.id} must carry a messageKey`).toBeTruthy();
       const r = renderFinding(f, 'en');

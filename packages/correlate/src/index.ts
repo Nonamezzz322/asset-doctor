@@ -74,7 +74,11 @@ export function correlate(stat: AnalysisReport, rt: RuntimeReport): CorrelationR
   const tooManyDraws =
     rt.drawCalls.max > DRAW_CALL_BUDGET || (rt.drawCalls.max >= 4 && rt.drawCalls.max > idealDraws * 3);
   if (fragmented && tooManyDraws) {
-    const looseN = shouldAtlas?.relatedRefs?.length ?? 0;
+    // The runtime draw-call correlation must cite the LOGICAL loose-sprite count (one variant loads per
+    // asset), which the finding now carries in params.n. Fall back to relatedRefs.length for synthetic
+    // findings without params.n (keeps the correlate unit test green).
+    const nParam = shouldAtlas?.params?.n;
+    const looseN = typeof nParam === 'number' ? nParam : (shouldAtlas?.relatedRefs?.length ?? 0);
     out.push({
       id: 'corr:batching',
       rule: 'batching',

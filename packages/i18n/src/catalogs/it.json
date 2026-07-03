@@ -180,8 +180,8 @@
   },
   "find.trim-margin.detail": {
     "$count": "sprites",
-    "one": "{sprites} sprite non ritagliato porta margini trasparenti attorno alla sua grafica opaca. Quel margine fissa {vram:bytes} di VRAM ({area}px × 4) che una ricompattazione con ritaglio recupera fino a, più ~{disk:bytes} di disco dell'atlas (stima per area).",
-    "other": "{sprites} sprite non ritagliati portano margini trasparenti attorno alla loro grafica opaca. Quel margine fissa {vram:bytes} di VRAM ({area}px × 4) che una ricompattazione con ritaglio recupera fino a, più ~{disk:bytes} di disco dell'atlas (stima per area)."
+    "one": "{sprites} sprite non ritagliato porta margini trasparenti attorno alla sua grafica opaca. Quel margine fissa {vram:bytes} di VRAM ({area}px × 4) che una ricompattazione con ritaglio recupera fino a.",
+    "other": "{sprites} sprite non ritagliati portano margini trasparenti attorno alla loro grafica opaca. Quel margine fissa {vram:bytes} di VRAM ({area}px × 4) che una ricompattazione con ritaglio recupera fino a."
   },
   "find.trim-margin.fix": "Ricompatta con il ritaglio abilitato così ogni fotogramma è ridotto ai suoi limiti opachi.",
   "find.bleeding.title": {
@@ -243,6 +243,14 @@
     "other": "{refs} sono riempiti ciascuno sotto il {pct}%. Il loro contenuto sta in ~{merged} sheet — unirli riduce i bind di texture, le draw call e la VRAM. Il più grande buco vuoto contiguo è il {largestPct:pct} del suo sheet (dispersione {frag:pct}); più bassa è la dispersione, più serve un repack completo, non un semplice trim."
   },
   "find.atlas-merge.fix": "Riassembla questi atlas insieme.",
+  "find.atlas-merge-batching.title": "{n} atlas poco riempiti → unisci in ~{merged}",
+  "find.atlas-merge-batching.detail": {
+    "$count": "merged",
+    "one": "{refs} sono riempiti ciascuno sotto il {pct}%. Il loro contenuto sta in ~{merged} sheet — unirli riduce i bind di texture e le draw call. Una variazione di VRAM non è quantificabile dalle sole dimensioni di questi sheet, quindi il vantaggio garantito sono meno draw — un repack serrato può anche ridurre la memoria GPU. Il più grande buco vuoto contiguo è il {largestPct:pct} del suo sheet (dispersione {frag:pct}); più bassa è la dispersione, più serve un repack completo, non un semplice trim.",
+    "many": "{refs} sono riempiti ciascuno sotto il {pct}%. Il loro contenuto sta in ~{merged} di sheet — unirli riduce i bind di texture e le draw call. Una variazione di VRAM non è quantificabile dalle sole dimensioni di questi sheet, quindi il vantaggio garantito sono meno draw — un repack serrato può anche ridurre la memoria GPU. Il più grande buco vuoto contiguo è il {largestPct:pct} del suo sheet (dispersione {frag:pct}); più bassa è la dispersione, più serve un repack completo, non un semplice trim.",
+    "other": "{refs} sono riempiti ciascuno sotto il {pct}%. Il loro contenuto sta in ~{merged} sheet — unirli riduce i bind di texture e le draw call. Una variazione di VRAM non è quantificabile dalle sole dimensioni di questi sheet, quindi il vantaggio garantito sono meno draw — un repack serrato può anche ridurre la memoria GPU. Il più grande buco vuoto contiguo è il {largestPct:pct} del suo sheet (dispersione {frag:pct}); più bassa è la dispersione, più serve un repack completo, non un semplice trim."
+  },
+  "find.atlas-merge-batching.fix": "Riassembla questi atlas insieme.",
   "find.integrity.title": "Immagine atlas mancante: {image}",
   "find.integrity.detail": "Il manifest {manifest} fa riferimento a \\\"{image}\\\", che non è nella cartella — l'atlas non può caricarsi.",
   "find.integrity.fix": "Aggiungi l'immagine mancante o correggi il percorso nel manifest.",

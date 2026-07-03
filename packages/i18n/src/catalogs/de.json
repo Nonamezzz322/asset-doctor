@@ -178,8 +178,8 @@
   },
   "find.trim-margin.detail": {
     "$count": "sprites",
-    "one": "{sprites} ungetrimmtes Sprite trägt transparente Ränder um seine deckende Grafik. Dieser Rand bindet {vram:bytes} VRAM ({area}px × 4), die ein getrimmtes Neupacken bis zu freigibt, plus ~{disk:bytes} Atlas-Speicher (Flächenschätzung).",
-    "other": "{sprites} ungetrimmte Sprites tragen transparente Ränder um ihre deckende Grafik. Dieser Rand bindet {vram:bytes} VRAM ({area}px × 4), die ein getrimmtes Neupacken bis zu freigibt, plus ~{disk:bytes} Atlas-Speicher (Flächenschätzung)."
+    "one": "{sprites} ungetrimmtes Sprite trägt transparente Ränder um seine deckende Grafik. Dieser Rand bindet {vram:bytes} VRAM ({area}px × 4), die ein getrimmtes Neupacken bis zu freigibt.",
+    "other": "{sprites} ungetrimmte Sprites tragen transparente Ränder um ihre deckende Grafik. Dieser Rand bindet {vram:bytes} VRAM ({area}px × 4), die ein getrimmtes Neupacken bis zu freigibt."
   },
   "find.trim-margin.fix": "Mit aktiviertem Trimmen neu packen, damit jeder Frame auf seine deckenden Grenzen verkleinert wird.",
   "find.bleeding.title": {
@@ -240,6 +240,13 @@
     "other": "{refs} sind jeweils unter {pct}% gefüllt. Ihr Inhalt passt in ~{merged} Sheets — Zusammenführen senkt Textur-Binds, draw calls und VRAM. Größtes zusammenhängendes leeres Loch ist {largestPct:pct} seines Sheets (Streuung {frag:pct}); je geringer die Streuung, desto eher braucht es ein vollständiges Neupacken statt nur Trimmen."
   },
   "find.atlas-merge.fix": "Diese Atlanten gemeinsam neu packen.",
+  "find.atlas-merge-batching.title": "{n} unterfüllte Atlanten → zu ~{merged} zusammenführen",
+  "find.atlas-merge-batching.detail": {
+    "$count": "merged",
+    "one": "{refs} sind jeweils unter {pct}% gefüllt. Ihr Inhalt passt in ~{merged} Sheet — Zusammenführen senkt Textur-Binds und draw calls. Eine VRAM-Änderung lässt sich hier nicht allein aus diesen Sheet-Größen beziffern, der garantierte Gewinn sind also weniger Draws — ein dichtes Neupacken kann auch GPU-Speicher sparen. Größtes zusammenhängendes leeres Loch ist {largestPct:pct} seines Sheets (Streuung {frag:pct}); je geringer die Streuung, desto eher braucht es ein vollständiges Neupacken statt nur Trimmen.",
+    "other": "{refs} sind jeweils unter {pct}% gefüllt. Ihr Inhalt passt in ~{merged} Sheets — Zusammenführen senkt Textur-Binds und draw calls. Eine VRAM-Änderung lässt sich hier nicht allein aus diesen Sheet-Größen beziffern, der garantierte Gewinn sind also weniger Draws — ein dichtes Neupacken kann auch GPU-Speicher sparen. Größtes zusammenhängendes leeres Loch ist {largestPct:pct} seines Sheets (Streuung {frag:pct}); je geringer die Streuung, desto eher braucht es ein vollständiges Neupacken statt nur Trimmen."
+  },
+  "find.atlas-merge-batching.fix": "Diese Atlanten gemeinsam neu packen.",
   "find.integrity.title": "Fehlendes Atlas-Bild: {image}",
   "find.integrity.detail": "Manifest {manifest} referenziert \\\"{image}\\\", das nicht im Ordner liegt — der Atlas kann nicht geladen werden.",
   "find.integrity.fix": "Das fehlende Bild hinzufügen oder den Manifest-Pfad korrigieren.",
