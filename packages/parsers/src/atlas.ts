@@ -43,6 +43,12 @@ function readSize(v: unknown): Size | null {
   const w = num(s.w);
   const h = num(s.h);
   if (w === undefined || h === undefined) return null;
+  // Reject a degenerate / non-positive size: a 0×0 or negative meta.size is not a usable atlas
+  // dimension and, being truthy, would DEFEAT the `?? opts.imageSize` fallback (below) — whole-
+  // rejecting or mis-sizing an otherwise-good atlas. Falling through to null lets the real image
+  // size take over. Mirrors readRect's w<=0/h<=0 guard (no x/y here); also protects the sourceSize
+  // fallback, where a degenerate 0×0 collapses to the frame size instead of poisoning the sprite.
+  if (w <= 0 || h <= 0) return null;
   return { w, h };
 }
 

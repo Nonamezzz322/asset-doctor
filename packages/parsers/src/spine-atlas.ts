@@ -13,7 +13,7 @@ export interface SpinePage {
   format?: string;
   sprites: Sprite[];
   /** Regions on THIS page that named an asset but were unusable (a required field — xy/size/orig/bounds —
-   *  had a non-finite value, or the region fell outside the page). Per-region recovery: the page keeps its
+   *  had a non-finite OR non-positive value, or the region fell outside the page). Per-region recovery: the page keeps its
    *  good sprites; only the bad ones are surfaced. Additive: absent/empty ⇒ byte-identical to today. */
   malformedRegions?: { name: string; reason: string }[];
 }
@@ -28,8 +28,8 @@ interface RegionAcc {
   offsets?: { w: number; h: number };
   /** legacy `offset: x, y` — the trimmed region's offset within the original. */
   offset?: { x: number; y: number };
-  /** Set when a REQUIRED field had a non-finite value — the region is dropped + surfaced (not silently
-   *  coerced to 0, which would fabricate a placement). First failure wins (??=). */
+  /** Set when a REQUIRED field had a non-finite OR non-positive value — the region is dropped + surfaced
+   *  (not silently coerced to 0 or kept degenerate, which would fabricate a placement). First failure wins (??=). */
   malformed?: string;
 }
 
@@ -70,14 +70,21 @@ function applyRegionKey(r: RegionAcc, key: string, val: string): void {
     if (!fin(n[0]) || !fin(n[1])) r.malformed ??= `region "${r.name}": non-finite xy "${val.trim()}"`;
     else r.xy = { x: n[0]!, y: n[1]! };
   } else if (key === 'size') {
+    // Require BOTH finite AND > 0: a zero/negative region size is a degenerate placement (a 0×0 or
+    // negative frame), not a usable sprite. Reject + surface honestly rather than fabricate a positive
+    // size — mirrors the page `size:` guard (applyPageKey) and readRect's w<=0/h<=0 guard.
     if (!fin(n[0]) || !fin(n[1])) r.malformed ??= `region "${r.name}": non-finite size "${val.trim()}"`;
+    else if (n[0]! <= 0 || n[1]! <= 0) r.malformed ??= `region "${r.name}": non-positive size "${val.trim()}"`;
     else r.size = { w: n[0]!, h: n[1]! };
   } else if (key === 'orig') {
     if (!fin(n[0]) || !fin(n[1])) r.malformed ??= `region "${r.name}": non-finite orig "${val.trim()}"`;
     else r.orig = { w: n[0]!, h: n[1]! };
   } else if (key === 'bounds') {
+    // bounds = x,y,w,h. x/y are placement coords (0 is valid); w/h must be finite AND > 0 (same reason
+    // as `size` above — bounds supplies the frame w/h in toSprite when there is no `size` token).
     if (!fin(n[0]) || !fin(n[1]) || !fin(n[2]) || !fin(n[3]))
       r.malformed ??= `region "${r.name}": non-finite bounds "${val.trim()}"`;
+    else if (n[2]! <= 0 || n[3]! <= 0) r.malformed ??= `region "${r.name}": non-positive bounds "${val.trim()}"`;
     else r.bounds = { x: n[0]!, y: n[1]!, w: n[2]!, h: n[3]! };
   } else if (key === 'offsets') {
     // tolerant: a malformed optional offset defaults to 0 (today's behavior).

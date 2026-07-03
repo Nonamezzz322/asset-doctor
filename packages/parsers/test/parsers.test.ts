@@ -823,6 +823,42 @@ describe('parser hardening — corrupt input is rejected, not coerced (F3)', () 
     expect(readImageInfo(huge)).toBeNull();
   });
 
+  it('readSize: a degenerate meta.size (0×0 / negative) no longer whole-rejects — falls through to the real image size', () => {
+    // Pre-fix: readSize returned a truthy {w:0,h:0}, DEFEATING the `?? opts.imageSize` fallback; the atlas
+    // took size 0×0, every good frame then read as OOB, and the whole (good) sheet was whole-rejected.
+    const good = { frame: { x: 0, y: 0, w: 100, h: 100 }, rotated: false, trimmed: false, sourceSize: { w: 100, h: 100 } };
+    for (const badSize of [{ w: 0, h: 0 }, { w: -512, h: 512 }, { w: 512, h: -1 }]) {
+      const res = parseAtlas(
+        { frames: { 'a.png': good }, meta: { image: 'packed.png', size: badSize } },
+        img1024(),
+      );
+      expect(res.ok, JSON.stringify(badSize)).toBe(true);
+      if (!res.ok || res.asset.kind !== 'atlas') throw new Error('expected atlas');
+      expect(res.asset.atlas.size).toEqual({ w: 1024, h: 1024 }); // real image size, NOT the poisoned meta.size
+      expect(res.asset.atlas.sprites.map((s) => s.name)).toEqual(['a.png']); // the good sprite survives
+      expect(res.malformedFrames).toBeUndefined();
+    }
+  });
+
+  it('readSize: a degenerate meta.size with NO image fallback fails HONESTLY (never a fabricated 0×0 atlas)', () => {
+    const res = parseAtlasManifest({
+      frames: { 'a.png': { frame: { x: 0, y: 0, w: 10, h: 10 } } },
+      meta: { image: 's.png', size: { w: 0, h: 0 } },
+    }); // no opts.imageSize
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toBe('atlas size unknown (no meta.size and no image)');
+  });
+
+  it('readSize regression: a VALID meta.size still wins over the image size (byte-identical)', () => {
+    const res = parseAtlasManifest(
+      { frames: { 'a.png': { frame: { x: 0, y: 0, w: 10, h: 10 } } }, meta: { image: 's.png', size: { w: 512, h: 512 } } },
+      { imageSize: { w: 1024, h: 1024 } },
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.atlas.size).toEqual({ w: 512, h: 512 }); // positive meta.size unchanged, not the fallback
+  });
+
   it('spine fixed-arity NaN parse: a blank coord token flags the region malformed (no coord shift)', () => {
     // Old `.filter(Number.isFinite)` turned `xy: , 100` into [100] → {x:100,y:0} (silent misplacement).
     const atlas = `sheet.png
@@ -862,6 +898,54 @@ outside
     expect(p.sprites.map((s) => s.name)).toEqual(['inside']);
     expect(p.malformedRegions).toEqual([
       { name: 'outside', reason: 'region "outside" extends past page 128×128' },
+    ]);
+  });
+
+  it('spine size positivity: a region with a 0×0 / negative `size` token is dropped + surfaced; the good ones stay', () => {
+    // Pre-fix: applyRegionKey only checked Number.isFinite, so a finite-but-non-positive size produced a
+    // degenerate 0×0 (or negative) frame instead of being rejected like readRect / the fnt parser do.
+    const atlas = `sheet.png
+size: 256,256
+good
+  rotate: 0
+  xy: 0, 0
+  size: 50, 50
+  orig: 50, 50
+zeroSize
+  rotate: 0
+  xy: 60, 0
+  size: 0, 0
+  orig: 50, 50
+negSize
+  rotate: 0
+  xy: 120, 0
+  size: -10, 20
+  orig: 50, 50
+`;
+    const p = parseSpineAtlasText(atlas)[0]!;
+    expect(p.sprites.map((s) => s.name)).toEqual(['good']); // only the positive-size region is placed
+    expect(p.sprites[0]!.frame).toEqual({ x: 0, y: 0, w: 50, h: 50 }); // valid region byte-identical
+    expect(p.malformedRegions).toEqual([
+      { name: 'zeroSize', reason: 'region "zeroSize": non-positive size "0, 0"' },
+      { name: 'negSize', reason: 'region "negSize": non-positive size "-10, 20"' },
+    ]);
+  });
+
+  it('spine bounds positivity: a modern `bounds` token with non-positive w/h is dropped + surfaced', () => {
+    const atlas = `sheet.png
+size: 256,256
+good
+  rotate: 0
+  bounds: 0, 0, 40, 40
+bad
+  rotate: 0
+  bounds: 50, 0, 0, 30
+`;
+    const p = parseSpineAtlasText(atlas)[0]!;
+    expect(p.sprites.map((s) => s.name)).toEqual(['good']);
+    expect(p.sprites[0]!.frame).toEqual({ x: 0, y: 0, w: 40, h: 40 }); // valid bounds region unchanged
+    expect(p.malformedRegions).toEqual([
+      { name: 'bad', reason: 'region "bad": non-positive bounds "50, 0, 0, 30"' },
     ]);
   });
 
