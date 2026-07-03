@@ -47,7 +47,10 @@ import { buildTotalsRows } from './lib/totals-rows';
 import { focusTargetAfterSwap, type SwapState } from './lib/focus-move';
 import { Landing } from './components/landing/Landing';
 import { LandingFooter } from './components/landing/LandingFooter';
-import { LANDING_OPEN_FOLDER_ID } from './lib/landing-nav';
+import { LANDING_OPEN_FOLDER_ID, h2IdOf } from './lib/landing-nav';
+import { SPECIMEN_FRAMES, SPECIMEN_ZONES, SPECIMEN_VIEWBOX } from './lib/landing-specimen';
+import { ZONE_STYLE } from './lib/film-legend-style';
+import { HERO_READOUT_CELLS } from './lib/hero-readout';
 
 // Stable empty Set (constant identity) so the `foldIds` memo has a fixed reference when there is no report —
 // no fresh object per render, so nothing downstream needlessly recomputes. PRESENTATION only (design §5.1).
@@ -819,85 +822,150 @@ function Dropzone({
   const analyzing = phase.t === 'analyzing';
   // a11y: honest progress bar spec from the worker's REAL done/total (indeterminate when total unknown).
   const view = progressView(phase.t === 'analyzing' ? phase.progress : undefined);
+  // Secondary CTA: smooth-scroll + focus the How-it-works section (mirrors Landing.onAnchorClick),
+  // reduced-motion gated. '#how-it-works' never matches the exact-match settings router, so history stays clean.
+  const reduce = (): boolean =>
+    typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const scrollToHow = (): void => {
+    document.getElementById(h2IdOf('how-it-works'))?.focus({ preventScroll: true });
+    document.getElementById('how-it-works')?.scrollIntoView({ behavior: reduce() ? 'auto' : 'smooth' });
+    history.replaceState(null, '', '#how-it-works');
+  };
   return (
-    // a11y: the Dropzone is a NAMED region — aria-labelledby points at its own visible h1 (zero new strings,
-    // the name can never drift from the copy).
-    <section aria-labelledby="ad-dropzone-h1" className="mx-auto max-w-3xl">
-      <div className="text-center">
+    // a11y: the Dropzone HERO is a NAMED region — aria-labelledby points at its own visible h1 (the ONE h1 on
+    // the idle/analyzing/error view; the name can never drift from the copy). Two columns on lg+ (pitch + real
+    // CTAs left, the signature demo viewer + drop target right); stacks below lg.
+    <section aria-labelledby="ad-dropzone-h1" className="grid items-center gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+      {/* LEFT — pitch + the real conversion (Open folder) */}
+      <div className="text-center lg:text-left">
         <div className="mb-5 inline-flex items-center gap-2 font-mono text-xs font-medium uppercase tracking-[0.06em] text-teal-text">
           <span className="ad-pulse-dot inline-block h-[7px] w-[7px] rounded-full bg-cta" />
           {t('header.xray')}
         </div>
         <h1 id="ad-dropzone-h1" tabIndex={-1} className="ad-focus-anchor text-balance font-display text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl">{t('dropzone.title')}</h1>
-        {/* Landing hero tagline (full ink — it is the value prop). Scoped "nothing is uploaded" = the
-            diagnosis. The existing subtitle (analysis-scoped claim) stays verbatim below it. */}
-        <p className="mx-auto mt-3 max-w-xl text-pretty text-[15px] leading-relaxed text-ink">{t('landing.tagline')}</p>
-        <p className="mx-auto mt-4 max-w-xl text-pretty text-[15px] leading-relaxed text-ink-soft">{t('dropzone.subtitle')}</p>
+        {/* tagline (full ink — the value prop) + the analysis-scoped subtitle. */}
+        <p className="mx-auto mt-4 max-w-xl text-pretty text-[15px] leading-relaxed text-ink lg:mx-0">{t('landing.tagline')}</p>
+        <p className="mx-auto mt-3 max-w-xl text-pretty text-[15px] leading-relaxed text-ink-soft lg:mx-0">{t('dropzone.subtitle')}</p>
+        <div className="mt-7 flex flex-wrap items-center justify-center gap-3 lg:justify-start">
+          <button
+            type="button"
+            id={LANDING_OPEN_FOLDER_ID}
+            onClick={onOpen}
+            className="rounded-lg bg-cta px-5 py-2.5 font-sans text-sm font-semibold text-white shadow-[0_2px_6px_rgba(21,160,106,0.32)] transition hover:bg-cta-hover"
+          >
+            {t('dropzone.open')}
+          </button>
+          <a
+            href="#how-it-works"
+            onClick={(e) => {
+              e.preventDefault();
+              scrollToHow();
+            }}
+            className="rounded-lg border border-line bg-panel px-5 py-2.5 font-sans text-sm font-semibold text-ink transition hover:border-teal hover:text-teal-text"
+          >
+            {t('landing.scrollHint')}
+          </a>
+        </div>
+        {/* privacy pin — shield in the ok token (invariant 1: nothing is uploaded for the diagnosis). */}
+        <div className="mt-6 flex items-center justify-center gap-2 font-mono text-[12.5px] text-ink-soft lg:justify-start">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3z" stroke="var(--color-ok)" strokeWidth="1.7" strokeLinejoin="round" />
+            <path d="M9 12l2.2 2.2L15.5 10" stroke="var(--color-ok)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          {t('dropzone.privacy')}
+        </div>
+        {phase.t === 'error' && <ErrorNotice state={phase.error} mt="mt-6" />}
+        {/* Mobile honesty line (visible only < sm). Never promises mobile analysis (WebGL probe / FS Access
+            limits) but doesn't say "impossible" either — file-input folder picking exists. */}
+        <p className="mx-auto mt-4 max-w-xl text-center font-mono text-[11px] text-ink-soft sm:hidden lg:text-left">{t('landing.mobileNote')}</p>
       </div>
 
-      <div
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragging(false);
-          if (e.dataTransfer.items.length) onDrop(e.dataTransfer.items);
-        }}
-        className="ad-grid ad-clip ad-viewer-shadow relative mt-9 rounded-2xl border border-film-border p-3.5"
-      >
+      {/* RIGHT — the signature viewer: BOTH the illustrative demo AND the real drop/click target (runs a real
+          diagnosis). The decorative demo chrome (top bar, specimen, readout, drop prompt) is aria-hidden so a
+          SR is not read a fabricated "symbols.png / VRAM —" ; the analyzing progress (role=status) stays
+          announced, and the honesty caption below is read. The accessible open control is the left button;
+          click/drag on the viewer is a mouse-only convenience. */}
+      <div>
         <div
-          // a11y: aria-busy while analysis runs so assistive tech knows the region is updating (cleared the
-          // moment phase leaves 'analyzing' — the whole Dropzone unmounts at done, so it can never get stuck on).
-          aria-busy={analyzing}
-          className={`relative flex min-h-[240px] flex-col items-center justify-center gap-5 overflow-hidden rounded-[10px] border-2 border-dashed px-6 py-10 text-center transition-colors ${
-            dragging ? 'border-teal bg-teal/10' : 'border-teal/35'
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragging(false);
+            if (e.dataTransfer.items.length) onDrop(e.dataTransfer.items);
+          }}
+          onClick={onOpen}
+          className={`ad-grid ad-clip ad-viewer-shadow relative cursor-copy rounded-2xl border p-3.5 transition-colors ${
+            dragging ? 'border-teal' : 'border-film-border'
           }`}
         >
-          <div className="ad-scanline" />
-          <Logo size={40} />
-          {analyzing ? (
-            // a11y: the otherwise-silent progress text becomes a polite live region so a SR user who clicked
-            // "open folder" hears "analyzing… N/M · label". aria-atomic reads the whole phrase, not just the
-            // changed number. No copy/visual change — the existing localized strings are spoken verbatim.
-            <>
-              <p role="status" aria-live="polite" aria-atomic="true" className="font-mono text-sm text-[#9be7e7]">
-                {t('dropzone.analyzing')}{' '}
-                {phase.progress ? t('dropzone.progress', { done: phase.progress.done, total: phase.progress.total, label: phase.progress.label }) : ''}
-              </p>
-              {/* a11y: machine-readable determinate progress (role=progressbar). The fill width is the worker's
-                  REAL done/total (progressView); indeterminate ⇒ static dashed track + omitted valuenow/valuemax
-                  (canonical AT busy signal). Color is NOT the sole signal — the {done}/{total} text above remains. */}
-              <div
-                className={`ad-progress-track${view.determinate ? '' : ' ad-progress-indet'}`}
-                role="progressbar"
-                aria-valuemin={0}
-                aria-label={t('dropzone.analyzing')}
-                {...(view.determinate ? { 'aria-valuenow': view.valueNow, 'aria-valuemax': view.valueMax } : {})}
-              >
-                {view.determinate && <div className="ad-progress-fill" style={{ width: view.pct + '%' }} aria-hidden="true" />}
+          {/* top bar — illustrative demo filename + format badge. */}
+          <div aria-hidden="true" className="flex items-center gap-2 px-1 pb-3 pt-1 font-mono text-[12.5px] text-film-soft">
+            symbols.png
+            <span className="rounded bg-info px-1.5 py-0.5 text-[10px] font-semibold text-film">PNG</span>
+          </div>
+          {/* stage */}
+          <div aria-busy={analyzing} className="relative aspect-square overflow-hidden rounded-lg">
+            {analyzing ? (
+              // a11y: the otherwise-silent progress text is a polite live region so a SR user who opened a
+              // folder hears "analyzing… N/M · label". aria-atomic reads the whole phrase.
+              <div className="flex h-full flex-col items-center justify-center gap-5 px-6 text-center">
+                <div className="ad-scanline" aria-hidden="true" />
+                <Logo size={40} />
+                <p role="status" aria-live="polite" aria-atomic="true" className="font-mono text-sm text-[#9be7e7]">
+                  {t('dropzone.analyzing')}{' '}
+                  {phase.progress ? t('dropzone.progress', { done: phase.progress.done, total: phase.progress.total, label: phase.progress.label }) : ''}
+                </p>
+                {/* machine-readable determinate progress (role=progressbar); indeterminate ⇒ static dashed track. */}
+                <div
+                  className={`ad-progress-track${view.determinate ? '' : ' ad-progress-indet'}`}
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-label={t('dropzone.analyzing')}
+                  {...(view.determinate ? { 'aria-valuenow': view.valueNow, 'aria-valuemax': view.valueMax } : {})}
+                >
+                  {view.determinate && <div className="ad-progress-fill" style={{ width: view.pct + '%' }} aria-hidden="true" />}
+                </div>
               </div>
-            </>
-          ) : (
-            <button
-              type="button"
-              id={LANDING_OPEN_FOLDER_ID}
-              onClick={onOpen}
-              className="rounded-lg bg-cta px-5 py-2.5 font-sans text-sm font-semibold text-white shadow-[0_2px_6px_rgba(21,160,106,0.32)] transition hover:bg-cta-hover"
-            >
-              {t('dropzone.open')}
-            </button>
-          )}
+            ) : (
+              // illustrative atlas specimen — SHIPPED static geometry + the real overlay palette (ZONE_STYLE),
+              // so the demo can never drift from what the FilmViewer actually paints. Decorative ⇒ aria-hidden.
+              // absolute inset-0 fills the aspect-square stage (so the svg h-full has a sized parent and the
+              // scanline / drop prompt anchor to the stage).
+              <div aria-hidden="true" className="absolute inset-0">
+                <svg viewBox={`0 0 ${SPECIMEN_VIEWBOX.w} ${SPECIMEN_VIEWBOX.h}`} className="block h-full w-full">
+                  {SPECIMEN_FRAMES.map((f, i) => (
+                    <rect key={`f${i}`} x={f.x} y={f.y} width={f.w} height={f.h} rx={3} fill="rgba(255,255,255,0.05)" stroke="var(--color-film-border)" strokeWidth={1} />
+                  ))}
+                  {SPECIMEN_ZONES.map((z, i) => (
+                    <rect key={`z${i}`} x={z.x} y={z.y} width={z.w} height={z.h} rx={2} fill={ZONE_STYLE[z.kind].fill} stroke={ZONE_STYLE[z.kind].stroke} strokeWidth={1.5} strokeDasharray={z.kind === 'empty' ? '4 3' : undefined} />
+                  ))}
+                </svg>
+                <div className="ad-scanline" />
+                {dragging && (
+                  <div className="absolute inset-2 flex items-center justify-center rounded-lg border-2 border-dashed border-teal bg-teal/10 font-mono text-sm text-[#9be7e7]">
+                    {t('dropzone.dropPrompt')}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          {/* readout strip — every value '—' (illustrative, not a measurement; hero-readout.ts pins it). */}
+          <div aria-hidden="true" className="mt-3 grid grid-cols-4 gap-px overflow-hidden rounded-lg border border-film-border bg-film-border">
+            {HERO_READOUT_CELLS.map((c) => (
+              <div key={c.label} className="bg-film px-2 py-1.5 text-center">
+                <div className="ad-label-sm text-film-soft">{c.label}</div>
+                <div className="font-mono text-[11px] font-semibold text-film-soft">{c.value}</div>
+              </div>
+            ))}
+          </div>
         </div>
+        {/* honesty caption OUTSIDE the aria-hidden chrome (so SRs read it). */}
+        <p className="mt-2 text-center font-mono text-[10px] text-ink-soft">{t('dropzone.demoCaption')}</p>
       </div>
-
-      {phase.t === 'error' && <ErrorNotice state={phase.error} />}
-      <p className="mt-5 text-center font-mono text-[11px] text-ink-soft">{t('dropzone.footnote')}</p>
-      {/* Mobile honesty line (visible only < sm). Never promises mobile analysis (WebGL probe / FS Access
-          limits) but doesn't say "impossible" either — file-input folder picking exists. */}
-      <p className="mt-2 text-center font-mono text-[11px] text-ink-soft sm:hidden">{t('landing.mobileNote')}</p>
     </section>
   );
 }
