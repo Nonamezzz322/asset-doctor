@@ -181,28 +181,36 @@ export function Landing({ phaseT }: { phaseT: 'idle' | 'analyzing' | 'error' }) 
         <h2 id={h2IdOf('disk-vram')} tabIndex={-1} className={`${h2Class} text-center`}>
           {t('landing.vram.title')}
         </h2>
-        <p className="mx-auto mt-4 max-w-2xl text-pretty text-center text-sm leading-relaxed text-ink-soft">
-          {t('landing.vram.body')}
-        </p>
-        {/* Token figure: a small file on disk vs a fixed 16 MB on the GPU. One role=img group; inner
-            labels aria-hidden (the alt carries the meaning). */}
-        <div role="img" aria-label={t('landing.vram.figureAlt')} className="mt-8">
-          <div className="flex flex-wrap items-end justify-center gap-8" aria-hidden="true">
-            <div className="flex flex-col items-center gap-2">
-              <div className="flex h-24 w-24 items-center justify-center rounded-lg border border-line bg-panel">
-                <span className="font-mono text-sm font-semibold text-ink">{t('landing.vram.disk.value')}</span>
+        {/* Bolder "disk size lies" card (mockup-aligned): prose + the honest w×h×4 math anchor on the left,
+            a dark VRAM meter on the right. The bars are a QUALITATIVE illustration (disk tiny, VRAM full);
+            the quantitative TRUTH is the math anchor (2048² × 4 = 16 MB), never a fabricated user number.
+            Static bar widths (inline) ⇒ reduced-motion-safe by construction (no width animation). */}
+        <div className="mx-auto mt-8 grid max-w-3xl gap-8 rounded-2xl border border-line bg-panel p-6 sm:p-8 md:grid-cols-2 md:items-center">
+          <div>
+            <p className="text-pretty text-sm leading-relaxed text-ink-soft">{t('landing.vram.body')}</p>
+            <p className="mt-4 font-mono text-xs text-ink-soft">{t('landing.vram.math')}</p>
+            <p className="mt-1 font-mono text-[11px] text-ink-soft">{t('landing.vram.mip')}</p>
+          </div>
+          {/* One role=img group; inner labels aria-hidden (the alt carries the meaning). Value text on the
+              always-dark ad-grid: text-ok (AA) / text-crit (AA); bars are non-text (1.4.11). */}
+          <div role="img" aria-label={t('landing.vram.figureAlt')} className="ad-grid rounded-xl border border-film-border p-5">
+            <div aria-hidden="true">
+              <div className="flex items-center justify-between font-mono text-[11px] text-film-soft">
+                <span>{t('landing.vram.disk.label')}</span>
+                <span className="text-ok">{t('landing.vram.disk.value')}</span>
               </div>
-              <span className="font-mono text-[11px] text-ink-soft">{t('landing.vram.disk.label')}</span>
-            </div>
-            <div className="flex flex-col items-center gap-2">
-              <div className="ad-grid flex h-24 w-24 items-center justify-center rounded-lg border border-film-border">
-                <span className="font-mono text-sm font-semibold text-white">{t('landing.vram.gpu.value')}</span>
+              <div className="mt-2 h-3.5 overflow-hidden rounded-full bg-film-line">
+                <div className="h-full rounded-full bg-ok" style={{ width: '8%' }} />
               </div>
-              <span className="font-mono text-[11px] text-ink-soft">{t('landing.vram.gpu.label')}</span>
+              <div className="mt-5 flex items-center justify-between font-mono text-[11px] text-film-soft">
+                <span>{t('landing.vram.gpu.label')}</span>
+                <span className="text-crit">{t('landing.vram.gpu.value')}</span>
+              </div>
+              <div className="mt-2 h-3.5 overflow-hidden rounded-full bg-film-line">
+                <div className="h-full rounded-full" style={{ width: '100%', background: 'linear-gradient(90deg, var(--color-warn), var(--color-crit))' }} />
+              </div>
             </div>
           </div>
-          <p className="mt-5 text-center font-mono text-xs text-ink-soft" aria-hidden="true">{t('landing.vram.math')}</p>
-          <p className="mt-1 text-center font-mono text-[11px] text-ink-soft" aria-hidden="true">{t('landing.vram.mip')}</p>
         </div>
         <p className="mx-auto mt-6 max-w-2xl text-pretty text-center text-sm leading-relaxed text-ink-soft">
           {t('landing.vram.note')}
