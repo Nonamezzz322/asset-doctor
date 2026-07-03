@@ -10,6 +10,14 @@ GitHub-кредов — пушит пользователь); хэши комм�
 
 ---
 
+## UX-раунд 6 — отложенный backlog (error-card + типографика лейблов) — 2026-07-03
+Пивот с honesty на отложенный UX/usability backlog (после исчерпания темы честности измерений). Design-раунд `wx0hxetki`: судья проверил открытость vs HEAD → **2 PROCEED**, **дропнул sub-lg-hero-order** (отличное суждение: любой CSS-`order`-фикс ломает WCAG 1.3.2/2.4.3 [визуальный порядок ≠ reading/focus], а DOM-reorder переворачивает разумный ledger→film control→output focus-порядок — латеральный a11y-размен, не выигрыш). Impl `wzv5xt4pk`; ревью 3 MINOR — все починил я. Ветка **107 над `origin/main`** (web 856).
+
+- **Локализованная error-карточка** (`9c47ed0`)
+  — Упавший analysis/fix-прогон рендерил СЫРОЕ непереведённое worker-`e.message` голой строкой без заголовка, а fix-card error-сайт (App.tsx:1396) НЕ имел live-региона. Теперь discriminated `ErrorState` + ЧИСТЫЙ Node-тестируемый `error-view` маппер (зеркалит `ledger-empty.ts`) → локализованная карточка: `role=alert` заголовок (ОБА сайта) + сырой английский демотирован в свёрнутый `<details>`; +3 ключа ×9. **Мой фикс MINOR:** тело `<details>` клампится `max-h-40` ⇒ добавил `tabIndex=0`+`aria-label` (клавиатурный скролл длинного сообщения, WCAG 2.1.1; SR читает весь DOM независимо). a11y-улучшение.
+- **Токены типографики микро-лейблов** (`9c47ed0`)
+  — 2 канонических токена (`.ad-label` 10px/0.06em, `.ad-label-sm` 9px/0.08em, без baked color/lh) заменяют 6+ дрейфующих 8–10px mono-uppercase размеров. Вкатывает связанный ReadCell long-locale overflow: de «VRAM (DEKLARIERT)» вился/клипался в узкой film-колонке ⇒ `min-w-0`+`break-words` держит честный declared/measured-квалификатор ПОЛНОСТЬЮ видимым (никакого truncate, инв. 5). Чистый source-grep drift-guard. **Мои фиксы MINOR:** (2) коммент байт-идентичности переоценивал — честно назвал 3 НАМЕРЕННЫЕ нормализации (ReadCell 9.5→9px + два 9px-лейбла 0.06→0.08em); (3) drift-guard был слеп к переставленным/wrong-tracking стекам ⇒ усилил до order/tracking-value-insensitive (ловит реинтродукцию `text-[9px]…0.06em` дрейфа). **Вердикт: SHIP** (0 serious; 3 minor мной починены). Gate: typecheck + web 856 + i18n + lint зелёные.
+
 ## Честность чека Pro-фикса (3 over-claim на платном пути) — 2026-07-03
 Пивот темы «честность измерений» с диагноза на ВЫВОД фикса (чек — платный путь, где over-claim хуже всего; 3 диаг-раунда его не аудировали). Selection `w2mikgmsn` → **3 CONFIRMED** (killed ~6: уже-раскрытое lossless-vs-lossy, presentation-only зелёный-на-росте, честные run-тоталы). Impl `wffu4rge8`; один ревью-агент вернул пусто ⇒ я вручную проверил все 3 изменения (near-dup accounting-split, spine-сниппет, plan-footprint target). Ветка **105 над `origin/main`** (fix 495, web 845, i18n parity).
 
