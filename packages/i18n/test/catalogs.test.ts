@@ -89,6 +89,25 @@ describe('catalog completeness (all 9 locales)', () => {
     }
   });
 
+  // Fix-honesty (near-dup drop VRAM): the two SEPARATE duplicate-VRAM upper-bound lines both render their
+  // {bytes:bytes} param brace-free in every locale — the owner-aware dedup bound (auto-repointed) AND the
+  // bare-drop near-duplicate bound (NOT auto-repointed; realized only if the user manually repoints). Neither
+  // is ever folded into the hard VRAM row (invariant 5). They MUST be distinct copy in en (different
+  // contingencies — one runtime-shared upload, one manual repoint), never accidentally the same string.
+  it('every locale renders BOTH duplicate-VRAM upper-bound keys brace-free; en copy is distinct', () => {
+    for (const loc of LOCALES) {
+      const dedup = translate(loc, 'fix.dedup.vramUpperBound', { bytes: 16 * 1048576 });
+      const nearDup = translate(loc, 'fix.nearDup.vramUpperBound', { bytes: 16 * 1048576 });
+      expect(dedup, `${loc} fix.dedup.vramUpperBound`).not.toContain('{');
+      expect(nearDup, `${loc} fix.nearDup.vramUpperBound`).not.toContain('{');
+      expect(nearDup, `${loc} fix.nearDup.vramUpperBound renders bytes`).toContain('16.0 MB');
+    }
+    // en copy differs — the near-dup bound names the MANUAL repoint contingency, not the runtime-shared upload.
+    expect(translate('en', 'fix.nearDup.vramUpperBound', { bytes: 1 })).not.toBe(
+      translate('en', 'fix.dedup.vramUpperBound', { bytes: 1 }),
+    );
+  });
+
   it('every locale renders the loader-migration chrome keys without leftover braces', () => {
     for (const loc of LOCALES) {
       expect(translate(loc, 'fix.migrate.title')).not.toContain('{');

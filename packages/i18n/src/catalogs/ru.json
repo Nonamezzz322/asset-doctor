@@ -476,6 +476,7 @@
   },
   "fix.dedup.diskSaved": "−{bytes:bytes} на диске за счёт дедупликации",
   "fix.dedup.vramUpperBound": "до −{bytes:bytes} VRAM (верхняя граница — только если рантайм делит одну загрузку между копиями)",
+  "fix.nearDup.vramUpperBound": "до −{bytes:bytes} VRAM (верхняя граница — только если вы перенаправите ссылки удалённого дубликата на оставленную копию)",
   "fix.sheetDiff.title": {
     "$count": "n",
     "one": "{n} лист — наглядное подтверждение",

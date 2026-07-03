@@ -239,17 +239,23 @@ describe('migrationSnippet — Phaser 3 (verbatim CODE, never i18n)', () => {
     );
   });
 
-  it('pack into a Spine .atlas: plugin honesty comment', () => {
+  it('pack into a Spine .atlas: real spineAtlas load, no fabricated .png page', () => {
     const changes = packChanges(['hero/idle.png'], ['hero/hero.atlas']);
     expect(migrationSnippet(changes, 'phaser')).toBe(
       [
         'function preload() {',
         '  // was: hero/idle.png',
-        '  // requires the spine-phaser plugin: this.load.spineAtlas / spineJson',
-        '  this.load.atlas("hero", "hero/hero.png", "hero/hero.atlas");',
+        '  // requires the spine-phaser plugin: this.load.spineAtlas (+ this.load.spineJson/spineBinary for the skeleton)',
+        '  this.load.spineAtlas("hero", "hero/hero.atlas");',
         '}',
       ].join('\n'),
     );
+    // never-fabricate regression: real spineAtlas load with the REAL .atlas url, NEVER an ext-swapped .png page,
+    // and NEVER the wrong TexturePacker-JSON loader (this.load.atlas) for a libGDX Spine .atlas (invariant 3).
+    const spine = migrationSnippet(packChanges(['hero/idle.png'], ['hero/hero.atlas']), 'phaser');
+    expect(spine).toContain('this.load.spineAtlas("hero", "hero/hero.atlas")');
+    expect(spine).not.toContain('hero/hero.png'); // no fabricated page (idle.png survives only in a // was: comment)
+    expect(spine).not.toContain('this.load.atlas('); // never the wrong TP-JSON loader for a Spine .atlas
   });
 });
 

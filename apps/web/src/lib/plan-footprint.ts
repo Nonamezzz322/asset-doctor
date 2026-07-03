@@ -7,7 +7,11 @@
 //   • "measured now" — the ONLY footprint numbers summed here. Each delta's before→after is computable
 //     PRE-COMPOSE from already-known geometry/sizes carried on the finding:
 //       – DISK: a `format`/`format-lossless` finding with a SURVIVING transcode op → srcBytes − bestBytes
-//         (the lossy q0.9 canvas ESTIMATE the diagnosis already encoded; sets `estimated`). A `wasted-alpha`
+//         (the lossy q0.9 canvas ESTIMATE the diagnosis already encoded; sets `estimated`) — but ONLY when
+//         the op's `targetMime` EQUALS the finding's measured `bestMime`. `bestBytes` was measured for the
+//         strict-smaller FORMAT_TARGETS winner (CAN be WebP even at an AVIF target); with bestFormatPerImage
+//         OFF (default) the run emits `opts.targetMime`, so a codec MISMATCH would credit a saving the run
+//         never produces — those refs DEFER (counted, never summed), like a repack. A `wasted-alpha`
 //         finding with a SURVIVING opaque transcode → srcBytes − opaqueBytes (a MEASURED channel-drop).
 //       – VRAM: a `dimensions-oversize` finding with a SURVIVING resize op → params.vram (the MEASURED
 //         pre-resize w·h·4 from rules.ts) − to.w·to.h·4. EXACT.
@@ -27,7 +31,7 @@
 // Math.random / DOM. Same input ⇒ deep-equal output. ADDITIVE: nothing measurable ⇒ undefined ⇒ the Plan
 // card is byte-identical to today (counts-only).
 
-import type { AnalysisReport, FixOp, Size } from '@asset-doctor/core';
+import type { AnalysisReport, FixOp, ImageMime, Size } from '@asset-doctor/core';
 import type { FixPlanFootprint } from '../worker/fix-protocol';
 import { fixOpKind, type OpKind } from './op-manifest';
 
@@ -35,6 +39,12 @@ const BYTES_PER_PX = 4;
 
 /** Coerce a finding param to a usable positive finite number (else 0 ⇒ contributes nothing — honest). */
 const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
+
+/** The four real image mimes (core's ImageMime union). Mirrors plan.ts's own guard so the preview can
+ *  compare a finding's MEASURED `params.bestMime` against the op's real `targetMime` — a malformed/absent
+ *  bestMime fails the guard ⇒ the ref defers (fail-safe, never credits a bogus number). */
+const VALID_MIMES: ReadonlySet<string> = new Set(['image/png', 'image/webp', 'image/jpeg', 'image/avif']);
+const isImageMime = (v: unknown): v is ImageMime => typeof v === 'string' && VALID_MIMES.has(v);
 
 /** Kinds whose before→after is NOT knowable pre-compose ⇒ counted in `deferredOps`, never summed. */
 const DEFERRED_KINDS: ReadonlySet<OpKind> = new Set<OpKind>(['repack', 'merge', 'pack', 'dedup']);
@@ -54,14 +64,17 @@ export function summarizeFixPlanFootprint(
   excluded: ReadonlySet<OpKind>,
 ): FixPlanFootprint | undefined {
   // ── Pass A: index the SURVIVING ops by ref (skip deselected) ──────────────────────────────────────
-  const transcodeRefs = new Set<string>(); // refs with a surviving transcode op (disk-measurable)
+  // ref → the format the run WILL emit (op.targetMime), NOT the measured winner. The DISK credit in pass B
+  // may sum `srcBytes − bestBytes` ONLY when this equals the finding's `bestMime` — else the run encodes a
+  // format the finding carries no byte count for ⇒ the saving is not pre-compose-knowable ⇒ defer (honest).
+  const transcodeTarget = new Map<string, ImageMime>();
   const opaqueRefs = new Set<string>(); // refs whose surviving transcode drops the dead alpha channel
   const resizeTo = new Map<string, Size>(); // ref → surviving resize target (VRAM-measurable)
   let deferredOps = 0; // repack/merge/pack/dedup — sized at download
   for (const op of ops) {
     if (excluded.has(fixOpKind(op))) continue; // deselected ⇒ does no work ⇒ contributes nothing
     if (op.kind === 'transcode') {
-      transcodeRefs.add(op.assetRef);
+      transcodeTarget.set(op.assetRef, op.targetMime);
       if (op.opaque === true) opaqueRefs.add(op.assetRef);
     } else if (op.kind === 'resize') {
       resizeTo.set(op.assetRef, op.to);
@@ -81,11 +94,23 @@ export function summarizeFixPlanFootprint(
     if (f.scope === 'folder') continue; // folder findings have no single op target
     const ref = f.assetRef;
     const p = f.params;
-    // DISK — format/format-lossless: srcBytes − bestBytes (lossy q0.9 ESTIMATE ⇒ estimated=true).
-    if (f.rule === 'format' && transcodeRefs.has(ref)) {
-      diskBytesSaved += Math.max(0, num(p?.srcBytes) - num(p?.bestBytes));
-      estimated = true;
+    // DISK — format/format-lossless: srcBytes − bestBytes (lossy q0.9 ESTIMATE ⇒ estimated=true), but ONLY
+    // when the run emits EXACTLY the measured winner. `bestBytes` was measured for `bestMime` (the strict-
+    // smaller FORMAT_TARGETS candidate — CAN be WebP even at an AVIF target); if the op's `targetMime` differs
+    // (default: bestFormatPerImage OFF ⇒ op emits opts.targetMime), the finding carries NO byte count for the
+    // format the run will produce ⇒ the disk delta is NOT pre-compose-knowable ⇒ defer it (count, never sum),
+    // exactly like a repack/pack. `disced.add` on BOTH branches: planFix folds a same-ref wasted-alpha into
+    // THIS transcode as opaque:true, so the format branch OWNS this ref's disk attribution whether it credits
+    // or defers — the wasted-alpha branch must never sneak in a codec-mismatched `srcBytes − opaqueBytes`.
+    if (f.rule === 'format' && transcodeTarget.has(ref)) {
       disced.add(ref);
+      const best = p?.bestMime;
+      if (isImageMime(best) && transcodeTarget.get(ref) === best) {
+        diskBytesSaved += Math.max(0, num(p?.srcBytes) - num(p?.bestBytes));
+        estimated = true;
+      } else {
+        deferredOps++; // run emits a DIFFERENT format than bestBytes was measured for ⇒ sized at download
+      }
     } else if (f.rule === 'wasted-alpha' && opaqueRefs.has(ref) && !disced.has(ref)) {
       // DISK — wasted-alpha (MEASURED channel drop): srcBytes − opaqueBytes. Not an estimate.
       diskBytesSaved += Math.max(0, num(p?.srcBytes) - num(p?.opaqueBytes));

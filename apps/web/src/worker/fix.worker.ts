@@ -1227,6 +1227,14 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     let looseRepathSkipped = 0;
     let dedupDiskBytesSaved = 0;
     let dedupVramBytesSavedUpperBound = 0;
+    // BARE-drop (near-duplicate / non-owner-modelled) VRAM upper bound. A bare drop DELETES a copy but does
+    // NO repoint (the reference is left dangling, to:[]), so the dropped file's w·h·4 GPU footprint is NOT a
+    // saving realized in the emitted folder — it is realized ONLY if the user MANUALLY repoints the dangling
+    // reference to the kept sibling. So it is accumulated here as a SEPARATE upper bound (strictly weaker than
+    // dedupVramBytesSavedUpperBound: the copies are NOT byte-identical + the tool never repoints) and is NEVER
+    // folded into the hard vramSaved / vramBytesAfter (invariants 3 & 5). The DISK saving is already real
+    // (diskAfter simply omits the dropped bytes). 0 ⇒ no bare drop ran ⇒ receipt byte-identical to today.
+    let droppedDuplicateVramBytesUpperBound = 0;
     // Feature 4 (pack loose) receipt counters. packedGroups/packedSheetCount/packedRegionCount feed
     // FixReceipt.packedSheets; packVerified/packUnmatched/packUnverified feed FixReceipt.packVerification.
     // Building a sheet is reference-changing ⇒ referencesChanged is also set (NOT a blind drop-in).
@@ -2821,7 +2829,15 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           if (sInfo) dropped.add(sInfo.path);
           referencesChanged = true; // removing a file changes the folder's references
           changeRows.push(dropChange(path)); // loader-migration: a file the loader called was REMOVED (to: [])
-          vramSaved += vramByRef.get(op.assetRef) ?? 0;
+          // HONESTY (invariants 3 & 5): a bare drop does NO repoint — the reference is left dangling (to:[]),
+          // so deleting the file does NOT eliminate a GPU upload on the spot. Its w·h·4 is therefore an UPPER
+          // BOUND (realized only if the user MANUALLY repoints to the kept sibling), routed to the SEPARATE
+          // droppedDuplicateVramBytesUpperBound — NEVER folded into the hard vramSaved / vramBytesAfter. Even
+          // if the kept sibling is later resized/transcoded smaller, the dropped copy's source w·h·4 stays a
+          // valid UPPER bound (repointing to a smaller kept copy saves at most this much). The DISK saving is
+          // real+measured (diskAfter omits the dropped bytes) — only the VRAM claim is upper-bounded. This
+          // mirrors the same-dims-transcode DISK-only rule and the owner-aware dedup upper bound.
+          droppedDuplicateVramBytesUpperBound += vramByRef.get(op.assetRef) ?? 0;
           operations.push(`drop duplicate ${basename(path)}`);
         }
       } else if (op.kind === 'pack') {
@@ -4323,6 +4339,11 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       ...(looseRepathSkipped > 0 ? { looseRepathSkipped } : {}),
       ...(dedupDiskBytesSaved > 0 ? { dedupDiskBytesSaved } : {}),
       ...(dedupVramBytesSavedUpperBound > 0 ? { dedupVramBytesSavedUpperBound } : {}),
+      // Bare duplicate-drop VRAM upper bound (additive, optional — invariants 3 & 5). The dropped near-duplicate's
+      // w·h·4 is NEVER folded into the hard vramBytesAfter (the file is deleted but nothing repoints); it is
+      // realized only if the user manually repoints the dangling reference. Absent/0 ⇒ no bare drop ran ⇒
+      // receipt byte-identical to today.
+      ...(droppedDuplicateVramBytesUpperBound > 0 ? { droppedDuplicateVramBytesUpperBound } : {}),
       // Polygon mode (additive, optional): meshSprites counts sprites carrying a mesh in the SELECTED
       // results (0 on fallback ⇒ omit); polygonAreaSavedPct is the measured VRAM delta, only when a
       // polygon result actually won. Absent in non-polygon runs ⇒ receipt is byte-identical to today.

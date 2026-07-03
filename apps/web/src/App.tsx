@@ -1633,6 +1633,13 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
       {(receipt.dedupVramBytesSavedUpperBound ?? 0) > 0 ? (
         <p className="font-mono text-[10px] text-ink-soft">{t('fix.dedup.vramUpperBound', { bytes: receipt.dedupVramBytesSavedUpperBound ?? 0 })}</p>
       ) : null}
+      {/* Bare duplicate-drop VRAM upper bound (invariant 5): a near-duplicate was DELETED but its reference was
+          left dangling (no auto-repoint), so this VRAM is realized ONLY if the user manually repoints to the kept
+          copy — a SEPARATE upper bound, never folded into the hard VRAM row above (strictly weaker than the dedup
+          upper bound). The DISK saving is already counted in the headline disk row. Gated > 0 (additive). */}
+      {(receipt.droppedDuplicateVramBytesUpperBound ?? 0) > 0 ? (
+        <p className="font-mono text-[10px] text-ink-soft">{t('fix.nearDup.vramUpperBound', { bytes: receipt.droppedDuplicateVramBytesUpperBound ?? 0 })}</p>
+      ) : null}
       {/* Skipped → first-class list of the honest per-asset reason strings (was a bare count). Skips are
           informational (what the fix REFUSED to touch / couldn't do), not warnings → text-ink-soft. */}
       {receipt.skipped.length > 0 ? (

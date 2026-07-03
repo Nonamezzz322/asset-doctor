@@ -456,6 +456,7 @@
   },
   "fix.dedup.diskSaved": "−{bytes:bytes} en disco por la deduplicación",
   "fix.dedup.vramUpperBound": "hasta −{bytes:bytes} de VRAM (límite superior — solo si el runtime comparte una carga entre las copias)",
+  "fix.nearDup.vramUpperBound": "hasta −{bytes:bytes} de VRAM (límite superior — solo si rediriges las referencias del duplicado eliminado a la copia conservada)",
   "fix.sheetDiff.title": {
     "$count": "n",
     "one": "{n} hoja — prueba visual",

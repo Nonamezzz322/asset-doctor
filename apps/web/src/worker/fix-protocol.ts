@@ -379,6 +379,14 @@ export interface FixReceipt {
   /** UPPER-BOUND VRAM saving from dedup: only realized if the runtime shares one GPU upload across the
    *  dropped copies. Reported separately + flagged as upper bound; never folded into a hard VRAM claim. */
   dedupVramBytesSavedUpperBound?: number;
+  /** UPPER-BOUND VRAM from a BARE duplicate drop (near-duplicate / non-owner-modelled): the w·h·4 footprint
+   *  of every copy this run DELETED without an auto-repoint. Strictly WEAKER than dedupVramBytesSavedUpperBound
+   *  — the dropped copy is NOT byte-identical to the kept one (so the runtime can never share one upload) AND
+   *  the tool does NO repoint (the reference is left dangling, to:[]) — so this VRAM is realized ONLY if the
+   *  user MANUALLY repoints the dropped near-duplicate's references to the kept copy AND accepts the visual
+   *  substitution (two contingencies). The DISK saving is real+measured (diskBytesAfter); this is the SEPARATE
+   *  VRAM upper bound, NEVER folded into the hard vramBytesAfter (invariants 3 & 5). Absent/0 ⇒ no bare drop ran. */
+  droppedDuplicateVramBytesUpperBound?: number;
   /** Polygon mode: count of sprites carrying a mesh in the FINAL selected result (0 on fallback). */
   meshSprites?: number;
   /** Polygon mode: measured VRAM saving (%) of the selected result, only when polygon packing won. */

@@ -301,6 +301,30 @@ function recount(ops: readonly FixOp[], tierAssets: number): Record<string, numb
   return c;
 }
 
+// Fix-honesty mirror of fix.worker.ts's drop-VRAM accounting. The worker's impure exec needs OffscreenCanvas
+// ⇒ not Node-runnable, so this re-derives the routing from the SAME shared SSOT predicates the worker branches
+// on (isOwnerAwareDrop / the ownerRef==null bare-drop condition, mirrored by fixOpKind). The load-bearing
+// invariant it pins (invariants 3 & 5): a dropped copy's w·h·4 GPU footprint is NEVER folded into the hard
+// vramSaved — a drop removes the file from DISK but the GPU upload it fed is eliminated only once the reference
+// is repointed (auto-repoint for owner-aware dedup ⇒ dedup upper bound; NO repoint for a bare near-dup drop ⇒
+// the separate dropped-duplicate upper bound, realized only if the user manually repoints).
+function routeDropVram(
+  ops: readonly FixOp[],
+  vramByRef: ReadonlyMap<string, number>,
+): { vramSaved: number; dedupVramBytesSavedUpperBound: number; droppedDuplicateVramBytesUpperBound: number } {
+  const vramSaved = 0; // const, not let — a drop NEVER contributes to the hard claim (compile-time-pinned invariant).
+  let dedupVramBytesSavedUpperBound = 0;
+  let droppedDuplicateVramBytesUpperBound = 0;
+  for (const op of ops) {
+    if (op.kind !== 'drop') continue;
+    const footprint = vramByRef.get(op.assetRef) ?? 0;
+    if (isOwnerAwareDrop(op)) dedupVramBytesSavedUpperBound += footprint; // ownerRef set ⇒ auto-repoint upper bound
+    else droppedDuplicateVramBytesUpperBound += footprint; // bare drop (ownerRef == null) ⇒ manual-repoint upper bound
+    // NEVER: vramSaved += footprint — an un-repointed drop realizes no GPU saving on the spot.
+  }
+  return { vramSaved, dedupVramBytesSavedUpperBound, droppedDuplicateVramBytesUpperBound };
+}
+
 describe('dry-run plan preview — worker plan short-circuit (T6)', () => {
   const tiers = validateTiers([...DEFAULT_SCALE_TIERS]);
   if (!tiers.ok) throw new Error('default ladder must validate');
@@ -475,5 +499,50 @@ describe('dry-run plan preview — worker plan short-circuit (T6)', () => {
     expect(tierOff.summary.referencesChanged).toBe(false);
     // and the full-plan (tier-on) preview WITHOUT the mask still warns — so this is a real flip, not a constant.
     expect(withTier.summary.referencesChanged).not.toBe(tierOff.summary.referencesChanged);
+  });
+});
+
+// Fix-honesty (near-dup drop VRAM): the receipt's SOLE hard VRAM claim (vramBytesAfter) must count ONLY
+// realized savings. A bare duplicate drop deletes a file but does NO repoint, so its w·h·4 is an UPPER BOUND,
+// routed to the SEPARATE droppedDuplicateVramBytesUpperBound — never the hard claim. The owner-aware dedup drop
+// (auto-repointed) keeps its own SEPARATE dedupVramBytesSavedUpperBound. This pins the accounting split via the
+// shared SSOT predicates the worker branches on; the worker's impure exec itself is canvas-bound (not Node-runnable).
+describe('drop-VRAM accounting split — bare-drop vs owner-aware (fix-honesty, invariants 3 & 5)', () => {
+  const NEAR = 2048 * 2048 * 4; // 16 MB near-duplicate footprint (bare drop)
+  const EXACT = 1024 * 1024 * 4; // 4 MB exact-duplicate footprint (owner-aware)
+  const vramByRef = new Map<string, number>([
+    ['near.png', NEAR],
+    ['exact.png', EXACT],
+  ]);
+  const bareDrop: FixOp = { kind: 'drop', assetRef: 'near.png', reason: 'duplicate-similar' };
+  const ownerDrop: FixOp = { kind: 'drop', assetRef: 'exact.png', reason: 'duplicate-exact', ownerRef: 'keep.png', repointManifest: true };
+
+  it('the shared SSOT splits the two ops: bare ⇒ drop / not owner-aware; owner ⇒ dedup / owner-aware', () => {
+    expect(fixOpKind(bareDrop)).toBe('drop');
+    expect(isOwnerAwareDrop(bareDrop)).toBe(false);
+    expect(fixOpKind(ownerDrop)).toBe('dedup');
+    expect(isOwnerAwareDrop(ownerDrop)).toBe(true);
+  });
+
+  it('a BARE drop routes its w·h·4 to the dropped-duplicate upper bound, 0 to the hard vramSaved', () => {
+    const acc = routeDropVram([bareDrop], vramByRef);
+    expect(acc.droppedDuplicateVramBytesUpperBound).toBe(NEAR); // the SEPARATE upper bound
+    expect(acc.vramSaved).toBe(0); // the fabricated fold into the hard claim is GONE
+    expect(acc.dedupVramBytesSavedUpperBound).toBe(0); // not the owner-aware bucket
+  });
+
+  it('an OWNER-AWARE drop still routes to the dedup upper bound, 0 to the hard vramSaved (unchanged)', () => {
+    const acc = routeDropVram([ownerDrop], vramByRef);
+    expect(acc.dedupVramBytesSavedUpperBound).toBe(EXACT);
+    expect(acc.vramSaved).toBe(0);
+    expect(acc.droppedDuplicateVramBytesUpperBound).toBe(0);
+  });
+
+  it('a mixed run keeps the two upper bounds SEPARATE and the hard claim at 0 — never conflated', () => {
+    const acc = routeDropVram([bareDrop, ownerDrop], vramByRef);
+    expect(acc.droppedDuplicateVramBytesUpperBound).toBe(NEAR);
+    expect(acc.dedupVramBytesSavedUpperBound).toBe(EXACT);
+    expect(acc.vramSaved).toBe(0);
+    expect(acc.droppedDuplicateVramBytesUpperBound).not.toBe(acc.dedupVramBytesSavedUpperBound); // distinct, invariant 5
   });
 });

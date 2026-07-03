@@ -452,6 +452,7 @@
   },
   "fix.dedup.diskSaved": "−{bytes:bytes} auf der Festplatte durch Deduplizierung",
   "fix.dedup.vramUpperBound": "bis zu −{bytes:bytes} VRAM (Obergrenze — nur wenn die Laufzeit einen Upload über die Kopien teilt)",
+  "fix.nearDup.vramUpperBound": "bis zu −{bytes:bytes} VRAM (Obergrenze — nur wenn Sie die Referenzen des gelöschten Duplikats auf die behaltene Kopie umleiten)",
   "fix.sheetDiff.title": {
     "$count": "n",
     "one": "{n} Sheet — visueller Beweis",

@@ -439,6 +439,7 @@
   },
   "fix.dedup.diskSaved": "去重在磁盘上节省 −{bytes:bytes}",
   "fix.dedup.vramUpperBound": "最多节省 −{bytes:bytes} VRAM（上限 — 仅当运行时在各副本间共享一次上传时）",
+  "fix.nearDup.vramUpperBound": "最多节省 −{bytes:bytes} VRAM（上限 — 仅当你将已删除副本的引用重新指向保留的副本时）",
   "fix.sheetDiff.title": {
     "$count": "n",
     "one": "{n} 张图集 — 可视化证明",

@@ -456,6 +456,7 @@
   },
   "fix.dedup.diskSaved": "−{bytes:bytes} on disk from de-duplication",
   "fix.dedup.vramUpperBound": "up to −{bytes:bytes} VRAM (upper bound — only if the runtime shares one upload across the copies)",
+  "fix.nearDup.vramUpperBound": "up to −{bytes:bytes} VRAM (upper bound — only if you repoint the dropped duplicate's references to the copy that was kept)",
   "fix.sheetDiff.title": {
     "$count": "n",
     "one": "{n} folha — prova visual",

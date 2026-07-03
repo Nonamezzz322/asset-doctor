@@ -100,6 +100,19 @@ const solidFinding = (ref: string, w: number, h: number): Finding => ({
   estimate: { vramBytesSaved: vram(w, h) - 4 },
 });
 
+// Near-duplicate (folder scope, relatedRefs). In aggressive mode planFix (no groups) bare-drops every copy
+// after the first — the op the fix-honesty guard below asserts contributes ZERO hard VRAM to the preview.
+const duplicateSimilarFinding = (a: string, b: string): Finding => ({
+  id: `${a}:dup-similar`,
+  rule: 'duplicate-similar',
+  severity: 'info',
+  scope: 'folder',
+  assetRef: a,
+  relatedRefs: [a, b],
+  title: 'duplicate-similar',
+  detail: '',
+});
+
 const report = (findings: Finding[]): AnalysisReport => ({
   assets: [],
   findings,
@@ -129,14 +142,72 @@ const EMPTY_MASK: ReadonlySet<OpKind> = new Set();
 
 describe('summarizeFixPlanFootprint — honest pre-compose footprint buckets (round22 #2)', () => {
   it('DISK: a format ref with a surviving transcode op → srcBytes − bestBytes; estimated', () => {
-    const r = report([formatFinding('a.png', 10000, 6000)]);
-    const plan = planFix(r, baseOpts());
-    expect(plan.ops.some((o) => o.kind === 'transcode')).toBe(true);
+    const r = report([formatFinding('a.png', 10000, 6000)]); // factory bestMime defaults to WebP
+    const plan = planFix(r, baseOpts()); // baseOpts targetMime defaults to WebP
+    const t = plan.ops.find((o): o is Extract<FixOp, { kind: 'transcode' }> => o.kind === 'transcode');
+    expect(t).toBeDefined();
+    expect(t!.targetMime).toBe('image/webp'); // op target === finding bestMime ⇒ codec MATCH ⇒ credited
     const fp = summarizeFixPlanFootprint(r, plan.ops, EMPTY_MASK);
     expect(fp?.diskBytesSaved).toBe(4000);
     expect(fp?.vramBytesSaved).toBe(0);
     expect(fp?.estimated).toBe(true);
     expect(fp?.deferredOps).toBe(0);
+  });
+
+  // Fix-honesty (invariant 3): the DISK credit sums `srcBytes − bestBytes` — where `bestBytes` was MEASURED
+  // for the strict-smaller FORMAT_TARGETS winner (`bestMime`, CAN be WebP even at an AVIF target). With
+  // bestFormatPerImage OFF (default) the run encodes `opts.targetMime`, so crediting the WebP saving at an
+  // AVIF target over-claims a saving the run never produces. The preview must credit ONLY on a codec match;
+  // a mismatch defers to the honest "sized at download" bucket. These cases pin that gate on the REAL planFix.
+  it('OVER-CLAIM guard: bestMime=WebP at an AVIF target (default) is NOT credited — deferred', () => {
+    const r = report([formatFinding('a.png', 10000, 6000, 'image/webp')]); // measured winner WebP, saving 4000
+    const plan = planFix(r, baseOpts({ targetMime: 'image/avif' })); // default bestFormatPerImage OFF
+    const t = plan.ops.find((o): o is Extract<FixOp, { kind: 'transcode' }> => o.kind === 'transcode')!;
+    expect(t.targetMime).toBe('image/avif'); // the run encodes AVIF, NOT the credited WebP
+    const fp = summarizeFixPlanFootprint(r, plan.ops, EMPTY_MASK)!;
+    expect(fp.diskBytesSaved).toBe(0); // WebP saving withdrawn — target ≠ bestMime
+    expect(fp.deferredOps).toBe(1); // the AVIF transcode is "sized at download"
+    expect(fp.estimated).toBe(false); // no lossy-format estimate was summed
+  });
+
+  it('MATCH: bestMime=AVIF at an AVIF target → credited srcBytes − bestBytes; estimated', () => {
+    const r = report([formatFinding('a.png', 10000, 6000, 'image/avif')]); // winner AVIF (the common case)
+    const plan = planFix(r, baseOpts({ targetMime: 'image/avif' }));
+    const t = plan.ops.find((o): o is Extract<FixOp, { kind: 'transcode' }> => o.kind === 'transcode')!;
+    expect(t.targetMime).toBe('image/avif'); // run emits EXACTLY the measured winner
+    const fp = summarizeFixPlanFootprint(r, plan.ops, EMPTY_MASK)!;
+    expect(fp.diskBytesSaved).toBe(4000); // codec matches ⇒ credited exactly as before
+    expect(fp.estimated).toBe(true);
+    expect(fp.deferredOps).toBe(0);
+  });
+
+  it('bestFormatPerImage ON: op stamps the measured winner ⇒ credited even at a divergent global target', () => {
+    const r = report([formatFinding('a.png', 10000, 6000, 'image/webp')]); // winner WebP
+    const plan = planFix(r, baseOpts({ targetMime: 'image/avif', bestFormatPerImage: true }));
+    const t = plan.ops.find((o): o is Extract<FixOp, { kind: 'transcode' }> => o.kind === 'transcode')!;
+    expect(t.targetMime).toBe('image/webp'); // plan.ts routes the op to the measured winner ⇒ codec MATCH
+    const fp = summarizeFixPlanFootprint(r, plan.ops, EMPTY_MASK)!;
+    expect(fp.diskBytesSaved).toBe(4000); // credited — the run WILL emit the format bestBytes measured
+    expect(fp.estimated).toBe(true);
+    expect(fp.deferredOps).toBe(0);
+  });
+
+  it('format ∩ wasted-alpha, codec MISMATCH → deferred once, wasted-alpha NOT double-credited', () => {
+    const ref = 'opaque.png';
+    const r = report([formatFinding(ref, 10000, 6000, 'image/webp'), wastedAlphaFinding(ref, 10000, 7000)]);
+    const plan = planFix(r, baseOpts({ targetMime: 'image/avif', opaqueAlpha: true }));
+    const transcodes = plan.ops.filter((o) => o.kind === 'transcode');
+    expect(transcodes.length).toBe(1); // single opaque AVIF transcode (wasted-alpha folded in)
+    const fp = summarizeFixPlanFootprint(r, plan.ops, EMPTY_MASK)!;
+    expect(fp.diskBytesSaved).toBe(0); // WebP-winner saving withdrawn; wasted-alpha delta not summed behind our back
+    expect(fp.deferredOps).toBe(1); // counted once (the format branch owns this ref's disk attribution)
+  });
+
+  it('DETERMINISM (codec-mismatch input): same input ⇒ deep-equal output', () => {
+    const mk = (): AnalysisReport => report([formatFinding('a.png', 10000, 6000, 'image/webp')]);
+    const a = summarizeFixPlanFootprint(mk(), planFix(mk(), baseOpts({ targetMime: 'image/avif' })).ops, EMPTY_MASK);
+    const b = summarizeFixPlanFootprint(mk(), planFix(mk(), baseOpts({ targetMime: 'image/avif' })).ops, EMPTY_MASK);
+    expect(a).toEqual(b);
   });
 
   it('VRAM: an oversize ref with a surviving resize op → params.vram − to.w·to.h·4 (EXACT)', () => {
@@ -230,6 +301,25 @@ describe('summarizeFixPlanFootprint — honest pre-compose footprint buckets (ro
 
   it('empty plan / counts-only → undefined (additive: card stays counts-only)', () => {
     expect(summarizeFixPlanFootprint(report([]), [], EMPTY_MASK)).toBeUndefined();
+  });
+
+  // Fix-honesty (near-dup drop VRAM) — PREVIEW↔RECEIPT parity guard (invariants 3 & 5). A bare duplicate drop
+  // (ownerRef undefined, no auto-repoint) must claim ZERO HARD VRAM in the preview — it is neither a measured-now
+  // delta (transcode/resize) nor a deferred pack/repack/merge/dedup. This pins the honest reference the receipt's
+  // vramBytesAfter is coded to MATCH: the dropped copy's w·h·4 is routed to a SEPARATE upper bound in the worker,
+  // never into the hard claim. (Regression guard: were the drop ever summed as hard VRAM here — or in the receipt —
+  // the two would disagree and this would fail.)
+  it('near-dup BARE drop claims 0 HARD VRAM (not measured-now, not deferred) → footprint undefined', () => {
+    const r = report([duplicateSimilarFinding('a.png', 'b.png')]);
+    const plan = planFix(r, baseOpts({ aggressive: true }));
+    // planFix (no groups) emits a BARE drop for the second copy — ownerRef undefined ⇒ NOT owner-aware dedup.
+    const drops = plan.ops.filter((o): o is Extract<FixOp, { kind: 'drop' }> => o.kind === 'drop');
+    expect(drops).toHaveLength(1);
+    expect(drops[0]!.assetRef).toBe('b.png');
+    expect(drops[0]!.ownerRef).toBeUndefined(); // bare drop (the ownerRef==null fold site in fix.worker.ts)
+    // The preview sums NO hard VRAM for it and does NOT count it as a deferred op ⇒ nothing knowable ⇒ undefined.
+    const fp = summarizeFixPlanFootprint(r, plan.ops, EMPTY_MASK);
+    expect(fp).toBeUndefined();
   });
 
   it('DETERMINISM: same input ⇒ deep-equal output', () => {
