@@ -62,7 +62,7 @@ export function PrimaryRecommendation({
         </button>
         <a
           href={configureHref}
-          className="rounded-lg border border-line px-3 py-2 font-mono text-xs text-teal transition hover:border-teal"
+          className="rounded-lg border border-line px-3 py-2 font-mono text-xs text-teal-text transition hover:border-teal"
         >
           {t('recommend.pack.configure')}
         </a>

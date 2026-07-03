@@ -4,7 +4,8 @@ import { useI18n } from '../lib/i18n';
 import { fmtBytes } from '../lib/format';
 import { useWindow } from '../lib/useWindow';
 import { nextActiveIndex, scrollToActive, type NavKey } from '../lib/ledger-nav';
-import { DOT, TXT } from './Findings';
+import { DOT } from './Findings';
+import { severityLabelClass } from '../lib/severity-style';
 import {
   isAssetAxis,
   type LedgerRow,
@@ -135,7 +136,7 @@ function LedgerRowView({
             {t('triage.relatedRefs', { n: row.relatedRefs.length })}
           </span>
         ) : null}
-        <span className={`font-mono text-[9px] uppercase tracking-[0.06em] ${TXT[row.severity]}`}>
+        <span className={`font-mono text-[9px] uppercase tracking-[0.06em] ${severityLabelClass(row.severity)}`}>
           {t(`triage.scope.${row.scope}`)}
         </span>
         {badge ? (

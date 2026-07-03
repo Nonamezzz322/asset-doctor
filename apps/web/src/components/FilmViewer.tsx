@@ -6,7 +6,7 @@ import { useI18n } from '../lib/i18n';
 // swatches (film-legend.ts) read the SAME colors with no import cycle — the legend can never drift from paint.
 import { ZONE_STYLE } from '../lib/film-legend-style';
 import { filmAltText, legendItemsFor } from '../lib/film-legend';
-import { explainerRows } from '../lib/readout-explainers';
+import { explainerRows, baseReadingFlags } from '../lib/readout-explainers';
 
 const MAX_W = 760;
 
@@ -111,8 +111,10 @@ export function FilmViewer({
   // Mip ceiling is a CONDITIONAL upper bound (+33%), shown only when it exceeds the base (nonzero size).
   const showMip = m !== undefined && m.vramBytesMipmapped > m.vramBytes;
   // Explainer rows for the disclosure — reuse the card's OWN render gates (probe strips, showMip row)
-  // so the panel can never disagree with the cells. `[]` (diff-view / metrics-less card) ⇒ no trigger.
-  const explainers = explainerRows({ probe: probe !== undefined, mip: showMip });
+  // plus the always-present base strip (VRAM/DISK/OCC/FRAG), gated to a real fully-measured card by
+  // baseReadingFlags (the diff-view partial has no diskBytes ⇒ all-false ⇒ byte-identical there). So
+  // even a plain loose asset now gets an accessible disk≠VRAM explanation. `[]` ⇒ no trigger.
+  const explainers = explainerRows({ ...baseReadingFlags(m), probe: probe !== undefined, mip: showMip });
 
   // Accessible name for the canvas (otherwise an inaccessible painted blob) — MEASURED facts only: name,
   // dims (omitted when not yet decoded), and the measured highlighted-region count. No disk/VRAM/savings.
@@ -302,7 +304,9 @@ export function FilmViewer({
           >
             {explainers.map((row) => (
               <div key={row.key}>
-                <dt className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-film-soft">{t(row.termKey)}</dt>
+                <dt className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-film-soft">
+                  {'i18nKey' in row.term ? t(row.term.i18nKey) : row.term.literal}
+                </dt>
                 <dd className="mt-0.5 text-[11px] leading-relaxed text-film-soft">{t(row.bodyKey)}</dd>
               </div>
             ))}

@@ -56,7 +56,7 @@ export function ActivatePanel({ onUnlocked }: { onUnlocked: () => void }) {
           href={CHECKOUT_URL}
           target="_blank"
           rel="noreferrer"
-          className="block text-center font-mono text-[10px] text-teal underline-offset-2 hover:underline"
+          className="block text-center font-mono text-[10px] text-teal-text underline-offset-2 hover:underline"
         >
           {t('license.buy')} →
         </a>

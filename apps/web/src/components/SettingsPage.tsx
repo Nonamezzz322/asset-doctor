@@ -48,7 +48,7 @@ interface Sect {
 function Card({ id, title, children }: { id?: string; title: string; children: ReactNode }) {
   return (
     <section id={id} className="rounded-xl border border-line bg-panel p-4 text-left">
-      <h2 className="font-mono text-[10px] uppercase tracking-[0.06em] text-teal">{title}</h2>
+      <h2 className="font-mono text-[10px] uppercase tracking-[0.06em] text-teal-text">{title}</h2>
       <div className="mt-3 space-y-2">{children}</div>
     </section>
   );
@@ -244,7 +244,7 @@ function FormatsCard({ s, patch }: Sect) {
                 </div>
               );
             })}
-            <button type="button" onClick={addTier} className="mt-1 font-mono text-[10px] text-teal hover:underline">
+            <button type="button" onClick={addTier} className="mt-1 font-mono text-[10px] text-teal-text hover:underline">
               + {t('fix.profile.addTier')}
             </button>
           </div>
@@ -272,10 +272,10 @@ function FormatsCard({ s, patch }: Sect) {
               </div>
             ))}
             <div className="mt-1 flex flex-wrap gap-3">
-              <button type="button" onClick={addFonts444} className="font-mono text-[10px] text-teal hover:underline">
+              <button type="button" onClick={addFonts444} className="font-mono text-[10px] text-teal-text hover:underline">
                 + {t('fix.profile.overrideFonts444')}
               </button>
-              <button type="button" onClick={addOverride} className="font-mono text-[10px] text-teal hover:underline">
+              <button type="button" onClick={addOverride} className="font-mono text-[10px] text-teal-text hover:underline">
                 + {t('fix.profile.addOverride')}
               </button>
             </div>
@@ -332,7 +332,7 @@ function ResolutionsCard({ s, patch }: Sect) {
             <li>{t('fix.skipped.whyNoKernel')}</li>
             <li>{t('fix.skipped.whyNoPreBlur')}</li>
             {/* Softened, consent-agnostic tier hint (the per-run consent lives in the FixCard). */}
-            {s.resampleEnable ? <li className="text-teal">{t('settings.resampleTierHint')}</li> : null}
+            {s.resampleEnable ? <li className="text-teal-text">{t('settings.resampleTierHint')}</li> : null}
           </ul>
         </div>
       ) : null}
@@ -502,7 +502,7 @@ function RulesCard({ s, patch }: Sect) {
             </button>
           </div>
         ))}
-        <button type="button" onClick={() => setOverrides([...s.overrides, { match: '', quality: 0.85 }])} className="mt-1.5 font-mono text-[10px] text-teal underline-offset-2 hover:underline">
+        <button type="button" onClick={() => setOverrides([...s.overrides, { match: '', quality: 0.85 }])} className="mt-1.5 font-mono text-[10px] text-teal-text underline-offset-2 hover:underline">
           + {t('fix.settings.overrides')}
         </button>
       </div>
@@ -598,10 +598,10 @@ function ConfigCard({ s }: { s: BuildSettings }) {
   return (
     <Card title={t('settings.section.config')}>
       <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={onSave} className="rounded border border-line px-2 py-1 font-mono text-[11px] text-teal transition hover:border-teal">
+        <button type="button" onClick={onSave} className="rounded border border-line px-2 py-1 font-mono text-[11px] text-teal-text transition hover:border-teal">
           ↓ {t('fix.config.save')}
         </button>
-        <button type="button" onClick={() => cfgInputRef.current?.click()} className="rounded border border-line px-2 py-1 font-mono text-[11px] text-teal transition hover:border-teal">
+        <button type="button" onClick={() => cfgInputRef.current?.click()} className="rounded border border-line px-2 py-1 font-mono text-[11px] text-teal-text transition hover:border-teal">
           ↑ {t('fix.config.load')}
         </button>
         <input
@@ -641,7 +641,7 @@ export function SettingsPage({ hasResults }: { hasResults: boolean }) {
       {/* The back link returns to the main view. Its label is HONEST about the destination: "back to results"
           only when a report exists (the page is reachable pre-analysis from the header nav — there the link
           returns to the empty dropzone, so it says just "back"). */}
-      <a href="#" className="inline-block font-mono text-xs text-teal underline-offset-2 hover:underline">
+      <a href="#" className="inline-block font-mono text-xs text-teal-text underline-offset-2 hover:underline">
         ← {t(hasResults ? 'settings.back' : 'settings.backHome')}
       </a>
       <div>

@@ -466,7 +466,7 @@ export function App() {
             ) : null}
             {/* Settings-page nav (design §5.1): a real hash link so the page is reachable from any state and
                 deep-linkable. Styled like the existing mono-teal links. */}
-            <a href={SETTINGS_HASH} className="font-mono text-xs text-teal underline-offset-2 hover:underline">
+            <a href={SETTINGS_HASH} className="font-mono text-xs text-teal-text underline-offset-2 hover:underline">
               {t('settings.nav')}
             </a>
             <LanguageSwitcher />
@@ -588,7 +588,7 @@ export function App() {
                   ) : (
                     <p className="rounded-xl border border-line bg-panel p-4 font-mono text-sm text-ink-soft">{t('report.noImage')}</p>
                   )}
-                  <h2 className="font-mono text-xs uppercase tracking-[0.06em] text-teal">{t('findings.title')}</h2>
+                  <h2 className="font-mono text-xs uppercase tracking-[0.06em] text-teal-text">{t('findings.title')}</h2>
                   <Findings findings={assetFindings} selectedId={selectedFinding} onSelect={setSelectedFinding} />
                   <FixCard files={files} buildNonce={buildNonce} />
                   {/* AB-R2 → settings-page: first-class deep-link to the build config. Gated on having files
@@ -596,14 +596,14 @@ export function App() {
                       вывода") carries PROFILE_PANEL_ANCHOR — Formats being the first card IS the landing spot,
                       so no scroll bookkeeping is needed. */}
                   {optimizeEntryEnabled(files.length, true) ? (
-                    <a href={SETTINGS_HASH} className="block font-mono text-xs text-teal underline-offset-2 hover:underline">
+                    <a href={SETTINGS_HASH} className="block font-mono text-xs text-teal-text underline-offset-2 hover:underline">
                       {t(OPTIMIZE_ENTRY.anchorKey)}
                     </a>
                   ) : null}
                   <button
                     type="button"
                     onClick={() => setPhase({ t: 'idle' })}
-                    className="font-mono text-xs text-teal underline-offset-2 hover:underline"
+                    className="font-mono text-xs text-teal-text underline-offset-2 hover:underline"
                   >
                     {t('action.analyzeAnother')}
                   </button>
@@ -641,7 +641,7 @@ function LanguageSwitcher() {
       aria-label={t('ui.language')}
       value={locale}
       onChange={(e) => setLocale(e.target.value as typeof locale)}
-      className="rounded-lg border border-line bg-panel px-2 py-1.5 font-mono text-xs text-ink-soft transition hover:border-teal hover:text-teal focus:border-teal"
+      className="rounded-lg border border-line bg-panel px-2 py-1.5 font-mono text-xs text-ink-soft transition hover:border-teal hover:text-teal-text focus:border-teal"
     >
       {LOCALES.map((l) => (
         <option key={l} value={l}>
@@ -669,7 +669,7 @@ function HeaderMetric({
   return (
     <div className="bg-panel px-3 py-1.5" title={explainer}>
       <div className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-soft">{label}</div>
-      <div className={`font-mono text-xs font-semibold ${accent ? 'text-cta' : 'text-ink'}`}>{value}</div>
+      <div className={`font-mono text-xs font-semibold ${accent ? 'text-cta-text' : 'text-ink'}`}>{value}</div>
       {explainer ? <span className="ad-sr-only">{explainer}</span> : null}
     </div>
   );
@@ -678,7 +678,7 @@ function HeaderMetric({
 // Mirrors HeaderMetric but inline-wrap-friendly for the sub-md totals strip: no per-cell border/bg
 // (unlike the header's bg-line divider grid) — a wrapping label/value list under VerdictBar. flex-col
 // glues each label to its own value so wrapping never blurs declared/measured/saveable. No animation
-// ⇒ inert under prefers-reduced-motion. Token-driven only (text-ink/text-ink-soft/text-cta).
+// ⇒ inert under prefers-reduced-motion. Token-driven only (text-ink/text-ink-soft/text-cta-text).
 function MobileTotal({
   label,
   value,
@@ -693,7 +693,7 @@ function MobileTotal({
   return (
     <div className="flex flex-col" title={explainer}>
       <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-soft">{label}</span>
-      <span className={`font-mono text-xs font-semibold ${accent ? 'text-cta' : 'text-ink'}`}>{value}</span>
+      <span className={`font-mono text-xs font-semibold ${accent ? 'text-cta-text' : 'text-ink'}`}>{value}</span>
       {explainer ? <span className="ad-sr-only">{explainer}</span> : null}
     </div>
   );
@@ -747,7 +747,7 @@ function Dropzone({
     // the name can never drift from the copy).
     <section aria-labelledby="ad-dropzone-h1" className="mx-auto max-w-3xl">
       <div className="text-center">
-        <div className="mb-5 inline-flex items-center gap-2 font-mono text-xs font-medium uppercase tracking-[0.06em] text-teal">
+        <div className="mb-5 inline-flex items-center gap-2 font-mono text-xs font-medium uppercase tracking-[0.06em] text-teal-text">
           <span className="ad-pulse-dot inline-block h-[7px] w-[7px] rounded-full bg-cta" />
           {t('header.xray')}
         </div>
@@ -940,7 +940,7 @@ function BundlesPanel({
   const states: BundleAvailability[] = ['eager', 'lazy', 'isolated'];
   return (
     <details className="mt-2 rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
-      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">{t('fix.bundles.title')}</summary>
+      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal-text">{t('fix.bundles.title')}</summary>
       <p className="mt-1.5 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.bundles.hint')}</p>
       <div className="mt-2 space-y-1.5">
         {folders.map((b) => (
@@ -1279,9 +1279,9 @@ function FixCard({ files, buildNonce }: { files: PickedFile[]; buildNonce: numbe
       <p className="mx-auto mt-1 max-w-sm font-mono text-[11px] leading-relaxed text-ink-soft">{t(OPTIMIZE_ENTRY.subKey)}</p>
       <p className="mt-1 font-mono text-[10px] text-ink-soft">{t('pro.note')}</p>
       {phase.t === 'planning' ? (
-        <p className="mt-2.5 font-mono text-xs text-teal">{t('dropzone.analyzing')}</p>
+        <p className="mt-2.5 font-mono text-xs text-teal-text">{t('dropzone.analyzing')}</p>
       ) : phase.t === 'running' ? (
-        <p className="mt-2.5 font-mono text-xs text-teal">{t('fix.optimizing')} {phase.p.total > 1 ? `${phase.p.done}/${phase.p.total}` : ''} {phase.p.label}</p>
+        <p className="mt-2.5 font-mono text-xs text-teal-text">{t('fix.optimizing')} {phase.p.total > 1 ? `${phase.p.done}/${phase.p.total}` : ''} {phase.p.label}</p>
       ) : phase.t === 'plan' ? (
         <PlanCard summary={phase.summary} excluded={excludeKinds} pending={phase.pending ?? false} onToggle={togglePlanKind} onRun={run} onBack={() => setPhase({ t: 'idle' })} disabled={files.length === 0} />
       ) : phase.t === 'done' ? (
@@ -1290,7 +1290,7 @@ function FixCard({ files, buildNonce }: { files: PickedFile[]; buildNonce: numbe
         <>
           {/* The build config lives on the dedicated Settings page now — a real hash link jumps there
               (design §5.2: FixCard points at the config, doesn't host it). */}
-          <a href={SETTINGS_HASH} className="mt-2 inline-block font-mono text-[11px] text-teal underline-offset-2 hover:underline">
+          <a href={SETTINGS_HASH} className="mt-2 inline-block font-mono text-[11px] text-teal-text underline-offset-2 hover:underline">
             {t('settings.open')}
           </a>
 
@@ -1337,7 +1337,7 @@ function FixCard({ files, buildNonce }: { files: PickedFile[]; buildNonce: numbe
             type="button"
             onClick={run}
             disabled={files.length === 0}
-            className="mt-2 w-full rounded-lg border border-line px-3 py-1.5 font-mono text-[11px] text-teal transition hover:border-teal disabled:opacity-55"
+            className="mt-2 w-full rounded-lg border border-line px-3 py-1.5 font-mono text-[11px] text-teal-text transition hover:border-teal disabled:opacity-55"
           >
             {t('pro.cta')}
           </button>
@@ -1578,7 +1578,7 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
         <p className="font-mono text-[10px] text-ink-soft">{t('fix.dedup.looseSkipped', { n: receipt.looseRepathSkipped ?? 0 })}</p>
       ) : null}
       {(receipt.dedupDiskBytesSaved ?? 0) > 0 ? (
-        <p className="font-mono text-[10px] text-cta">{t('fix.dedup.diskSaved', { bytes: receipt.dedupDiskBytesSaved ?? 0 })}</p>
+        <p className="font-mono text-[10px] text-cta-text">{t('fix.dedup.diskSaved', { bytes: receipt.dedupDiskBytesSaved ?? 0 })}</p>
       ) : null}
       {(receipt.dedupVramBytesSavedUpperBound ?? 0) > 0 ? (
         <p className="font-mono text-[10px] text-ink-soft">{t('fix.dedup.vramUpperBound', { bytes: receipt.dedupVramBytesSavedUpperBound ?? 0 })}</p>
@@ -1599,7 +1599,7 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
           </ul>
         </details>
       ) : null}
-      <button type="button" onClick={onRedownload} className="w-full rounded-lg border border-line px-3 py-1.5 font-mono text-[11px] text-teal transition hover:border-teal">
+      <button type="button" onClick={onRedownload} className="w-full rounded-lg border border-line px-3 py-1.5 font-mono text-[11px] text-teal-text transition hover:border-teal">
         ↓ {t('fix.download')}
       </button>
     </div>
@@ -1625,7 +1625,7 @@ function FixVerdicts({ receipt }: { receipt: FixReceipt }) {
             <p className="font-mono text-[11px] font-semibold">[{t(`severity.${f.severity}`)}] {r.title}</p>
             <p className="mt-0.5 font-mono text-[10px] text-ink-soft">{r.runtimeEvidence}</p>
             <p className="mt-0.5 font-mono text-[10px] leading-relaxed text-ink-soft">{r.diagnosis}</p>
-            <p className="mt-0.5 font-mono text-[10px] text-teal">→ {r.fix}</p>
+            <p className="mt-0.5 font-mono text-[10px] text-teal-text">→ {r.fix}</p>
           </div>
         );
       })}
@@ -1642,7 +1642,7 @@ function SheetDiffs({ sheetDiffs, total }: { sheetDiffs: SheetDiff[]; total: num
   const { t } = useI18n();
   return (
     <details className="rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
-      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">
+      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal-text">
         {t('fix.sheetDiff.title', { n: sheetDiffs.length })}
       </summary>
       <p className="mt-1.5 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.sheetDiff.proofNote')}</p>
@@ -1711,7 +1711,7 @@ function SheetDiffView({ diff }: { diff: SheetDiff }) {
           only when the probe filled fields; gated PER-METRIC. Pack page (no beforeFrames) shows after-only
           — honest, mirroring the static "OCC 0% →". */}
       {diff.drawCallsAfter != null || diff.decodedVramAfter != null ? (
-        <p className="break-all px-1 font-mono text-[10px] leading-relaxed text-teal/90">
+        <p className="break-all px-1 font-mono text-[10px] leading-relaxed text-teal-text">
           <span className="uppercase tracking-[0.08em]">{t('fix.sheetDiff.measuredBadge')}</span>
           {' · '}
           {diff.drawCallsBefore != null && diff.drawCallsAfter != null ? (
@@ -1764,7 +1764,7 @@ function PlanCard({ summary, excluded, pending, onToggle, onRun, onBack, disable
   const allDeselected = rows.length > 0 && rows.every(([kind]) => excluded.has(kind));
   return (
     <div className="mt-2.5 space-y-1.5 text-left">
-      <div className="flex items-center justify-center gap-1.5 font-mono text-xs text-teal">
+      <div className="flex items-center justify-center gap-1.5 font-mono text-xs text-teal-text">
         <span className="h-2 w-2 rounded-full bg-teal" /> {t('fix.plan.title', { n: summary.totalOps })}
         {/* Re-preview in flight after a checkbox toggle: subtle hint, card stays mounted (no flicker). Reuses
             the existing dropzone.analyzing string so no new 9-catalog key is needed (design N3). */}
@@ -1814,7 +1814,7 @@ function PlanCard({ summary, excluded, pending, onToggle, onRun, onBack, disable
             </span>
           ) : null}
           {summary.footprint.vramBytesSaved > 0 ? (
-            <span className="text-teal">{t('fix.plan.measuredNowVram', { vram: summary.footprint.vramBytesSaved })}</span>
+            <span className="text-teal-text">{t('fix.plan.measuredNowVram', { vram: summary.footprint.vramBytesSaved })}</span>
           ) : null}
         </p>
       ) : null}
@@ -1854,7 +1854,7 @@ function PlanCard({ summary, excluded, pending, onToggle, onRun, onBack, disable
       >
         {t('fix.plan.run')}
       </button>
-      <button type="button" onClick={onBack} className="w-full rounded-lg border border-line px-3 py-1.5 font-mono text-[11px] text-teal transition hover:border-teal">
+      <button type="button" onClick={onBack} className="w-full rounded-lg border border-line px-3 py-1.5 font-mono text-[11px] text-teal-text transition hover:border-teal">
         ← {t('fix.plan.back')}
       </button>
     </div>
@@ -1871,7 +1871,7 @@ function OpManifest({ operations }: { operations: string[] }) {
   const groups = groupOps(operations);
   return (
     <details className="rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
-      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal">
+      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-teal-text">
         {t('fix.changes.title', { n: operations.length })}
       </summary>
       <div className="mt-1.5 space-y-2">
@@ -1934,7 +1934,7 @@ function LoaderMigration({ changes, ktx2 }: { changes: FixChange[]; ktx2: boolea
             type="button"
             onClick={() => setEngine(e)}
             aria-pressed={engine === e}
-            className={`rounded px-2 py-0.5 font-mono text-[10px] transition ${engine === e ? 'bg-teal text-white' : 'border border-line text-ink-soft hover:border-teal'}`}
+            className={`rounded px-2 py-0.5 font-mono text-[10px] transition ${engine === e ? 'bg-teal-text text-white' : 'border border-line text-ink-soft hover:border-teal'}`}
           >
             {e === 'pixi' ? 'PixiJS' : 'Phaser'}
           </button>
@@ -1956,7 +1956,7 @@ function LoaderMigration({ changes, ktx2 }: { changes: FixChange[]; ktx2: boolea
             <button
               type="button"
               onClick={copy}
-              className="rounded border border-line px-2 py-0.5 font-mono text-[10px] text-teal transition hover:border-teal"
+              className="rounded border border-line px-2 py-0.5 font-mono text-[10px] text-teal-text transition hover:border-teal"
             >
               {copied ? '✓ ' : ''}
               {t('fix.migrate.copy')}
@@ -1994,7 +1994,7 @@ function ReceiptRow({ label, before, after, pct }: { label: string; before: numb
       <span className="text-ink-soft">{label}</span>
       <span>
         <span className="text-ink-soft line-through">{fmtBytes(before)}</span> → <span className="text-ink">{fmtBytes(after)}</span>{' '}
-        <span className="text-cta">{pct >= 0 ? `−${pct}%` : `+${-pct}%`}</span>
+        <span className="text-cta-text">{pct >= 0 ? `−${pct}%` : `+${-pct}%`}</span>
       </span>
     </div>
   );

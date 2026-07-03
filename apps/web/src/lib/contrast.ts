@@ -17,6 +17,10 @@ export const SURFACE = { bg: '#E7ECF1', panel: '#FFFFFF', film: '#0C1116' } as c
 export const INK_SOFT = '#566472';
 // --color-film-soft (index.css:19) — the secondary-text token for the dark x-ray (bg-film) surface.
 export const FILM_SOFT = '#9FB0BD';
+// --color-ink (index.css:8) — the AA-safe label token; and the four severity hues (index.css:22-25),
+// mirrored as the SoT for the round5 severity-label decolorize proof.
+export const INK = '#16202A';
+export const SEVERITY_HEX = { crit: '#E5484D', warn: '#D98A00', ok: '#1F9D63', info: '#2B8FC9' } as const;
 
 // The AA threshold for NORMAL-size text (not the 3:1 large-text exception). All flagged notes are
 // text-[9px]/text-[10px] mono ⇒ well under 18.66px bold / 24px ⇒ 4.5:1 applies.
@@ -101,4 +105,55 @@ export function inkSoftPassesAA(alpha: number, surface: keyof typeof SURFACE): b
 // on film = 8.51:1 (pass). Pinned by the contrast test so a regression back to ink-soft-on-film is caught.
 export function filmSoftPassesAA(): boolean {
   return contrastRatio(FILM_SOFT, SURFACE.film) >= AA_NORMAL;
+}
+
+// round5 severity-label decolorize: a severity HUE as label text FAILS AA on a light surface (the
+// defect the recolor removes) — this is why the severity WORD must be text-ink and the hue lives only
+// on the adjacent dot (WCAG 1.4.1 preserved). Pinned so a regression back to a hue-colored word is caught.
+export function severityHuePassesAA(sev: keyof typeof SEVERITY_HEX, surface: 'bg' | 'panel'): boolean {
+  return contrastRatio(SEVERITY_HEX[sev], SURFACE[surface]) >= AA_NORMAL;
+}
+
+// ink label text PASSES AA on a light surface (the fix target: 16.48:1 panel / 13.87:1 bg — AAA).
+export function inkPassesAA(surface: 'bg' | 'panel'): boolean {
+  return contrastRatio(INK, SURFACE[surface]) >= AA_NORMAL;
+}
+
+// ── round5 CTA/teal role-split AA proof ──────────────────────────────────────
+// Brand hexes mirrored from index.css @theme (SoT). These pin the role-split remap so a regression that
+// lightens a role back below AA is caught by a deterministic unit test. All pure/O(1), no new deps.
+export const CTA = '#128659'; // button FILL (index.css --color-cta)
+export const CTA_HOVER = '#0E7049'; // button hover FILL (index.css --color-cta-hover)
+export const CTA_TEXT = '#0C7248'; // green accent TEXT on light (index.css --color-cta-text)
+export const TEAL_TEXT = '#0C7676'; // teal link/label TEXT + the one white-on-teal chip bg (--color-teal-text)
+export const TEAL_DECOR = '#0E8C8C'; // decorative only (--color-teal): focus ring / borders / scanline / SVG / dots
+export const WHITE = '#FFFFFF';
+
+// WCAG large-text (≥24px normal / ≥18.66px bold) minimum — used only to justify KEEPING decorative teal on
+// the 30px landing step numeral and as the non-text 1.4.11 floor for the focus ring / borders.
+export const AA_LARGE = 3.0;
+
+// A button fill must clear AA for its WHITE label (normal-size button text).
+export function ctaWhitePassesAA(): boolean {
+  return contrastRatio(WHITE, CTA) >= AA_NORMAL;
+}
+// Hover fill: still legible in white AND strictly darker than the base (a hover must never read lighter).
+export function ctaHoverPassesAA(): boolean {
+  return contrastRatio(WHITE, CTA_HOVER) >= AA_NORMAL && relLuminance(CTA_HOVER) < relLuminance(CTA);
+}
+// Green accent TEXT must clear AA on BOTH light surfaces (it renders on bg AND panel).
+export function ctaTextPassesAA(surface: keyof typeof SURFACE): boolean {
+  return contrastRatio(CTA_TEXT, SURFACE[surface]) >= AA_NORMAL;
+}
+// Teal link/label TEXT must clear AA on BOTH light surfaces (the readable-teal migration target).
+export function linkTealTextPassesAA(surface: keyof typeof SURFACE): boolean {
+  return contrastRatio(TEAL_TEXT, SURFACE[surface]) >= AA_NORMAL;
+}
+// The teal-text token also backs the one white-on-teal chip (App engine toggle) — white on it must clear AA.
+export function tealTextWhiteBgPassesAA(): boolean {
+  return contrastRatio(WHITE, TEAL_TEXT) >= AA_NORMAL;
+}
+// Decorative teal is retained ONLY where large-text / non-text 1.4.11 (≥3:1) applies — proven, not asserted.
+export function tealDecorLargePassesAA(surface: keyof typeof SURFACE): boolean {
+  return contrastRatio(TEAL_DECOR, SURFACE[surface]) >= AA_LARGE;
 }

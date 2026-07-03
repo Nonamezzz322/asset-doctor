@@ -1,8 +1,9 @@
 import type { Severity } from '@asset-doctor/core';
 import { useI18n } from '../lib/i18n';
-import { DOT, TXT } from './Findings';
+import { DOT } from './Findings';
 import type { TriageIndex } from '../lib/triage';
 import { skippedChipModel } from '../lib/skipped-chip';
+import { severityLabelClass } from '../lib/severity-style';
 
 // Thin summary header below the app chrome: the verdict word + a row of severity-tally chips that
 // double as FILTER toggles. The chips show REAL finding counts straight off the precomputed index's
@@ -47,7 +48,7 @@ export function VerdictBar({
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line pb-4">
       <h2 className="font-display text-lg font-semibold text-ink">{t('triage.verdict')}</h2>
       {problemCount === 0 ? (
-        <span className="flex items-center gap-2 font-mono text-xs text-ok">
+        <span className={`flex items-center gap-2 font-mono text-xs ${severityLabelClass()}`}>
           <span className="h-2 w-2 rounded-full bg-ok" /> {t('triage.allClear')}
         </span>
       ) : (
@@ -66,7 +67,9 @@ export function VerdictBar({
                 }`}
               >
                 <span className={`h-2 w-2 rounded-full ${DOT[sev]} ${pressed ? '' : 'opacity-40'}`} />
-                <span className={pressed ? TXT[sev] : ''}>{t(`triage.filter.${sev}`, { n: tally[sev] })}</span>
+                {/* The word inherits the button's own AA-safe color (pressed text-ink / unpressed
+                    text-ink-soft); the hue lives only on the dot above (WCAG 1.4.1). */}
+                {t(`triage.filter.${sev}`, { n: tally[sev] })}
               </button>
             );
           })}

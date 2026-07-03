@@ -1,8 +1,8 @@
 import type { Finding, Severity } from '@asset-doctor/core';
 import { useI18n } from '../lib/i18n';
+import { severityLabelClass } from '../lib/severity-style';
 
 export const DOT: Record<Severity, string> = { crit: 'bg-crit', warn: 'bg-warn', ok: 'bg-ok', info: 'bg-info' };
-export const TXT: Record<Severity, string> = { crit: 'text-crit', warn: 'text-warn', ok: 'text-ok', info: 'text-info' };
 
 export function Findings({
   findings,
@@ -16,7 +16,7 @@ export function Findings({
   const { t, renderFinding } = useI18n();
   if (findings.length === 0) {
     return (
-      <div className="flex items-center gap-2 rounded-xl border border-line bg-panel p-4 font-mono text-sm text-ok">
+      <div className={`flex items-center gap-2 rounded-xl border border-line bg-panel p-4 font-mono text-sm ${severityLabelClass()}`}>
         <span className="h-2 w-2 rounded-full bg-ok" /> {t('findings.none')}
       </div>
     );
@@ -37,11 +37,11 @@ export function Findings({
             >
               <div className="mb-2 flex items-center gap-2">
                 <span className={`ad-pulse-dot h-2 w-2 rounded-full ${DOT[f.severity]}`} />
-                <span className={`font-mono text-[10px] uppercase tracking-[0.06em] ${TXT[f.severity]}`}>{t(`severity.${f.severity}`)}</span>
+                <span className={`font-mono text-[10px] uppercase tracking-[0.06em] ${severityLabelClass(f.severity)}`}>{t(`severity.${f.severity}`)}</span>
               </div>
               <h3 className="font-display text-[15px] font-semibold leading-snug text-ink">{r.title}</h3>
               <p className="mt-1 text-[13px] leading-snug text-ink-soft">{r.detail}</p>
-              {r.fix ? <p className="mt-2 font-mono text-xs text-teal">→ {r.fix}</p> : null}
+              {r.fix ? <p className="mt-2 font-mono text-xs text-teal-text">→ {r.fix}</p> : null}
             </button>
           </li>
         );

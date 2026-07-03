@@ -7,9 +7,11 @@
   --color-line: #dce3ea;
   --color-ink: #16202a;
   --color-ink-soft: #566472;
-  --color-teal: #0e8c8c;
-  --color-cta: #15a06a;
-  --color-cta-hover: #128a5b;
+  --color-teal: #0e8c8c; /* UNCHANGED — decorative only: focus ring / borders / scanline / SVG / dots */
+  --color-teal-text: #0c7676; /* NEW — AA-safe teal for readable text on light + the one white-on-teal chip bg (on bg 4.567 / panel 5.428 / white-on 5.428) */
+  --color-cta: #128659; /* was #15a06a — button FILL; white-on 4.585 (AA) */
+  --color-cta-hover: #0e7049; /* was #128a5b — hover FILL, MUST stay darker than --color-cta; white-on 6.118 */
+  --color-cta-text: #0c7248; /* NEW — green accent TEXT on light; on bg 5.024 / panel 5.972 (AA) */
 
   /* film / x-ray stage palette */
   --color-film: #0c1116;
@@ -219,9 +221,10 @@ body {
 
 /* a11y: skip-to-content pill (WCAG 2.4.1) — hidden with the off-screen-transform pattern (NOT display:none —
    it must stay in the tab order), revealed instantly on focus (no transition ⇒ reduced-motion safe).
-   ink-on-panel = 16.5:1 (AA); teal is border-only here — teal text on panel is 4.08:1 and would fail AA
-   (UX-3 discipline). The global :focus-visible teal ring (above) supplies the 2.4.7 indicator on the
-   revealed pill. white-space:nowrap + no fixed width ⇒ auto-sizes for every locale. */
+   ink-on-panel = 16.5:1 (AA); teal here is BORDER-ONLY decorative --color-teal (raw teal text on panel is only
+   4.08:1). Readable teal text elsewhere uses the AA-safe --color-teal-text; this pill deliberately keeps
+   --color-teal as a border-only accent (non-text 1.4.11 ≥ 3:1). The global :focus-visible teal ring (above)
+   supplies the 2.4.7 indicator on the revealed pill. white-space:nowrap + no fixed width ⇒ auto-sizes for every locale. */
 .ad-skip-link {
   position: fixed;
   top: 12px;
