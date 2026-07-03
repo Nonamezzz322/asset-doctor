@@ -61,7 +61,14 @@ const appSrc =
   '\n' +
   // PrimaryRecommendation.tsx owns the recommend.pack.* keys (title/body/build/configure), referenced
   // nowhere else; without scanning it a renamed recommend.pack.* key would silently render a raw dotted key.
-  comp('PrimaryRecommendation.tsx');
+  comp('PrimaryRecommendation.tsx') +
+  '\n' +
+  // ledger-empty.ts owns the triage.empty.* card keys + reuses triage.showClean (the t() literals live in the
+  // PURE module's emptyLedgerCard switch, not in TriageLedger.tsx), so it must be scanned or a renamed
+  // empty-card key would silently render a raw dotted key. skipped-chip.ts likewise owns report.skippedChip*.
+  lib('ledger-empty.ts') +
+  '\n' +
+  lib('skipped-chip.ts');
 
 // Suffix maps mirrored from App.tsx (modeKey / granKey) so dynamic option keys resolve to concrete keys.
 const MODE_SUFFIXES = ['auto', 'static', 'spine'];
@@ -141,8 +148,17 @@ describe('app i18n keys exist in the en catalog', () => {
       'triage.showing',
       'triage.relatedRefs',
       'triage.cabinetIssues',
-      'triage.noMatch',
       'triage.cleanAsset',
+      // UX-4: the cause-aware empty-ledger cards replaced the single cause-blind triage.noMatch (removed).
+      'triage.empty.clean.title',
+      'triage.empty.clean.body',
+      'triage.empty.filtered.title',
+      'triage.empty.filtered.body',
+      'triage.empty.filtered.action',
+      'triage.empty.search.title',
+      'triage.empty.search.action',
+      'report.skippedChip',
+      'report.skippedChip.hint',
     ]) {
       expect(CATALOGS.en[k], `${k} must exist in en.json`).toBeDefined();
     }

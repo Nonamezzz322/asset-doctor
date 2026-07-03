@@ -11,10 +11,12 @@
 // pure, dependency-free, and O(1).
 
 // Token hexes mirrored from index.css @theme — the single source of truth for the contrast proof.
-// bg = --color-bg (index.css:5), panel = --color-panel (index.css:6).
-export const SURFACE = { bg: '#E7ECF1', panel: '#FFFFFF' } as const;
+// bg = --color-bg (index.css:5), panel = --color-panel (index.css:6), film = --color-film (index.css:15).
+export const SURFACE = { bg: '#E7ECF1', panel: '#FFFFFF', film: '#0C1116' } as const;
 // --color-ink-soft (index.css:9).
 export const INK_SOFT = '#566472';
+// --color-film-soft (index.css:19) — the secondary-text token for the dark x-ray (bg-film) surface.
+export const FILM_SOFT = '#9FB0BD';
 
 // The AA threshold for NORMAL-size text (not the 3:1 large-text exception). All flagged notes are
 // text-[9px]/text-[10px] mono ⇒ well under 18.66px bold / 24px ⇒ 4.5:1 applies.
@@ -92,4 +94,11 @@ export function accessibleInkSoftAlpha(): 1 {
 // Convenience used by the test (and self-documenting): proves a given alpha passes AA on a surface.
 export function inkSoftPassesAA(alpha: number, surface: keyof typeof SURFACE): boolean {
   return contrastRatio(compositeAlpha(INK_SOFT, SURFACE[surface], alpha), SURFACE[surface]) >= AA_NORMAL;
+}
+
+// The film-surface remap decision (UX-4 rider): secondary text on the dark bg-film stage must be
+// film-soft, never ink-soft. ink-soft #566472 on film #0C1116 = 3.13:1 (AA FAIL); film-soft #9FB0BD
+// on film = 8.51:1 (pass). Pinned by the contrast test so a regression back to ink-soft-on-film is caught.
+export function filmSoftPassesAA(): boolean {
+  return contrastRatio(FILM_SOFT, SURFACE.film) >= AA_NORMAL;
 }

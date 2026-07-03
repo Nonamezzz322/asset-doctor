@@ -2,6 +2,7 @@ import type { Severity } from '@asset-doctor/core';
 import { useI18n } from '../lib/i18n';
 import { DOT, TXT } from './Findings';
 import type { TriageIndex } from '../lib/triage';
+import { skippedChipModel } from '../lib/skipped-chip';
 
 // Thin summary header below the app chrome: the verdict word + a row of severity-tally chips that
 // double as FILTER toggles. The chips show REAL finding counts straight off the precomputed index's
@@ -20,6 +21,8 @@ export function VerdictBar({
   tally,
   severityFilter,
   onToggle,
+  skippedCount = 0,
+  onSkippedJump,
 }: {
   /** Finding counts per severity, from buildIndex (already O(1) — no scan here). */
   tally: TriageIndex['tally'];
@@ -27,9 +30,18 @@ export function VerdictBar({
   severityFilter: Set<Severity>;
   /** Toggle one severity in/out of the filter. */
   onToggle: (sev: Severity) => void;
+  /** report.unparsed.length — files that could not be analyzed. 0 ⇒ no chip. NOT a severity, never counted
+   *  into problemCount, never joins the tally chips (UX-4). */
+  skippedCount?: number;
+  /** Jump command: open + anchor-scroll to the UnparsedNotice disclosure. Chip is inert without it. */
+  onSkippedJump?: () => void;
 }) {
   const { t } = useI18n();
   const problemCount = tally.crit + tally.warn + tally.info;
+  // "Could not analyze" chip — a jump command, NOT a filter/severity: dashed warn-toned border, no
+  // aria-pressed, never counted into problemCount. Renders in ALL done-phase report states (including the
+  // assets=0 + unparsed=N case, where "no issues found" + "N files skipped" side by side is the honest story).
+  const chip = onSkippedJump ? skippedChipModel(skippedCount, t) : null;
 
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line pb-4">
@@ -60,6 +72,22 @@ export function VerdictBar({
           })}
         </div>
       )}
+      {chip ? (
+        // ml-auto right-aligns it; flex-wrap drops it to its own line on narrow widths (the row's gap-y-2
+        // handles the wrap). Warn arrives via the decorative dot + border/bg tint ONLY — the label text is
+        // text-ink (AA); text-warn (#D98A00 ≈ 2.6:1 on #FFF) must never carry text. The sr-only hint suffix
+        // is INSIDE the button so the accessible name = "N files skipped — jump to the skipped-files list"
+        // (visible label is a prefix, WCAG 2.5.3). No aria-pressed (a jump command, not a toggle).
+        <button
+          type="button"
+          onClick={onSkippedJump}
+          className="ml-auto flex items-center gap-1.5 rounded-lg border border-dashed border-warn/50 bg-warn/5 px-2.5 py-1 font-mono text-xs text-ink transition hover:border-warn"
+        >
+          <span className="h-2 w-2 rounded-full bg-warn" aria-hidden />
+          {chip.label}
+          <span className="ad-sr-only"> — {chip.hint}</span>
+        </button>
+      ) : null}
     </div>
   );
 }

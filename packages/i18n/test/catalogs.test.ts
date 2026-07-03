@@ -182,6 +182,33 @@ describe('catalog completeness (all 9 locales)', () => {
     }
   });
 
+  // UX-4 (design §4.6): the cause-aware empty-ledger cards + the skipped-files chip keys exist in all 9
+  // locales and render brace-free. The static keys (titles/actions) carry no token; the plural bodies + chip
+  // label ({n}) render both forms (n=1 singular, n=5/1000 plural); the search title interpolates {q} verbatim.
+  // Key parity is enforced by `same keys as en` above; this pins the render for the new UI copy.
+  it('every locale renders the UX-4 empty-ledger card + skipped-chip keys (design §4.6) without leftover braces', () => {
+    for (const loc of LOCALES) {
+      expect(translate(loc, 'triage.empty.clean.title')).not.toContain('{');
+      expect(translate(loc, 'triage.empty.filtered.title')).not.toContain('{');
+      expect(translate(loc, 'triage.empty.filtered.action')).not.toContain('{');
+      expect(translate(loc, 'triage.empty.search.action')).not.toContain('{');
+      expect(translate(loc, 'report.skippedChip.hint')).not.toContain('{');
+      for (const n of [1, 5]) {
+        expect(translate(loc, 'triage.empty.clean.body', { n }), `${loc} clean.body n=${n}`).not.toContain('{');
+        expect(translate(loc, 'triage.empty.filtered.body', { n }), `${loc} filtered.body n=${n}`).not.toContain('{');
+      }
+      for (const n of [1, 1000]) {
+        expect(translate(loc, 'report.skippedChip', { n }), `${loc} skippedChip n=${n}`).not.toContain('{');
+      }
+      // The search title interpolates the query verbatim (React renders it as text — no injection) with no brace.
+      const st = translate(loc, 'triage.empty.search.title', { q: 'hero.png' });
+      expect(st, `${loc} search.title`).toContain('hero.png');
+      expect(st, `${loc} search.title`).not.toContain('{');
+    }
+    // triage.noMatch is removed everywhere (its cause-blind sentence is replaced by the three cards).
+    for (const loc of LOCALES) expect(CATALOGS[loc]['triage.noMatch'], `${loc} triage.noMatch removed`).toBeUndefined();
+  });
+
   it('whyNoKernel is left untouched (a separate resample key carries the tier hint — B2)', () => {
     expect(translate('en', 'fix.skipped.whyNoKernel')).toBe(
       "Downscale kernel isn't configurable in-browser — the browser's high-quality resampler is used.",

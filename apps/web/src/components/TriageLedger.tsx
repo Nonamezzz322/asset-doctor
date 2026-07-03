@@ -1,4 +1,4 @@
-import { useCallback, useMemo, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type KeyboardEvent } from 'react';
 import type { Finding } from '@asset-doctor/core';
 import { useI18n } from '../lib/i18n';
 import { fmtBytes } from '../lib/format';
@@ -12,6 +12,7 @@ import {
   type SortKey,
   type TriageIndex,
 } from '../lib/triage';
+import { emptyLedgerCard, emptyLedgerReason, type EmptyLedgerReason } from '../lib/ledger-empty';
 
 // The virtualized triage ledger — the scalable replacement for the old AssetSelector chip wall. Default
 // unit is the PROBLEM (one row per finding), worst-first, driven by the pure buildIndex/selectRows index.
@@ -31,6 +32,15 @@ import {
 const ROW_H = 52; // fixed item height (rows AND headers) — the windower's slice math depends on it.
 
 const SORT_KEYS: SortKey[] = ['severity', 'wastedDisk', 'vram', 'occupancy'];
+
+// Per-cause empty-ledger card border (UX-4). ok = the clean-bill agreement with the VerdictBar all-clear dot;
+// teal = the filter-interaction color (severity reset); neutral line = a plain search miss. Only existing
+// tokens with opacity modifiers (precedent: bg-teal/10) — zero index.css changes.
+const CARD_BORDER: Record<EmptyLedgerReason['kind'], string> = {
+  clean: 'border-ok/40',
+  filtered: 'border-teal/40',
+  search: 'border-line',
+};
 
 // Keyboard nav (WCAG 2.1.1): the ledger virtualizes (~25-35 mounted rows), so without keyboard primitives a
 // keyboard / screen-reader user can reach only the mounted slice. We use the aria-activedescendant LISTBOX
@@ -199,6 +209,7 @@ export function TriageLedger({
   setGroupByFolder,
   showClean,
   setShowClean,
+  resetSeverities,
   totalRows,
   foldedCount,
   foldOpen,
@@ -221,6 +232,8 @@ export function TriageLedger({
   /** When true, problemsOnly is forced off so `ok` rows surface (the honest "show clean" path). */
   showClean: boolean;
   setShowClean: (b: boolean) => void;
+  /** Restore the canonical severity default (DEFAULT_SEVERITIES) — the filtered empty-card's one-click reset. */
+  resetSeverities: () => void;
   /** Total candidate rows under the current severity/clean policy (for "showing N of M"). */
   totalRows: number;
   /** Count of foldable rows (K) within the current post-search `rows` — stated verbatim on the toggle. The
@@ -238,6 +251,19 @@ export function TriageLedger({
 
   const win = useWindow(items.length, ROW_H, 8);
   const slice = items.slice(win.start, win.end);
+
+  // The search box is controlled here; a ref lets an empty-card action re-home focus onto it (WCAG 2.4.3).
+  const searchRef = useRef<HTMLInputElement>(null);
+  // Set true by an empty-card action, cleared by the effect below once the rows settle — so focus never drops
+  // to <body> when the acted-on card button unmounts.
+  const pendingFocus = useRef(false);
+  // Reveal the synthesized clean rows — the EXACT toolbar-toggle "on" action, reused by the clean card so both
+  // share one accessible name + behavior (§4.3). showClean drives includeClean; problemsOnly is forced off so
+  // the ok rows survive the severity filter (App also gates effectiveProblemsOnly + effectiveSeverityFilter on it).
+  const revealClean = useCallback(() => {
+    setShowClean(true);
+    setProblemsOnly(false);
+  }, [setShowClean, setProblemsOnly]);
 
   // === Keyboard nav bridge (two index spaces) ===
   // NAV runs over the OPTION space (rows only; headers are role=presentation and never active). SCROLL runs
@@ -301,10 +327,41 @@ export function TriageLedger({
     [activeOption, items, optionItemIndexes, onRowClick, win.ref, win.start, win.end],
   );
 
+  // Cause-aware empty-ledger card (UX-4). Classification is pure (ledger-empty.ts); the component only maps
+  // it to markup + an action handler. `rows` here is App's visibleRows — the spritesheet fold can empty it
+  // while real findings still exist (every visible row folded away). That emptiness is NEITHER clean nor a
+  // filter/search miss, so we suppress the card (foldedAll) and let the ledger's "show K folded notes" toggle
+  // be the escape. Because countCandidates (totalRows) is fold-independent AND App forces foldedCount to 0 on
+  // asset-axis sorts / when nothing folds, `foldedCount>0` can co-occur ONLY with the fold — never with a
+  // genuine filter/search-empty (those keep foldedCount at 0), so the guard can never hide a real cause card.
+  const foldedAll = rows.length === 0 && foldedCount > 0;
+  const empty =
+    rows.length === 0 && !foldedAll
+      ? emptyLedgerCard(emptyLedgerReason(index.tally, rows.length, totalRows, index.cleanAssetCount, opts.search)!, t)
+      : null;
+  // Re-home focus off a card action button that is about to unmount: onto the listbox (single tab stop, its
+  // active option already reselected by App's orphan-reselect) when rows appear, else onto the search input
+  // (always mounted). Keyed on the settled row count AND the card kind so a filtered→search MORPH (rows stay
+  // 0, kind changes) still moves focus to the search box instead of leaving it on the vanished reset button.
+  // pendingFocus gates it to deliberate card actions only — a plain filter/scroll change never steals focus.
+  useEffect(() => {
+    if (!pendingFocus.current) return;
+    pendingFocus.current = false;
+    if (rows.length > 0) win.ref.current?.focus();
+    else searchRef.current?.focus();
+  }, [rows.length, empty?.kind, win.ref]);
+  const runCardAction = (kind: EmptyLedgerReason['kind']): void => {
+    pendingFocus.current = true;
+    if (kind === 'clean') revealClean();
+    else if (kind === 'filtered') resetSeverities();
+    else setSearch('');
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <input
+          ref={searchRef}
           type="search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -353,9 +410,8 @@ export function TriageLedger({
             type="button"
             aria-pressed={showClean}
             onClick={() => {
-              const next = !showClean;
-              setShowClean(next);
-              if (next) setProblemsOnly(false);
+              if (showClean) setShowClean(false);
+              else revealClean(); // same "on" action the clean empty-card reuses (§4.3)
             }}
             className={`rounded-lg border px-2.5 py-1 font-mono text-xs transition ${
               showClean ? 'border-teal text-ink' : 'border-line text-ink-soft hover:border-ink-soft'
@@ -383,12 +439,38 @@ export function TriageLedger({
         ) : null}
       </div>
 
-      <div className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">
-        {t('triage.showing', { n: rows.length, m: totalRows })}
-      </div>
+      {/* "showing N of M" — suppressed when the card hides counts (totalRows===0 ⇒ "showing 0 of 0" is pure
+          noise that fights the verdict); kept for a search miss ("showing 0 of M" is informative). */}
+      {empty?.hideCounts ? null : (
+        <div className="font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">
+          {t('triage.showing', { n: rows.length, m: totalRows })}
+        </div>
+      )}
 
       {rows.length === 0 ? (
-        <p className="rounded-xl border border-line bg-panel p-4 font-mono text-sm text-ink-soft">{t('triage.noMatch')}</p>
+        // Cause-aware card replaces the old single cause-blind "no assets match these filters" <p>. Null in
+        // the foldedAll case (the "show K folded notes" toggle is the escape there). h3 keeps the heading
+        // outline monotonic: sr-only h1 → h2 Diagnosis → h3 card → h2 Findings.
+        empty ? (
+          <div className={`space-y-2 rounded-xl border bg-panel p-4 ${CARD_BORDER[empty.kind]}`}>
+            <h3 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
+              {/* Clean card prefixes the SAME ok token/shape as the VerdictBar all-clear dot — visual agreement,
+                  not contradiction. Decorative (aria-hidden); the title text carries the meaning. */}
+              {empty.kind === 'clean' ? <span className="h-2 w-2 rounded-full bg-ok" aria-hidden /> : null}
+              <span className="break-words">{empty.title}</span>
+            </h3>
+            {empty.body ? <p className="text-pretty text-[13px] leading-relaxed text-ink-soft">{empty.body}</p> : null}
+            {empty.action ? (
+              <button
+                type="button"
+                onClick={() => runCardAction(empty.kind)}
+                className="rounded-lg border border-teal bg-panel px-2.5 py-1 font-mono text-xs text-ink transition hover:bg-bg"
+              >
+                {empty.action}
+              </button>
+            ) : null}
+          </div>
+        ) : null
       ) : (
         <div
           ref={win.ref}

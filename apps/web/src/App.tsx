@@ -37,9 +37,12 @@ import { PrimaryRecommendation } from './components/PrimaryRecommendation';
 import { useDebounced } from './lib/useDebounced';
 import { buildIndex, countCandidates, defaultSelectOpts, DEFAULT_SEVERITIES, DEFAULT_SORT, foldableFindingIds, isAssetAxis, looseRecommendation, selectRows, type LedgerRow, type SelectOpts, type SortKey } from './lib/triage';
 import { analysisReadyMessage, resultCountMessage } from './lib/announce';
+import { effectiveSeverityFilter } from './lib/ledger-empty';
+import { UNPARSED_DETAILS_ID, UNPARSED_SUMMARY_ID } from './lib/skipped-chip';
 import { resultsHeading } from './lib/results-heading';
 import { progressView } from './lib/progress-view';
 import { buildTotalsRows } from './lib/totals-rows';
+import { focusTargetAfterSwap, type SwapState } from './lib/focus-move';
 
 // Stable empty Set (constant identity) so the `foldIds` memo has a fixed reference when there is no report —
 // no fresh object per render, so nothing downstream needlessly recomputes. PRESENTATION only (design §5.1).
@@ -74,6 +77,24 @@ export function App() {
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
+  // a11y (UX-4): move focus on view/phase swaps — the pure decision lives in lib/focus-move.ts (Node-tested).
+  // Every swap unmounts (or display:none-s, via the settings `hidden` wrapper below) the focused control,
+  // dropping keyboard/SR focus to <body> at the exact ≤10s payoff moment. Deps are ONLY the swap coordinates
+  // [view, phase.t] — `report` is deliberately NOT a dep, so the async probe re-set (a NEW report object with
+  // the same phase, attachProbeReadings) can STRUCTURALLY never re-fire this (stronger than the autoSelectedFor
+  // ref-guard it mirrors). focus() on the sr-only results/dropzone h1 scrolls to that region's top (a
+  // position:absolute anchor — desired); the jump is instant (no scroll-behavior:smooth anywhere) ⇒
+  // reduced-motion safe. This is the ONE focus owner for BOTH directions of the settings swap (SettingsPage's
+  // former mount-focus effect is deleted — it could never handle settings→main, being unmounted by then).
+  // Initial mount seeds prev to the current state ⇒ rule 5 ⇒ null ⇒ no focus steal on load (the first Tab must
+  // reach the skip link; SRs must start at the document top).
+  const prevSwap = useRef<SwapState>({ view, phase: phase.t });
+  useEffect(() => {
+    const next: SwapState = { view, phase: phase.t };
+    const target = focusTargetAfterSwap(prevSwap.current, next);
+    prevSwap.current = next;
+    if (target) document.getElementById(target)?.focus();
+  }, [view, phase.t]);
   // Round 21 #2: LAZY dir-aware byte readers for the picked folder — keyed by the SAME keyOf the workers/probe
   // use so a basename collision across folders never resolves the wrong bytes. Replaces the former EAGER byte
   // `map` (which captured `f.bytes` BEFORE runAnalysis transferred — and would hold DETACHED buffers after the
@@ -94,6 +115,10 @@ export function App() {
   const [problemsOnly, setProblemsOnly] = useState(true);
   const [groupByFolder, setGroupByFolder] = useState(false);
   const [showClean, setShowClean] = useState(false);
+  // Controlled open-state of the skipped-files <details> (UX-4): the VerdictBar's skipped chip opens it +
+  // anchor-scrolls to it. Reset to collapsed at the start of every run() so a re-drop starts closed. The
+  // user can still close it natively (onToggle keeps this in sync). Pure presentation.
+  const [unparsedOpen, setUnparsedOpen] = useState(false);
   // Monotonic "the user asked to build a spritesheet" signal (spritesheet-first design §4.3). The primary
   // recommendation card's [Build] bumps this AND flips packLoose (via the context patch); the FixCard's
   // nonce effect reads the increment and previews a pack-inclusive plan. Pure UI state — feeds no analysis.
@@ -147,6 +172,7 @@ export function App() {
     setReaders(lazyReaders);
     setReport(null);
     setSelectedFinding(undefined);
+    setUnparsedOpen(false); // a fresh run starts with the skipped-files disclosure collapsed (UX-4)
     setPhase({ t: 'analyzing' });
     try {
       const rep = await runAnalysis(picked, (p) => setPhase({ t: 'analyzing', progress: p }), ctrl.signal);
@@ -222,7 +248,11 @@ export function App() {
         ? {
             sort,
             search: debouncedSearch,
-            severityFilter,
+            // §1.3 fix: admit the synthesized `ok` rows through the severity filter ONLY while showClean is
+            // on, so the "show N clean" toggle actually reveals N (it was a dead control — the filter dropped
+            // every synthesized ok row). Fresh Set (effectiveSeverityFilter never aliases state); deps already
+            // list both severityFilter + showClean so the memo recomputes exactly as before.
+            severityFilter: effectiveSeverityFilter(severityFilter, showClean),
             problemsOnly: effectiveProblemsOnly,
             includeClean: showClean,
             groupByFolder,
@@ -368,6 +398,20 @@ export function App() {
       else next.add(sev);
       return next;
     });
+  // The filtered empty-card's one-click escape (UX-4): restore the ONE canonical severity default (no reset
+  // control existed before — chips had to be re-pressed one by one). Reuses DEFAULT_SEVERITIES, the single
+  // source of truth (triage.ts) — a fresh mutable Set so toggling never aliases the constant.
+  const resetSeverities = () => setSeverityFilter(new Set<Severity>(DEFAULT_SEVERITIES));
+  // The skipped chip's jump (UX-4): open the (controlled) UnparsedNotice, anchor-scroll to it under the
+  // sticky header (scroll-mt-20; reduced-motion-gated — the optimize-entry deep-link pattern), and move focus
+  // to its <summary> (natively focusable) so a keyboard/SR user lands ON the disclosure it just opened.
+  const jumpToUnparsed = () => {
+    setUnparsedOpen(true);
+    const el = typeof document !== 'undefined' ? document.getElementById(UNPARSED_DETAILS_ID) : null;
+    const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    el?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth' });
+    document.getElementById(UNPARSED_SUMMARY_ID)?.focus({ preventScroll: true });
+  };
   // Sprite count for the MEASURED draw-calls readout ("N sprites batched"). Same keying invariant as
   // the probe (assetRef === atlas.name === atlasFrames key). 0 for loose / un-probed assets. Keyed on the
   // debounced asset so it moves in lockstep with the film it annotates.
@@ -376,6 +420,22 @@ export function App() {
   return (
     <BuildSettingsProvider>
     <div className="min-h-full bg-bg text-ink">
+      {/* a11y: skip-to-content (WCAG 2.4.1) — the FIRST tab stop on every view/phase (inserted before the
+          sticky <header>), visually hidden until keyboard focus (.ad-skip-link). preventDefault keeps
+          location.hash untouched: the hash namespace belongs to the settings router (lib/route.ts,
+          exact-match '#settings') — a native '#ad-main' jump would navigate settings→main and pollute
+          history. Programmatic focus() replaces the native anchor jump; Enter fires click on an <a>, so it
+          stays keyboard-complete. */}
+      <a
+        href="#ad-main"
+        className="ad-skip-link"
+        onClick={(e) => {
+          e.preventDefault();
+          document.getElementById('ad-main')?.focus();
+        }}
+      >
+        {t('a11y.skipToContent')}
+      </a>
       <header className="sticky top-0 z-50 border-b border-line bg-bg/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-3">
           <div className="flex items-center gap-2.5">
@@ -395,7 +455,7 @@ export function App() {
                   <HeaderMetric
                     label={t('metric.vramMeasured')}
                     value={fmtBytes(totals.probe.vramBytes)}
-                    title={t('readout.measuredTooltip')}
+                    explainer={t('readout.measuredTooltip')}
                   />
                 ) : null}
                 <HeaderMetric label={t('metric.saveable')} value={`${fmtBytes(totals?.potentialDiskSaved ?? 0)} · ${savedPct}%`} accent />
@@ -411,7 +471,11 @@ export function App() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-6 py-10">
+      {/* a11y: id/tabIndex make <main> the skip-link target + the focus landing when the skip link is used.
+          ad-focus-anchor suppresses the focus ring on this programmatic (tabIndex=-1) target. Honest on BOTH
+          views — SettingsPage renders inside this same <main>, so "skip to content" always lands on real
+          content. */}
+      <main id="ad-main" tabIndex={-1} className="ad-focus-anchor mx-auto max-w-6xl px-6 py-10">
         {/* a11y: ONE persistent polite live region, mounted unconditionally as the FIRST child of <main> so it
             survives the Dropzone↔results swap (mounting a region and its text in the same tick is unreliable in
             some SRs). role=status + aria-live=polite for non-urgent announcements; aria-atomic so the whole
@@ -443,7 +507,7 @@ export function App() {
                 removed from flow ⇒ adds NO space-y-5 gap/box ⇒ zero visual diff, while staying first in
                 DOM/AOM order so the SR rotor reads h1→h2→h2→h3 (monotonic). Same honest crit+warn+info count
                 as VerdictBar/announce.ts; never VRAM/disk. */}
-            <h1 className="ad-sr-only">{resultsHeading(index.tally, t)}</h1>
+            <h1 id="ad-results-h1" tabIndex={-1} className="ad-sr-only ad-focus-anchor">{resultsHeading(index.tally, t)}</h1>
             {/* The PRIMARY "Build a spritesheet" recommendation (design §4.1) — rendered ONLY when the folder
                 is loose-dominated (`rec`). Sits between the results h1 and the VerdictBar so the heading
                 outline stays monotonic (h1 → this h2 → VerdictBar's h2). Absent when not dominated ⇒ the
@@ -456,7 +520,13 @@ export function App() {
                 configureHref={SETTINGS_HASH}
               />
             ) : null}
-            <VerdictBar tally={index.tally} severityFilter={severityFilter} onToggle={toggleSeverity} />
+            <VerdictBar
+              tally={index.tally}
+              severityFilter={severityFilter}
+              onToggle={toggleSeverity}
+              skippedCount={report.unparsed?.length ?? 0}
+              onSkippedJump={jumpToUnparsed}
+            />
             {/* Sub-md totals strip — the EXACT inverse breakpoint of the desktop header block (md:flex):
                 below md the header totals are display:none, so without this the disk≠VRAM honesty pin
                 (invariant 5) and the saveable instant-wow payoff are 100% invisible on phones/small
@@ -466,7 +536,7 @@ export function App() {
             {totals ? (
               <div className="flex flex-wrap gap-x-5 gap-y-1.5 border-b border-line pb-4 md:hidden">
                 {buildTotalsRows(totals, t, fmtBytes).map((r) => (
-                  <MobileTotal key={r.key} label={r.label} value={r.value} accent={r.accent} title={r.title} />
+                  <MobileTotal key={r.key} label={r.label} value={r.value} accent={r.accent} explainer={r.title} />
                 ))}
               </div>
             ) : null}
@@ -476,7 +546,7 @@ export function App() {
               // Two-column x-ray triage board: the virtualized ledger (left, 1fr) drives the sticky film
               // detail (right, minmax(320px,420px) — the existing token). On <lg it stacks; the ledger's
               // own scroll container is the only long scroller.
-              <section className="grid items-start gap-6 lg:grid-cols-[1fr_minmax(320px,420px)]">
+              <section aria-labelledby="ad-results-h1" className="grid items-start gap-6 lg:grid-cols-[1fr_minmax(320px,420px)]">
                 <TriageLedger
                   index={index}
                   rows={visibleRows}
@@ -490,6 +560,7 @@ export function App() {
                   setGroupByFolder={setGroupByFolder}
                   showClean={showClean}
                   setShowClean={setShowClean}
+                  resetSeverities={resetSeverities}
                   totalRows={totalRows}
                   foldedCount={foldedCount}
                   foldOpen={foldOpen}
@@ -497,7 +568,11 @@ export function App() {
                   onRowClick={onRowClick}
                 />
 
-                <aside className="space-y-3 lg:sticky lg:top-20">
+                {/* a11y: the film-viewer HERO column is a NAMED region, not <aside> — <aside>=complementary
+                    ("supporting, separable") is dishonest for the hero (CLAUDE.md: "Герой — film-viewer").
+                    Classes verbatim ⇒ lg:sticky/top-20 + grid placement (by child order) untouched; the tag
+                    swap is style-inert (no aside selector in index.css). */}
+                <section aria-label={t('region.filmDetail')} className="space-y-3 lg:sticky lg:top-20">
                   {selectedBytes && debouncedSelected ? (
                     <FilmViewer bytes={selectedBytes} findings={assetFindings} highlightId={debouncedHighlight} name={debouncedSelected} metrics={selectedMetrics} frameCount={selectedFrameCount} />
                   ) : (
@@ -522,10 +597,12 @@ export function App() {
                   >
                     {t('action.analyzeAnother')}
                   </button>
-                </aside>
+                </section>
               </section>
             )}
-            {report.unparsed?.length ? <UnparsedNotice items={report.unparsed} /> : null}
+            {report.unparsed?.length ? (
+              <UnparsedNotice items={report.unparsed} open={unparsedOpen} onToggle={setUnparsedOpen} />
+            ) : null}
           </div>
         )}
         </div>
@@ -559,11 +636,25 @@ function LanguageSwitcher() {
   );
 }
 
-function HeaderMetric({ label, value, accent, title }: { label: string; value: string; accent?: boolean; title?: string }) {
+// `explainer` (UX-4): the invariant-5 measured-vs-declared honesty note. Delivered BOTH as title=
+// (mouse hover, kept) AND as an ad-sr-only span so it's read by every SR in browse mode on this
+// non-focusable chip (aria-describedby is unreliable on a generic div) — zero visible header width.
+function HeaderMetric({
+  label,
+  value,
+  accent,
+  explainer,
+}: {
+  label: string;
+  value: string;
+  accent?: boolean;
+  explainer?: string;
+}) {
   return (
-    <div className="bg-panel px-3 py-1.5" title={title}>
+    <div className="bg-panel px-3 py-1.5" title={explainer}>
       <div className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-soft">{label}</div>
       <div className={`font-mono text-xs font-semibold ${accent ? 'text-cta' : 'text-ink'}`}>{value}</div>
+      {explainer ? <span className="ad-sr-only">{explainer}</span> : null}
     </div>
   );
 }
@@ -572,25 +663,45 @@ function HeaderMetric({ label, value, accent, title }: { label: string; value: s
 // (unlike the header's bg-line divider grid) — a wrapping label/value list under VerdictBar. flex-col
 // glues each label to its own value so wrapping never blurs declared/measured/saveable. No animation
 // ⇒ inert under prefers-reduced-motion. Token-driven only (text-ink/text-ink-soft/text-cta).
-function MobileTotal({ label, value, accent, title }: { label: string; value: string; accent?: boolean; title?: string }) {
+function MobileTotal({
+  label,
+  value,
+  accent,
+  explainer,
+}: {
+  label: string;
+  value: string;
+  accent?: boolean;
+  explainer?: string;
+}) {
   return (
-    <div className="flex flex-col" title={title}>
+    <div className="flex flex-col" title={explainer}>
       <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-soft">{label}</span>
       <span className={`font-mono text-xs font-semibold ${accent ? 'text-cta' : 'text-ink'}`}>{value}</span>
+      {explainer ? <span className="ad-sr-only">{explainer}</span> : null}
     </div>
   );
 }
 
 // Honest "could not analyze" surface — symmetric with the fix receipt's skipped[] list. Reuses the
 // fix.skipped <details> styling. Reasons stay English (parser strings, same precedent as fix.skipped).
-function UnparsedNotice({ items }: { items: NonNullable<AnalysisReport['unparsed']> }) {
+// CONTROLLED (UX-4): the VerdictBar skipped chip opens it + anchor-scrolls here. `id` is the chip's scroll
+// target (scroll-mt-20 clears the sticky header); the `<summary>` id is the focus target. `onToggle` keeps
+// the parent state in sync when the user closes it natively (no preventDefault — native behavior preserved).
+function UnparsedNotice({ items, open, onToggle }: { items: NonNullable<AnalysisReport['unparsed']>; open: boolean; onToggle: (open: boolean) => void }) {
   const { t } = useI18n();
   return (
-    <details className="rounded-md border border-line bg-bg p-2 text-left open:pb-2.5">
-      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">
+    <details
+      id={UNPARSED_DETAILS_ID}
+      open={open}
+      onToggle={(e) => onToggle(e.currentTarget.open)}
+      className="scroll-mt-20 rounded-md border border-line bg-bg p-2 text-left open:pb-2.5"
+    >
+      <summary id={UNPARSED_SUMMARY_ID} className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">
         {t('report.unparsed.title', { n: items.length })}
       </summary>
-      <ul className="mt-1.5 space-y-1">
+      {/* Cap the 1000-entry case to one screen of scroll instead of a 9000px page append (each entry ~10px). */}
+      <ul className="mt-1.5 max-h-72 space-y-1 overflow-y-auto">
         {items.map((u, i) => (
           <li key={i} className="font-mono text-[10px] leading-relaxed text-ink-soft">
             <span className="break-all">{u.ref}</span> — {u.reason}
@@ -616,13 +727,15 @@ function Dropzone({
   // a11y: honest progress bar spec from the worker's REAL done/total (indeterminate when total unknown).
   const view = progressView(phase.t === 'analyzing' ? phase.progress : undefined);
   return (
-    <section className="mx-auto max-w-3xl">
+    // a11y: the Dropzone is a NAMED region — aria-labelledby points at its own visible h1 (zero new strings,
+    // the name can never drift from the copy).
+    <section aria-labelledby="ad-dropzone-h1" className="mx-auto max-w-3xl">
       <div className="text-center">
         <div className="mb-5 inline-flex items-center gap-2 font-mono text-xs font-medium uppercase tracking-[0.06em] text-teal">
           <span className="ad-pulse-dot inline-block h-[7px] w-[7px] rounded-full bg-cta" />
           {t('header.xray')}
         </div>
-        <h1 className="text-balance font-display text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl">{t('dropzone.title')}</h1>
+        <h1 id="ad-dropzone-h1" tabIndex={-1} className="ad-focus-anchor text-balance font-display text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl">{t('dropzone.title')}</h1>
         <p className="mx-auto mt-4 max-w-xl text-pretty text-[15px] leading-relaxed text-ink-soft">{t('dropzone.subtitle')}</p>
       </div>
 

@@ -217,6 +217,38 @@ body {
   border: 0;
 }
 
+/* a11y: skip-to-content pill (WCAG 2.4.1) — hidden with the off-screen-transform pattern (NOT display:none —
+   it must stay in the tab order), revealed instantly on focus (no transition ⇒ reduced-motion safe).
+   ink-on-panel = 16.5:1 (AA); teal is border-only here — teal text on panel is 4.08:1 and would fail AA
+   (UX-3 discipline). The global :focus-visible teal ring (above) supplies the 2.4.7 indicator on the
+   revealed pill. white-space:nowrap + no fixed width ⇒ auto-sizes for every locale. */
+.ad-skip-link {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 100; /* above the sticky header (z-50, App.tsx) */
+  transform: translateY(calc(-100% - 16px));
+  background: var(--color-panel);
+  color: var(--color-ink);
+  border: 1px solid var(--color-teal);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.ad-skip-link:focus {
+  transform: none;
+}
+
+/* a11y: programmatic-focus anchors (<main> + the view h1s, all tabIndex=-1). They are NOT sequentially
+   focusable, so 2.4.7 does not demand a ring; suppressing it avoids a phantom teal outline around the entire
+   <main> after skip-link use / around a hero h1 after a view swap. Specificity (0,2,0) beats the global
+   :focus-visible (0,1,0); sequentially focusable controls keep their ring. */
+.ad-focus-anchor:focus {
+  outline: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ad-reveal,
   .ad-pulse-dot {

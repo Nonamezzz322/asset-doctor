@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   AA_NORMAL,
+  FILM_SOFT,
   INK_SOFT,
   SURFACE,
   accessibleInkSoftAlpha,
   compositeAlpha,
   contrastRatio,
+  filmSoftPassesAA,
   inkSoftPassesAA,
   relLuminance,
 } from '../src/lib/contrast';
@@ -56,6 +58,18 @@ describe('contrast — the remap decision (regression guard)', () => {
 
   it('the accessible alpha for a readable note is full strength (1)', () => {
     expect(accessibleInkSoftAlpha()).toBe(1);
+  });
+});
+
+describe('contrast — film-surface remap (UX-4 rider): secondary text on bg-film must be film-soft', () => {
+  it('ink-soft on the film surface FAILS AA (3.13:1) — the defect the recolor removes', () => {
+    expect(contrastRatio(INK_SOFT, SURFACE.film)).toBeCloseTo(3.13, 2);
+    expect(inkSoftPassesAA(1, 'film')).toBe(false);
+  });
+
+  it('film-soft on the film surface PASSES AA (8.51:1)', () => {
+    expect(contrastRatio(FILM_SOFT, SURFACE.film)).toBeCloseTo(8.51, 2);
+    expect(filmSoftPassesAA()).toBe(true);
   });
 });
 

@@ -14,7 +14,7 @@
 // the mipmap card is COPY + the existing extrude knob only (raster formats cannot store mip levels — the GPU
 // generates them at load; the opt-in KTX2 backend op bakes real mips). No network, no asset bytes leave.
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import type { ExportFormat, ResolutionTier } from '@asset-doctor/core';
 import type { PackMode, StaticGranularity } from '@asset-doctor/ingest';
 import { DEFAULT_SCALE_TIERS, isSafeSuffix } from '@asset-doctor/fix';
@@ -630,14 +630,12 @@ function ConfigCard({ s }: { s: BuildSettings }) {
 
 // The page shell: back link + focusable h1 + apply-note + the grouped open cards. Rendered INSIDE the same
 // <main> landmark as the results tree (App wraps the main tree in a `hidden` sibling), so there is exactly
-// ONE <h1> per view. Focus moves to the h1 on mount (standard SPA view-switch practice).
+// ONE <h1> per view. Focus is moved to this h1 on the main→settings swap by App's ONE focus owner (UX-4,
+// lib/focus-move.ts) — NOT a local mount effect: only focus-move can also handle the settings→main return
+// (SettingsPage is unmounted by then). The frozen id `ad-settings-h1` is the anchor it targets.
 export function SettingsPage({ hasResults }: { hasResults: boolean }) {
   const { t } = useI18n();
   const { settings, patch } = useBuildSettings();
-  const h1Ref = useRef<HTMLHeadingElement>(null);
-  useEffect(() => {
-    h1Ref.current?.focus();
-  }, []);
   return (
     <div className="space-y-5">
       {/* The back link returns to the main view. Its label is HONEST about the destination: "back to results"
@@ -647,7 +645,7 @@ export function SettingsPage({ hasResults }: { hasResults: boolean }) {
         ← {t(hasResults ? 'settings.back' : 'settings.backHome')}
       </a>
       <div>
-        <h1 ref={h1Ref} tabIndex={-1} className="font-display text-2xl font-semibold tracking-tight outline-none">
+        <h1 id="ad-settings-h1" tabIndex={-1} className="ad-focus-anchor font-display text-2xl font-semibold tracking-tight">
           {t('settings.title')}
         </h1>
         <p className="mt-2 max-w-xl font-mono text-[11px] leading-relaxed text-ink-soft">{t('settings.applyNote')}</p>

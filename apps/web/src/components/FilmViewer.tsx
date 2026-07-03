@@ -6,6 +6,7 @@ import { useI18n } from '../lib/i18n';
 // swatches (film-legend.ts) read the SAME colors with no import cycle — the legend can never drift from paint.
 import { ZONE_STYLE } from '../lib/film-legend-style';
 import { filmAltText, legendItemsFor } from '../lib/film-legend';
+import { explainerRows } from '../lib/readout-explainers';
 
 const MAX_W = 760;
 
@@ -37,6 +38,11 @@ export function FilmViewer({
   // Stable, unique id for the legend's accessible group name (aria-labelledby). `name` may carry odd chars,
   // so useId is the safe source — never derived from the asset name. React 18-safe.
   const legendHeadingId = useId();
+  // WAI-ARIA disclosure for the invariant-5 readings help (UX-4): one quiet trigger toggles a static
+  // definitions panel that re-delivers the three vetted honesty strings keyboard/touch/SR-accessibly
+  // (they ship elsewhere ONLY as title= = mouse-only). Open state persists across asset switches.
+  const [explainOpen, setExplainOpen] = useState(false);
+  const explainPanelId = useId();
 
   useEffect(() => {
     let cancelled = false;
@@ -104,6 +110,9 @@ export function FilmViewer({
   const m = metrics;
   // Mip ceiling is a CONDITIONAL upper bound (+33%), shown only when it exceeds the base (nonzero size).
   const showMip = m !== undefined && m.vramBytesMipmapped > m.vramBytes;
+  // Explainer rows for the disclosure — reuse the card's OWN render gates (probe strips, showMip row)
+  // so the panel can never disagree with the cells. `[]` (diff-view / metrics-less card) ⇒ no trigger.
+  const explainers = explainerRows({ probe: probe !== undefined, mip: showMip });
 
   // Accessible name for the canvas (otherwise an inaccessible painted blob) — MEASURED facts only: name,
   // dims (omitted when not yet decoded), and the measured highlighted-region count. No disk/VRAM/savings.
@@ -120,7 +129,7 @@ export function FilmViewer({
           <span className="truncate text-xs text-film-soft">{name}</span>
           <span className="rounded bg-info px-1.5 py-0.5 text-[10px] font-semibold text-film">{formatOf(name)}</span>
         </div>
-        <span className="shrink-0 text-[11px] text-ink-soft">{sizeStr}</span>
+        <span className="shrink-0 text-[11px] text-film-soft">{sizeStr}</span>
       </div>
 
       {/* x-ray stage */}
@@ -262,6 +271,44 @@ export function FilmViewer({
           ) : null}
         </div>
       ) : null}
+
+      {/* READINGS DISCLOSURE (UX-4, invariant 5) — WAI-ARIA disclosure: a single quiet trigger toggling
+          a static <dl> that re-delivers the three vetted honesty strings (measured / mip ceiling / declared-
+          vs-measured) keyboard/touch/SR-accessibly. Elsewhere these ship ONLY as title= (mouse-only). LAST
+          child so reading order is facts-first, meta-help last. Renders nothing when explainers=[] (diff-view /
+          metrics-less card) ⇒ byte-identical there. Terms reuse the on-card cell-label keys ⇒ zero drift; no
+          new honesty copy — only readout.explainTrigger is new. */}
+      {explainers.length > 0 ? (
+        <div className="mt-2.5 px-1">
+          <button
+            type="button"
+            aria-expanded={explainOpen}
+            aria-controls={explainPanelId}
+            onClick={() => setExplainOpen((v) => !v)}
+            className="flex min-h-6 items-center gap-1.5 font-mono text-[10px] text-film-soft underline-offset-2 hover:underline"
+          >
+            <span
+              aria-hidden="true"
+              className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border border-film-soft text-[9px] leading-none"
+            >
+              i
+            </span>
+            {t('readout.explainTrigger')}
+          </button>
+          <dl
+            id={explainPanelId}
+            hidden={!explainOpen}
+            className="mt-1.5 space-y-2 rounded-lg border border-film-border bg-film-2 px-3 py-2.5"
+          >
+            {explainers.map((row) => (
+              <div key={row.key}>
+                <dt className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-film-soft">{t(row.termKey)}</dt>
+                <dd className="mt-0.5 text-[11px] leading-relaxed text-film-soft">{t(row.bodyKey)}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -283,7 +330,7 @@ function ReadCell({
 }) {
   return (
     <div className="bg-film px-3 py-2.5" title={title}>
-      <div className="mb-1 font-mono text-[9.5px] uppercase tracking-[0.08em] text-ink-soft">{label}</div>
+      <div className="mb-1 font-mono text-[9.5px] uppercase tracking-[0.08em] text-film-soft">{label}</div>
       <div className={`font-mono text-[17px] font-semibold leading-none ${color}`}>{value}</div>
       {sub ? <div className="mt-1 font-mono text-[9px] leading-tight text-film-soft">{sub}</div> : null}
     </div>
