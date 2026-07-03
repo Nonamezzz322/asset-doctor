@@ -22,6 +22,7 @@ import { useI18n } from '../lib/i18n';
 import { useBuildSettings } from '../lib/settings-ctx';
 import type { BuildSettings } from '../lib/build-settings';
 import { GROUP_ORDER, groupState, RULES_IN_GROUP, setGroupHidden, toggleRule } from '../lib/view-prefs';
+import { applyTheme, loadTheme, saveTheme, type Theme } from '../lib/theme';
 import { FORMAT_KEYS, OVERRIDE_MODE_KEYS, type OverrideMode } from '../lib/profile-ui-types';
 import { BUILD_CONFIG_VERSION, parseBuildConfig, serializeBuildConfig } from '../lib/build-config';
 import { PROFILE_PANEL_ANCHOR } from '../lib/optimize-entry';
@@ -107,6 +108,51 @@ function CheckRow({
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="accent-teal" />
       {label}
     </label>
+  );
+}
+
+// ── Card: Appearance — the durable DISPLAY-theme preference (auto/light/dark). A sibling of the diagnosis
+//    view-filter: a localStorage-durable UI pref applied IMMEDIATELY (precedent: the locale switch), NOT part
+//    of BuildSettings/build-config — absent from the export, never invalidates a pending fix. Self-contained:
+//    the theme lives on <html data-theme> (outside React), so this owns local state seeded from loadTheme().
+//    a11y: a native radiogroup (<fieldset>/<legend> + radios), fully keyboard-navigable; option labels are
+//    static t() literals so the i18n-app-keys scanner covers them. 'auto' removes the attribute (the CSS
+//    @media(prefers-color-scheme) then drives, reacting live to the OS with zero JS). ──
+function ThemeCard() {
+  const { t } = useI18n();
+  const [theme, setThemeState] = useState<Theme>(() => loadTheme());
+  const choose = (next: Theme): void => {
+    applyTheme(next, document.documentElement);
+    saveTheme(next);
+    setThemeState(next);
+  };
+  const options: { v: Theme; label: string }[] = [
+    { v: 'auto', label: t('settings.theme.auto') },
+    { v: 'light', label: t('settings.theme.light') },
+    { v: 'dark', label: t('settings.theme.dark') },
+  ];
+  return (
+    <Card title={t('settings.section.appearance')}>
+      <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('settings.theme.intro')}</p>
+      <fieldset className="rounded border border-line/70 p-2">
+        <legend className="px-1 ad-label text-ink-soft">{t('settings.theme.legend')}</legend>
+        <div className="mt-1 space-y-1">
+          {options.map(({ v, label }) => (
+            <label key={v} className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
+              <input
+                type="radio"
+                name="ad-theme"
+                value={v}
+                checked={theme === v}
+                onChange={() => choose(v)}
+                className="accent-teal"
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+    </Card>
   );
 }
 
@@ -733,8 +779,11 @@ export function SettingsPage({
         <p className="mt-2 max-w-xl font-mono text-[11px] leading-relaxed text-ink-soft">{t('settings.applyNote')}</p>
       </div>
       <div className="space-y-4">
-        {/* The diagnosis-VIEW filter goes FIRST (design §5): it applies immediately and is separate from the
-            build/export cards below (governed by the page-level "applies to the NEXT run" note). */}
+        {/* Appearance (theme) FIRST — a durable display pref that applies immediately, sibling to the diagnosis
+            view-filter and independent of the build/export cards below. */}
+        <ThemeCard />
+        {/* The diagnosis-VIEW filter: applies immediately and is separate from the build/export cards below
+            (governed by the page-level "applies to the NEXT run" note). */}
         <DiagnosisCard hidden={hiddenRules} onChange={onChangeHiddenRules} />
         <FormatsCard s={settings} patch={patch} />
         <ResolutionsCard s={settings} patch={patch} />

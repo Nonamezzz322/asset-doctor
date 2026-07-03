@@ -4,6 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Asset Doctor</title>
+    <script>
+      // FOUC-free theme bootstrap (contract mirror of src/lib/theme.ts, pinned by test/theme.test.ts). A classic
+      // (non-module) script so it runs synchronously before first paint. Fail-closed: only 'light'/'dark' set the
+      // attribute; auto/missing/garbage/blocked storage leave it unset so the CSS @media(prefers-color-scheme)
+      // drives with zero JS. On-device only; no network (invariant 1).
+      (function () {
+        try {
+          var t = localStorage.getItem('ad.theme');
+          if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

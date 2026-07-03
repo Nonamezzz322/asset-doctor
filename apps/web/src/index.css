@@ -32,6 +32,50 @@
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
 }
 
+/* Dark theme. The @theme block above is the LIGHT default; these rules OVERRIDE the same custom properties.
+   Because they are UNLAYERED they outrank Tailwind layered @theme output, and the :root[data-theme] and
+   :root:not(...) selectors are specificity (0,2,0), above @theme :root (0,1,0). Overriding the color tokens
+   flips every bg, text and border utility with ZERO component churn.
+   (A) auto: follow the OS, but a forced light choice must win even under a dark OS, hence :not([data-theme='light']).
+   (B) forced dark wins regardless of OS. (C) forced light needs no palette (defaults ARE light); it only pins
+   color-scheme so native controls and scrollbars follow.
+   The film tokens, the CTA FILL, and the severity DOT hues are DELIBERATELY unchanged (already dark or
+   theme-independent). Only the accent-TEXT tokens flip to LIGHTER hues; each is proven above 4.5:1 on BOTH dark
+   surfaces in contrast.test.ts. Elevation stays ordered film 0c1116 below bg 141b24 below panel 1e2a36 so the
+   always-dark FilmViewer reads as an inset well. The two dark palettes below MUST stay byte-identical. */
+:root {
+  color-scheme: light;
+}
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --color-bg: #141b24;
+    --color-panel: #1e2a36;
+    --color-line: #33424f;
+    --color-ink: #e8edf2;
+    --color-ink-soft: #9fb0bd;
+    --color-teal-text: #4cc7c7;
+    --color-cta-text: #45c892;
+    --color-crit-text: #ff8a8d;
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --color-bg: #141b24;
+  --color-panel: #1e2a36;
+  --color-line: #33424f;
+  --color-ink: #e8edf2;
+  --color-ink-soft: #9fb0bd;
+  --color-teal-text: #4cc7c7;
+  --color-cta-text: #45c892;
+  --color-crit-text: #ff8a8d;
+}
+
 html,
 body,
 #root {

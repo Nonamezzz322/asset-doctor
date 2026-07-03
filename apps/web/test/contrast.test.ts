@@ -5,6 +5,12 @@ import {
   CTA,
   CTA_HOVER,
   CTA_TEXT,
+  DARK,
+  DARK_CRIT_TEXT,
+  DARK_CTA_TEXT,
+  DARK_INK,
+  DARK_INK_SOFT,
+  DARK_TEAL_TEXT,
   FILM_SOFT,
   INK,
   INK_SOFT,
@@ -14,17 +20,21 @@ import {
   TEAL_TEXT,
   WHITE,
   accessibleInkSoftAlpha,
+  chipLabelPassesAABothThemes,
   compositeAlpha,
   contrastRatio,
   ctaHoverPassesAA,
   ctaTextPassesAA,
   ctaWhitePassesAA,
+  darkTextPassesAA,
   filmSoftPassesAA,
   inkPassesAA,
   inkSoftPassesAA,
   linkTealTextPassesAA,
   relLuminance,
+  severityDotDarkPasses,
   severityHuePassesAA,
+  tealDecorDarkLargePasses,
   tealDecorLargePassesAA,
   tealTextWhiteBgPassesAA,
 } from '../src/lib/contrast';
@@ -168,5 +178,52 @@ describe('contrast — round5 CTA/teal role-split (regression guard)', () => {
     expect(AA_LARGE).toBe(3.0);
     expect(tealDecorLargePassesAA('bg')).toBe(true);
     expect(tealDecorLargePassesAA('panel')).toBe(true);
+  });
+});
+
+describe('contrast — dark theme AA (the [data-theme=dark] token overrides mirror index.css)', () => {
+  it('every dark readable-text token clears AA (≥4.5) on BOTH dark surfaces', () => {
+    for (const hex of [DARK_INK, DARK_INK_SOFT, DARK_TEAL_TEXT, DARK_CTA_TEXT, DARK_CRIT_TEXT])
+      for (const s of ['bg', 'panel'] as const) expect(darkTextPassesAA(hex, s)).toBe(true);
+  });
+
+  it('premise numbers hold on dark bg / panel', () => {
+    expect(contrastRatio(DARK_INK, DARK.bg)).toBeCloseTo(14.709, 2);
+    expect(contrastRatio(DARK_INK, DARK.panel)).toBeCloseTo(12.383, 2);
+    expect(contrastRatio(DARK_INK_SOFT, DARK.bg)).toBeCloseTo(7.772, 2);
+    expect(contrastRatio(DARK_INK_SOFT, DARK.panel)).toBeCloseTo(6.543, 2);
+    expect(contrastRatio(DARK_TEAL_TEXT, DARK.bg)).toBeCloseTo(8.5, 2);
+    expect(contrastRatio(DARK_TEAL_TEXT, DARK.panel)).toBeCloseTo(7.155, 2);
+    expect(contrastRatio(DARK_CTA_TEXT, DARK.bg)).toBeCloseTo(8.193, 2);
+    expect(contrastRatio(DARK_CTA_TEXT, DARK.panel)).toBeCloseTo(6.897, 2);
+    expect(contrastRatio(DARK_CRIT_TEXT, DARK.bg)).toBeCloseTo(7.65, 2);
+    expect(contrastRatio(DARK_CRIT_TEXT, DARK.panel)).toBeCloseTo(6.44, 2);
+  });
+
+  it('the prevented bug: white-on-dark-teal-fill is 2.039 (< AA) — why App:2018 uses text-panel not text-white', () => {
+    expect(contrastRatio(WHITE, DARK_TEAL_TEXT)).toBeCloseTo(2.039, 2);
+    expect(contrastRatio(WHITE, DARK_TEAL_TEXT) < AA_NORMAL).toBe(true);
+  });
+
+  it('the engine chip label (panel-on-teal-text fill) clears AA in BOTH themes (light 5.428 / dark 7.155)', () => {
+    expect(chipLabelPassesAABothThemes()).toBe(true);
+    expect(contrastRatio(SURFACE.panel, TEAL_TEXT)).toBeCloseTo(5.428, 2);
+    expect(contrastRatio(DARK.panel, DARK_TEAL_TEXT)).toBeCloseTo(7.155, 2);
+  });
+
+  it('the CTA fill is theme-independent: white-on-CTA stays 4.585 (AA) in dark too', () => {
+    expect(contrastRatio(WHITE, CTA)).toBeCloseTo(4.585, 2);
+  });
+
+  it('decorative teal keeps the 3:1 non-text floor on both dark surfaces (4.248 / 3.576)', () => {
+    expect(tealDecorDarkLargePasses('bg')).toBe(true);
+    expect(tealDecorDarkLargePasses('panel')).toBe(true);
+    expect(contrastRatio(TEAL_DECOR, DARK.bg)).toBeCloseTo(4.248, 2);
+    expect(contrastRatio(TEAL_DECOR, DARK.panel)).toBeCloseTo(3.576, 2);
+  });
+
+  it('every severity DOT clears the 3:1 non-text floor on both dark surfaces (color is never the sole signal)', () => {
+    for (const sev of ['crit', 'warn', 'ok', 'info'] as const)
+      for (const s of ['bg', 'panel'] as const) expect(severityDotDarkPasses(sev, s)).toBe(true);
   });
 });

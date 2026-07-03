@@ -526,7 +526,7 @@ export function TriageLedger({
                     style={{ height: ROW_H }}
                     className="flex items-center justify-between gap-2 border-b border-line bg-bg px-3"
                   >
-                    <span className="truncate font-mono text-[10px] uppercase tracking-[0.06em] text-teal">
+                    <span className="truncate font-mono text-[10px] uppercase tracking-[0.06em] text-teal-text">
                       {it.isCabinet ? t('triage.cabinetIssues') : it.folder === '' ? '/' : `${it.folder}/`} · {it.count}
                     </span>
                     <span className="shrink-0 font-mono text-[10px] text-ink-soft">

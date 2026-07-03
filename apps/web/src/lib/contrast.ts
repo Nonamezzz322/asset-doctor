@@ -157,3 +157,32 @@ export function tealTextWhiteBgPassesAA(): boolean {
 export function tealDecorLargePassesAA(surface: keyof typeof SURFACE): boolean {
   return contrastRatio(TEAL_DECOR, SURFACE[surface]) >= AA_LARGE;
 }
+
+// ── dark-theme AA proof ──────────────────────────────────────────────────────
+// The dark palette OVERRIDES the same @theme --color-* tokens under [data-theme='dark'] /
+// @media(prefers-color-scheme:dark) — mirrored here from index.css as the single source of truth so a
+// regression that lightens a dark surface (or darkens a dark accent) below AA is caught by a unit test.
+// Only the accent-TEXT tokens flip; the CTA FILL and severity DOT hues are theme-independent. All pure/O(1).
+export const DARK = { bg: '#141B24', panel: '#1E2A36' } as const;
+export const DARK_INK = '#E8EDF2'; // dark --color-ink
+export const DARK_INK_SOFT = '#9FB0BD'; // dark --color-ink-soft (= film-soft; already AA on dark)
+export const DARK_TEAL_TEXT = '#4CC7C7'; // dark --color-teal-text
+export const DARK_CTA_TEXT = '#45C892'; // dark --color-cta-text
+export const DARK_CRIT_TEXT = '#FF8A8D'; // dark --color-crit-text
+
+// A dark-theme readable-text token must clear AA on the given dark surface (it renders on bg AND panel).
+export function darkTextPassesAA(hex: string, surface: keyof typeof DARK): boolean {
+  return contrastRatio(hex, DARK[surface]) >= AA_NORMAL;
+}
+// The engine-chip label is panel-on-teal-text-fill (both flip together) — it must clear AA in BOTH themes.
+export function chipLabelPassesAABothThemes(): boolean {
+  return contrastRatio(SURFACE.panel, TEAL_TEXT) >= AA_NORMAL && contrastRatio(DARK.panel, DARK_TEAL_TEXT) >= AA_NORMAL;
+}
+// A severity DOT (non-text signal) clears the 1.4.11 floor (≥3:1) on a dark surface.
+export function severityDotDarkPasses(sev: keyof typeof SEVERITY_HEX, surface: keyof typeof DARK): boolean {
+  return contrastRatio(SEVERITY_HEX[sev], DARK[surface]) >= AA_LARGE;
+}
+// Decorative teal (focus ring / borders / scanline) keeps its non-text 1.4.11 floor on dark surfaces too.
+export function tealDecorDarkLargePasses(surface: keyof typeof DARK): boolean {
+  return contrastRatio(TEAL_DECOR, DARK[surface]) >= AA_LARGE;
+}

@@ -2015,7 +2015,7 @@ function LoaderMigration({ changes, ktx2 }: { changes: FixChange[]; ktx2: boolea
             type="button"
             onClick={() => setEngine(e)}
             aria-pressed={engine === e}
-            className={`rounded px-2 py-0.5 font-mono text-[10px] transition ${engine === e ? 'bg-teal-text text-white' : 'border border-line text-ink-soft hover:border-teal'}`}
+            className={`rounded px-2 py-0.5 font-mono text-[10px] transition ${engine === e ? 'bg-teal-text text-panel' : 'border border-line text-ink-soft hover:border-teal'}`}
           >
             {e === 'pixi' ? 'PixiJS' : 'Phaser'}
           </button>

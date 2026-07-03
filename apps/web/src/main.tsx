@@ -11,6 +11,12 @@ import '@fontsource/ibm-plex-mono/500.css';
 import './index.css';
 import { App } from './App';
 import { I18nProvider } from './lib/i18n';
+import { applyTheme, loadTheme } from './lib/theme';
+
+// Apply the stored display-theme once at startup. The inline <head> script (index.html) already set data-theme
+// FOUC-free for a forced light/dark choice; this reconciles the 'auto' case (removes the attribute so the CSS
+// @media(prefers-color-scheme) drives) after a previous forced choice was cleared. Idempotent.
+applyTheme(loadTheme(), document.documentElement);
 
 const rootEl = document.getElementById('root');
 if (!rootEl) throw new Error('Root element #root not found');
