@@ -22,6 +22,7 @@ import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CATALOGS } from '@asset-doctor/i18n';
 import { OP_KIND_ORDER } from '../src/lib/op-manifest';
+import { ALL_RULES, GROUP_ORDER } from '../src/lib/view-prefs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const comp = (name: string): string => readFileSync(join(here, '..', 'src', 'components', name), 'utf8');
@@ -100,6 +101,12 @@ const LICENSE_ERR_SUFFIXES = ['unknown_key', 'inactive', 'seats_exceeded', 'reac
 // fix.lazy.${s} (App.tsx:505) — mirrors core's TYPE-ONLY BundleAvailability ('eager'|'lazy'|'isolated').
 // (fix.lazy.note is a STATIC t('fix.lazy.note') call → caught by staticKeys, not emitted here.)
 const LAZY_SUFFIXES = ['eager', 'lazy', 'isolated'];
+// rule.${r} (SettingsPage DiagnosisCard, the finding-type checkboxes) and settings.diagnosis.group.${g}
+// (the group <legend>s) — IMPORTED from view-prefs (ALL_RULES / GROUP_ORDER, the single source of truth),
+// so a new rule added to core (⇒ RULE_GROUP ⇒ ALL_RULES) automatically demands a `rule.*` catalog key here.
+// Cannot drift: the mirror IS the live constant, not a copied list.
+const RULE_SUFFIXES = [...ALL_RULES];
+const DIAGNOSIS_GROUP_SUFFIXES = [...GROUP_ORDER];
 
 /** Static literal keys: t('a.b.c') or t(`a.b.c`) with NO interpolation. */
 function staticKeys(src: string): Set<string> {
@@ -124,6 +131,10 @@ function expandedDynamicKeys(src: string): Set<string> {
     // of these prefix-collide, so order is incidental, but kept specific-first for clarity.
     else if (tmpl.startsWith('fix.lazy.')) LAZY_SUFFIXES.forEach((s) => keys.add(`fix.lazy.${s}`));
     else if (tmpl.startsWith('fix.op.')) FIX_OP_SUFFIXES.forEach((s) => keys.add(`fix.op.${s}`));
+    // settings.diagnosis.group. must be branched BEFORE rule. is irrelevant (no prefix overlap), but the
+    // group prefix is longer than nothing else here — kept adjacent to its sibling for clarity.
+    else if (tmpl.startsWith('settings.diagnosis.group.')) DIAGNOSIS_GROUP_SUFFIXES.forEach((s) => keys.add(`settings.diagnosis.group.${s}`));
+    else if (tmpl.startsWith('rule.')) RULE_SUFFIXES.forEach((s) => keys.add(`rule.${s}`));
   }
   return keys;
 }
@@ -212,6 +223,40 @@ describe('app i18n keys exist in the en catalog', () => {
     }
     for (const s of FIX_OP_SUFFIXES) {
       expect(CATALOGS.en[`fix.op.${s}`], `fix.op.${s} must exist in en.json`).toBeDefined();
+    }
+  });
+
+  it('rule.* labels exist in en for EVERY rule (drift guard — mirrors imported ALL_RULES / core Rule union)', () => {
+    // A 22nd core Rule ⇒ RULE_GROUP ⇒ ALL_RULES grows ⇒ this fails until the rule.* label is added to en.
+    expect(RULE_SUFFIXES).toHaveLength(21);
+    for (const r of RULE_SUFFIXES) {
+      expect(CATALOGS.en[`rule.${r}`], `rule.${r} must exist in en.json (the DiagnosisCard checkbox label)`).toBeDefined();
+    }
+  });
+
+  it('settings.diagnosis.* keys (card + group legends) exist in en', () => {
+    for (const k of [
+      'settings.section.diagnosis',
+      'settings.diagnosis.intro',
+      'settings.diagnosis.hiddenSummary',
+      'settings.diagnosis.showAll',
+      'settings.diagnosis.groupToggle',
+    ]) {
+      expect(CATALOGS.en[k], `${k} must exist in en.json`).toBeDefined();
+    }
+    for (const g of DIAGNOSIS_GROUP_SUFFIXES) {
+      expect(CATALOGS.en[`settings.diagnosis.group.${g}`], `settings.diagnosis.group.${g} must exist in en.json`).toBeDefined();
+    }
+  });
+
+  it('the finding-type filter H-line + empty-card keys are catalogued (TriageLedger / ledger-empty drift)', () => {
+    for (const k of [
+      'triage.typeHidden.summary',
+      'triage.typeHidden.clear',
+      'triage.empty.typeFiltered.title',
+      'triage.empty.typeFiltered.body',
+    ]) {
+      expect(CATALOGS.en[k], `${k} must exist in en.json`).toBeDefined();
     }
   });
 });

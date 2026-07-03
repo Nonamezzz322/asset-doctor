@@ -11,9 +11,10 @@
 // engine does).
 //
 // SETTINGS-PAGE UPDATE: the anchor is now a NAVIGATION link — `<a href={SETTINGS_HASH}>` (lib/route.ts)
-// — to the dedicated Settings page, whose FIRST card ("Форматы вывода", the moved ExportProfilePanel)
-// carries PROFILE_PANEL_ANCHOR as its DOM id. No scroll bookkeeping: Formats being the first card IS the
-// landing position. The gate (optimizeEntryEnabled) and the copy keys are unchanged.
+// — to the dedicated Settings page. The Formats card ("Форматы вывода", the moved ExportProfilePanel)
+// carries PROFILE_PANEL_ANCHOR as a stable DOM id. (The diagnosis view-filter card is placed first on the
+// page, so the link lands at the settings top rather than directly on Formats — no scroll bookkeeping.)
+// The gate (optimizeEntryEnabled) and the copy keys are unchanged.
 
 /** The three copy keys for the optimize affordance — single source of truth so a test can assert they
  *  exist in all 9 i18n catalogs (the same drift-guard discipline as the catalog completeness test). */
@@ -39,7 +40,7 @@ export function optimizeEntryEnabled(fileCount: number, profileSupported: boolea
 }
 
 /** DOM id of the deep-link TARGET — the Formats card (the moved ExportProfilePanel content) on the
- *  Settings page, the FIRST card after the h1. The anchor itself navigates via href={SETTINGS_HASH}
- *  (lib/route.ts); sharing this id keeps the deep-link source and target from ever drifting apart.
- *  (Pre-settings-page this was the FixCard ExportProfilePanel <details> id — value unchanged.) */
+ *  Settings page (now the second card, after the diagnosis view-filter card). The anchor itself navigates
+ *  via href={SETTINGS_HASH} (lib/route.ts); sharing this id keeps the deep-link source and target from ever
+ *  drifting apart. (Pre-settings-page this was the FixCard ExportProfilePanel <details> id — value unchanged.) */
 export const PROFILE_PANEL_ANCHOR = 'ad-export-profile';

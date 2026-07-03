@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { AnalysisReport, AssetMetrics, Finding, Severity } from '@asset-doctor/core';
-import { buildIndex, countCandidates, defaultSelectOpts, DEFAULT_SEVERITIES, DEFAULT_SORT, selectRows, SEV_RANK, isAssetAxis, type SelectOpts } from '../src/lib/triage';
+import type { AnalysisReport, AssetMetrics, Finding, Rule, Severity } from '@asset-doctor/core';
+import { buildIndex, countCandidates, defaultSelectOpts, DEFAULT_SEVERITIES, DEFAULT_SORT, foldableFindingIds, selectRows, SEV_RANK, isAssetAxis, typeHiddenCount, type SelectOpts } from '../src/lib/triage';
+import { ALL_RULES } from '../src/lib/view-prefs';
 
 // ── builders ──────────────────────────────────────────────────────────────────────────────────────
 const asset = (assetRef: string, extra: Partial<AssetMetrics> = {}): AssetMetrics => ({
@@ -43,6 +44,7 @@ const opts = (o: Partial<SelectOpts> = {}): SelectOpts => ({
   problemsOnly: false,
   includeClean: false,
   groupByFolder: false,
+  hiddenRules: new Set<Rule>(), // default = show every type ⇒ the type filter is a byte-identical no-op
   ...o,
 });
 
@@ -118,6 +120,18 @@ describe('buildIndex', () => {
     // relatedRefs ride through (the "+N assets" disclosure count).
     expect(byId.get('folder1')?.relatedRefs).toEqual(['a.png', 'b.png', 'c.png']);
     expect(byId.get('asset1')?.relatedRefs).toEqual([]);
+  });
+
+  it('carries the finding rule on every real row (the finding-type filter axis)', () => {
+    const idx = buildIndex(
+      report(
+        [asset('a.png'), asset('b.png')],
+        [finding('f1', 'a.png', 'warn', { rule: 'format' }), finding('f2', 'b.png', 'crit', { rule: 'dimensions-oversize' })],
+      ),
+    );
+    const byId = new Map(idx.rows.map((r) => [r.id, r]));
+    expect(byId.get('f1')?.rule).toBe('format');
+    expect(byId.get('f2')?.rule).toBe('dimensions-oversize');
   });
 
   it('reads wastedDisk straight off estimate.diskBytesSaved (sparse ⇒ undefined, never 0)', () => {
@@ -395,9 +409,117 @@ describe('countCandidates == selectRows(...,{search:""}).length', () => {
   }
 });
 
+// ── selectRows: the finding-TYPE filter (view-prefs) — an honest USER filter, byte-identical when empty ──
+describe('selectRows finding-type filter (hiddenRules)', () => {
+  // Mixed rules across three assets; play.png has TWO findings (occupancy + format) so hiding one type
+  // collapses it to the other on the asset axis rather than removing the asset.
+  const mixed = report(
+    [
+      asset('ui/play.png', { vramBytes: 300 }),
+      asset('ui/pause.png', { vramBytes: 200 }),
+      asset('bg.png', { vramBytes: 500 }),
+    ],
+    [
+      finding('occ1', 'ui/play.png', 'warn', { rule: 'occupancy' }),
+      finding('fmt1', 'ui/play.png', 'info', { rule: 'format' }),
+      finding('fmt2', 'ui/pause.png', 'warn', { rule: 'format' }),
+      finding('over1', 'bg.png', 'crit', { rule: 'dimensions-oversize' }),
+    ],
+  );
+  const idx = buildIndex(mixed);
+
+  it('BYTE-IDENTITY: an empty hidden set and an OMITTED hidden set select the exact same rows', () => {
+    const emptySet = selectRows(idx, opts({ hiddenRules: new Set<Rule>() }));
+    const omitted = selectRows(idx, { ...opts(), hiddenRules: undefined });
+    expect(ids(omitted)).toEqual(ids(emptySet));
+    // ...and both equal the pre-existing (no type-filter) behavior: all four rows.
+    expect(ids(emptySet).sort()).toEqual(['fmt1', 'fmt2', 'occ1', 'over1']);
+  });
+
+  it('BYTE-IDENTITY: hiding a rule NOT present in the report is a no-op, and H === 0', () => {
+    const base = selectRows(idx, opts());
+    const notPresent = opts({ hiddenRules: new Set<Rule>(['bleeding']) }); // valid rule, absent here
+    expect(ids(selectRows(idx, notPresent))).toEqual(ids(base));
+    expect(typeHiddenCount(idx, notPresent)).toBe(0); // H counts only ACTUALLY-hidden rows
+  });
+
+  it('hiding a present rule removes EXACTLY the rows of that type (finding-axis)', () => {
+    const hidFormat = selectRows(idx, opts({ hiddenRules: new Set<Rule>(['format']) }));
+    expect(ids(hidFormat).sort()).toEqual(['occ1', 'over1']); // fmt1 + fmt2 gone; nothing else touched
+  });
+
+  it('a synthesized CLEAN row (rule undefined) is NEVER type-hidden — even hiding ALL rules keeps it', () => {
+    const idx2 = buildIndex(
+      report([asset('dirty.png'), asset('clean.png')], [finding('d', 'dirty.png', 'warn', { rule: 'occupancy' })]),
+    );
+    const rows = selectRows(idx2, opts({ includeClean: true, hiddenRules: new Set<Rule>(ALL_RULES) }));
+    expect(rows.some((r) => r.id === 'd')).toBe(false); // the real occupancy row IS hidden
+    expect(rows.some((r) => r.clean && r.assetRef === 'clean.png')).toBe(true); // the clean row survives
+  });
+
+  // ── H reconciliation (design §1.3): countCandidates(withType) + H === countCandidates(noType) ──────
+  it('H reconciles on the FINDING axis (severity sort): withType + H === noType', () => {
+    const o = opts({ sort: 'severity', hiddenRules: new Set<Rule>(['format']) });
+    const withType = countCandidates(idx, o);
+    const h = typeHiddenCount(idx, o);
+    const noType = countCandidates(idx, { ...o, hiddenRules: new Set<Rule>() });
+    expect(withType).toBe(2); // occ1 + over1
+    expect(h).toBe(2); // fmt1 + fmt2 hidden
+    expect(withType + h).toBe(noType); // == 4
+    expect(h).toBeGreaterThan(0);
+  });
+
+  it('H reconciles on the ASSET axis (vram sort, distinct-asset units): withType + H === noType', () => {
+    const o = opts({ sort: 'vram', hiddenRules: new Set<Rule>(['format']) });
+    const withType = countCandidates(idx, o);
+    const h = typeHiddenCount(idx, o);
+    const noType = countCandidates(idx, { ...o, hiddenRules: new Set<Rule>() });
+    // play collapses to its still-visible occupancy row; pause (format-only) drops; bg stays.
+    expect(withType).toBe(2); // play + bg
+    expect(noType).toBe(3); // play + pause + bg
+    expect(h).toBe(1); // pause disappeared
+    expect(withType + h).toBe(noType);
+  });
+
+  // ── composition with the severity filter AND the spritesheet fold ──────────────────────────────────
+  it('severity ∩ type = the intersection of the two view filters', () => {
+    const sevOpts = opts({ severityFilter: new Set<Severity>(['crit', 'warn']) }); // drops fmt1 (info)
+    const typeOpts = opts({ hiddenRules: new Set<Rule>(['format']) }); // drops fmt1 + fmt2
+    const bothOpts = opts({ severityFilter: new Set<Severity>(['crit', 'warn']), hiddenRules: new Set<Rule>(['format']) });
+    const sevIds = new Set(ids(selectRows(idx, sevOpts)));
+    const typeIds = new Set(ids(selectRows(idx, typeOpts)));
+    const intersection = [...sevIds].filter((id) => typeIds.has(id)).sort();
+    expect(ids(selectRows(idx, bothOpts)).sort()).toEqual(intersection);
+    expect(intersection).toEqual(['occ1', 'over1']);
+  });
+
+  it('a type-hidden finding that is ALSO fold-eligible is counted in H, NOT in the fold — no double-count', () => {
+    // sib is a redundant-sibling `format` finding ⇒ foldableFindingIds returns it (computed over the FULL
+    // report, pre-select). Hiding `format` removes it from the selected rows, so a post-select fold count
+    // over those rows sees ZERO of the still-foldable ids — it is charged to H instead (single bucket).
+    const foldRep = report(
+      [asset('a.png'), asset('b.png')],
+      [
+        finding('sib', 'a.png', 'info', { rule: 'format', params: { redundantSibling: 1 } }),
+        finding('keep', 'b.png', 'warn', { rule: 'occupancy' }),
+      ],
+    );
+    const foldIdx = buildIndex(foldRep);
+    const foldable = foldableFindingIds(foldRep);
+    expect(foldable.has('sib')).toBe(true); // fold set is pre-select, unchanged by the type filter
+
+    const o = opts({ hiddenRules: new Set<Rule>(['format']) });
+    const rows = selectRows(foldIdx, o);
+    expect(rows.some((r) => r.id === 'sib')).toBe(false); // gone from the type-filtered rows
+    const foldedInRows = rows.filter((r) => foldable.has(r.id)).length; // K over the post-type rows
+    expect(foldedInRows).toBe(0); // NOT counted in the fold...
+    expect(typeHiddenCount(foldIdx, o)).toBe(1); // ...counted in H instead
+  });
+});
+
 // ── defaultSelectOpts: the ONE canonical opening view (round11 #3 — no drift) ──────────────────────────
 describe('defaultSelectOpts', () => {
-  it('is worst-first, all-severities, problems-only, no-clean, ungrouped', () => {
+  it('is worst-first, all-severities, problems-only, no-clean, ungrouped, no hidden types', () => {
     const d = defaultSelectOpts();
     expect(d.sort).toBe(DEFAULT_SORT);
     expect(d.sort).toBe('severity');
@@ -406,6 +528,7 @@ describe('defaultSelectOpts', () => {
     expect(d.includeClean).toBe(false);
     expect(d.groupByFolder).toBe(false);
     expect(d.search).toBe('');
+    expect(d.hiddenRules?.size ?? 0).toBe(0); // default hides no type ⇒ byte-identical to today
   });
 
   it('returns a FRESH severityFilter Set each call (toggling never aliases the shared default)', () => {

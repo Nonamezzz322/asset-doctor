@@ -15,12 +15,13 @@
 // generates them at load; the opt-in KTX2 backend op bakes real mips). No network, no asset bytes leave.
 
 import { useRef, useState, type ReactNode } from 'react';
-import type { ExportFormat, ResolutionTier } from '@asset-doctor/core';
+import type { ExportFormat, ResolutionTier, Rule } from '@asset-doctor/core';
 import type { PackMode, StaticGranularity } from '@asset-doctor/ingest';
 import { DEFAULT_SCALE_TIERS, isSafeSuffix } from '@asset-doctor/fix';
 import { useI18n } from '../lib/i18n';
 import { useBuildSettings } from '../lib/settings-ctx';
 import type { BuildSettings } from '../lib/build-settings';
+import { GROUP_ORDER, groupState, RULES_IN_GROUP, setGroupHidden, toggleRule } from '../lib/view-prefs';
 import { FORMAT_KEYS, OVERRIDE_MODE_KEYS, type OverrideMode } from '../lib/profile-ui-types';
 import { BUILD_CONFIG_VERSION, parseBuildConfig, serializeBuildConfig } from '../lib/build-config';
 import { PROFILE_PANEL_ANCHOR } from '../lib/optimize-entry';
@@ -109,9 +110,80 @@ function CheckRow({
   );
 }
 
+// ── Card: Что показывать в диагнозе (Diagnosis view filter) — the honest per-rule finding-type visibility
+//    control (invariant 3). It edits the SEPARATE hiddenRules view-preference slice (view-prefs.ts / App
+//    state, localStorage-durable), NOT BuildSettings — so it is absent from the build-config export, never
+//    invalidates a pending fix plan, and is untouched by config load/save. It NEVER suppresses anything: the
+//    analysis still MEASURES every type and the VerdictBar tally stays full; the user only chooses what to
+//    SEE. Checkbox semantics are "checked = shown" (default all checked ⇒ empty hidden set ⇒ byte-identical
+//    to today). Its own "applies immediately" intro distinguishes it from the page-level "applies to the NEXT
+//    run" note (which governs the build cards below). a11y: each group is a <fieldset>/<legend> (WCAG 1.3.1);
+//    the group toggle is a native tri-state checkbox (indeterminate on a partial group) with its own
+//    aria-label; the live summary is a role=status region. ──
+function DiagnosisCard({ hidden, onChange }: { hidden: ReadonlySet<Rule>; onChange: (next: Set<Rule>) => void }) {
+  const { t } = useI18n();
+  const hiddenCount = hidden.size;
+  return (
+    <Card title={t('settings.section.diagnosis')}>
+      <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('settings.diagnosis.intro')}</p>
+      <div className="flex items-center justify-between gap-2">
+        {/* Live hidden-count — role=status so a screen reader hears it change as boxes toggle (design §9). */}
+        <p role="status" aria-live="polite" className="font-mono text-[10px] text-ink-soft">
+          {t('settings.diagnosis.hiddenSummary', { n: hiddenCount })}
+        </p>
+        {/* One-click "show all types" reset — the card-level escape (mirrors the ledger H-line's clear).
+            Disabled (not removed) when nothing is hidden ⇒ a stable, discoverable control. */}
+        <button
+          type="button"
+          disabled={hiddenCount === 0}
+          onClick={() => onChange(new Set())}
+          className="shrink-0 rounded border border-line px-2 py-0.5 font-mono text-[10px] text-teal-text transition hover:border-teal disabled:opacity-60 disabled:hover:border-line"
+        >
+          {t('settings.diagnosis.showAll')}
+        </button>
+      </div>
+      <div className="space-y-3">
+        {GROUP_ORDER.map((g) => {
+          const state = groupState(hidden, g); // 'all' | 'none' | 'some' — checked = shown
+          const groupName = t(`settings.diagnosis.group.${g}`);
+          return (
+            <fieldset key={g} className="rounded border border-line/70 p-2">
+              <legend className="flex items-center gap-1.5 px-1 font-mono text-[10px] uppercase tracking-[0.06em] text-ink-soft">
+                {/* Group show-all / hide-all: a tri-state checkbox. checked ⇔ the whole group is shown;
+                    indeterminate ⇔ mixed. Clicking a fully-shown group hides it; clicking a partial/hidden
+                    group shows it (setGroupHidden hides iff state was 'all'). Its own aria-label keeps it
+                    distinct from the per-rule boxes. */}
+                <input
+                  type="checkbox"
+                  checked={state === 'all'}
+                  ref={(el) => {
+                    if (el) el.indeterminate = state === 'some';
+                  }}
+                  aria-label={t('settings.diagnosis.groupToggle', { group: groupName })}
+                  onChange={() => onChange(setGroupHidden(hidden, g, state === 'all'))}
+                  className="accent-teal"
+                />
+                {groupName}
+              </legend>
+              <div className="mt-1 space-y-1">
+                {RULES_IN_GROUP[g].map((r) => (
+                  <label key={r} className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
+                    <input type="checkbox" checked={!hidden.has(r)} onChange={() => onChange(toggleRule(hidden, r))} className="accent-teal" />
+                    {t(`rule.${r}`)}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
 // ── Card: Форматы вывода (Formats) — the moved ExportProfilePanel content (minus save/load, minus the
 //    <details> wrapper) + the profile-OFF defaults row. id=PROFILE_PANEL_ANCHOR (the optimize deep-link
-//    target, the first card after the h1). ──
+//    target). ──
 function FormatsCard({ s, patch }: Sect) {
   const { t } = useI18n();
   const formats = s.profileFormats;
@@ -633,7 +705,17 @@ function ConfigCard({ s }: { s: BuildSettings }) {
 // ONE <h1> per view. Focus is moved to this h1 on the main→settings swap by App's ONE focus owner (UX-4,
 // lib/focus-move.ts) — NOT a local mount effect: only focus-move can also handle the settings→main return
 // (SettingsPage is unmounted by then). The frozen id `ad-settings-h1` is the anchor it targets.
-export function SettingsPage({ hasResults }: { hasResults: boolean }) {
+export function SettingsPage({
+  hasResults,
+  hiddenRules,
+  onChangeHiddenRules,
+}: {
+  hasResults: boolean;
+  /** The user's finding-type visibility set (view-prefs slice, App-owned + localStorage-durable). */
+  hiddenRules: ReadonlySet<Rule>;
+  /** Persist + apply a new hidden set (App threads this to saveHiddenRules + state). */
+  onChangeHiddenRules: (next: Set<Rule>) => void;
+}) {
   const { t } = useI18n();
   const { settings, patch } = useBuildSettings();
   return (
@@ -651,6 +733,9 @@ export function SettingsPage({ hasResults }: { hasResults: boolean }) {
         <p className="mt-2 max-w-xl font-mono text-[11px] leading-relaxed text-ink-soft">{t('settings.applyNote')}</p>
       </div>
       <div className="space-y-4">
+        {/* The diagnosis-VIEW filter goes FIRST (design §5): it applies immediately and is separate from the
+            build/export cards below (governed by the page-level "applies to the NEXT run" note). */}
+        <DiagnosisCard hidden={hiddenRules} onChange={onChangeHiddenRules} />
         <FormatsCard s={settings} patch={patch} />
         <ResolutionsCard s={settings} patch={patch} />
         <PackingCard s={settings} patch={patch} />

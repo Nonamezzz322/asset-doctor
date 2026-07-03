@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AnalysisReport, AssetMetrics, BundleAvailability, Finding, LazyMarking, Severity, SkinGuard } from '@asset-doctor/core';
+import type { AnalysisReport, AssetMetrics, BundleAvailability, Finding, LazyMarking, Rule, Severity, SkinGuard } from '@asset-doctor/core';
 import { bundleOf, cmp } from '@asset-doctor/analysis';
 import {
   filesFromDataTransfer,
@@ -35,7 +35,8 @@ import { VerdictBar } from './components/VerdictBar';
 import { TriageLedger } from './components/TriageLedger';
 import { PrimaryRecommendation } from './components/PrimaryRecommendation';
 import { useDebounced } from './lib/useDebounced';
-import { buildIndex, countCandidates, defaultSelectOpts, DEFAULT_SEVERITIES, DEFAULT_SORT, foldableFindingIds, isAssetAxis, looseRecommendation, selectRows, type LedgerRow, type SelectOpts, type SortKey } from './lib/triage';
+import { buildIndex, countCandidates, defaultSelectOpts, DEFAULT_SEVERITIES, DEFAULT_SORT, foldableFindingIds, isAssetAxis, looseRecommendation, selectRows, typeHiddenCount, type LedgerRow, type SelectOpts, type SortKey } from './lib/triage';
+import { loadHiddenRules, saveHiddenRules } from './lib/view-prefs';
 import { analysisReadyMessage, resultCountMessage } from './lib/announce';
 import { effectiveSeverityFilter } from './lib/ledger-empty';
 import { UNPARSED_DETAILS_ID, UNPARSED_SUMMARY_ID } from './lib/skipped-chip';
@@ -115,6 +116,18 @@ export function App() {
   const [sort, setSort] = useState<SortKey>(DEFAULT_SORT);
   const [search, setSearch] = useState(''); // raw input; debounced before it feeds the filter memo.
   const [severityFilter, setSeverityFilter] = useState<Set<Severity>>(() => new Set<Severity>(DEFAULT_SEVERITIES));
+  // ── Finding-TYPE visibility (view-prefs slice — an EXPLICIT, one-click-reversible USER filter, NEVER
+  //    silent suppression; invariant 3). UNLIKE severityFilter it is DURABLE (localStorage 'ad.hiddenRules',
+  //    the locale precedent) because the user set it "в настройках" — a sticky preference. Default = empty ⇒
+  //    the filter is a byte-identical no-op. Loaded once (lazy init, fail-closed); the persisting setter
+  //    writes storage + state together so the durable value and the live view can never diverge. It stores a
+  //    list of RULE NAMES only — never asset bytes — so invariant 1 (nothing leaves the device) is intact. ──
+  const [hiddenRules, setHiddenRules] = useState<Set<Rule>>(loadHiddenRules);
+  const setHiddenRulesPersisted = (next: Set<Rule>): void => {
+    saveHiddenRules(next);
+    setHiddenRules(next);
+  };
+  const clearHiddenRules = (): void => setHiddenRulesPersisted(new Set<Rule>());
   const [problemsOnly, setProblemsOnly] = useState(true);
   const [groupByFolder, setGroupByFolder] = useState(false);
   const [showClean, setShowClean] = useState(false);
@@ -187,7 +200,11 @@ export function App() {
       // analysis here (before the probe write-back), and autoSelectedFor is stamped so the probe re-set
       // never re-selects (correction #1).
       const firstIndex = buildIndex(rep);
-      const firstRows = selectRows(firstIndex, defaultSelectOpts());
+      // Respect the user's finding-type filter when picking the opening worst offender, so the ≤10s film/
+      // detail never lands on a type the user chose to hide. defaultSelectOpts() stays the ONE canonical
+      // default (empty hiddenRules); the live value is spread in here — the same one-source pattern the live
+      // selectOpts memo uses, so the two can't drift.
+      const firstRows = selectRows(firstIndex, { ...defaultSelectOpts(), hiddenRules });
       const worst = firstRows[0];
       setSelectedAsset((worst ?? undefined)?.assetRef ?? rep.assets[0]?.assetRef);
       setSelectedFinding(worst?.scope === 'asset' ? worst.id : undefined);
@@ -256,12 +273,14 @@ export function App() {
             // every synthesized ok row). Fresh Set (effectiveSeverityFilter never aliases state); deps already
             // list both severityFilter + showClean so the memo recomputes exactly as before.
             severityFilter: effectiveSeverityFilter(severityFilter, showClean),
+            // The finding-type filter (view-prefs) — a candidate predicate alongside severity. Empty ⇒ no-op.
+            hiddenRules,
             problemsOnly: effectiveProblemsOnly,
             includeClean: showClean,
             groupByFolder,
           }
         : null,
-    [index, sort, debouncedSearch, severityFilter, effectiveProblemsOnly, showClean, groupByFolder],
+    [index, sort, debouncedSearch, severityFilter, hiddenRules, effectiveProblemsOnly, showClean, groupByFolder],
   );
   const rows = useMemo(() => (index && selectOpts ? selectRows(index, selectOpts) : []), [index, selectOpts]);
   // Candidate count under the current severity/clean policy but ignoring search (the "of M" in "showing N
@@ -269,6 +288,14 @@ export function App() {
   // filter-only pass (no second full sort+group per keystroke — round11 #4); pure, deterministic.
   const totalRows = useMemo(
     () => (index && selectOpts ? countCandidates(index, selectOpts) : 0),
+    [index, selectOpts],
+  );
+  // Honest "H hidden by your finding-type filter" — how many MORE candidate rows the current view would show
+  // if the type filter were cleared (typeHiddenCount, design §1.3). Same axis/units as `totalRows` (M), so
+  // M + H can never contradict. 0 whenever hiddenRules is empty (guarded) ⇒ no H-line, byte-identical view.
+  // Drives BOTH the ledger H-line (when rows exist) and the type-filtered empty-card cause (when M===0).
+  const hiddenByType = useMemo(
+    () => (index && selectOpts ? typeHiddenCount(index, selectOpts) : 0),
     [index, selectOpts],
   );
   // ── Honest spam-collapse (spritesheet-first design §5.1/§1) — PRESENTATION ONLY (invariant 3). `foldIds` is
@@ -377,7 +404,11 @@ export function App() {
   // "Diagnosis ready. N problems." for that same moment — we only want the count on subsequent control changes.
   const countAnnouncedFor = useRef<AnalysisReport | null>(null);
   useEffect(() => {
-    if (!report || phase.t !== 'done') return;
+    // view guard: the finding-type filter lives on #settings, so toggling it changes visibleRows/totalRows
+    // while the ledger is display:none. Without this, "Showing N of M" would be spoken out of context on the
+    // settings page (competing with the DiagnosisCard's own hidden-count status). In-ledger controls
+    // (severity chips/search/sort/fold) still announce because they only run on the results view.
+    if (!report || phase.t !== 'done' || view === 'settings') return;
     if (countAnnouncedFor.current !== report) {
       // Fresh report: the diagnosis-ready announcement already covered this settle; arm for the NEXT change.
       countAnnouncedFor.current = report;
@@ -572,6 +603,8 @@ export function App() {
                   setShowClean={setShowClean}
                   resetSeverities={resetSeverities}
                   totalRows={totalRows}
+                  hiddenByType={hiddenByType}
+                  onClearHiddenRules={clearHiddenRules}
                   foldedCount={foldedCount}
                   foldOpen={foldOpen}
                   setFoldOpen={setFoldOpen}
@@ -592,9 +625,10 @@ export function App() {
                   <Findings findings={assetFindings} selectedId={selectedFinding} onSelect={setSelectedFinding} />
                   <FixCard files={files} buildNonce={buildNonce} />
                   {/* AB-R2 → settings-page: first-class deep-link to the build config. Gated on having files
-                      (inert otherwise). Now a real hash link to the Settings page, whose FIRST card ("Форматы
-                      вывода") carries PROFILE_PANEL_ANCHOR — Formats being the first card IS the landing spot,
-                      so no scroll bookkeeping is needed. */}
+                      (inert otherwise). A real hash link to the Settings page; the Formats card ("Форматы
+                      вывода") carries PROFILE_PANEL_ANCHOR as a stable target id. (The diagnosis view-filter
+                      card now precedes Formats on the page, so the link lands at the settings top, not
+                      directly on Formats — an accepted trade for surfacing the honest view filter first.) */}
                   {optimizeEntryEnabled(files.length, true) ? (
                     <a href={SETTINGS_HASH} className="block font-mono text-xs text-teal-text underline-offset-2 hover:underline">
                       {t(OPTIMIZE_ENTRY.anchorKey)}
@@ -616,7 +650,9 @@ export function App() {
           </div>
         )}
         </div>
-        {view === 'settings' ? <SettingsPage hasResults={!!report} /> : null}
+        {view === 'settings' ? (
+          <SettingsPage hasResults={!!report} hiddenRules={hiddenRules} onChangeHiddenRules={setHiddenRulesPersisted} />
+        ) : null}
       </main>
 
       {/* The landing footer — the app's first honest contentinfo landmark (a <footer> nested in <main>

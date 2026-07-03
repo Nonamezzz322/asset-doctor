@@ -40,6 +40,7 @@ const SORT_KEYS: SortKey[] = ['severity', 'wastedDisk', 'vram', 'occupancy'];
 const CARD_BORDER: Record<EmptyLedgerReason['kind'], string> = {
   clean: 'border-ok/40',
   filtered: 'border-teal/40',
+  'type-filtered': 'border-teal/40', // same filter-interaction color as the severity-filtered card
   search: 'border-line',
 };
 
@@ -212,6 +213,8 @@ export function TriageLedger({
   setShowClean,
   resetSeverities,
   totalRows,
+  hiddenByType,
+  onClearHiddenRules,
   foldedCount,
   foldOpen,
   setFoldOpen,
@@ -237,6 +240,12 @@ export function TriageLedger({
   resetSeverities: () => void;
   /** Total candidate rows under the current severity/clean policy (for "showing N of M"). */
   totalRows: number;
+  /** H — how many candidate rows the user's finding-TYPE filter is hiding (typeHiddenCount, design §1.3). 0
+   *  when nothing is hidden ⇒ no H-line (byte-identical). Same axis/units as `totalRows` so it never lies. */
+  hiddenByType: number;
+  /** Clear the user's finding-type filter (show every type) — the H-line's + type-filtered card's one-click
+   *  reset. Threads to App's clearHiddenRules (persists the empty set). */
+  onClearHiddenRules: () => void;
   /** Count of foldable rows (K) within the current post-search `rows` — stated verbatim on the toggle. The
    *  `rows` prop already has them removed while collapsed (App's visibleRows); this K is how many. 0 ⇒ no
    *  toggle (design §5.2). PRESENTATION only — the honest tally lives in the VerdictBar (index.tally). */
@@ -338,7 +347,7 @@ export function TriageLedger({
   const foldedAll = rows.length === 0 && foldedCount > 0;
   const empty =
     rows.length === 0 && !foldedAll
-      ? emptyLedgerCard(emptyLedgerReason(index.tally, rows.length, totalRows, index.cleanAssetCount, opts.search)!, t)
+      ? emptyLedgerCard(emptyLedgerReason(index.tally, rows.length, totalRows, index.cleanAssetCount, opts.search, hiddenByType)!, t)
       : null;
   // Re-home focus off a card action button that is about to unmount: onto the listbox (single tab stop, its
   // active option already reselected by App's orphan-reselect) when rows appear, else onto the search input
@@ -355,6 +364,7 @@ export function TriageLedger({
     pendingFocus.current = true;
     if (kind === 'clean') revealClean();
     else if (kind === 'filtered') resetSeverities();
+    else if (kind === 'type-filtered') onClearHiddenRules();
     else setSearch('');
   };
 
@@ -447,6 +457,27 @@ export function TriageLedger({
           {t('triage.showing', { n: rows.length, m: totalRows })}
         </div>
       )}
+
+      {/* Honest H-line (invariant 3 / design §1.2, §4): the type filter's control lives OFF-SCREEN on
+          #settings, so the ledger carries its own visibility affordance — "H hidden by your type filter" +
+          a one-click "show all types". Rendered only when H>0 AND rows exist; when the ledger is empty the
+          type-filtered empty-card already states it (no duplication). role=status so a screen reader hears
+          the count change. H is byte-identically 0 when nothing is hidden ⇒ this row never renders by default. */}
+      {/* Gated on `!empty` (not `rows.length>0`) so the affordance ALSO shows in the foldedAll corner (every
+          type-visible row folded away ⇒ rows.length===0 yet no empty card); when the type-filtered empty card
+          IS shown it already states H, so `!empty` avoids duplicating it. */}
+      {hiddenByType > 0 && !empty ? (
+        <div role="status" className="flex flex-wrap items-center gap-2 font-mono text-[10px] text-ink-soft">
+          <span>{t('triage.typeHidden.summary', { n: hiddenByType })}</span>
+          <button
+            type="button"
+            onClick={onClearHiddenRules}
+            className="rounded border border-line px-2 py-0.5 text-teal-text transition hover:border-teal"
+          >
+            {t('triage.typeHidden.clear')}
+          </button>
+        </div>
+      ) : null}
 
       {rows.length === 0 ? (
         // Cause-aware card replaces the old single cause-blind "no assets match these filters" <p>. Null in

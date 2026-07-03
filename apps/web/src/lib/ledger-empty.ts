@@ -11,6 +11,7 @@ import type { TriageIndex } from './triage';
 export type EmptyLedgerReason =
   | { kind: 'clean'; cleanCount: number } // zero problems in the report
   | { kind: 'filtered'; hiddenCount: number } // problems exist; severity filter hides all
+  | { kind: 'type-filtered'; hiddenCount: number } // problems exist; the user's finding-TYPE filter hides all
   | { kind: 'search'; query: string }; // candidates exist; search hides all
 
 /** Classify WHY the ledger is empty. Total (callable every render): returns null when rows exist, so the
@@ -24,13 +25,18 @@ export function emptyLedgerReason(
   totalRows: number,
   cleanAssetCount: number,
   search: string,
+  hiddenByType = 0,
 ): EmptyLedgerReason | null {
   if (rowCount > 0) return null;
   const problems = tally.crit + tally.warn + tally.info; // same formula as VerdictBar/announce
   if (totalRows === 0) {
-    return problems === 0
-      ? { kind: 'clean', cleanCount: cleanAssetCount }
-      : { kind: 'filtered', hiddenCount: problems }; // totalRows===0 ⇒ ALL problems hidden
+    // totalRows===0 ⇒ ALL problems are hidden. Attribute the cause the user can ACT on: if clearing the
+    // finding-type filter would reveal rows (hiddenByType>0) it is the type filter (an off-screen #settings
+    // control ⇒ the card must name it); otherwise it is the severity filter (today's behavior). hiddenByType
+    // is >0 only when the type set is non-empty, so an untouched run never reaches this branch (byte-identity).
+    if (problems === 0) return { kind: 'clean', cleanCount: cleanAssetCount };
+    if (hiddenByType > 0) return { kind: 'type-filtered', hiddenCount: hiddenByType };
+    return { kind: 'filtered', hiddenCount: problems };
   }
   // rowCount===0 && totalRows>0 ⇒ search non-empty BY CONSTRUCTION: countCandidates ≡
   // selectRows(...,{search:''}).length (triage.ts), and selectRows trims the needle — a blank search cannot
@@ -69,6 +75,16 @@ export function emptyLedgerCard(r: EmptyLedgerReason, t: T): EmptyLedgerCard {
         title: t('triage.empty.filtered.title'),
         body: t('triage.empty.filtered.body', { n: r.hiddenCount }),
         action: t('triage.empty.filtered.action'),
+        hideCounts: true,
+      };
+    case 'type-filtered':
+      return {
+        kind: 'type-filtered',
+        title: t('triage.empty.typeFiltered.title'),
+        body: t('triage.empty.typeFiltered.body', { n: r.hiddenCount }),
+        // Reuses the ledger H-line's EXACT "show all types" label — same one-click reset, same accessible
+        // name (consistency, not duplication).
+        action: t('triage.typeHidden.clear'),
         hideCounts: true,
       };
     case 'search':

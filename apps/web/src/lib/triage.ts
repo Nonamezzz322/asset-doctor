@@ -40,6 +40,10 @@ export interface LedgerRow {
   assetRef: string;
   severity: Severity;
   scope: 'asset' | 'folder';
+  /** The finding's TYPE (Finding.rule) — the axis the user's finding-type filter keys on (view-prefs.ts).
+   *  Set for every REAL finding row; undefined ONLY on a synthesized clean row (no backing finding), so a
+   *  clean row can never be type-hidden (it has no finding type to hide). */
+  rule?: Rule;
   /** True for a SYNTHESIZED clean-asset row (severity 'ok', no backing finding). The honest "show N
    *  clean" path surfaces one such row per clean asset; it carries NO metric badge / VRAM / OCC (a clean
    *  asset has no problem footprint to claim) so grouped rollups never inflate. false for every real finding. */
@@ -80,6 +84,11 @@ export interface SelectOpts {
   search: string;
   /** Severities to KEEP (the filter chips). A finding whose severity is absent is hidden. */
   severityFilter: Set<Severity>;
+  /** Finding TYPES the USER has chosen to HIDE (view-prefs.ts). A row whose rule is in this set is dropped
+   *  from the ledger — a visible, one-click-reversible user filter, NEVER silent suppression (invariant 3).
+   *  Optional + absent/empty ⇒ a no-op (show every type), so an untouched run is byte-identical (the whole
+   *  pre-existing suite is the pin). Synthesized clean rows (rule undefined) are never hidden by it. */
+  hiddenRules?: ReadonlySet<Rule>;
   /** Hide `ok` rows (the synthesized clean rows). With NO clean rows present this is inert, so the
    *  honest clean toggle drives `includeClean` instead — `problemsOnly` only matters once clean rows exist. */
   problemsOnly: boolean;
@@ -96,6 +105,11 @@ export interface SelectOpts {
  *  `severityFilter` is built per-caller (a fresh mutable Set) so toggling never aliases this constant. */
 export const DEFAULT_SORT: SortKey = 'severity';
 export const DEFAULT_SEVERITIES: readonly Severity[] = ['crit', 'warn', 'info'];
+
+/** The canonical empty hidden-rules set — "show every type". Shared (ReadonlySet-typed ⇒ never mutated) so
+ *  typeHiddenCount's cleared-filter pass and the default view never allocate a throwaway set. */
+const NO_HIDDEN_RULES: ReadonlySet<Rule> = new Set();
+
 export function defaultSelectOpts(): SelectOpts {
   return {
     sort: DEFAULT_SORT,
@@ -104,7 +118,18 @@ export function defaultSelectOpts(): SelectOpts {
     problemsOnly: true,
     includeClean: false,
     groupByFolder: false,
+    // Default = show every finding type ⇒ the type filter is a no-op ⇒ byte-identical to today.
+    hiddenRules: NO_HIDDEN_RULES,
   };
+}
+
+/** TYPE-visibility predicate (the user's explicit finding-type filter — invariant 3, NEVER silent app-side
+ *  suppression). A row is dropped IFF the user has hidden its rule. Synthesized clean rows (rule undefined)
+ *  are NEVER hidden — a clean asset has no finding TYPE to hide. Absent/empty hidden set ⇒ always true, so
+ *  the whole filter is a byte-identical no-op when the user has touched nothing. */
+function typeVisible(row: LedgerRow, hidden: ReadonlySet<Rule> | undefined): boolean {
+  if (hidden === undefined || hidden.size === 0) return true;
+  return row.rule === undefined || !hidden.has(row.rule);
 }
 
 const folderOf = (ref: string): string => {
@@ -133,6 +158,7 @@ export function buildIndex(report: AnalysisReport): TriageIndex {
       assetRef: f.assetRef,
       severity: f.severity,
       scope,
+      rule: f.rule,
       folder: folderOf(f.assetRef),
       relatedRefs: scope === 'folder' ? f.relatedRefs ?? [] : [],
       metric: {
@@ -250,6 +276,7 @@ export function selectRows(index: TriageIndex, opts: SelectOpts): LedgerRow[] {
   let rows = candidates.filter((r) => {
     if (opts.problemsOnly && r.severity === 'ok') return false;
     if (!opts.severityFilter.has(r.severity)) return false;
+    if (!typeVisible(r, opts.hiddenRules)) return false; // the user's finding-type filter (invariant 3)
     if (needle && !r.assetRef.toLowerCase().includes(needle)) return false;
     return true;
   });
@@ -289,10 +316,11 @@ export function countCandidates(index: TriageIndex, opts: SelectOpts): number {
   const candidates: LedgerRow[] = opts.includeClean
     ? [...index.rows, ...index.cleanAssets.map(cleanRow)]
     : index.rows;
-  // Severity/clean filter only — search is deliberately excluded (it's the numerator N's job to narrow).
+  // Severity/type/clean filter only — search is deliberately excluded (it's the numerator N's job to narrow).
   const filtered = candidates.filter((r) => {
     if (opts.problemsOnly && r.severity === 'ok') return false;
-    return opts.severityFilter.has(r.severity);
+    if (!opts.severityFilter.has(r.severity)) return false;
+    return typeVisible(r, opts.hiddenRules); // same type filter as selectRows ⇒ M stays consistent with N
   });
   // ASSET-axis sorts collapse to one row per asset (collapsePerAsset keys on assetRef), so the count is the
   // number of DISTINCT assetRefs, not the raw finding count. Finding-axis keeps every row.
@@ -300,6 +328,19 @@ export function countCandidates(index: TriageIndex, opts: SelectOpts): number {
   const refs = new Set<string>();
   for (const r of filtered) refs.add(r.assetRef);
   return refs.size;
+}
+
+/** How many MORE candidate rows the CURRENT view would show if the user cleared their finding-type filter —
+ *  the honest "H hidden by your type filter" count (design §1.3). Defined as the SAME candidate pool with
+ *  the type filter cleared minus the pool with it applied, on the SAME axis/units as countCandidates (== the
+ *  "of M" denominator), so H can never contradict M/N: `countCandidates(withType) + typeHiddenCount ===
+ *  countCandidates(noType)` by construction, and H ≥ 0 (monotonic — a filter can only shrink the pool).
+ *  Returns 0 whenever hiddenRules is absent/empty (early-out ⇒ no second pass, no H-line, byte-identical). */
+export function typeHiddenCount(index: TriageIndex, opts: SelectOpts): number {
+  if (opts.hiddenRules === undefined || opts.hiddenRules.size === 0) return 0;
+  const withType = countCandidates(index, opts);
+  const noType = countCandidates(index, { ...opts, hiddenRules: NO_HIDDEN_RULES });
+  return noType - withType;
 }
 
 /* ── Spritesheet-first presentation predicates (PRESENTATION ONLY — invariant 3) ──────────────────

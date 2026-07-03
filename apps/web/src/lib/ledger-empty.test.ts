@@ -38,6 +38,29 @@ describe('emptyLedgerReason — classifies the honest cause of an empty ledger',
   it('rowCount===0 & totalRows>0 ⇒ search, with the query trimmed', () => {
     expect(emptyLedgerReason(tally({ warn: 4 }), 0, 4, 0, '  hero_gl  ')).toEqual({ kind: 'search', query: 'hero_gl' });
   });
+
+  it('HONESTY: totalRows===0 & problems>0 & hiddenByType>0 ⇒ type-filtered, carrying the hidden-by-type count', () => {
+    // The type filter is the ACTIONABLE cause (clearing it reveals rows) and lives off-screen on #settings,
+    // so the card must name it. hiddenCount is the by-type count (5), never the problem tally.
+    expect(emptyLedgerReason(tally({ crit: 2, warn: 1, info: 0, ok: 9 }), 0, 0, 0, '', 5)).toEqual({
+      kind: 'type-filtered',
+      hiddenCount: 5,
+    });
+  });
+
+  it('type filter is attributed over severity when BOTH hid everything (it is the actionable, off-screen one)', () => {
+    expect(emptyLedgerReason(tally({ crit: 3 }), 0, 0, 0, '', 3)).toEqual({ kind: 'type-filtered', hiddenCount: 3 });
+  });
+
+  it('BYTE-IDENTITY: the pre-existing 5-arg call (hiddenByType defaults to 0) still ⇒ severity-filtered', () => {
+    // No 6th arg ⇒ hiddenByType=0 ⇒ today's behavior, unchanged. Explicit 0 is identical.
+    expect(emptyLedgerReason(tally({ crit: 2, warn: 1 }), 0, 0, 0, '')).toEqual({ kind: 'filtered', hiddenCount: 3 });
+    expect(emptyLedgerReason(tally({ crit: 2, warn: 1 }), 0, 0, 0, '', 0)).toEqual({ kind: 'filtered', hiddenCount: 3 });
+  });
+
+  it('clean wins even if hiddenByType>0 (no problems ⇒ nothing the type filter could reveal)', () => {
+    expect(emptyLedgerReason(tally({ ok: 5 }), 0, 0, 5, '', 4)).toEqual({ kind: 'clean', cleanCount: 5 });
+  });
 });
 
 // ── card model (fakeT: assert the key+params CHOICE) ────────────────────────────────────────────────
@@ -71,6 +94,14 @@ describe('emptyLedgerCard — key+params per kind, chosen purely', () => {
     expect(c.action).toBe('triage.empty.search.action:undefined');
     expect(c.hideCounts).toBe(false); // "showing 0 of M" is informative on a search miss
   });
+
+  it('type-filtered: title + hidden-count body + reuses triage.typeHidden.clear, hideCounts', () => {
+    const c = emptyLedgerCard({ kind: 'type-filtered', hiddenCount: 12 }, fakeT);
+    expect(c.title).toBe('triage.empty.typeFiltered.title:undefined');
+    expect(c.body).toBe('triage.empty.typeFiltered.body:{"n":12}');
+    expect(c.action).toBe('triage.typeHidden.clear:undefined'); // SAME key the ledger H-line clear uses
+    expect(c.hideCounts).toBe(true);
+  });
 });
 
 // ── EN render (enT: prove the copy pluralizes + fills placeholders) ─────────────────────────────────
@@ -96,6 +127,16 @@ describe('emptyLedgerCard — EN renders clean, correctly-pluralized copy', () =
     const c = emptyLedgerCard({ kind: 'search', query: 'hero_glow' }, enT);
     expect(c.title).toContain('hero_glow');
     expect(c.title).not.toContain('{');
+  });
+
+  it('type-filtered singular n=1 vs plural n=5, and the clear action fills no braces', () => {
+    const one = emptyLedgerCard({ kind: 'type-filtered', hiddenCount: 1 }, enT);
+    expect(one.body).toMatch(/1 problem is hidden by your finding-type filter/);
+    expect(one.body).not.toContain('{');
+    const many = emptyLedgerCard({ kind: 'type-filtered', hiddenCount: 5 }, enT);
+    expect(many.body).toMatch(/5 problems are hidden by your finding-type filter/);
+    expect(many.body).not.toContain('{');
+    expect(one.action).toBe('Show all finding types');
   });
 });
 
