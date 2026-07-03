@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'IBM Plex Sans',sans-serif;color:#16202A;background:#E7ECF1;-webkit-font-smoothing:antialiased}
+  ::selection{background:#0E8C8C;color:#fff}
+  input,button,select{font-family:inherit}
+  input::placeholder{color:#8593a0}
+  @keyframes ad-scan{0%{top:-6%;opacity:0}12%{opacity:.95}88%{opacity:.95}100%{top:104%;opacity:0}}
+  @keyframes ad-pulse{0%,100%{opacity:.5;transform:scale(1)}50%{opacity:1;transform:scale(1.3)}}
+  @keyframes ad-blink{0%,100%{opacity:1}50%{opacity:.3}}
+  @media (prefers-reduced-motion: reduce){ [data-anim]{animation:none!important} .ad-scanline{display:none!important} }
+</style>
+</helmet>
+
+<div style="display:flex;min-height:100vh;width:100%">
+
+  <!-- SIDEBAR -->
+  <aside style="width:236px;flex:none;background:#fff;border-right:1px solid #DCE3EA;display:flex;flex-direction:column;position:sticky;top:0;height:100vh">
+    <a href="Asset Doctor.dc.html" style="display:flex;align-items:center;gap:10px;text-decoration:none;padding:20px 20px 22px;border-bottom:1px solid #DCE3EA">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9.2" stroke="#0E8C8C" stroke-width="1.8"/><path d="M12 6.5v11M6.5 12h11" stroke="#0E8C8C" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <span style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:16px;letter-spacing:-.01em;color:#16202A">Asset Doctor</span>
+    </a>
+    <nav style="padding:14px 12px;display:flex;flex-direction:column;gap:2px;flex:1">
+      <button onClick="{{ goScan }}" style="{{ navScanStyle }}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" stroke-width="1.7"/><path d="M15.5 15.5L20 20" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        Scan &amp; results
+      </button>
+      <button onClick="{{ goSettings }}" style="{{ navSettingsStyle }}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        Settings
+      </button>
+      <button onClick="{{ goBilling }}" style="{{ navBillingStyle }}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><rect x="3" y="6" width="18" height="12" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M3 10h18" stroke="currentColor" stroke-width="1.7"/></svg>
+        Billing
+      </button>
+    </nav>
+    <div style="padding:14px;border-top:1px solid #DCE3EA">
+      <div style="background:#F4F7FA;border:1px solid #DCE3EA;border-radius:10px;padding:13px">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#8593a0;margin-bottom:6px">Current plan</div>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:15px;color:#16202A">Free</span>
+          <button onClick="{{ goBilling }}" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#0E8C8C;background:none;border:none;cursor:pointer;padding:0">Upgrade →</button>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main style="flex:1;min-width:0;max-height:100vh;overflow-y:auto">
+
+    <!-- ============ SCAN / RESULTS ============ -->
+    <sc-if value="{{ screenIsScan }}" hint-placeholder-val="{{ true }}">
+    <div style="padding:26px 34px 60px">
+      <!-- chart header -->
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap;margin-bottom:22px">
+        <div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#1F9D63;display:flex;align-items:center;gap:6px"><span style="width:7px;height:7px;border-radius:50%;background:#1F9D63;display:inline-block"></span>Diagnosis complete</span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8593a0">· 0.9s · in-browser</span>
+          </div>
+          <h1 style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:27px;letter-spacing:-.02em;margin:0;color:#16202A">slots_bundle/ <span style="font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:400;color:#8593a0">· 7 atlases · 214 sprites</span></h1>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="text-align:right">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#8593a0">Recoverable</div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:24px;font-weight:600;color:#15A06A">−43%</div>
+          </div>
+          <button style="font-weight:600;font-size:14.5px;color:#fff;background:#15A06A;border:none;padding:12px 20px;border-radius:9px;cursor:pointer;box-shadow:0 2px 6px rgba(21,160,106,.3)" style-hover="background:#128a5b">Download the fix</button>
+        </div>
+      </div>
+
+      <!-- budget strip -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px">
+        <div style="background:#fff;border:1px solid #DCE3EA;border-radius:12px;padding:16px 18px">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:#8593a0;margin-bottom:8px">VRAM footprint</div>
+          <div style="display:flex;align-items:baseline;gap:6px"><span style="font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:600;color:#E5484D">210</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8593a0">MB / 160 budget</span></div>
+          <div style="height:6px;background:#EEF2F6;border-radius:3px;margin-top:10px;overflow:hidden"><div style="height:100%;width:100%;background:linear-gradient(90deg,#D98A00,#E5484D)"></div></div>
+        </div>
+        <div style="background:#fff;border:1px solid #DCE3EA;border-radius:12px;padding:16px 18px">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:#8593a0;margin-bottom:8px">Draw calls</div>
+          <div style="display:flex;align-items:baseline;gap:6px"><span style="font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:600;color:#D98A00">128</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8593a0">/ 90 budget</span></div>
+          <div style="height:6px;background:#EEF2F6;border-radius:3px;margin-top:10px;overflow:hidden"><div style="height:100%;width:82%;background:#D98A00"></div></div>
+        </div>
+        <div style="background:#fff;border:1px solid #DCE3EA;border-radius:12px;padding:16px 18px">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:#8593a0;margin-bottom:8px">Disk size</div>
+          <div style="display:flex;align-items:baseline;gap:6px"><span style="font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:600;color:#2B8FC9">84</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8593a0">MB → 48 fixed</span></div>
+          <div style="height:6px;background:#EEF2F6;border-radius:3px;margin-top:10px;overflow:hidden"><div style="height:100%;width:57%;background:#2B8FC9"></div></div>
+        </div>
+        <div style="background:#fff;border:1px solid #DCE3EA;border-radius:12px;padding:16px 18px">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:#8593a0;margin-bottom:8px">Findings</div>
+          <div style="display:flex;align-items:baseline;gap:6px"><span style="font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:600;color:#16202A">11</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8593a0">· 3 crit</span></div>
+          <div style="display:flex;gap:4px;margin-top:11px"><span style="flex:3;height:6px;border-radius:3px;background:#E5484D"></span><span style="flex:4;height:6px;border-radius:3px;background:#D98A00"></span><span style="flex:4;height:6px;border-radius:3px;background:#2B8FC9"></span></div>
+        </div>
+      </div>
+
+      <!-- viewer + findings -->
+      <div style="display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:22px">
+        <!-- lightbox viewer -->
+        <div style="background:#0C1116;border:1px solid #1B2530;border-radius:14px;padding:14px;box-shadow:0 20px 50px -30px rgba(12,17,22,.5)">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:2px 4px 12px;font-family:'IBM Plex Mono',monospace">
+            <span style="font-size:12.5px;color:#9fb0bd">symbols.png <span style="color:#0C1116;background:#2B8FC9;padding:1px 5px;border-radius:4px;font-size:10px;font-weight:600;margin-left:4px">2048²</span></span>
+            <span style="font-size:11px;color:#566472">heatmap · alpha coverage</span>
+          </div>
+          <div id="ad-res-stage" style="position:relative;aspect-ratio:1/1;width:100%;border-radius:10px;overflow:hidden;background-color:#0A0E12;background-image:linear-gradient(#121A22 1px,transparent 1px),linear-gradient(90deg,#121A22 1px,transparent 1px);background-size:24px 24px">
+            <canvas id="ad-res-canvas" width="600" height="600" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+            <canvas id="ad-res-overlay" width="600" height="600" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+            <div class="ad-scanline" data-anim style="position:absolute;left:0;right:0;top:-6%;height:3px;background:linear-gradient(90deg,transparent,#0E8C8C,transparent);box-shadow:0 0 20px 5px rgba(14,140,140,.5);animation:ad-scan 2.4s ease-in-out .3s both;z-index:3"></div>
+            <div style="position:absolute;left:5%;top:74%;width:66%;height:21%;border:1px solid rgba(229,72,77,.8);border-radius:4px;pointer-events:none"><span style="position:absolute;bottom:6px;left:8px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#ffb3b5;background:rgba(12,17,22,.75);padding:3px 6px;border-radius:3px">42% empty · 16 MB VRAM</span></div>
+          </div>
+          <div style="display:flex;gap:16px;margin-top:12px;padding:0 4px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#9fb0bd">
+            <span style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:2px;background:rgba(229,72,77,.55)"></span>Empty</span>
+            <span style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:2px;background:rgba(217,138,0,.5)"></span>Transparent pad</span>
+            <span style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:2px;background:rgba(31,157,99,.5)"></span>Packed</span>
+          </div>
+        </div>
+
+        <!-- findings list -->
+        <div style="background:#fff;border:1px solid #DCE3EA;border-radius:14px;overflow:hidden;display:flex;flex-direction:column">
+          <div style="padding:16px 20px;border-bottom:1px solid #DCE3EA;display:flex;align-items:center;justify-content:space-between">
+            <h2 style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:17px;margin:0;color:#16202A">Findings, ranked by impact</h2>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8593a0">saving</span>
+          </div>
+          <sc-for list="{{ findings }}" as="f" hint-placeholder-count="6">
+            <div style="padding:15px 20px;border-bottom:1px solid #EEF2F6;display:flex;align-items:flex-start;gap:13px" style-hover="background:#FAFCFE">
+              <span style="width:9px;height:9px;border-radius:50%;margin-top:5px;flex:none;background:{{ f.color }}"></span>
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:{{ f.color }}">{{ f.sev }}</span>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8593a0">{{ f.file }}</span>
+                </div>
+                <div style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:15px;color:#16202A;margin-bottom:2px">{{ f.title }}</div>
+                <div style="font-size:13px;line-height:1.45;color:#566472">{{ f.detail }}</div>
+              </div>
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:600;color:#15A06A;white-space:nowrap;margin-top:2px">{{ f.save }}</span>
+            </div>
+          </sc-for>
+          <div style="padding:14px 20px;text-align:center;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#0E8C8C;cursor:pointer" style-hover="background:#F4F7FA">Show all 11 findings ↓</div>
+        </div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- ============ SETTINGS ============ -->
+    <sc-if value="{{ screenIsSettings }}" hint-placeholder-val="{{ false }}">
+    <div style="padding:26px 34px 60px;max-width:840px">
+      <h1 style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:27px;letter-spacing:-.02em;margin:0 0 4px;color:#16202A">Settings</h1>
+      <p style="font-size:15px;color:#566472;margin:0 0 28px">Tune what the diagnosis flags and how the fix is generated. All analysis runs on your device.</p>
+
+      <!-- ANALYSIS -->
+      <div style="background:#fff;border:1px solid #DCE3EA;border-radius:14px;padding:26px;margin-bottom:20px">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#0E8C8C;margin-bottom:20px">Analysis</div>
+
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:20px;padding:14px 0;border-bottom:1px solid #EEF2F6">
+          <div><div style="font-weight:600;font-size:15px;color:#16202A;margin-bottom:2px">Platform target</div><div style="font-size:13.5px;color:#566472">Sets format and size heuristics.</div></div>
+          <div style="display:flex;background:#F4F7FA;border:1px solid #DCE3EA;border-radius:8px;padding:3px;gap:2px;flex:none">
+            <button onClick="{{ setPlatMobile }}" style="{{ platMobileStyle }}">Mobile</button>
+            <button onClick="{{ setPlatDesktop }}" style="{{ platDesktopStyle }}">Desktop</button>
+            <button onClick="{{ setPlatWeb }}" style="{{ platWebStyle }}">Web</button>
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:20px;padding:14px 0;border-bottom:1px solid #EEF2F6">
+          <div><div style="font-weight:600;font-size:15px;color:#16202A;margin-bottom:2px">Preferred output format</div><div style="font-size:13.5px;color:#566472">What the fix converts eligible textures to.</div></div>
+          <div style="display:flex;background:#F4F7FA;border:1px solid #DCE3EA;border-radius:8px;padding:3px;gap:2px;flex:none">
+            <button onClick="{{ setFmtWebp }}" style="{{ fmtWebpStyle }}">WebP</button>
+            <button onClick="{{ setFmtPng }}" style="{{ fmtPngStyle }}">PNG</button>
+            <button onClick="{{ setFmtAvif }}" style="{{ fmtAvifStyle }}">AVIF</button>
+          </div>
+        </div>
+
+        <div style="padding:16px 0 8px;border-bottom:1px solid #EEF2F6">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <div><div style="font-weight:600;font-size:15px;color:#16202A;margin-bottom:2px">Empty-space threshold</div><div style="font-size:13.5px;color:#566472">Flag atlases with more wasted area than this.</div></div>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;color:#0E8C8C">{{ emptyPct }}%</span>
+          </div>
+          <input type="range" min="10" max="60" step="5" value="{{ emptyRaw }}" onInput="{{ setEmpty }}" style="width:100%;accent-color:#0E8C8C" />
+        </div>
+
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:20px;padding:16px 0 6px">
+          <div><div style="font-weight:600;font-size:15px;color:#16202A;margin-bottom:2px">Max useful texture size</div><div style="font-size:13.5px;color:#566472">Textures never rendered above this are flagged oversized.</div></div>
+          <select value="{{ maxSize }}" onChange="{{ setMaxSize }}" style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#16202A;background:#F4F7FA;border:1px solid #DCE3EA;border-radius:8px;padding:9px 12px;cursor:pointer">
+            <option>512</option><option>1024</option><option>2048</option><option>4096</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- BUDGETS -->
+      <div style="background:#fff;border:1px solid #DCE3EA;border-radius:14px;padding:26px;margin-bottom:20px">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#0E8C8C;margin-bottom:6px">Budgets <span style="color:#8593a0;text-transform:none;letter-spacing:0">· used for CI gates on Studio</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:16px">
+          <div>
+            <label style="display:block;font-weight:600;font-size:14px;color:#16202A;margin-bottom:7px">VRAM budget (MB)</label>
+            <input type="number" value="160" style="width:100%;font-family:'IBM Plex Mono',monospace;font-size:15px;color:#16202A;background:#F4F7FA;border:1px solid #DCE3EA;border-radius:8px;padding:10px 12px" style-focus="border-color:#0E8C8C;background:#fff" />
+          </div>
+          <div>
+            <label style="display:block;font-weight:600;font-size:14px;color:#16202A;margin-bottom:7px">Draw-call budget</label>
+            <input type="number" value="90" style="width:100%;font-family:'IBM Plex Mono',monospace;font-size:15px;color:#16202A;background:#F4F7FA;border:1px solid #DCE3EA;border-radius:8px;padding:10px 12px" style-focus="border-color:#0E8C8C;background:#fff" />
+          </div>
+        </div>
+      </div>
+
+      <!-- TOGGLES / PRIVACY -->
+      <div style="background:#fff;border:1px solid #DCE3EA;border-radius:14px;padding:8px 26px;margin-bottom:20px">
+        <div onClick="{{ toggleWebp }}" style="display:flex;align-items:center;justify-content:space-between;padding:18px 0;border-bottom:1px solid #EEF2F6;cursor:pointer">
+          <div><div style="font-weight:600;font-size:15px;color:#16202A;margin-bottom:2px">Auto-convert to WebP in fixes</div><div style="font-size:13.5px;color:#566472">Skip formats the target platform can't decode.</div></div>
+          <span style="{{ swWebpTrack }}"><span style="{{ swWebpKnob }}"></span></span>
+        </div>
+        <div onClick="{{ toggleStrip }}" style="display:flex;align-items:center;justify-content:space-between;padding:18px 0;border-bottom:1px solid #EEF2F6;cursor:pointer">
+          <div><div style="font-weight:600;font-size:15px;color:#16202A;margin-bottom:2px">Strip metadata &amp; color profiles</div><div style="font-size:13.5px;color:#566472">Removes EXIF/ICC the runtime never reads.</div></div>
+          <span style="{{ swStripTrack }}"><span style="{{ swStripKnob }}"></span></span>
+        </div>
+        <div onClick="{{ toggleOrphans }}" style="display:flex;align-items:center;justify-content:space-between;padding:18px 0;cursor:pointer">
+          <div><div style="font-weight:600;font-size:15px;color:#16202A;margin-bottom:2px">Report orphaned assets</div><div style="font-size:13.5px;color:#566472">Flag files nothing in the build references.</div></div>
+          <span style="{{ swOrphansTrack }}"><span style="{{ swOrphansKnob }}"></span></span>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:9px;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#1F9D63;padding:2px 4px">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3z" stroke="#1F9D63" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 12l2.2 2.2L15.5 10" stroke="#1F9D63" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        All analysis runs in-browser. No asset or setting leaves your device.
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- ============ BILLING ============ -->
+    <sc-if value="{{ screenIsBilling }}" hint-placeholder-val="{{ false }}">
+    <div style="padding:26px 34px 60px">
+      <h1 style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:27px;letter-spacing:-.02em;margin:0 0 4px;color:#16202A">Upgrade your plan</h1>
+      <p style="font-size:15px;color:#566472;margin:0 0 22px">Diagnosis is always free. Pay to download the fix and gate your pipeline.</p>
+
+      <!-- cycle toggle -->
+      <div style="display:inline-flex;background:#fff;border:1px solid #DCE3EA;border-radius:9px;padding:3px;gap:2px;margin-bottom:24px">
+        <button onClick="{{ setMonthly }}" style="{{ cycleMonthlyStyle }}">Monthly</button>
+        <button onClick="{{ setAnnual }}" style="{{ cycleAnnualStyle }}">Annual <span style="color:#15A06A">−20%</span></button>
+      </div>
+
+      <div style="display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:24px;align-items:start">
+        <!-- plans -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div onClick="{{ pickPro }}" style="{{ planProCard }}">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+              <h3 style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:20px;margin:0;color:#16202A">Pro</h3>
+              <span style="{{ planProRadio }}"><span style="{{ planProDot }}"></span></span>
+            </div>
+            <div style="display:flex;align-items:baseline;gap:4px;margin-bottom:14px"><span style="font-family:'IBM Plex Mono',monospace;font-size:28px;font-weight:600;color:#16202A">${{ proPrice }}</span><span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#8593a0">/mo</span></div>
+            <div style="font-size:13.5px;line-height:1.7;color:#566472">
+              <div>✓ Download the optimized folder</div>
+              <div>✓ Batch &amp; history</div>
+              <div>✓ Build-to-build diffs</div>
+            </div>
+          </div>
+          <div onClick="{{ pickStudio }}" style="{{ planStudioCard }}">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+              <h3 style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:20px;margin:0;color:#16202A">Studio</h3>
+              <span style="{{ planStudioRadio }}"><span style="{{ planStudioDot }}"></span></span>
+            </div>
+            <div style="display:flex;align-items:baseline;gap:4px;margin-bottom:14px"><span style="font-family:'IBM Plex Mono',monospace;font-size:28px;font-weight:600;color:#16202A">${{ studioPrice }}</span><span style="font-family:'IBM Plex Mono',monospace;font-size:13px;color:#8593a0">/mo</span></div>
+            <div style="font-size:13.5px;line-height:1.7;color:#566472">
+              <div>✓ Everything in Pro</div>
+              <div>✓ Budget gates in CI</div>
+              <div>✓ Team seats &amp; SSO</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- order + card -->
+        <div style="background:#fff;border:1px solid #DCE3EA;border-radius:14px;padding:24px;box-shadow:0 16px 40px -30px rgba(22,32,42,.4)">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#8593a0;margin-bottom:16px">Order summary</div>
+          <div style="display:flex;justify-content:space-between;font-size:14px;color:#566472;padding:6px 0"><span>{{ orderPlan }} · {{ orderCycle }}</span><span style="font-family:'IBM Plex Mono',monospace;color:#16202A">${{ orderSub }}</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:14px;color:#566472;padding:6px 0;border-bottom:1px solid #EEF2F6;margin-bottom:8px"><span>{{ orderDiscLabel }}</span><span style="font-family:'IBM Plex Mono',monospace;color:#15A06A">{{ orderDisc }}</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;padding:8px 0 18px"><span style="font-weight:600;font-size:15px;color:#16202A">Total today</span><span style="font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:600;color:#16202A">${{ orderTotal }}</span></div>
+
+          <div style="display:flex;flex-direction:column;gap:11px">
+            <input placeholder="Card number" inputmode="numeric" style="width:100%;font-family:'IBM Plex Mono',monospace;font-size:14px;color:#16202A;background:#F4F7FA;border:1px solid #DCE3EA;border-radius:8px;padding:11px 13px" style-focus="border-color:#0E8C8C;background:#fff" />
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">
+              <input placeholder="MM / YY" style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#16202A;background:#F4F7FA;border:1px solid #DCE3EA;border-radius:8px;padding:11px 13px" style-focus="border-color:#0E8C8C;background:#fff" />
+              <input placeholder="CVC" inputmode="numeric" style="font-family:'IBM Plex Mono',monospace;font-size:14px;color:#16202A;background:#F4F7FA;border:1px solid #DCE3EA;border-radius:8px;padding:11px 13px" style-focus="border-color:#0E8C8C;background:#fff" />
+            </div>
+          </div>
+          <button onClick="{{ pay }}" style="width:100%;margin-top:16px;font-weight:600;font-size:15px;color:#fff;background:#15A06A;border:none;padding:13px;border-radius:9px;cursor:pointer;box-shadow:0 2px 6px rgba(21,160,106,.3)" style-hover="background:#128a5b">{{ payLabel }}</button>
+          <div style="display:flex;align-items:center;justify-content:center;gap:7px;margin-top:13px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8593a0">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="9" rx="2" stroke="#8593a0" stroke-width="1.7"/><path d="M8 11V8a4 4 0 018 0v3" stroke="#8593a0" stroke-width="1.7"/></svg>
+            Encrypted · cancel anytime
+          </div>
+        </div>
+      </div>
+    </div>
+    </sc-if>
+
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280,&quot;height&quot;:880}}">
+class Component extends DCLogic {
+  state = {
+    screen: 'scan',
+    platform: 'mobile',
+    format: 'webp',
+    empty: 25,
+    maxSize: '1024',
+    webp: true,
+    strip: true,
+    orphans: true,
+    plan: 'pro',
+    cycle: 'annual',
+    paid: false,
+  };
+
+  navStyle(active) {
+    const base = 'display:flex;align-items:center;gap:11px;width:100%;text-align:left;padding:10px 12px;border:none;border-radius:9px;cursor:pointer;font-family:\'IBM Plex Sans\',sans-serif;font-size:14.5px;font-weight:500;';
+    return active
+      ? base + 'background:#0E8C8C;color:#fff'
+      : base + 'background:transparent;color:#566472';
+  }
+  seg(active) {
+    const base = 'padding:7px 13px;border:none;border-radius:6px;cursor:pointer;font-family:\'IBM Plex Mono\',monospace;font-size:12.5px;font-weight:500;transition:all .15s;';
+    return active ? base + 'background:#0E8C8C;color:#fff' : base + 'background:transparent;color:#566472';
+  }
+  cyc(active) {
+    const base = 'padding:8px 16px;border:none;border-radius:7px;cursor:pointer;font-family:\'IBM Plex Sans\',sans-serif;font-size:13.5px;font-weight:600;';
+    return active ? base + 'background:#16202A;color:#fff' : base + 'background:transparent;color:#566472';
+  }
+  swTrack(on) {
+    return 'width:42px;height:24px;border-radius:12px;flex:none;position:relative;transition:background .18s;background:' + (on ? '#15A06A' : '#CBD5DE') + ';display:inline-block';
+  }
+  swKnob(on) {
+    return 'position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .18s;transform:translateX(' + (on ? '18px' : '0') + ')';
+  }
+  planCard(active) {
+    const base = 'border-radius:14px;padding:20px;cursor:pointer;transition:all .15s;background:#fff;';
+    return active ? base + 'border:2px solid #0E8C8C;box-shadow:0 8px 24px -14px rgba(14,140,140,.5)' : base + 'border:1px solid #DCE3EA';
+  }
+  radio(active) {
+    return 'width:20px;height:20px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;border:2px solid ' + (active ? '#0E8C8C' : '#CBD5DE');
+  }
+  dot(active) {
+    return 'width:10px;height:10px;border-radius:50%;background:' + (active ? '#0E8C8C' : 'transparent');
+  }
+
+  renderVals() {
+    const s = this.state;
+    const set = (k, v) => () => this.setState({ [k]: v });
+    const tog = (k) => () => this.setState((st) => ({ [k]: !st[k] }));
+
+    const prices = { pro: { monthly: 19, annual: 15 }, studio: { monthly: 49, annual: 39 } };
+    const proPrice = prices.pro[s.cycle];
+    const studioPrice = prices.studio[s.cycle];
+    const unit = prices[s.plan][s.cycle];
+    const months = s.cycle === 'annual' ? 12 : 1;
+    const sub = s.cycle === 'annual' ? Math.round(unit / 0.8) * months : unit;
+    const total = unit * months;
+    const disc = sub - total;
+
+    return {
+      findings: [
+        { color: '#E5484D', sev: 'crit', file: 'symbols.png', title: 'Wasted atlas space', detail: '42% of the sheet is empty but still allocates 16 MB VRAM.', save: '−16 MB' },
+        { color: '#E5484D', sev: 'crit', file: 'bg_4k.png', title: 'Oversized texture', detail: '4096² art never renders above 1024 — downscale is safe.', save: '−12 MB' },
+        { color: '#E5484D', sev: 'crit', file: 'reels/*.png', title: 'Wrong format for platform', detail: '9 PNGs would ship as WebP at 38% the size, lossless.', save: '−9 MB' },
+        { color: '#D98A00', sev: 'warn', file: 'coin_fx.png', title: 'Premultiplied alpha error', detail: 'Dark fringing along transparent edges on composite.', save: 'fix' },
+        { color: '#D98A00', sev: 'warn', file: 'ui_atlas.png', title: 'Duplicate art, 2 names', detail: 'button_a.png is byte-identical to btn_primary.png.', save: '−2 MB' },
+        { color: '#2B8FC9', sev: 'info', file: 'old/', title: 'Orphaned assets', detail: '14 files nothing in the build references.', save: '−4 MB' },
+      ],
+      screenIsScan: s.screen === 'scan',
+      screenIsSettings: s.screen === 'settings',
+      screenIsBilling: s.screen === 'billing',
+      navScanStyle: this.navStyle(s.screen === 'scan'),
+      navSettingsStyle: this.navStyle(s.screen === 'settings'),
+      navBillingStyle: this.navStyle(s.screen === 'billing'),
+      goScan: set('screen', 'scan'),
+      goSettings: set('screen', 'settings'),
+      goBilling: set('screen', 'billing'),
+
+      platMobileStyle: this.seg(s.platform === 'mobile'),
+      platDesktopStyle: this.seg(s.platform === 'desktop'),
+      platWebStyle: this.seg(s.platform === 'web'),
+      setPlatMobile: set('platform', 'mobile'),
+      setPlatDesktop: set('platform', 'desktop'),
+      setPlatWeb: set('platform', 'web'),
+      fmtWebpStyle: this.seg(s.format === 'webp'),
+      fmtPngStyle: this.seg(s.format === 'png'),
+      fmtAvifStyle: this.seg(s.format === 'avif'),
+      setFmtWebp: set('format', 'webp'),
+      setFmtPng: set('format', 'png'),
+      setFmtAvif: set('format', 'avif'),
+      emptyPct: s.empty,
+      emptyRaw: s.empty,
+      setEmpty: (e) => this.setState({ empty: parseInt(e.target.value, 10) }),
+      maxSize: s.maxSize,
+      setMaxSize: (e) => this.setState({ maxSize: e.target.value }),
+
+      swWebpTrack: this.swTrack(s.webp), swWebpKnob: this.swKnob(s.webp), toggleWebp: tog('webp'),
+      swStripTrack: this.swTrack(s.strip), swStripKnob: this.swKnob(s.strip), toggleStrip: tog('strip'),
+      swOrphansTrack: this.swTrack(s.orphans), swOrphansKnob: this.swKnob(s.orphans), toggleOrphans: tog('orphans'),
+
+      cycleMonthlyStyle: this.cyc(s.cycle === 'monthly'),
+      cycleAnnualStyle: this.cyc(s.cycle === 'annual'),
+      setMonthly: set('cycle', 'monthly'),
+      setAnnual: set('cycle', 'annual'),
+      proPrice, studioPrice,
+      planProCard: this.planCard(s.plan === 'pro'),
+      planStudioCard: this.planCard(s.plan === 'studio'),
+      planProRadio: this.radio(s.plan === 'pro'), planProDot: this.dot(s.plan === 'pro'),
+      planStudioRadio: this.radio(s.plan === 'studio'), planStudioDot: this.dot(s.plan === 'studio'),
+      pickPro: set('plan', 'pro'),
+      pickStudio: set('plan', 'studio'),
+
+      orderPlan: s.plan === 'pro' ? 'Pro' : 'Studio',
+      orderCycle: s.cycle === 'annual' ? 'annual' : 'monthly',
+      orderSub: sub,
+      orderDiscLabel: s.cycle === 'annual' ? 'Annual discount (−20%)' : 'No discount',
+      orderDisc: disc > 0 ? '−$' + disc : '$0',
+      orderTotal: total,
+      payLabel: s.paid ? '✓ Subscribed' : ('Pay $' + total + ' — start ' + (s.plan === 'pro' ? 'Pro' : 'Studio')),
+      pay: () => this.setState({ paid: true }),
+    };
+  }
+
+  componentDidMount() {
+    this.rm = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    this.scheduleDraw();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => this.scheduleDraw());
+  }
+  componentDidUpdate() {
+    if (this.state.screen === 'scan') this.scheduleDraw();
+  }
+  scheduleDraw() {
+    // redraw across a few frames — the runtime may remount the canvas after render, wiping paint
+    [0, 60, 200, 500].forEach((d) => setTimeout(() => this.drawResultsAtlas(), d));
+  }
+
+  drawResultsAtlas() {
+    const cv = document.getElementById('ad-res-canvas');
+    const ov = document.getElementById('ad-res-overlay');
+    if (!cv || !ov) return;
+    try {
+    const ctx = cv.getContext('2d');
+    const octx = ov.getContext('2d');
+    const W = cv.width, H = cv.height;
+    ctx.clearRect(0, 0, W, H);
+    octx.clearRect(0, 0, W, H);
+    const teal = '#0E8C8C', info = '#2B8FC9', ok = '#1F9D63', warn = '#D98A00', crit = '#E5484D';
+    const cells = [
+      [0.06,0.06,'seven',crit],[0.30,0.06,'gem',info],[0.54,0.06,'star',warn],
+      [0.06,0.30,'bell',warn],[0.30,0.30,'coin',ok],[0.54,0.30,'bar',teal],
+      [0.06,0.54,'cherry',crit],[0.30,0.54,'clover',ok]
+    ];
+    const s = 0.18 * W;
+    cells.forEach(([gx,gy,type,color]) => this.glyph(ctx, gx*W, gy*H, s, type, color));
+    // heatmap overlay: empty bottom-right & bottom strip red, top-left pad amber
+    octx.fillStyle = 'rgba(229,72,77,0.22)';
+    octx.fillRect(0.72*W, 0, 0.28*W, H);
+    octx.fillRect(0, 0.72*H, 0.72*W, 0.28*H);
+    octx.fillStyle = 'rgba(217,138,0,0.18)';
+    octx.fillRect(0.045*W, 0.045*H, 0.19*W, 0.19*H);
+    } catch (e) { window.__drawErr = e.message; }
+  }
+  glyph(ctx, x, y, s, type, color) {
+    ctx.save(); ctx.translate(x, y);
+    ctx.shadowColor = color; ctx.shadowBlur = 14;
+    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 3.5;
+    const c = s / 2;
+    if (type === 'seven') { ctx.font = '600 ' + (s*0.82) + "px 'IBM Plex Mono', monospace"; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('7', c, c+2); }
+    else if (type === 'bar') { ctx.font = '700 ' + (s*0.3) + "px 'Space Grotesk', sans-serif"; ctx.textAlign='center'; ctx.textBaseline='middle'; this.rr(ctx,s*0.1,s*0.3,s*0.8,s*0.4,6); ctx.stroke(); ctx.fillText('BAR', c, c+1); }
+    else if (type === 'gem') { ctx.beginPath(); ctx.moveTo(c,s*0.12); ctx.lineTo(s*0.86,c); ctx.lineTo(c,s*0.88); ctx.lineTo(s*0.14,c); ctx.closePath(); ctx.stroke(); ctx.beginPath(); ctx.moveTo(s*0.14,c); ctx.lineTo(s*0.86,c); ctx.moveTo(c,s*0.12); ctx.lineTo(c,s*0.88); ctx.stroke(); }
+    else if (type === 'star') { this.star(ctx,c,c,s*0.42,s*0.18,5); ctx.stroke(); }
+    else if (type === 'bell') { ctx.beginPath(); ctx.moveTo(s*0.22,s*0.72); ctx.quadraticCurveTo(s*0.22,s*0.28,c,s*0.2); ctx.quadraticCurveTo(s*0.78,s*0.28,s*0.78,s*0.72); ctx.closePath(); ctx.stroke(); ctx.beginPath(); ctx.arc(c,s*0.8,s*0.07,0,7); ctx.fill(); }
+    else if (type === 'coin') { ctx.beginPath(); ctx.arc(c,c,s*0.36,0,7); ctx.stroke(); ctx.beginPath(); ctx.arc(c,c,s*0.22,0,7); ctx.stroke(); }
+    else if (type === 'cherry') { ctx.beginPath(); ctx.arc(s*0.32,s*0.68,s*0.16,0,7); ctx.stroke(); ctx.beginPath(); ctx.arc(s*0.66,s*0.74,s*0.14,0,7); ctx.stroke(); ctx.beginPath(); ctx.moveTo(s*0.32,s*0.52); ctx.quadraticCurveTo(s*0.6,s*0.18,s*0.66,s*0.6); ctx.stroke(); }
+    else if (type === 'clover') { [[c,s*0.34],[s*0.34,c],[s*0.66,c]].forEach(([px,py])=>{ctx.beginPath();ctx.arc(px,py,s*0.16,0,7);ctx.stroke();}); }
+    ctx.restore();
+  }
+  rr(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+  star(ctx,cx,cy,outer,inner,points){ctx.beginPath();for(let i=0;i<points*2;i++){const r=i%2?inner:outer;const a=Math.PI*i/points-Math.PI/2;ctx.lineTo(cx+Math.cos(a)*r,cy+Math.sin(a)*r);}ctx.closePath();}
+}
+</script>
+</body>
+</html>
