@@ -130,6 +130,35 @@ export function alphaFullyOpaque(rgba: Uint8ClampedArray | number[]): boolean {
   return true;
 }
 
+/** Below this per-channel FULL-RESOLUTION min↔max spread, the channel reads as one value. A small
+ *  band (not 0) tolerates lossy-format ringing on a genuinely flat fill; any REAL feature swings a
+ *  channel far past it. Full-res sibling of SOLID_STD (which gates the 9×8 sample). */
+export const SOLID_FULL_TOL = 8;
+
+/** True iff EVERY pixel is within a per-channel band of one color — the FULL-RESOLUTION confirmation
+ *  of the 9×8 `isSolidColor` pre-filter. Tracks per-channel min/max over the interleaved RGBA
+ *  (alpha included: a fully-transparent image is 0,0,0,0 everywhere ⇒ solid; a hard cutout swings
+ *  alpha 0↔255 ⇒ NOT solid). SHORT-CIRCUITS false the moment any channel's spread exceeds `tol`, so a
+ *  non-solid image (a real feature) bails as soon as the scan reaches it. An empty buffer ⇒ false
+ *  (never claim a saving on no data). Pure integer read, deterministic — and, unlike the 9×8
+ *  downsample, resampler-INDEPENDENT (the full-res draw is 1:1, no canvas resampling). */
+export function isSolidFullRes(rgba: Uint8ClampedArray | Uint8Array | number[], tol = SOLID_FULL_TOL): boolean {
+  const n = Math.floor(rgba.length / 4);
+  if (n === 0) return false;
+  const mn = [255, 255, 255, 255];
+  const mx = [0, 0, 0, 0];
+  for (let p = 0; p < n; p++) {
+    const b = p * 4;
+    for (let c = 0; c < 4; c++) {
+      const v = rgba[b + c] ?? 0;
+      if (v < mn[c]!) mn[c] = v;
+      if (v > mx[c]!) mx[c] = v;
+      if (mx[c]! - mn[c]! > tol) return false; // a real feature — bail immediately
+    }
+  }
+  return true;
+}
+
 /** Axis-aligned packed rect of a sprite AS PLACED in the atlas page (already w/h-swapped when rotated). */
 export interface FrameRect {
   x: number;

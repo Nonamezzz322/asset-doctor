@@ -16,6 +16,16 @@
     "other": "{n} Sprites gebündelt"
   },
   "readout.measuredTooltip": "Tatsächlicher decodierter Textur-Footprint, gemessen per echtem WebGL-Render — weicht von der deklarierten Schätzung ab, wenn die Manifest-Größe ≠ den realen Pixeln des Bildes ist. Keine Einsparung, sondern eine andere Größe.",
+  "readout.measuredScope": {
+    "$count": "n",
+    "one": "{n} Atlas",
+    "other": "{n} Atlanten"
+  },
+  "readout.measuredAggregateTooltip": {
+    "$count": "n",
+    "one": "Summiert über {n} geprüften Atlas (alle Varianten-Stufen; lose und ungeprüfte Bilder ausgeschlossen). Die deklarierte vram daneben ist das geladene Set des gesamten Ordners — eine Stufe pro Bild. Gleichwertig verglichen liegt die deklarierte Schätzung dieser Atlanten bei {declared:bytes}; der gemessene Wert weicht ab, wenn die Manifest-Geometrie ≠ den dekodierten Pixeln ist. Keine Ersparnis; eine andere Größe.",
+    "other": "Summiert über {n} geprüfte Atlanten (alle Varianten-Stufen; lose und ungeprüfte Bilder ausgeschlossen). Die deklarierte vram daneben ist das geladene Set des gesamten Ordners — eine Stufe pro Bild. Gleichwertig verglichen liegt die deklarierte Schätzung dieser Atlanten bei {declared:bytes}; der gemessene Wert weicht ab, wenn die Manifest-Geometrie ≠ den dekodierten Pixeln ist. Keine Ersparnis; eine andere Größe."
+  },
   "readout.breakdown": "vram-aufschlüsselung",
   "readout.mipCeiling": "wenn mipmaps an",
   "readout.mipCeilingTooltip": "Obergrenze bei aktivierten Mipmaps (Pixi/Phaser autoGenerateMipmaps): Basis × 4/3 (+33%). Eine Obergrenze, keine bestätigte Belegung — deaktivierte Mipmaps kosten hier nichts.",

@@ -12,15 +12,25 @@
       "w": 576,
       "h": 512,
       "solid": true,
-      "why": "one solid opaque color edge to edge → every per-channel stdDev ≈ 0 < SOLID_STD (2)"
+      "solidFullRes": true,
+      "why": "one solid opaque color edge to edge → every per-channel stdDev ≈ 0 < SOLID_STD (2); full-res spread 0 ≤ SOLID_FULL_TOL (8)"
     },
     {
       "name": "framed.png",
       "w": 576,
       "h": 512,
       "solid": false,
-      "why": "solid center with a 64px (one full 9×8 cell) perimeter of a different color → edge cells differ from interior by the full delta after box-average → above SOLID_STD"
+      "solidFullRes": false,
+      "why": "solid center with a 64px (one full 9×8 cell) perimeter of a different color → edge cells differ from interior by the full delta after box-average → above SOLID_STD; full-res A↔B spread ≫ SOLID_FULL_TOL"
+    },
+    {
+      "name": "speck.png",
+      "w": 576,
+      "h": 512,
+      "solid": true,
+      "solidFullRes": false,
+      "why": "solid plate with a sub-cell 12×12 speck → box-average dilutes it to per-channel stdDev < SOLID_STD ⇒ 9×8 pre-filter FALSE-POSITIVE solid=true; the speck swings R by 180 ≫ SOLID_FULL_TOL ⇒ full-res confirmation solid=false. The worker requires BOTH ⇒ NOT flagged (no fabricated VRAM saving)."
     }
   ],
-  "note": "Two loose images for the single-color (solid-fill) detector. Drawn on a 9×8-aligned grid so a box-average downsample to the dHash sample is deterministic and the verdict survives the resample. plate ⇒ solid (rule solid-fill, vramBytesSaved = w·h·4 − 4); framed ⇒ not solid. Features below one 9×8 cell (e.g. a 1px border) are sub-sample and average away — only ≥1-cell-thick structure is detectable."
+  "note": "Three loose images for the single-color (solid-fill) detector, cross-checking BOTH stages. Drawn on a 9×8-aligned grid so a box-average downsample to the dHash sample is deterministic and the verdict survives the resample. plate ⇒ solid at 9×8 AND full res (rule solid-fill, vramBytesSaved = w·h·4 − 4); framed ⇒ not solid at either. speck ⇒ the false positive: the 9×8 pre-filter reads solid=true but the full-resolution confirmation (isSolidFullRes) reads solid=false, so the worker (candidate AND confirmed) sets solid=false — killing the fabricated ~1.2 MB VRAM saving on an image that is NOT actually solid."
 }

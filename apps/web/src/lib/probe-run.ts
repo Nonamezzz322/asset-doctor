@@ -11,6 +11,9 @@
 //  - Non-blocking: the caller runs this AFTER setReport so the ≤10s first result is never delayed.
 //  - Honest: probe.vramBytes is the REAL decoded texture footprint — a different quantity from the
 //    static AssetMetrics.vramBytes (declared manifest size). Never combined into a savings delta.
+//    probe.declaredVramBytes is the STATIC declared VRAM summed over EXACTLY the probed atlases — the
+//    like-for-like partner of probe.vramBytes (same population), so an aggregate tooltip can compare
+//    two aggregations of the SAME set rather than the whole-folder deduplicated loadedVramBytes.
 //  - Deterministic: per-atlas integer sums are commutative; the GL instrument reports a deterministic
 //    decoded size and Pixi makes no mipmaps for a one-shot render.
 
@@ -101,11 +104,15 @@ export async function attachProbeReadings(
   // (commutative — iteration order is not load-bearing for determinism).
   let drawCalls = 0;
   let vramBytes = 0;
+  // Σ static DECLARED VRAM over exactly the probed atlases — the like-for-like partner of the MEASURED
+  // vramBytes (same set: probed atlases, every variant tier, minus failures). NEVER a savings delta.
+  let declaredVramBytes = 0;
   const assets: AssetMetrics[] = report.assets.map((a) => {
     const r = readings.get(a.assetRef);
     if (!r) return a;
     drawCalls += r.drawCalls;
     vramBytes += r.vramBytes;
+    declaredVramBytes += a.vramBytes;
     return { ...a, probe: r };
   });
 
@@ -114,7 +121,7 @@ export async function attachProbeReadings(
     assets,
     totals: {
       ...report.totals,
-      probe: { drawCalls, vramBytes, atlasesProbed: readings.size },
+      probe: { drawCalls, vramBytes, atlasesProbed: readings.size, declaredVramBytes },
     },
   };
 }

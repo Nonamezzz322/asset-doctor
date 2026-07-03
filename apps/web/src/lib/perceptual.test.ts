@@ -18,10 +18,12 @@ import {
   hashFrameRegions,
   isFlat,
   isSolidColor,
+  isSolidFullRes,
   luma,
   FLAT_STD,
   FRAME_HASH_MAX_PX,
   FRAME_HASH_MAX_SPRITES,
+  SOLID_FULL_TOL,
   SOLID_STD,
   type FrameRect,
 } from './perceptual';
@@ -157,6 +159,48 @@ describe('alphaFullyOpaque (full-frame opaque scan — wasted-alpha detector)', 
 
   it('an empty buffer ⇒ false (nothing to measure — never claim a saving on no data)', () => {
     expect(alphaFullyOpaque(new Uint8ClampedArray(0))).toBe(false);
+  });
+});
+
+describe('isSolidFullRes (FULL-RESOLUTION solid confirmation — the 9×8 pre-filter cannot fabricate past this)', () => {
+  it('a uniform opaque buffer ⇒ solid (every channel spread 0 ≤ SOLID_FULL_TOL)', () => {
+    expect(SOLID_FULL_TOL).toBe(8); // drift guard, like SOLID_STD === 2
+    expect(isSolidFullRes(rgba(() => [40, 110, 170, 255]))).toBe(true);
+  });
+
+  it('a fully-transparent buffer (0,0,0,0) ⇒ solid (no spread on any channel)', () => {
+    expect(isSolidFullRes(rgba(() => [0, 0, 0, 0]))).toBe(true);
+  });
+
+  it('a constant color at a constant α (128) ⇒ solid (a uniform semi-transparent fill)', () => {
+    expect(isSolidFullRes(rgba(() => [90, 90, 90, 128]))).toBe(true);
+  });
+
+  it('one single differing pixel among N (a real sub-cell feature) ⇒ NOT solid', () => {
+    // The exact shape the 9×8 downsample averages away but full-res must catch: one pixel swings R far.
+    expect(isSolidFullRes(rgba((i) => (i === 0 ? [220, 60, 60, 255] : [40, 110, 170, 255])))).toBe(false);
+  });
+
+  it('a hard cutout (α 0↔255, constant RGB) ⇒ NOT solid (alpha spread caught)', () => {
+    expect(isSolidFullRes(rgba((i) => (i < N / 2 ? [90, 90, 90, 255] : [90, 90, 90, 0])))).toBe(false);
+  });
+
+  it('two chromatic colors at EQUAL luma but different RGB ⇒ NOT solid (per-channel min/max catches it)', () => {
+    // A gray-only detector would miss this; min/max on R/G/B (spread ≫ tol) does not.
+    const a: [number, number, number, number] = [180, 110, 80, 255];
+    const b: [number, number, number, number] = [40, 160, 190, 255];
+    expect(isSolidFullRes(rgba((i) => (i % 2 === 0 ? a : b)))).toBe(false);
+  });
+
+  it('a within-tolerance band ⇒ solid; one level past SOLID_FULL_TOL ⇒ NOT solid (the boundary)', () => {
+    // Encoder ringing on a genuinely flat fill stays within ±tol ⇒ still solid.
+    expect(isSolidFullRes(rgba((i) => [100 + (i % (SOLID_FULL_TOL + 1)), 100, 100, 255]))).toBe(true); // spread === tol
+    // One level more of spread is a real difference ⇒ not solid.
+    expect(isSolidFullRes(rgba((i) => [100 + (i % (SOLID_FULL_TOL + 2)), 100, 100, 255]))).toBe(false); // spread === tol+1
+  });
+
+  it('an empty buffer ⇒ false (never claim a saving on no data)', () => {
+    expect(isSolidFullRes(new Uint8ClampedArray(0))).toBe(false);
   });
 });
 
@@ -351,16 +395,65 @@ describe('isSolidColor over the solid-fill fixtures (golden cross-check)', () =>
     images: ExpectedSolid[];
   };
 
+  // speck.png pins the BUG the full-res confirmation fixes: the 9×8 pre-filter ALONE reads solid=true
+  // (a sub-cell speck box-averages away), so at THIS stage it is a false positive (golden solid:true).
+  // The full-res cross-check below is what corrects it to solid=false — the visible before/after.
   for (const img of [
     { name: 'plate.png', solid: true },
     { name: 'framed.png', solid: false },
+    { name: 'speck.png', solid: true }, // 9×8 pre-filter FALSE POSITIVE — vetoed by isSolidFullRes below
   ]) {
-    it(`${img.name} ⇒ solid:${img.solid} (matches the authored golden)`, () => {
+    it(`${img.name} ⇒ 9×8 solid:${img.solid} (matches the authored golden)`, () => {
       const golden = expected.images.find((e) => e.name === img.name);
       expect(golden?.solid).toBe(img.solid); // golden agrees with the hard-coded expectation (no drift)
       expect(solidFixture(img.name)).toBe(img.solid); // detector agrees with the golden
     });
   }
+});
+
+describe('isSolidFullRes over the solid-fill fixtures (FULL-RES golden cross-check — kills the 9×8 false positive)', () => {
+  // UNLIKE the 9×8 pre-filter cross-check above (which box-averages to the dHash sample), the confirmation
+  // runs on the FULL-RESOLUTION decode — a sub-cell speck must NOT average away. So we read the full-res
+  // fixture PNG directly (PNG.data IS the interleaved RGBA the worker's full-frame getImageData yields) and
+  // feed it straight to isSolidFullRes, exactly as the alphaFullyOpaque cross-check does for wasted-alpha.
+  // The golden `solidFullRes` in expected.json is authored by hand in the generator, an independent check.
+  const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../../fixtures/sample-projects/solid-fill');
+
+  function solidFullResFixture(file: string): boolean {
+    const png = PNG.sync.read(readFileSync(join(FIXTURES, file)));
+    return isSolidFullRes(new Uint8ClampedArray(png.data)); // full-res RGBA, no downsample
+  }
+
+  interface ExpectedSolidFull {
+    name: string;
+    solidFullRes: boolean;
+  }
+  const expected = JSON.parse(readFileSync(join(FIXTURES, 'expected.json'), 'utf8')) as {
+    images: ExpectedSolidFull[];
+  };
+
+  for (const img of [
+    { name: 'plate.png', solidFullRes: true },
+    { name: 'framed.png', solidFullRes: false },
+    { name: 'speck.png', solidFullRes: false }, // the 9×8 said solid:true — full res corrects it to false
+  ]) {
+    it(`${img.name} ⇒ full-res solid:${img.solidFullRes} (matches the authored golden)`, () => {
+      const golden = expected.images.find((e) => e.name === img.name);
+      expect(golden?.solidFullRes).toBe(img.solidFullRes); // golden agrees with the hard-coded expectation
+      expect(solidFullResFixture(img.name)).toBe(img.solidFullRes); // confirmation agrees with the golden
+    });
+  }
+
+  it('speck.png: the worker verdict = 9×8 candidate AND full-res confirm ⇒ solid=false (no fabricated saving)', () => {
+    // This is the load-bearing assertion: the SAME image the 9×8 pre-filter fabricates as solid is vetoed by
+    // the full-res confirmation, so the worker's `solid = candidate && confirmed` lands on FALSE. plate.png —
+    // genuinely one color — still passes both ⇒ stays flagged.
+    const png = PNG.sync.read(readFileSync(join(FIXTURES, 'speck.png')));
+    const candidate = true; // proven by the 9×8 cross-check above (solidFixture('speck.png') === true)
+    const confirmed = isSolidFullRes(new Uint8ClampedArray(png.data));
+    expect(confirmed).toBe(false);
+    expect(candidate && confirmed).toBe(false); // worker sets solid=false ⇒ solid-fill never fires for speck
+  });
 });
 
 // ── extractFrameRegions / hashFrameRegions: the PURE load-bearing half of the worker's hashAtlasFrames

@@ -1498,19 +1498,24 @@ verdict (gradients are deliberately out of the confident set, M2).
 }
 
 /* ── Case 16: solid-fill — single-color loose-image detector goldens (docs/improvements/round6-f2-solid-fill.md) ──
- * Two LOOSE images cross-checking `isSolidColor` (apps/web/src/lib/perceptual.ts) the same way Case 15
- * cross-checks `classifyContent`: the solid verdict is authored HERE, independently of the detector.
+ * THREE LOOSE images cross-checking BOTH halves of the two-stage solid detector (apps/web/src/lib/perceptual.ts):
+ * the cheap 9×8 pre-filter `isSolidColor` AND the FULL-RESOLUTION confirmation `isSolidFullRes` that the worker
+ * now requires before setting solid=true. Each verdict is authored HERE, independently of the detectors.
  *
- * `isSolidColor` runs on the 9×8 downsample of the decoded RGBA (the dHash sample the worker reuses;
- * Inv 4 — no encode). The cross-check reproduces that sample via the SAME box-average sample9x8 the
- * Case-15 test uses. So both fixtures are drawn on a 9×8-aligned grid (576×512, 64px cells):
- *   • plate.png  — one solid opaque color across the whole image → every per-channel stdDev ≈ 0 → solid.
+ * `isSolidColor` runs on the 9×8 downsample of the decoded RGBA (the dHash sample the worker reuses; Inv 4 —
+ * no encode); `isSolidFullRes` runs on the FULL-resolution RGBA (min↔max per channel ≤ SOLID_FULL_TOL). The
+ * cross-checks reproduce the 9×8 sample via the SAME box-average sample9x8 Case 15 uses, and read the full-res
+ * PNG directly. All fixtures are drawn on a 9×8-aligned grid (576×512, 64px cells):
+ *   • plate.png  — one solid opaque color across the whole image → 9×8 solid AND full-res solid.
  *   • framed.png — solid center color B with a THICK 64px perimeter color A (one full ring of edge cells).
- *                  Box-averaging keeps the perimeter cells = A and interior cells = B (the 64px ring fully
- *                  fills the outer 9×8 cells — NOT a thin 1px border that would average out), so the A↔B
- *                  delta is present at sample resolution → NOT solid, deterministically.
- * README documents the limitation: features below one 9×8 cell (e.g. a 1px border) are sub-sample and
- * average away — only ≥1-cell-thick structure is detectable. */
+ *                  Box-averaging keeps the perimeter cells = A and interior cells = B → NOT solid at 9×8,
+ *                  and the full-res A↔B spread ≫ tol → NOT solid at full res either.
+ *   • speck.png  — a solid plate with a tiny 12×12 contrasting speck fully INSIDE one interior 64px cell.
+ *                  The speck is sub-cell: box-averaging dilutes it to a per-channel stdDev < SOLID_STD, so the
+ *                  9×8 pre-filter reads solid=TRUE (the false positive) — but the speck pixels swing a channel
+ *                  by the full contrast (≫ SOLID_FULL_TOL), so the full-res confirmation reads solid=FALSE.
+ *                  This is the before/after that pins the fix: candidate(9×8)=true AND confirmed(full)=false ⇒
+ *                  the worker sets solid=FALSE ⇒ no fabricated ~1.2 MB VRAM saving on a not-actually-solid image. */
 {
   const GW = 9; // sample-grid columns (matches the dHash 9×8)
   const GH = 8; // sample-grid rows
@@ -1521,16 +1526,27 @@ verdict (gradients are deliberately out of the confident set, M2).
   const PLATE_COLOR = [40, 110, 170]; // the single solid color
   const FRAME_COLOR = [220, 60, 60]; // perimeter color A (full A↔B delta vs the center)
   const CENTER_COLOR = [40, 110, 170]; // interior color B
+  const SPECK = [220, 60, 60]; // the sub-cell speck color (full contrast vs PLATE_COLOR)
 
-  // plate: one solid opaque color, edge to edge → solid.
+  // plate: one solid opaque color, edge to edge → solid at BOTH 9×8 and full res.
   const plate = solidPng(W, H, PLATE_COLOR);
 
   // framed: 64px (one full cell) perimeter of A around a solid B center → NOT solid (edge cells differ
-  // from interior cells by the full A↔B delta after the box-average downsample).
+  // from interior cells by the full A↔B delta after the box-average downsample; full-res spread ≫ tol too).
   const framed = (() => {
     const png = new PNG({ width: W, height: H });
     fillRect(png, 0, 0, W, H, FRAME_COLOR); // whole image = frame color
     fillRect(png, CELL, CELL, W - 2 * CELL, H - 2 * CELL, CENTER_COLOR); // inset center = center color
+    return PNG.sync.write(png);
+  })();
+
+  // speck: a solid plate with a tiny 12×12 speck fully inside interior cell (1,1) — [64,128)×[64,128).
+  // 9×8: 144/4096 of that ONE cell shifts → per-channel stdDev < SOLID_STD ⇒ pre-filter says solid=TRUE
+  // (the false positive). Full-res: the speck pixels swing R by 180 ≫ SOLID_FULL_TOL ⇒ isSolidFullRes=FALSE.
+  const speck = (() => {
+    const png = new PNG({ width: W, height: H });
+    fillRect(png, 0, 0, W, H, PLATE_COLOR); // solid plate
+    fillRect(png, 100, 100, 12, 12, SPECK); // sub-cell contrasting speck inside grid cell (1,1)
     return PNG.sync.write(png);
   })();
 
@@ -1539,41 +1555,57 @@ verdict (gradients are deliberately out of the confident set, M2).
     {
       'plate.png': plate,
       'framed.png': framed,
+      'speck.png': speck,
       'expected.json': {
         kind: 'solid-fill',
         feature: 'solid-fill-loose-detector',
         grid: { w: GW, h: GH, cell: CELL },
-        // Golden `solid` per image — authored by hand, the independent cross-check of isSolidColor.
+        // Golden `solid` (9×8 pre-filter) + `solidFullRes` (full-resolution confirmation) per image —
+        // authored by hand, the independent cross-check of isSolidColor AND isSolidFullRes. The worker
+        // sets the ImageFeatures.solid flag only when BOTH are true (candidate AND confirmed).
         images: [
-          { name: 'plate.png', w: W, h: H, solid: true, why: 'one solid opaque color edge to edge → every per-channel stdDev ≈ 0 < SOLID_STD (2)' },
-          { name: 'framed.png', w: W, h: H, solid: false, why: 'solid center with a 64px (one full 9×8 cell) perimeter of a different color → edge cells differ from interior by the full delta after box-average → above SOLID_STD' },
+          { name: 'plate.png', w: W, h: H, solid: true, solidFullRes: true, why: 'one solid opaque color edge to edge → every per-channel stdDev ≈ 0 < SOLID_STD (2); full-res spread 0 ≤ SOLID_FULL_TOL (8)' },
+          { name: 'framed.png', w: W, h: H, solid: false, solidFullRes: false, why: 'solid center with a 64px (one full 9×8 cell) perimeter of a different color → edge cells differ from interior by the full delta after box-average → above SOLID_STD; full-res A↔B spread ≫ SOLID_FULL_TOL' },
+          { name: 'speck.png', w: W, h: H, solid: true, solidFullRes: false, why: 'solid plate with a sub-cell 12×12 speck → box-average dilutes it to per-channel stdDev < SOLID_STD ⇒ 9×8 pre-filter FALSE-POSITIVE solid=true; the speck swings R by 180 ≫ SOLID_FULL_TOL ⇒ full-res confirmation solid=false. The worker requires BOTH ⇒ NOT flagged (no fabricated VRAM saving).' },
         ],
         note:
-          'Two loose images for the single-color (solid-fill) detector. Drawn on a 9×8-aligned grid so a '
-          + 'box-average downsample to the dHash sample is deterministic and the verdict survives the resample. '
-          + 'plate ⇒ solid (rule solid-fill, vramBytesSaved = w·h·4 − 4); framed ⇒ not solid. Features below one '
-          + '9×8 cell (e.g. a 1px border) are sub-sample and average away — only ≥1-cell-thick structure is detectable.',
+          'Three loose images for the single-color (solid-fill) detector, cross-checking BOTH stages. Drawn on a '
+          + '9×8-aligned grid so a box-average downsample to the dHash sample is deterministic and the verdict '
+          + 'survives the resample. plate ⇒ solid at 9×8 AND full res (rule solid-fill, vramBytesSaved = w·h·4 − 4); '
+          + 'framed ⇒ not solid at either. speck ⇒ the false positive: the 9×8 pre-filter reads solid=true but the '
+          + 'full-resolution confirmation (isSolidFullRes) reads solid=false, so the worker (candidate AND confirmed) '
+          + 'sets solid=false — killing the fabricated ~1.2 MB VRAM saving on an image that is NOT actually solid.',
       },
     },
     `# solid-fill
 
-Two **loose** images for the single-color (**solid-fill**) detector
-(\`docs/improvements/round6-f2-solid-fill.md\`). Each carries a hand-authored golden \`solid\` flag in
-\`expected.json\` — the independent cross-check of \`isSolidColor\` (the detector runs on the **9×8 dHash
-sample** the worker already decodes; Invariant 4 — no encode).
+Three **loose** images for the single-color (**solid-fill**) detector
+(\`docs/improvements/round6-f2-solid-fill.md\`). Each carries hand-authored golden \`solid\` (the cheap
+**9×8 pre-filter** \`isSolidColor\`) and \`solidFullRes\` (the **full-resolution confirmation**
+\`isSolidFullRes\`) flags in \`expected.json\` — independent cross-checks of the two detector stages. The
+worker now sets \`ImageFeatures.solid\` only when **both** are true (candidate AND confirmed).
 
-Both are drawn on a grid that is an exact multiple of **9×8** (576×512, 64px cells), so a box-average
-downsample to 9×8 is deterministic and the verdict survives the resample:
+All three are drawn on a grid that is an exact multiple of **9×8** (576×512, 64px cells), so a
+box-average downsample to 9×8 is deterministic and the verdict survives the resample:
 
 - **\`plate.png\`** — one solid opaque color edge to edge → every per-channel stdDev ≈ 0 (below
-  \`SOLID_STD\` = 2) → **solid**. A 576×512 solid PNG pins ≈1.2 MB of VRAM to carry one color.
+  \`SOLID_STD\` = 2) **and** full-res spread 0 (≤ \`SOLID_FULL_TOL\` = 8) → **solid**. A 576×512 solid PNG
+  pins ≈1.2 MB of VRAM to carry one color.
 - **\`framed.png\`** — a solid center with a **thick 64px** perimeter (exactly one 9×8 cell) of a
   different color → the outer ring of sample cells reads color A, the interior reads color B, so the
-  full A↔B delta survives the box-average → **not solid**.
+  full A↔B delta survives the box-average **and** the full-res spread ≫ tol → **not solid** at either
+  stage.
+- **\`speck.png\`** — a solid plate with a tiny **12×12** contrasting speck fully inside one interior
+  64px cell. The speck is **sub-cell**: box-averaging dilutes it to a per-channel stdDev < \`SOLID_STD\`,
+  so the **9×8 pre-filter reads \`solid = true\` (a false positive)** — but the speck pixels swing a
+  channel by the full contrast (180 ≫ \`SOLID_FULL_TOL\`), so the **full-resolution confirmation reads
+  \`solid = false\`**. The worker requires both ⇒ **not flagged**.
 
-**Limitation (by design):** a feature thinner than one 9×8 cell (e.g. a 1px border) is below the sample
-resolution — it box-averages into the surrounding cell and the image reads as solid. Only structure at
-least one cell thick is detectable. (That is why the negative control uses a 64px frame, not a 1px one.)
+**Sub-cell features are now caught (was a known limitation).** A feature thinner than one 9×8 cell
+(e.g. \`speck.png\`'s 12×12 dot, or a 1px border) box-averages into its cell and the 9×8 pre-filter reads
+it as solid. That used to fabricate a ~1.2 MB VRAM saving on a not-actually-solid image; the
+**full-resolution confirmation** (\`isSolidFullRes\`) now vetoes those candidates, so only a genuinely
+single-color image (\`plate.png\`) is flagged. \`speck.png\` is the before/after that pins the fix.
 `,
   );
 }

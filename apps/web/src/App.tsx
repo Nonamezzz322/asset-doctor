@@ -484,12 +484,17 @@ export function App() {
                 <HeaderMetric label={t('metric.vram')} value={`${fmtBytes(totals?.loadedVramBytes ?? 0)}`} />
                 {/* MEASURED aggregate, additive — appears only once the render-probe has run (WebGL
                     present, ≥1 atlas). It's the REAL decoded footprint, a different quantity from the
-                    declared estimate beside it — never a savings delta (BLOCKER1). */}
+                    declared estimate beside it — never a savings delta (BLOCKER1). The "N atlases" scope
+                    sub + the aggregate-scoped tooltip disclose that this is a naive sum over the N PROBED
+                    atlases (all variant tiers; loose/un-probed excluded), NOT the whole-folder deduplicated
+                    "vram" beside it — and hand the manifest-vs-pixels claim a like-for-like partner
+                    (probe.declaredVramBytes) so the pair is honest, not a mis-attributed scope gap (R3). */}
                 {totals?.probe ? (
                   <HeaderMetric
                     label={t('metric.vramMeasured')}
                     value={fmtBytes(totals.probe.vramBytes)}
-                    explainer={t('readout.measuredTooltip')}
+                    sub={t('readout.measuredScope', { n: totals.probe.atlasesProbed })}
+                    explainer={t('readout.measuredAggregateTooltip', { n: totals.probe.atlasesProbed, declared: totals.probe.declaredVramBytes })}
                   />
                 ) : null}
                 <HeaderMetric label={t('metric.saveable')} value={`${fmtBytes(totals?.potentialDiskSaved ?? 0)} · ${savedPct}%`} accent />
@@ -577,7 +582,7 @@ export function App() {
             {totals ? (
               <div className="flex flex-wrap gap-x-5 gap-y-1.5 border-b border-line pb-4 md:hidden">
                 {buildTotalsRows(totals, t, fmtBytes).map((r) => (
-                  <MobileTotal key={r.key} label={r.label} value={r.value} accent={r.accent} explainer={r.title} />
+                  <MobileTotal key={r.key} label={r.label} value={r.value} accent={r.accent} explainer={r.title} sub={r.sub} />
                 ))}
               </div>
             ) : null}
@@ -696,16 +701,21 @@ function HeaderMetric({
   value,
   accent,
   explainer,
+  sub,
 }: {
   label: string;
   value: string;
   accent?: boolean;
   explainer?: string;
+  /** Secondary muted line under the value (e.g. the measured chip's "N atlases" scope — R3). Read by
+   *  sighted users at a glance; the full scope story stays in `explainer` (title + ad-sr-only). */
+  sub?: string;
 }) {
   return (
     <div className="bg-panel px-3 py-1.5" title={explainer}>
       <div className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-soft">{label}</div>
       <div className={`font-mono text-xs font-semibold ${accent ? 'text-cta-text' : 'text-ink'}`}>{value}</div>
+      {sub ? <div className="mt-0.5 font-mono text-[9px] leading-tight text-ink-soft">{sub}</div> : null}
       {explainer ? <span className="ad-sr-only">{explainer}</span> : null}
     </div>
   );
@@ -720,16 +730,20 @@ function MobileTotal({
   value,
   accent,
   explainer,
+  sub,
 }: {
   label: string;
   value: string;
   accent?: boolean;
   explainer?: string;
+  /** Secondary muted line under the value (e.g. the measured chip's "N atlases" scope — R3). */
+  sub?: string;
 }) {
   return (
     <div className="flex flex-col" title={explainer}>
       <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-soft">{label}</span>
       <span className={`font-mono text-xs font-semibold ${accent ? 'text-cta-text' : 'text-ink'}`}>{value}</span>
+      {sub ? <span className="font-mono text-[9px] leading-tight text-ink-soft">{sub}</span> : null}
       {explainer ? <span className="ad-sr-only">{explainer}</span> : null}
     </div>
   );

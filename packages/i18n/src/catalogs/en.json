@@ -16,6 +16,16 @@
     "other": "{n} sprites batched"
   },
   "readout.measuredTooltip": "Actual decoded texture footprint, measured by a real WebGL render — differs from the declared estimate when the manifest size ≠ the image's real pixels. Not a savings; a different quantity.",
+  "readout.measuredScope": {
+    "$count": "n",
+    "one": "{n} atlas",
+    "other": "{n} atlases"
+  },
+  "readout.measuredAggregateTooltip": {
+    "$count": "n",
+    "one": "Summed across {n} probed atlas (every variant tier; loose and un-probed images excluded). The declared vram beside it is the whole-folder loaded set — one tier per image. Like-for-like, that atlas's declared estimate is {declared:bytes}; measured differs when manifest geometry ≠ decoded pixels. Not a savings; a different quantity.",
+    "other": "Summed across {n} probed atlases (every variant tier; loose and un-probed images excluded). The declared vram beside it is the whole-folder loaded set — one tier per image. Like-for-like, those atlases' declared estimate is {declared:bytes}; measured differs when manifest geometry ≠ decoded pixels. Not a savings; a different quantity."
+  },
   "readout.breakdown": "vram breakdown",
   "readout.mipCeiling": "if mipmaps on",
   "readout.mipCeilingTooltip": "Upper bound if mipmaps are enabled (Pixi/Phaser autoGenerateMipmaps): base × 4/3 (+33%). A ceiling, not asserted residency — disabled mipmaps cost nothing here.",

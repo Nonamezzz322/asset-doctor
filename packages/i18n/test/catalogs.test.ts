@@ -141,6 +141,25 @@ describe('catalog completeness (all 9 locales)', () => {
     expect(translate('en', 'readout.declared')).not.toBe(translate('en', 'metric.vram'));
   });
 
+  // diagnosis-quality R3 (declared-vs-measured VRAM aggregate scope): the measured chip's scope sub
+  // (readout.measuredScope, plural on {n}) + the aggregate tooltip (readout.measuredAggregateTooltip,
+  // plural on {n}, carrying {n} + {declared:bytes}) render brace-free for singular/plural n in every
+  // locale. Key/token parity is enforced by `same keys as en` above; this pins the render for the new
+  // copy AND that the like-for-like declared basis surfaces as an MB figure in the en tooltip.
+  it('every locale renders the R3 measured-scope + aggregate-tooltip keys without leftover braces', () => {
+    for (const loc of LOCALES) {
+      for (const n of [1, 5]) {
+        expect(translate(loc, 'readout.measuredScope', { n }), `${loc} measuredScope n=${n}`).not.toContain('{');
+        expect(
+          translate(loc, 'readout.measuredAggregateTooltip', { n, declared: 16 * 1048576 }),
+          `${loc} measuredAggregateTooltip n=${n}`,
+        ).not.toContain('{');
+      }
+    }
+    // the like-for-like declared basis interpolates as an MB figure (never a bare brace) in the en tooltip.
+    expect(translate('en', 'readout.measuredAggregateTooltip', { n: 5, declared: 16 * 1048576 })).toContain('16.0 MB');
+  });
+
   // AB-R5: the build-config save/load labels + fail-closed parse-error reasons exist in all 9 locales and
   // render brace-free (they are static — no placeholder tokens). Key parity is already enforced by the
   // `same keys as en` assertion above; this pins them as a deliberate, never-silently-dropped contract.

@@ -16,6 +16,16 @@
     "other": "{n} 个 sprite 已合批"
   },
   "readout.measuredTooltip": "由真实 WebGL 渲染实测的已解码纹理占用——当清单尺寸 ≠ 图像真实像素时，会与声明的估算值不同。这不是节省量，而是另一种度量。",
+  "readout.measuredScope": {
+    "$count": "n",
+    "one": "{n} 个图集",
+    "other": "{n} 个图集"
+  },
+  "readout.measuredAggregateTooltip": {
+    "$count": "n",
+    "one": "在 {n} 个已探测图集上求和（每个变体层级；散图和未探测图像已排除）。旁边的声明 vram 是整个文件夹的加载集——每张图像一个层级。同口径比较下，这些图集的声明估计为 {declared:bytes}；当清单几何 ≠ 解码像素时，实测值会不同。这不是节省，而是另一种量。",
+    "other": "在 {n} 个已探测图集上求和（每个变体层级；散图和未探测图像已排除）。旁边的声明 vram 是整个文件夹的加载集——每张图像一个层级。同口径比较下，这些图集的声明估计为 {declared:bytes}；当清单几何 ≠ 解码像素时，实测值会不同。这不是节省，而是另一种量。"
+  },
   "readout.breakdown": "vram 明细",
   "readout.mipCeiling": "若启用 mipmap",
   "readout.mipCeilingTooltip": "启用 mipmap 时的上限（Pixi/Phaser autoGenerateMipmaps）：基础 × 4/3（+33%）。这是上限，并非确认的常驻占用——关闭 mipmap 时此处不产生开销。",

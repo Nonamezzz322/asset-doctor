@@ -389,8 +389,10 @@ export interface ImageFeatures {
    *  lossy-vs-lossless format verdict for LOOSE images (atlases pass 'unknown'). Additive: absent/'unknown'
    *  ⇒ today's lossy path, byte-identical. */
   contentClass?: ContentClass;
-  /** True iff the SAME 9×8 RGBA sample is a single color (or fully transparent) — every channel's
-   *  per-sample stdDev is below SOLID_STD. Drives the loose-only `solid-fill` finding (a big solid PNG
+  /** True iff the image is a single color (or fully transparent). A cheap 9×8-sample CANDIDATE (every
+   *  channel's per-sample stdDev below SOLID_STD) that is then CONFIRMED at FULL resolution (every pixel
+   *  within a per-channel band — NOT the 9×8 sample, so a sub-cell feature can't box-average away and
+   *  fabricate the verdict, invariant 3). Drives the loose-only `solid-fill` finding (a big solid PNG
    *  pins w×h×4 VRAM for one color). Additive: only ever SET when true; absent ⇒ today's behavior. */
   solid?: boolean;
   /** True iff a FULL-FRAME alpha scan found EVERY pixel fully opaque (alpha === 255) — i.e. the image
@@ -704,6 +706,12 @@ export interface AnalysisReport {
       vramBytes: number;
       /** How many atlases actually yielded a probe reading (denominator for the measured aggregate). */
       atlasesProbed: number;
+      /** Σ static declared VRAM (AssetMetrics.vramBytes) over EXACTLY the probed atlases — the
+       *  like-for-like partner of `vramBytes` (same population: probed atlases only, every variant
+       *  tier, minus failures; loose sprites never enter here). It exists so the aggregate
+       *  measured-vs-declared tooltip compares two aggregations of the SAME set, not the whole-folder
+       *  deduplicated `loadedVramBytes` headline. NEVER a savings delta. */
+      declaredVramBytes: number;
     };
   };
   /** The thresholds actually applied (for transparency in the UI). */

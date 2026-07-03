@@ -85,7 +85,9 @@ describe('attachProbeReadings', () => {
     expect(out).not.toBe(rep); // new report
     expect(out.assets[0]?.probe).toEqual(READING);
     expect(out.assets[1]?.probe).toEqual(READING);
-    expect(out.totals.probe).toEqual({ drawCalls: 2, vramBytes: 2097152, atlasesProbed: 2 });
+    // declaredVramBytes = Σ STATIC declared VRAM over the probed atlases (a.png 100 + b.png 200 = 300),
+    // the like-for-like partner of the MEASURED vramBytes — never the measured sum.
+    expect(out.totals.probe).toEqual({ drawCalls: 2, vramBytes: 2097152, atlasesProbed: 2, declaredVramBytes: 300 });
     // static estimate untouched (declared vs measured — never merged)
     expect(out.totals.vramBytes).toBe(300);
     expect(rep.assets[0]?.probe).toBeUndefined(); // input not mutated
@@ -98,7 +100,11 @@ describe('attachProbeReadings', () => {
     const out = await attachProbeReadings(report(true), bytesOf);
     expect(out.assets[0]?.probe).toBeUndefined();
     expect(out.assets[1]?.probe).toEqual(READING);
-    expect(out.totals.probe).toEqual({ drawCalls: 1, vramBytes: 1048576, atlasesProbed: 1 });
+    // Only b.png probed ⇒ declaredVramBytes sums b.png's STATIC 200 (not a.png's 100, not the measured
+    // vramBytes 1048576) — it stays like-for-like with the same probed-only set.
+    expect(out.totals.probe).toEqual({ drawCalls: 1, vramBytes: 1048576, atlasesProbed: 1, declaredVramBytes: 200 });
+    expect(out.totals.probe!.declaredVramBytes).toBe(200);
+    expect(out.totals.probe!.declaredVramBytes).not.toBe(out.totals.probe!.vramBytes);
   });
 
   it('already-aborted signal ⇒ returns the SAME report, never probes', async () => {

@@ -17,6 +17,7 @@ import {
   FRAME_HASH_MAX_SPRITES,
   isFlat,
   isSolidColor,
+  isSolidFullRes,
   luma,
 } from '../lib/perceptual';
 import type { ContentClass } from '@asset-doctor/core';
@@ -207,11 +208,16 @@ async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
 /** ONE 9×8 decode → BOTH the dHash (near-dup detection) AND the content class (format verdict). The
  *  9×8 RGBA sample is read once with getImageData; `dHash` is null for featureless fills (they collapse
  *  to one hash → false near-dup matches), `contentClass` is the lossy-vs-lossless hint (Inv 4: NO
- *  encode here — the class is pure math over the already-decoded sample). The same sample also yields
- *  `solid` (single-color / fully transparent — drives the loose-only solid-fill finding). When
- *  `scanAlpha` (a loose PNG/WebP), the SAME decoded bitmap is also drawn at FULL resolution for a
- *  full-frame opaque scan (`opaque` — alpha === 255 on every pixel; short-circuits on the first
- *  non-opaque pixel, so most images bail instantly). The full-frame scan is GATED by the shared
+ *  encode here — the class is pure math over the already-decoded sample). The 9×8 sample also yields the
+ *  `solid` CANDIDATE (single-color / fully transparent — drives the loose-only solid-fill finding), which
+ *  is then CONFIRMED at full resolution (`isSolidFullRes`) before being reported — a sub-cell feature can
+ *  box-average away in the 72-px sample, so an unconfirmed candidate would fabricate a VRAM saving on a
+ *  not-actually-solid image (invariant 3). When `scanAlpha` (a loose PNG/WebP) OR the 9×8 flagged a solid
+ *  candidate, the SAME decoded bitmap is drawn ONCE at FULL resolution and read once for BOTH the opaque
+ *  scan (`opaque` — alpha === 255 on every pixel; short-circuits on the first non-opaque pixel, so most
+ *  images bail instantly) AND the solid confirmation (PNG/WebP already pay this read for the opaque scan;
+ *  a rare solid-candidate JPEG/AVIF pays a bounded on-demand read; an over-budget candidate ⇒ solid stays
+ *  false, an honest conservative miss). The full-frame scan is GATED by the shared
  *  pageExceedsScanBudget (Round 21 #2: ANALYZE_PAGE_MAX_PX, the single-sourced ≈25.2 MP per-page cap that
  *  bounds this transient w·h·4 getImageData read ≤10s) — an oversize page sets `scanSkipped` so the CALLER
  *  can surface it honestly in unparsed[] (it was a SILENT skip before). 'unknown' / solid:false /
@@ -243,25 +249,38 @@ async function decodeFeatures(
     }
     c2d.drawImage(bmp, 0, 0, 9, 8);
     const data = c2d.getImageData(0, 0, 9, 8).data;
-    // Full-frame opaque scan: reuse the SAME bitmap (already decoded) at full resolution. Gated to loose
-    // alpha-bearing formats and the shared px cap; alphaFullyOpaque short-circuits on the first non-opaque
-    // pixel. `scanSkipped` is true ONLY when the scan was WANTED (scanAlpha) but the page busted the cap —
-    // a non-alpha format never wanted it ⇒ never "skipped" ⇒ no unparsed entry.
-    let opaque = false;
-    const scanSkipped = scanAlpha && pageExceedsScanBudget(width, height);
-    if (scanAlpha && !pageExceedsScanBudget(width, height)) {
-      const full = new OffscreenCanvas(width, height);
-      const fctx = full.getContext('2d', { willReadFrequently: true });
-      if (fctx) {
-        fctx.drawImage(bmp, 0, 0);
-        opaque = alphaFullyOpaque(fctx.getImageData(0, 0, width, height).data);
-      }
-    }
-    bmp.close();
     const gray: number[] = [];
     for (let p = 0; p < 9 * 8; p++) gray.push(luma(data, p * 4));
     const dHash = isFlat(gray) ? null : dHashFromGray(gray); // featureless → skip perceptual matching
-    return { dHash, contentClass: classifyContent(gray, data), solid: isSolidColor(gray, data), opaque, scanSkipped, w: width, h: height };
+    const contentClass = classifyContent(gray, data);
+    // The 9×8 `solid` CANDIDATE (cheap pre-filter). It rules out virtually every real image instantly, but a
+    // sub-cell feature can box-average away in the 72-px sample, so a candidate MUST be confirmed at full
+    // resolution before we claim solid (invariant 3 — otherwise a sparse-but-not-solid image fabricates a
+    // ~w·h·4 VRAM saving). Confirmed below; `solid` stays false unless BOTH agree.
+    const solidCandidate = isSolidColor(gray, data);
+    // `scanSkipped` is true ONLY when the OPAQUE scan was WANTED (scanAlpha) but the page busted the cap — a
+    // non-alpha format never wanted it ⇒ never "skipped" ⇒ no unparsed entry. (Unchanged semantics.)
+    const overBudget = pageExceedsScanBudget(width, height);
+    const scanSkipped = scanAlpha && overBudget;
+    // Full-resolution buffer needed iff the opaque scan wants it (loose PNG/WebP) OR the 9×8 flagged a solid
+    // candidate — and the page fits the px budget. ONE decode+read serves BOTH measurements: PNG/WebP already
+    // pay this read for the opaque scan, so the solid confirmation is nearly free there; only a RARE
+    // solid-candidate JPEG/AVIF pays a bounded on-demand read here. An over-budget solid candidate is left
+    // UNconfirmed ⇒ solid stays false (a conservative miss within ≤10s, never a guess — invariant 3).
+    let opaque = false;
+    let solid = false;
+    if ((scanAlpha || solidCandidate) && !overBudget) {
+      const full = new OffscreenCanvas(width, height);
+      const fctx = full.getContext('2d', { willReadFrequently: true });
+      if (fctx) {
+        fctx.drawImage(bmp, 0, 0); // 1:1 draw — no canvas resampler, so the confirmation is resampler-independent
+        const fullData = fctx.getImageData(0, 0, width, height).data;
+        opaque = scanAlpha ? alphaFullyOpaque(fullData) : false; // unchanged
+        solid = solidCandidate ? isSolidFullRes(fullData) : false; // full-res CONFIRMATION of the 9×8 candidate
+      }
+    }
+    bmp.close();
+    return { dHash, contentClass, solid, opaque, scanSkipped, w: width, h: height };
   } catch {
     return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, scanSkipped: false, w: 0, h: 0 };
   }

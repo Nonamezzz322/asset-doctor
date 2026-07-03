@@ -567,8 +567,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         : [];
     const tieringOn = tiers.length > 0;
     // Whole-folder already-tiered: if any cluster already differs by a resolution token, the folder ships
-    // tiers — skip tiering globally (design §8). A png+webp same-size folder does NOT trip this (format
-    // tokens are excluded from hasResolutionToken). tierForce (mirrors packForced) bypasses the skip.
+    // tiers — skip tiering globally (design §8). A png+webp same-size folder does NOT trip this: a
+    // format-ONLY name carries no resolution token (hasResolutionToken peels a trailing format suffix but
+    // still finds no res token underneath). tierForce (mirrors packForced) bypasses the skip.
     const folderAlreadyTiered =
       tieringOn &&
       !opts.tierForce &&

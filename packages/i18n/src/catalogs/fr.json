@@ -16,6 +16,16 @@
     "other": "{n} sprites regroupés"
   },
   "readout.measuredTooltip": "Empreinte réelle de la texture décodée, mesurée par un vrai rendu WebGL — diffère de l'estimation déclarée quand la taille du manifeste ≠ les pixels réels de l'image. Pas une économie, mais une grandeur différente.",
+  "readout.measuredScope": {
+    "$count": "n",
+    "one": "{n} atlas",
+    "other": "{n} atlas"
+  },
+  "readout.measuredAggregateTooltip": {
+    "$count": "n",
+    "one": "Cumulé sur {n} atlas sondé (tous les paliers de variantes ; images isolées et non sondées exclues). La vram déclarée à côté est l’ensemble chargé de tout le dossier — un palier par image. À périmètre égal, l’estimation déclarée de ces atlas est {declared:bytes} ; la mesure diffère lorsque la géométrie du manifeste ≠ les pixels décodés. Pas une économie ; une autre grandeur.",
+    "other": "Cumulé sur {n} atlas sondés (tous les paliers de variantes ; images isolées et non sondées exclues). La vram déclarée à côté est l’ensemble chargé de tout le dossier — un palier par image. À périmètre égal, l’estimation déclarée de ces atlas est {declared:bytes} ; la mesure diffère lorsque la géométrie du manifeste ≠ les pixels décodés. Pas une économie ; une autre grandeur."
+  },
   "readout.breakdown": "détail vram",
   "readout.mipCeiling": "si mipmaps activés",
   "readout.mipCeilingTooltip": "Plafond si les mipmaps sont activés (Pixi/Phaser autoGenerateMipmaps) : base × 4/3 (+33%). Un plafond, pas une résidence confirmée — les mipmaps désactivés ne coûtent rien ici.",

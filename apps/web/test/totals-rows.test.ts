@@ -47,21 +47,34 @@ describe('buildTotalsRows', () => {
   });
 
   it('with probe → 4 rows; measured inserted at index 2', () => {
-    const rows = buildTotalsRows(totals({ probe: { drawCalls: 5, vramBytes: 9000, atlasesProbed: 2 } }), echoT, tag);
+    const rows = buildTotalsRows(totals({ probe: { drawCalls: 5, vramBytes: 9000, atlasesProbed: 2, declaredVramBytes: 7000 } }), echoT, tag);
     expect(rows.map((r) => r.key)).toEqual(['disk', 'declared', 'measured', 'saveable']);
     expect(rows[2].key).toBe('measured');
   });
 
-  it('measured value is probe.vramBytes (never a delta) + the measuredTooltip title', () => {
-    const rows = buildTotalsRows(totals({ probe: { drawCalls: 5, vramBytes: 9000, atlasesProbed: 2 } }), echoT, tag);
+  it('measured value is probe.vramBytes (never a delta) + the aggregate-scope tooltip title + N-atlases sub', () => {
+    const rows = buildTotalsRows(totals({ probe: { drawCalls: 5, vramBytes: 9000, atlasesProbed: 2, declaredVramBytes: 7000 } }), echoT, tag);
     const measured = byKey(rows, 'measured')!;
     expect(measured.label).toBe('metric.vramMeasured');
     expect(measured.value).toBe('<9000>'); // straight fmtBytes(probe.vramBytes)
-    expect(measured.title).toBe('readout.measuredTooltip');
+    // R3: the aggregate chip discloses its scope — the tooltip is the aggregate-scoped key (NOT the
+    // per-atlas readout.measuredTooltip), and the sub carries the scope-denominator key.
+    expect(measured.title).toBe('readout.measuredAggregateTooltip');
+    expect(measured.sub).toBe('readout.measuredScope');
     // measured must NOT be any savings delta — distinct from saveable and from the declared/measured gap.
     const saveable = byKey(rows, 'saveable')!;
     expect(measured.value).not.toBe(saveable.value);
     expect(measured.value).not.toBe(tag(9000 - 4000)); // not declared→measured delta
+  });
+
+  it('R3: measured sub + tooltip carry n=atlasesProbed and declared=declaredVramBytes (like-for-like basis)', () => {
+    // A param-capturing translator (the echo stub drops params) pins that the scope denominator and the
+    // like-for-like declared basis are threaded through — not fabricated, not the whole-folder headline.
+    const capT = (k: string, p?: Record<string, string | number>): string => (p ? `${k}|${JSON.stringify(p)}` : k);
+    const rows = buildTotalsRows(totals({ probe: { drawCalls: 5, vramBytes: 9000, atlasesProbed: 3, declaredVramBytes: 4500 } }), capT, tag);
+    const measured = byKey(rows, 'measured')!;
+    expect(measured.sub).toBe(`readout.measuredScope|${JSON.stringify({ n: 3 })}`);
+    expect(measured.title).toBe(`readout.measuredAggregateTooltip|${JSON.stringify({ n: 3, declared: 4500 })}`);
   });
 
   it('saveable row: accent === true, label metric.saveable, value carries · N%', () => {
@@ -90,7 +103,7 @@ describe('buildTotalsRows', () => {
   });
 
   it('pins the EXACT i18n keys (stub-t echo) — disk/readout.declared/metric.vramMeasured/metric.saveable', () => {
-    const rows = buildTotalsRows(totals({ probe: { drawCalls: 1, vramBytes: 9000, atlasesProbed: 1 } }), echoT, tag);
+    const rows = buildTotalsRows(totals({ probe: { drawCalls: 1, vramBytes: 9000, atlasesProbed: 1, declaredVramBytes: 7000 } }), echoT, tag);
     expect(rows.map((r) => r.label)).toEqual(['metric.disk', 'readout.declared', 'metric.vramMeasured', 'metric.saveable']);
   });
 });

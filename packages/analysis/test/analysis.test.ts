@@ -1609,18 +1609,33 @@ describe('variant grouping (VRAM inflation)', () => {
       img('hero_1080p_avif.avif', 1080, 1080),
       img('other.png', 100, 100),
     ]);
-    // Resolution-stem clustering (correction 3): the two RESOLUTION-token files (hero_540p / hero_1080p)
-    // cluster by stem ALONE ("hero"); the two FORMAT-suffixed files (hero_540p_webp / hero_1080p_avif),
-    // whose TRAILING token is a format, keep the stem|aspectBucket key (both aspect 1:1 → one group).
-    // So this set forms TWO logical groups, each a 540p+1080p resolution pair; 'other' is a singleton.
-    expect(v.groups).toHaveLength(2);
-    for (const g of v.groups) expect(g.members).toHaveLength(2);
-    // logicalImages = bucket count: {hero res-pair} + {hero format-pair} + {other singleton} = 3 ≤ 5 raw.
-    expect(v.logicalImages).toBe(3);
-    expect(v.summedVram).toBe(2 * v540 + 2 * v1080 + v100);
-    // One tier loads per group: each group's largest is 1080² → 2·v1080, plus the 'other' singleton.
-    expect(v.loadedVramMax).toBe(2 * v1080 + v100);
-    expect(v.loadedVramMin).toBe(2 * v540 + v100);
+    // Resolution-stem clustering (correction 3, trailing-format fix): hasResolutionToken now peels a
+    // trailing FORMAT suffix before the res check, so hero_540p_webp / hero_1080p_avif are seen as the
+    // resolution tiers they are. All FOUR hero files (two res tiers, each also carrying a format suffix)
+    // therefore cluster by stem ALONE ("hero") into ONE group; 'other' is the only singleton.
+    expect(v.groups).toHaveLength(1);
+    expect(v.groups[0]!.members).toHaveLength(4); // the merged hero ladder: 540p×2 + 1080p×2
+    // logicalImages = bucket count: {hero ladder} + {other singleton} = 2 ≤ 5 raw.
+    expect(v.logicalImages).toBe(2);
+    expect(v.summedVram).toBe(2 * v540 + 2 * v1080 + v100); // unchanged — every file still summed
+    // One tier loads per logical image: the hero group's largest is 1080² → v1080 (counted ONCE),
+    // plus the 'other' singleton. No longer double-counts the top tier across a png/webp+avif split.
+    expect(v.loadedVramMax).toBe(v1080 + v100);
+    expect(v.loadedVramMin).toBe(v540 + v100);
+  });
+
+  it('treats a format-suffixed resolution tier as ONE logical image with the png/other tiers', () => {
+    // <stem>_<res>_<fmt> must be a resolution tier even though a format suffix trails the res token.
+    expect(hasResolutionToken('hero_1080p_webp.webp')).toBe(true);
+    expect(hasResolutionToken('hero_540p_avif.avif')).toBe(true);
+    expect(hasResolutionToken('sprite_webp.webp')).toBe(false); // format-only, not a tier
+    const v = groupVariants([
+      img('hero_1080p.png', 1080, 1080),
+      img('hero_1080p_webp.webp', 1080, 1080),
+      img('hero_1080p_avif.avif', 1080, 1080),
+    ]);
+    expect(v.logicalImages).toBe(1); // one bucket, not three
+    expect(v.loadedVramMax).toBe(1080 * 1080 * 4); // top tier counted ONCE
   });
 
   it('clusters a resolution tier with its source despite an independently-rounded aspect ratio', () => {

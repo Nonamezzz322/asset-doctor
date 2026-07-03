@@ -14,7 +14,13 @@
 //     chip is CONDITIONAL (probe gate), so a bare "vram" standing alone could be misread as "the vram",
 //     eroding the very honesty we're restoring. `readout.declared` keeps the two textually distinct
 //     regardless of whether the measured chip is present, with zero new strings.
-//   • MEASURED is read straight from `totals.probe.vramBytes` — NEVER a savings delta.
+//   • MEASURED is read straight from `totals.probe.vramBytes` — NEVER a savings delta. It ALSO carries a
+//     SCOPE sub (`readout.measuredScope` → "N atlases") + an aggregate-scoped tooltip
+//     (`readout.measuredAggregateTooltip`, params {n, declared}) so the number self-discloses that it is a
+//     naive sum over the N PROBED atlases (every variant tier; loose/un-probed excluded) — NOT the
+//     whole-folder deduplicated declared set beside it. Its like-for-like tooltip partner is
+//     `totals.probe.declaredVramBytes` (the SAME probed set), so "differs when manifest geometry ≠ decoded
+//     pixels" is true of the pair rather than mis-attributing the aggregate-scope gap (diagnosis-quality R3).
 //   • SAVEABLE is the disk-only %/bytes, identical to the header (`metric.saveable`, accent).
 // DETERMINISM: order is a fixed literal array; the probe branch is a single boolean gate; savedPct is
 //   integer Math.round. Same inputs → identical output. O(1), independent of asset count.
@@ -27,6 +33,8 @@ export interface TotalRow {
   value: string;
   accent?: boolean;
   title?: string;
+  /** Secondary muted line under the value (e.g. the measured chip's "N atlases" scope). */
+  sub?: string;
 }
 
 /** Build the fixed-order rows for the mobile totals strip:
@@ -52,13 +60,17 @@ export function buildTotalsRows(
   ];
 
   // MEASURED — additive, same gate as the header: present only once the render-probe has run. The REAL
-  // decoded footprint (probe.vramBytes), a different quantity from the declared estimate above — never a delta.
+  // decoded footprint (probe.vramBytes), a different quantity from the declared estimate above — never a
+  // delta. The scope sub + aggregate tooltip disclose that this is a naive sum over the N PROBED atlases
+  // (all variant tiers; loose/un-probed excluded), NOT the whole-folder deduplicated declared set — and
+  // give the manifest-vs-pixels claim a like-for-like partner (probe.declaredVramBytes). (R3)
   if (totals.probe) {
     rows.push({
       key: 'measured',
       label: t('metric.vramMeasured'),
       value: fmtBytes(totals.probe.vramBytes),
-      title: t('readout.measuredTooltip'),
+      sub: t('readout.measuredScope', { n: totals.probe.atlasesProbed }),
+      title: t('readout.measuredAggregateTooltip', { n: totals.probe.atlasesProbed, declared: totals.probe.declaredVramBytes }),
     });
   }
 

@@ -41,12 +41,23 @@ const aspectBucket = (s: Size): number => (s.h > 0 ? Math.round((s.w / s.h) * 50
 // tier suffix. Matched against the ext-stripped basename's trailing token.
 const RES_TOKEN = /[_-](\d{2,4}p|@?\d+x|hd|sd)$/i;
 
-/** True when a name's basename ends in a RESOLUTION token (e.g. "hero_720p", "icon@2x", "bg_hd"),
- *  i.e. it is one resolution tier of a logical asset. A format-only suffix ("sprite_webp") is NOT a
- *  resolution token. Used to switch clustering to a resolution-only, aspect-bucket-free key (below). */
+/** True when a name is one RESOLUTION TIER of a logical asset — i.e. a resolution token
+ *  (720p / @2x / hd / sd) appears among its trailing tokens, EVEN when a format suffix
+ *  (_webp / _avif / _jpg) trails it ("hero_1080p_webp"). A format-only name ("sprite_webp")
+ *  is NOT a tier. Checking only the LAST token (old behavior) mis-read every
+ *  `<stem>_<res>_<fmt>` file as a non-tier, splitting one logical image across two variant
+ *  buckets and ~2× over-counting loaded VRAM. Peels res OR format tokens off the end one at a
+ *  time (mirroring stemOf); any peeled token that IS a res token ⇒ tier. */
 export function hasResolutionToken(name: string): boolean {
-  const base = baseOf(name).toLowerCase().replace(/\.[a-z0-9]+$/, '');
-  return RES_TOKEN.test(base);
+  let base = baseOf(name).toLowerCase().replace(/\.[a-z0-9]+$/, '');
+  let prev = '';
+  while (base !== prev) {
+    prev = base;
+    const tok = base.match(TOKEN); // peel res OR format tokens off the end, one at a time
+    if (tok && RES_TOKEN.test(tok[0])) return true; // any peeled token that IS a res token ⇒ tier
+    base = base.replace(TOKEN, '');
+  }
+  return false;
 }
 
 export interface VariantGroups {
