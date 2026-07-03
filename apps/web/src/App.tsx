@@ -43,6 +43,9 @@ import { resultsHeading } from './lib/results-heading';
 import { progressView } from './lib/progress-view';
 import { buildTotalsRows } from './lib/totals-rows';
 import { focusTargetAfterSwap, type SwapState } from './lib/focus-move';
+import { Landing } from './components/landing/Landing';
+import { LandingFooter } from './components/landing/LandingFooter';
+import { LANDING_OPEN_FOLDER_ID } from './lib/landing-nav';
 
 // Stable empty Set (constant identity) so the `foldIds` memo has a fixed reference when there is no report —
 // no fresh object per render, so nothing downstream needlessly recomputes. PRESENTATION only (design §5.1).
@@ -492,11 +495,18 @@ export function App() {
             OUTSIDE the wrapper (a display:none live region is not announced by SRs). */}
         <div hidden={view === 'settings'}>
         {phase.t !== 'done' && (
-          <Dropzone
-            phase={phase}
-            onOpen={openFolder}
-            onDrop={(dt) => void filesFromDataTransfer(dt).then(run)}
-          />
+          <>
+            <Dropzone
+              phase={phase}
+              onOpen={openFolder}
+              onDrop={(dt) => void filesFromDataTransfer(dt).then(run)}
+            />
+            {/* The landing sections (nav + how-it-works + disk≠VRAM + capabilities + privacy + pricing +
+                FAQ) render BELOW the Dropzone on the idle/analyzing/error screen, inside this same
+                <main id="ad-main"> landmark and the settings `hidden` wrapper (auto-hidden on #settings).
+                Unmounts at 'done' (the results tree takes over). phase.t is narrowed to exclude 'done' here. */}
+            <Landing phaseT={phase.t} />
+          </>
         )}
 
         {report && phase.t === 'done' && index && selectOpts && (
@@ -608,6 +618,12 @@ export function App() {
         </div>
         {view === 'settings' ? <SettingsPage hasResults={!!report} /> : null}
       </main>
+
+      {/* The landing footer — the app's first honest contentinfo landmark (a <footer> nested in <main>
+          does NOT map to contentinfo, so it renders here as a top-level sibling). UX-4 reserved this slot
+          for the landing (no pre-existing footer to reuse). Shown only while the landing itself shows:
+          on the main view (not #settings) and pre-'done'. Reuses the shared LanguageSwitcher. */}
+      {view === 'main' && phase.t !== 'done' && <LandingFooter switcher={<LanguageSwitcher />} />}
 
       <input ref={inputRef} type="file" multiple hidden onChange={(e) => {
         const list = e.target.files;
@@ -736,6 +752,9 @@ function Dropzone({
           {t('header.xray')}
         </div>
         <h1 id="ad-dropzone-h1" tabIndex={-1} className="ad-focus-anchor text-balance font-display text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl">{t('dropzone.title')}</h1>
+        {/* Landing hero tagline (full ink — it is the value prop). Scoped "nothing is uploaded" = the
+            diagnosis. The existing subtitle (analysis-scoped claim) stays verbatim below it. */}
+        <p className="mx-auto mt-3 max-w-xl text-pretty text-[15px] leading-relaxed text-ink">{t('landing.tagline')}</p>
         <p className="mx-auto mt-4 max-w-xl text-pretty text-[15px] leading-relaxed text-ink-soft">{t('dropzone.subtitle')}</p>
       </div>
 
@@ -787,6 +806,7 @@ function Dropzone({
           ) : (
             <button
               type="button"
+              id={LANDING_OPEN_FOLDER_ID}
               onClick={onOpen}
               className="rounded-lg bg-cta px-5 py-2.5 font-sans text-sm font-semibold text-white shadow-[0_2px_6px_rgba(21,160,106,0.32)] transition hover:bg-cta-hover"
             >
@@ -801,6 +821,9 @@ function Dropzone({
           (e.g. error.noFiles) or the raw worker message; nothing is fabricated. */}
       {phase.t === 'error' && <p role="alert" className="mt-3 text-center font-mono text-xs text-crit">{phase.message}</p>}
       <p className="mt-5 text-center font-mono text-[11px] text-ink-soft">{t('dropzone.footnote')}</p>
+      {/* Mobile honesty line (visible only < sm). Never promises mobile analysis (WebGL probe / FS Access
+          limits) but doesn't say "impossible" either — file-input folder picking exists. */}
+      <p className="mt-2 text-center font-mono text-[11px] text-ink-soft sm:hidden">{t('landing.mobileNote')}</p>
     </section>
   );
 }

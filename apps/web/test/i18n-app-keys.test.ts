@@ -68,7 +68,16 @@ const appSrc =
   // empty-card key would silently render a raw dotted key. skipped-chip.ts likewise owns report.skippedChip*.
   lib('ledger-empty.ts') +
   '\n' +
-  lib('skipped-chip.ts');
+  lib('skipped-chip.ts') +
+  '\n' +
+  // Landing.tsx owns every landing.* t() literal (the whole idle-screen landing below the Dropzone). Its
+  // nav labels + the pricing-status line resolve through registry/gate constants (landing-nav.ts, pinned by
+  // landing-nav.test.ts + the i18n parity test), but the section copy is static t('landing.*') and must
+  // resolve; without scanning it a renamed landing key would silently render a raw dotted key.
+  comp('landing/Landing.tsx') +
+  '\n' +
+  // LandingFooter.tsx owns landing.footer.* (+ reuses dropzone.footnote), referenced nowhere else.
+  comp('landing/LandingFooter.tsx');
 
 // Suffix maps mirrored from App.tsx (modeKey / granKey) so dynamic option keys resolve to concrete keys.
 const MODE_SUFFIXES = ['auto', 'static', 'spine'];

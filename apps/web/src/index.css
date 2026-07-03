@@ -249,6 +249,25 @@ body {
   outline: none;
 }
 
+/* Landing full-bleed strip (the one dark privacy band): escapes <main>'s max-w-6xl px-6 to the viewport
+   edge. Paired with overflow-x:clip on html below — calc(50% - 50vw) overhangs by the scrollbar width
+   otherwise. */
+.ad-bleed {
+  margin-inline: calc(50% - 50vw);
+}
+/* Kill the phantom horizontal scroll from the bleed. `clip` (NOT hidden) does not create a scroll
+   container, so the sticky header keeps sticking to the viewport. */
+html {
+  overflow-x: clip;
+}
+
+/* Scroll-reveal pre-state. Content is hidden ONLY when JS chose 'observe' mode (landing-reveal.ts) — never
+   by default, so no-JS / no-IO / reduced-motion users always see everything. The reveal itself reuses the
+   SHIPPED one-shot .ad-reveal keyframe (0.5s ease both). */
+.ad-reveal-wait {
+  opacity: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ad-reveal,
   .ad-pulse-dot {
@@ -258,6 +277,11 @@ body {
   }
   .ad-scanline {
     display: none !important;
+  }
+  /* Belt & braces: under reduce the reveal class is never attached (landing-reveal.ts), but this guards a
+     race if the OS toggle flips mid-session while a section is still waiting. */
+  .ad-reveal-wait {
+    opacity: 1 !important;
   }
   .ad-progress-fill {
     transition: none !important;
