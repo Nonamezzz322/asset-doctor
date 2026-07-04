@@ -19,6 +19,7 @@ import {
   isSolidColor,
   isSolidFullRes,
   luma,
+  meanColorFromSample,
 } from '../lib/perceptual';
 import type { ContentClass } from '@asset-doctor/core';
 import type { WorkerRequest, WorkerResponse } from './protocol';
@@ -133,12 +134,15 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       // and JPEG/AVIF loose images never pay the full-resolution decode (instant-wow: most files skip it).
       const m = looseMime.get(assetRef);
       const scanAlpha = m === 'image/png' || m === 'image/webp';
-      const { dHash, contentClass, solid, opaque, scanSkipped, w, h } = await decodeFeatures(bytes, scanAlpha);
+      const { dHash, contentClass, solid, opaque, meanColor, scanSkipped, w, h } = await decodeFeatures(bytes, scanAlpha);
       const feat: ImageFeatures = { assetRef, contentHash };
       if (dHash) feat.dHash = dHash;
       if (contentClass !== 'unknown') feat.contentClass = contentClass;
       if (solid) feat.solid = true; // additive: only ever set when true
       if (opaque) feat.opaque = true; // additive: only ever set when true (full-frame alpha === 255)
+      // Attach whenever measured (non-null): the duplicate-similar mean-color guard consumes it; features
+      // that never enter perceptual matching (dHash-null) are filtered out downstream, so it's inert there.
+      if (meanColor) feat.meanColor = meanColor;
       features.push(feat);
       // Round 21 #2: the alpha scan was GATED OFF for an oversize loose page — surface that honestly in
       // unparsed[] (it was a SILENT skip before). Only when scanAlpha was wanted AND the page busted the cap;
@@ -232,12 +236,13 @@ async function decodeFeatures(
   contentClass: ContentClass;
   solid: boolean;
   opaque: boolean;
+  meanColor: { r: number; g: number; b: number } | null;
   scanSkipped: boolean;
   w: number;
   h: number;
 }> {
   if (typeof OffscreenCanvas === 'undefined')
-    return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, scanSkipped: false, w: 0, h: 0 };
+    return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, meanColor: null, scanSkipped: false, w: 0, h: 0 };
   try {
     const bmp = await createImageBitmap(new Blob([bytes]));
     const { width, height } = bmp; // capture before close() so the caller's skip reason has the dimensions
@@ -245,10 +250,13 @@ async function decodeFeatures(
     const c2d = canvas.getContext('2d');
     if (!c2d) {
       bmp.close();
-      return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, scanSkipped: false, w: width, h: height };
+      return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, meanColor: null, scanSkipped: false, w: width, h: height };
     }
     c2d.drawImage(bmp, 0, 0, 9, 8);
     const data = c2d.getImageData(0, 0, 9, 8).data;
+    // Alpha-weighted mean color over the SAME 9×8 sample (zero extra decode) — feeds the duplicate-similar
+    // mean-color guard (dHash is luma-sign-only ⇒ color-blind). null when Σα === 0 (nothing to measure).
+    const meanColor = meanColorFromSample(data);
     const gray: number[] = [];
     for (let p = 0; p < 9 * 8; p++) gray.push(luma(data, p * 4));
     const dHash = isFlat(gray) ? null : dHashFromGray(gray); // featureless → skip perceptual matching
@@ -280,9 +288,9 @@ async function decodeFeatures(
       }
     }
     bmp.close();
-    return { dHash, contentClass, solid, opaque, scanSkipped, w: width, h: height };
+    return { dHash, contentClass, solid, opaque, meanColor, scanSkipped, w: width, h: height };
   } catch {
-    return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, scanSkipped: false, w: 0, h: 0 };
+    return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, meanColor: null, scanSkipped: false, w: 0, h: 0 };
   }
 }
 

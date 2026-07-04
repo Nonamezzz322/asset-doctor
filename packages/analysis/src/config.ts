@@ -5,9 +5,21 @@ import type { ThresholdConfig } from '@asset-doctor/core';
 export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   occupancy: { warn: 0.8, crit: 0.6 }, // fraction of atlas area covered by frames (calibrated on real packed exports: median 0.92)
   oversizePx: { warn: 2048, crit: 2730 }, // longest texture edge, px (budget-Android GL_MAX often 2048; crit = mid-device danger line)
-  formatSaving: { warn: 0.25 }, // fraction of disk bytes a better format could save
+  formatSaving: { warn: 0.25, minBytes: 4096 }, // CALIBRATE — fraction of disk bytes a better format
+  // could save (warn) + absolute floor on the MEASURED saved bytes (minBytes). A tiny icon "saving 35%"
+  // is a few hundred bytes of noise — same rationale as strippableMetadata.minBytes below (a tiny tIME
+  // chunk is noise). Real transcode wins on game art clear 4 KB easily. Strict `<` in the rule, so
+  // saved === 4096 fires. Suppression also shrinks potentialDiskSaved (analyze.ts bumpBest) and the
+  // folder format-aggregate for free — both consume only surviving findings.
   npotPadding: { warn: 0.25 }, // POT-padding waste before an NPOT finding fires (NPOT alone is fine on WebGL2/Pixi)
-  duplicates: { similarHammingMax: 6 }, // dHash bits that may differ for "near-identical"
+  duplicates: { similarHammingMax: 6, maxMeanColorDelta: 24 }, // dHash bits that may differ for "near-identical".
+  // maxMeanColorDelta (CALIBRATE): max per-channel |Δ| of the alpha-weighted 9×8 mean color before two
+  // dHash-close images are refused as a near-dup pair — dHash is luma-sign-only (color-blind), so a red gem
+  // and its blue tint-recolor hash identically. A re-export/recompression shifts channel means ≲8 (lossy DC
+  // averages are preserved closely); a saturated hue swap moves ≥1 channel ≳60 (e.g. 200,40,40→40,40,200 is
+  // Δ160). 24 splits the two regimes with margin. Verify on the real slot corpus: genuine re-export clusters
+  // must survive, recolored symbol sets must split. Guard self-skips when either side lacks meanColor
+  // (CLI/headless features carry none ⇒ CLI findings byte-identical).
   shouldAtlas: { minLooseImages: 8, maxSpriteEdgePx: 512, dominatedFraction: 0.5 }, // loose sprites worth packing.
   // dominatedFraction (0.5 — PROVISIONAL, calibrate): BROWSER-ONLY presentation gate (primary-card prominence +
   // collapse-default). Fraction of ALL assets (big loose + every atlas in the denominator) that must be packable

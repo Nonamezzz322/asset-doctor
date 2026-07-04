@@ -402,6 +402,11 @@ export interface ImageFeatures {
    *  short-circuit on the first non-opaque pixel so most images bail instantly. Additive: only ever SET
    *  when true; absent (not opaque, decode skipped/failed, or no host scan) ⇒ today's behavior. */
   opaque?: boolean;
+  /** Alpha-WEIGHTED mean color over the SAME 9×8 RGBA sample as dHash (zero extra decode; weighting by
+   *  alpha keeps decoded fully-transparent pixels' arbitrary RGB out of the mean). Guards duplicate-similar
+   *  against hue-swapped shape twins (dHash is luma-sign-only ⇒ color-blind). Additive: absent (CLI/headless,
+   *  Σalpha=0, decode failure) ⇒ guard self-skips ⇒ today's clustering byte-identical. */
+  meanColor?: { r: number; g: number; b: number };
 }
 
 /** Per-atlas sprite-region hashes computed by the host (worker) from the ALREADY-DECODED atlas page, fed
@@ -562,11 +567,19 @@ export interface AssetMetrics {
 export interface ThresholdConfig {
   occupancy: { warn: number; crit: number };
   oversizePx: { warn: number; crit: number };
-  formatSaving: { warn: number };
+  /** Better-format saving gate. `warn`: fraction of disk bytes a better format must save before the
+   *  per-file finding fires. `minBytes` (optional, additive): absolute floor on the MEASURED saved
+   *  bytes — a high percentage on a tiny file is byte-noise (30% of a 2 KB icon ≈ 600 bytes); mirrors
+   *  strippableMetadata.minBytes. Absent ⇒ 0 (legacy fraction-only behavior). */
+  formatSaving: { warn: number; minBytes?: number };
   /** Fraction of the POT-padded area wasted before flagging an NPOT info finding. */
   npotPadding: { warn: number };
-  /** Folder-level checks. */
-  duplicates: { similarHammingMax: number };
+  /** Folder-level checks. `similarHammingMax`: dHash bits that may differ for "near-identical".
+   *  `maxMeanColorDelta` (optional, additive): max per-channel |Δ| of the alpha-weighted 9×8 mean color
+   *  before two dHash-close images are REFUSED as a near-dup pair — dHash is luma-sign-only (color-blind),
+   *  so a hue-swapped shape twin (recolored symbol set) hashes identically. Guard self-skips when either
+   *  side lacks `meanColor` (CLI/headless). Absent ⇒ Infinity (legacy hamming-only clustering). */
+  duplicates: { similarHammingMax: number; maxMeanColorDelta?: number };
   /** Loose-sprite packing gate. `minLooseImages` / `maxSpriteEdgePx` drive `shouldAtlasFinding`.
    *  `dominatedFraction` is a BROWSER-ONLY presentation gate (primary-card prominence + collapse-default):
    *  the fraction of ALL assets (big loose + every atlas included in the denominator) that must be packable

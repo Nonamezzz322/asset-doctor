@@ -61,6 +61,29 @@ export function isFlat(gray: number[], minStdDev = 6): boolean {
   return grayStdDev(gray) < minStdDev;
 }
 
+/** Alpha-weighted mean color of an interleaved RGBA sample: Σ(c·α)/Σα per channel. Weighting by alpha
+ *  keeps fully-transparent pixels' arbitrary decoded RGB from poisoning the mean (canvas un-premultiply
+ *  noise lives at low α). Returns null when Σα === 0 (fully transparent / empty — nothing to measure,
+ *  never a fabricated color). Pure float arithmetic, deterministic; NOT rounded. */
+export function meanColorFromSample(
+  rgba: Uint8ClampedArray | number[],
+): { r: number; g: number; b: number } | null {
+  const n = Math.floor(rgba.length / 4);
+  let sa = 0;
+  let sr = 0;
+  let sg = 0;
+  let sb = 0;
+  for (let p = 0; p < n; p++) {
+    const a = rgba[p * 4 + 3] ?? 0;
+    sa += a;
+    sr += (rgba[p * 4] ?? 0) * a;
+    sg += (rgba[p * 4 + 1] ?? 0) * a;
+    sb += (rgba[p * 4 + 2] ?? 0) * a;
+  }
+  if (sa === 0) return null;
+  return { r: sr / sa, g: sg / sa, b: sb / sa };
+}
+
 /** Standard deviation of channel `c` (0=R,1=G,2=B,3=A) across the interleaved RGBA samples. */
 function channelStdDev(rgba: Uint8ClampedArray | number[], c: number): number {
   const n = Math.floor(rgba.length / 4);

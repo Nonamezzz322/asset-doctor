@@ -82,12 +82,30 @@ export function duplicateSimilarFindings(features: ImageFeatures[], cfg: Thresho
   const feats = features.filter((f) => f.dHash);
   const used = new Set<number>();
   const out: Finding[] = [];
+  // dHash is luma-sign-only ⇒ color-blind; a hue-swapped shape twin (recolored symbol set) must not read
+  // as a near-dupe. Pairs whose alpha-weighted 9×8 mean color differs by more than maxMeanColorDelta on
+  // any channel are refused. Self-skips when either side lacks meanColor (CLI/headless, legacy features).
+  const maxDelta = cfg.duplicates.maxMeanColorDelta ?? Infinity;
+  const colorCompatible = (a: ImageFeatures, b: ImageFeatures): boolean => {
+    if (!a.meanColor || !b.meanColor) return true; // legacy features (CLI, old fixtures) — guard self-skips
+    return (
+      Math.max(
+        Math.abs(a.meanColor.r - b.meanColor.r),
+        Math.abs(a.meanColor.g - b.meanColor.g),
+        Math.abs(a.meanColor.b - b.meanColor.b),
+      ) <= maxDelta
+    );
+  };
   for (let i = 0; i < feats.length; i++) {
     if (used.has(i)) continue;
     const group = [i];
     for (let j = i + 1; j < feats.length; j++) {
       if (used.has(j)) continue;
-      if (hamming(feats[i]!.dHash!, feats[j]!.dHash!) <= cfg.duplicates.similarHammingMax) group.push(j);
+      if (
+        hamming(feats[i]!.dHash!, feats[j]!.dHash!) <= cfg.duplicates.similarHammingMax &&
+        colorCompatible(feats[i]!, feats[j]!)
+      )
+        group.push(j);
     }
     if (group.length < 2) continue;
     group.forEach((k) => used.add(k));

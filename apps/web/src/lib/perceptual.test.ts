@@ -20,6 +20,7 @@ import {
   isSolidColor,
   isSolidFullRes,
   luma,
+  meanColorFromSample,
   FLAT_STD,
   FRAME_HASH_MAX_PX,
   FRAME_HASH_MAX_SPRITES,
@@ -58,6 +59,30 @@ describe('grayStdDev / isFlat (unchanged)', () => {
     expect(grayStdDev(g)).toBeCloseTo(0);
     expect(isFlat(g)).toBe(true);
     expect(dHashFromGray(g)).toHaveLength(16);
+  });
+});
+
+describe('meanColorFromSample (alpha-weighted mean color — duplicate-similar color guard)', () => {
+  it('fully-transparent pixels carrying garbage RGB do NOT poison the mean (alpha-weighting)', () => {
+    // Half opaque pure red, half fully-transparent with arbitrary decoded RGB (canvas un-premultiply noise).
+    const buf = rgba((i) => (i < N / 2 ? [255, 0, 0, 255] : [13, 200, 77, 0]));
+    const mc = meanColorFromSample(buf)!;
+    expect(mc.r).toBe(255);
+    expect(mc.g).toBe(0);
+    expect(mc.b).toBe(0);
+  });
+
+  it('Σalpha === 0 ⇒ null (fully transparent — nothing to measure, never a fabricated color)', () => {
+    expect(meanColorFromSample(rgba(() => [50, 60, 70, 0]))).toBeNull();
+    expect(meanColorFromSample(new Uint8ClampedArray(0))).toBeNull(); // empty buffer too
+  });
+
+  it('weighted math is exact: (255,255,255,α255) + (0,0,0,α51) ⇒ 65025/306 = 212.5 per channel', () => {
+    const buf = new Uint8ClampedArray([255, 255, 255, 255, 0, 0, 0, 51]);
+    const mc = meanColorFromSample(buf)!;
+    expect(mc.r).toBe(212.5);
+    expect(mc.g).toBe(212.5);
+    expect(mc.b).toBe(212.5);
   });
 });
 

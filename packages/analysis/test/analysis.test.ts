@@ -2,10 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import type { Asset, Atlas, ImageAsset, ImageMime, Rect } from '@asset-doctor/core';
+import type { Asset, Atlas, ImageAsset, ImageFeatures, ImageMime, Rect, ThresholdConfig } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseFntText, parseFntPage, type FntPage } from '@asset-doctor/parsers';
 import { groupFiles, type RawFile } from '@asset-doctor/ingest';
-import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, crossAtlasRedundancyFinding, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, crossAtlasRedundancyFinding, duplicateSimilarFindings, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -236,38 +236,88 @@ describe('format audit — content-class lossless verdict', () => {
 // carrying this forward. A DIFFERENTIATING encoder mock is required (the constant `async () => 4000` only
 // ever proves AVIF wins) to exercise the WebP-wins branch + the deterministic tie-break.
 describe('format audit — measured bestMime param (round17)', () => {
+  // byteSize 100000 (not 10000): these tests document DEFAULT-config behavior, and the minBytes=4096
+  // floor would eat a 10000→6000/7000 saving (4000/3000 bytes). ×10 keeps every frac / MAX relation /
+  // tie-break identical while the measured savings (40000/30000) clear the floor realistically.
   const looseImg = (name: string, mime: ImageMime = 'image/png'): ImageAsset =>
-    ({ name, imageRef: name, size: { w: 256, h: 256 }, mime, byteSize: 10000 });
+    ({ name, imageRef: name, size: { w: 256, h: 256 }, mime, byteSize: 100000 });
 
   it('records bestMime = AVIF when AVIF encodes smallest (lossy verdict)', async () => {
-    const f = (await formatFinding('a.png', looseImg('a.png'), DEFAULT_THRESHOLDS, async (_r, _s, t) => (t === 'image/avif' ? 6000 : 7000)))!;
+    const f = (await formatFinding('a.png', looseImg('a.png'), DEFAULT_THRESHOLDS, async (_r, _s, t) => (t === 'image/avif' ? 60000 : 70000)))!;
     expect(f.messageKey).toBe('format');
     expect(f.params?.bestMime).toBe('image/avif');
     expect(f.params?.target).toBe('AVIF'); // the display label stays beside the machine-readable mime
   });
 
   it('records bestMime = WebP when WebP encodes smallest (the branch the constant mock can never hit)', async () => {
-    const f = (await formatFinding('b.png', looseImg('b.png'), DEFAULT_THRESHOLDS, async (_r, _s, t) => (t === 'image/avif' ? 7000 : 6000)))!;
+    const f = (await formatFinding('b.png', looseImg('b.png'), DEFAULT_THRESHOLDS, async (_r, _s, t) => (t === 'image/avif' ? 70000 : 60000)))!;
     expect(f.params?.bestMime).toBe('image/webp');
     expect(f.params?.target).toBe('WebP');
   });
 
   it('deterministic tie-break: equal encodes keep AVIF (first FORMAT_TARGETS candidate)', async () => {
-    const f = (await formatFinding('c.png', looseImg('c.png'), DEFAULT_THRESHOLDS, async () => 6000))!;
+    const f = (await formatFinding('c.png', looseImg('c.png'), DEFAULT_THRESHOLDS, async () => 60000))!;
     expect(f.params?.bestMime).toBe('image/avif'); // strict-smaller pick ⇒ tie keeps the first iterated
   });
 
   it('records bestMime on the flat/alpha-art lossless verdict too', async () => {
     for (const cls of ['flat', 'alpha-art'] as const) {
-      const f = (await formatFinding('d.png', looseImg('d.png'), DEFAULT_THRESHOLDS, async (_r, _s, t) => (t === 'image/avif' ? 7000 : 6000), cls))!;
+      const f = (await formatFinding('d.png', looseImg('d.png'), DEFAULT_THRESHOLDS, async (_r, _s, t) => (t === 'image/avif' ? 70000 : 60000), cls))!;
       expect(f.messageKey).toBe('format-lossless');
       expect(f.params?.bestMime).toBe('image/webp');
     }
   });
 
   it('bestMime is NEVER the source mime: a WebP source yields AVIF (candidate loop skips target===source)', async () => {
-    const f = (await formatFinding('e.webp', looseImg('e.webp', 'image/webp'), DEFAULT_THRESHOLDS, async () => 6000))!;
+    const f = (await formatFinding('e.webp', looseImg('e.webp', 'image/webp'), DEFAULT_THRESHOLDS, async () => 60000))!;
     expect(f.params?.bestMime).toBe('image/avif'); // only AVIF is a candidate for a WebP source
+  });
+});
+
+// ── Absolute byte floor on the MEASURED format saving (formatSaving.minBytes). A high PERCENTAGE on a
+// tiny file is byte-noise — 30% of a 2 KB icon is ~600 bytes, not a per-file warn. Same rationale (and
+// same strict-`<` gate shape) as strippableMetadata.minBytes.
+describe('format audit — absolute byte floor (minBytes)', () => {
+  const img = (name: string, byteSize: number): ImageAsset =>
+    ({ name, imageRef: name, size: { w: 64, h: 64 }, mime: 'image/png', byteSize });
+
+  it('2048-byte icon saving 35% (718 bytes) ⇒ null — the headline byte-noise case', async () => {
+    // frac 718/2048 ≈ 0.35 > warn 0.25, but saved 718 < minBytes 4096 ⇒ suppressed.
+    expect(await formatFinding('i.png', img('i.png', 2048), DEFAULT_THRESHOLDS, async () => 1330)).toBeNull();
+  });
+
+  it('saved === minBytes (4096) FIRES — strict `<` boundary (mirrors strippableMetadata)', async () => {
+    // 16384 → 12288: saved exactly 4096; frac exactly 0.25 also passes the non-strict side of `frac < warn`.
+    const f = await formatFinding('b.png', img('b.png', 16384), DEFAULT_THRESHOLDS, async () => 12288);
+    expect(f).not.toBeNull();
+    expect(f!.estimate?.diskBytesSaved).toBe(4096);
+  });
+
+  it('saved === minBytes − 1 (4095) ⇒ null — one-below boundary', async () => {
+    expect(await formatFinding('c.png', img('c.png', 16384), DEFAULT_THRESHOLDS, async () => 12289)).toBeNull();
+  });
+
+  it('the floor gates the LOSSLESS branch too (flat content, tiny file) ⇒ null', async () => {
+    expect(await formatFinding('f.png', img('f.png', 2048), DEFAULT_THRESHOLDS, async () => 1330, 'flat')).toBeNull();
+  });
+
+  it('legacy config WITHOUT minBytes ⇒ fraction-only, byte-identical (`?? 0`)', async () => {
+    // The exact partial shape budget/correlate/ingest test configs declare — must keep typechecking AND firing.
+    const legacy: ThresholdConfig = { ...DEFAULT_THRESHOLDS, formatSaving: { warn: 0.25 } };
+    const f = await formatFinding('l.png', img('l.png', 2048), legacy, async () => 1330);
+    expect(f).not.toBeNull();
+    expect(f!.estimate?.diskBytesSaved).toBe(718);
+  });
+
+  it('analyze: sub-floor tiny warns vanish ⇒ no per-file finding, no folder format-aggregate, potentialDiskSaved 0', async () => {
+    const loose = (n: string): Asset => ({
+      kind: 'image',
+      image: { name: n, imageRef: n, size: { w: 64, h: 64 }, mime: 'image/png', byteSize: 2048 },
+    });
+    // Two tiny icons each "saving" ~35% (718 bytes each) — below the floor, so NOTHING format-shaped survives.
+    const report = await analyze([loose('a.png'), loose('b.png')], undefined, { encodeImage: async () => 1330 });
+    expect(report.findings.some((f) => f.rule === 'format')).toBe(false); // per-file AND aggregate share rule 'format'
+    expect(report.totals.potentialDiskSaved).toBe(0);
   });
 });
 
@@ -403,30 +453,32 @@ describe('wasted-alpha (fully-opaque image carrying a dead alpha channel)', () =
   });
 
   it('a ref with BOTH a format AND a wasted-alpha finding contributes its disk saving ONCE (no double-count)', async () => {
-    // 10000-byte PNG: format → AVIF estimate 6000 (saved 4000); opaque re-encode → 7000 (saved 3000).
-    // The two overlap (transcode already drops the dead alpha plane). The aggregate must take the MAX
-    // per-ref (4000), NOT the sum (7000).
-    const report = await analyze([looseImg('flat.png', 512, 512)], undefined, {
-      encodeImage: async () => 6000, // AVIF/WebP transcode estimate → saved 4000
-      encodeOpaque: async () => 7000, // opaque same-format re-encode → saved 3000
+    // 100000-byte PNG (×10 vs the old 10000 so the format saving clears the DEFAULT minBytes=4096 floor;
+    // all fracs and the MAX relation are scale-invariant): format → AVIF estimate 60000 (saved 40000);
+    // opaque re-encode → 70000 (saved 30000). The two overlap (transcode already drops the dead alpha
+    // plane). The aggregate must take the MAX per-ref (40000), NOT the sum (70000).
+    const report = await analyze([looseImg('flat.png', 512, 512, 'image/png', 100000)], undefined, {
+      encodeImage: async () => 60000, // AVIF/WebP transcode estimate → saved 40000
+      encodeOpaque: async () => 70000, // opaque same-format re-encode → saved 30000
       features: [{ assetRef: 'flat.png', contentHash: 'h', contentClass: 'photographic', opaque: true }],
     });
-    expect(report.findings.find((f) => f.rule === 'format')?.estimate?.diskBytesSaved).toBe(4000);
-    expect(report.findings.find((f) => f.rule === 'wasted-alpha')?.estimate?.diskBytesSaved).toBe(3000);
-    // MAX(4000, 3000) = 4000 — NOT 7000. The per-finding estimates are still honest individually.
-    expect(report.totals.potentialDiskSaved).toBe(4000);
+    expect(report.findings.find((f) => f.rule === 'format')?.estimate?.diskBytesSaved).toBe(40000);
+    expect(report.findings.find((f) => f.rule === 'wasted-alpha')?.estimate?.diskBytesSaved).toBe(30000);
+    // MAX(40000, 30000) = 40000 — NOT 70000. The per-finding estimates are still honest individually.
+    expect(report.totals.potentialDiskSaved).toBe(40000);
   });
 
   it('wasted-alpha saving LARGER than format saving ⇒ aggregate = the larger (max), still counted once', async () => {
-    // format → 6000 (saved 4000, 40% > 25% gate); opaque → 3500 (saved 6500). MAX = 6500, not 10500.
-    const report = await analyze([looseImg('flat.png', 512, 512)], undefined, {
-      encodeImage: async () => 6000,
-      encodeOpaque: async () => 3500,
+    // format → 60000 (saved 40000, 40% > 25% gate + over the 4096 floor); opaque → 35000 (saved 65000).
+    // MAX = 65000, not 105000.
+    const report = await analyze([looseImg('flat.png', 512, 512, 'image/png', 100000)], undefined, {
+      encodeImage: async () => 60000,
+      encodeOpaque: async () => 35000,
       features: [{ assetRef: 'flat.png', contentHash: 'h', contentClass: 'photographic', opaque: true }],
     });
-    expect(report.findings.find((f) => f.rule === 'format')?.estimate?.diskBytesSaved).toBe(4000);
-    expect(report.findings.find((f) => f.rule === 'wasted-alpha')?.estimate?.diskBytesSaved).toBe(6500);
-    expect(report.totals.potentialDiskSaved).toBe(6500);
+    expect(report.findings.find((f) => f.rule === 'format')?.estimate?.diskBytesSaved).toBe(40000);
+    expect(report.findings.find((f) => f.rule === 'wasted-alpha')?.estimate?.diskBytesSaved).toBe(65000);
+    expect(report.totals.potentialDiskSaved).toBe(65000);
   });
 
   it('analyze NEVER fires wasted-alpha for an ATLAS, even if a feature marks it opaque (loose-only)', async () => {
@@ -509,19 +561,21 @@ describe('strippable-metadata (ancillary ICC/EXIF/XMP + non-essential chunks)', 
     expect(report.totals.potentialDiskSaved).toBe(50000);
   });
 
-  it('THREE-WAY MAX: fmt=4000 + alpha=6000 + strip=5000 ⇒ potentialDiskSaved === 6000 (honest MAX, not 7000)', async () => {
-    // 10000-byte PNG. format → 6000 estimate (saved 4000); opaque → 4000 (saved 6000); strip → 5000.
-    // The three overlap on one re-encode; the aggregate must be MAX(4000,6000,5000) === 6000, NOT 7000.
-    const asset: Asset = { kind: 'image', image: { name: 'x.png', imageRef: 'x.png', size: { w: 512, h: 512 }, mime: 'image/png', byteSize: 10000, strippableBytes: 5000 } };
+  it('THREE-WAY MAX: fmt=40000 + alpha=60000 + strip=50000 ⇒ potentialDiskSaved === 60000 (honest MAX, not 70000)', async () => {
+    // 100000-byte PNG (×10 vs the old 10000 so the format saving clears the DEFAULT minBytes=4096 floor;
+    // fracs + MAX relations scale-invariant; strip 50000 stays within [minBytes 4096, warnBytes 65536) so
+    // its severity is unchanged). format → 60000 estimate (saved 40000); opaque → 40000 (saved 60000);
+    // strip → 50000. The three overlap on one re-encode; aggregate = MAX(40000,60000,50000) === 60000.
+    const asset: Asset = { kind: 'image', image: { name: 'x.png', imageRef: 'x.png', size: { w: 512, h: 512 }, mime: 'image/png', byteSize: 100000, strippableBytes: 50000 } };
     const report = await analyze([asset], undefined, {
-      encodeImage: async () => 6000,  // format saved = 10000 - 6000 = 4000
-      encodeOpaque: async () => 4000, // wasted-alpha saved = 10000 - 4000 = 6000
+      encodeImage: async () => 60000,  // format saved = 100000 - 60000 = 40000
+      encodeOpaque: async () => 40000, // wasted-alpha saved = 100000 - 40000 = 60000
       features: [{ assetRef: 'x.png', contentHash: 'h', contentClass: 'photographic', opaque: true }],
     });
-    expect(report.findings.find((f) => f.rule === 'format')?.estimate?.diskBytesSaved).toBe(4000);
-    expect(report.findings.find((f) => f.rule === 'wasted-alpha')?.estimate?.diskBytesSaved).toBe(6000);
-    expect(report.findings.find((f) => f.rule === 'strippable-metadata' && f.scope !== 'folder')?.estimate?.diskBytesSaved).toBe(5000);
-    expect(report.totals.potentialDiskSaved).toBe(6000); // MAX, never 4000 + 2000 + 1000 = 7000
+    expect(report.findings.find((f) => f.rule === 'format')?.estimate?.diskBytesSaved).toBe(40000);
+    expect(report.findings.find((f) => f.rule === 'wasted-alpha')?.estimate?.diskBytesSaved).toBe(60000);
+    expect(report.findings.find((f) => f.rule === 'strippable-metadata' && f.scope !== 'folder')?.estimate?.diskBytesSaved).toBe(50000);
+    expect(report.totals.potentialDiskSaved).toBe(60000); // MAX, never 40000 + 20000 + 10000 = 70000
   });
 
   it('folder rollup: ≥2 per-asset findings ⇒ summed aggregate (display-only, NOT folded into totals)', () => {
@@ -1446,6 +1500,58 @@ describe('folder-level findings', () => {
     expect(rep.findings.some((f) => f.rule === 'duplicate-exact')).toBe(false);
   });
 
+  // ── Mean-color guard: dHash is luma-sign-only ⇒ color-blind, so a hue-swapped shape twin (recolored
+  // symbol set — the standard slot-game pattern) hashes identically. Pairs whose alpha-weighted 9×8 mean
+  // color differs by more than duplicates.maxMeanColorDelta on any channel must NOT cluster. Distinct
+  // contentHashes everywhere so the exact-dup dedupe guard doesn't eat the case.
+  describe('duplicate-similar — mean-color guard (dHash is color-blind)', () => {
+    const H = 'ffffffffffffffff';
+    const feat = (ref: string, hash: string, meanColor?: { r: number; g: number; b: number }): ImageFeatures => ({
+      assetRef: ref,
+      contentHash: hash,
+      dHash: H,
+      ...(meanColor ? { meanColor } : {}),
+    });
+
+    it('same dHash, red vs blue mean ⇒ NO finding (hue-swap split)', () => {
+      const out = duplicateSimilarFindings(
+        [feat('red.png', 'h1', { r: 200, g: 40, b: 40 }), feat('blue.png', 'h2', { r: 40, g: 60, b: 200 })],
+        DEFAULT_THRESHOLDS,
+      );
+      expect(out.some((f) => f.rule === 'duplicate-similar')).toBe(false);
+    });
+
+    it('same dHash, mean delta within 24 ⇒ finding fires (re-export regime survives)', () => {
+      const out = duplicateSimilarFindings(
+        [feat('a.png', 'h1', { r: 200, g: 40, b: 40 }), feat('b.png', 'h2', { r: 195, g: 45, b: 42 })],
+        DEFAULT_THRESHOLDS,
+      );
+      expect(out.find((f) => f.rule === 'duplicate-similar')?.relatedRefs).toEqual(['a.png', 'b.png']);
+    });
+
+    it('one side missing meanColor ⇒ guard self-skips, finding fires (legacy byte-identity proof)', () => {
+      const out = duplicateSimilarFindings(
+        [feat('a.png', 'h1', { r: 200, g: 40, b: 40 }), feat('b.png', 'h2')],
+        DEFAULT_THRESHOLDS,
+      );
+      expect(out.find((f) => f.rule === 'duplicate-similar')?.relatedRefs).toEqual(['a.png', 'b.png']);
+    });
+
+    it('three same-dHash features: two red-ish + one blue ⇒ ONE finding with exactly the 2 red refs', () => {
+      const out = duplicateSimilarFindings(
+        [
+          feat('r1.png', 'h1', { r: 200, g: 40, b: 40 }),
+          feat('blue.png', 'h2', { r: 40, g: 60, b: 200 }),
+          feat('r2.png', 'h3', { r: 190, g: 50, b: 45 }),
+        ],
+        DEFAULT_THRESHOLDS,
+      );
+      const sims = out.filter((f) => f.rule === 'duplicate-similar');
+      expect(sims).toHaveLength(1); // no singleton finding for the excluded blue twin
+      expect(sims[0]!.relatedRefs).toEqual(['r1.png', 'r2.png']);
+    });
+  });
+
   it('suggests atlasing many loose sprites', async () => {
     const assets = Array.from({ length: 8 }, (_, i) => img(`s${i}.png`, 32, 32));
     const rep = await analyze(assets);
@@ -1966,6 +2072,8 @@ describe('bmfont-sparse — BMFont .fnt glyph-page readout through the REAL path
 // MAX contribution both stay. Each per-finding estimate stays honest standalone (Inv 5 over-claim removal).
 describe('exact-dup de-overlap vs format/alpha (potentialDiskSaved cap)', () => {
   // Two byte-identical loose PNGs (same dims/mime/byteSize) so both clear the format/alpha gates identically.
+  // byteSize 100000 (×10 vs the old 10000): the format saving must clear the DEFAULT minBytes=4096 floor
+  // (100000→60000 saves 40000); every frac / MAX / revert relation below is scale-invariant.
   const dupImg = (name: string, strippableBytes = 0): Asset => ({
     kind: 'image',
     image: {
@@ -1973,72 +2081,72 @@ describe('exact-dup de-overlap vs format/alpha (potentialDiskSaved cap)', () => 
       imageRef: name,
       size: { w: 512, h: 512 },
       mime: 'image/png',
-      byteSize: 10000,
+      byteSize: 100000,
       ...(strippableBytes > 0 ? { strippableBytes } : {}),
     },
   });
 
-  it('dup + format: dropped copy format saving is phantom ⇒ 14000, NOT 18000', async () => {
+  it('dup + format: dropped copy format saving is phantom ⇒ 140000, NOT 180000', async () => {
     const report = await analyze([dupImg('a.png'), dupImg('b.png')], undefined, {
-      encodeImage: async () => 6000, // each format-saving = 10000 - 6000 = 4000
+      encodeImage: async () => 60000, // each format-saving = 100000 - 60000 = 40000
       features: [
         { assetRef: 'a.png', contentHash: 'h', contentClass: 'photographic' },
         { assetRef: 'b.png', contentHash: 'h', contentClass: 'photographic' },
       ],
     });
-    // dup saving = perDisk*(n-1) = 10000; kept (a.png === refs[0]) keeps its 4000 format; b.png's 4000 reverted.
-    expect(report.totals.potentialDiskSaved).toBe(14000); // NOT 18000
+    // dup saving = perDisk*(n-1) = 100000; kept (a.png === refs[0]) keeps its 40000 format; b.png's 40000 reverted.
+    expect(report.totals.potentialDiskSaved).toBe(140000); // NOT 180000
     // Per-finding honesty preserved (each estimate unchanged standalone):
     const fmtB = report.findings.find((f) => f.assetRef === 'b.png' && f.rule === 'format');
-    expect(fmtB?.estimate?.diskBytesSaved).toBe(4000); // dropped copy's finding still 4000 standalone
+    expect(fmtB?.estimate?.diskBytesSaved).toBe(40000); // dropped copy's finding still 40000 standalone
     const fmtA = report.findings.find((f) => f.assetRef === 'a.png' && f.rule === 'format');
-    expect(fmtA?.estimate?.diskBytesSaved).toBe(4000); // kept copy's finding still 4000 standalone
+    expect(fmtA?.estimate?.diskBytesSaved).toBe(40000); // kept copy's finding still 40000 standalone
     const dup = report.findings.find((f) => f.rule === 'duplicate-exact');
-    expect(dup?.estimate?.diskBytesSaved).toBe(10000); // dedup term unchanged
+    expect(dup?.estimate?.diskBytesSaved).toBe(100000); // dedup term unchanged
   });
 
-  it('regression — dup with NO format findings stays byte-identical (only the dedup term) ⇒ 10000', async () => {
+  it('regression — dup with NO format findings stays byte-identical (only the dedup term) ⇒ 100000', async () => {
     const report = await analyze([dupImg('a.png'), dupImg('b.png')], undefined, {
       features: [
         { assetRef: 'a.png', contentHash: 'h' },
         { assetRef: 'b.png', contentHash: 'h' },
       ],
     }); // no encodeImage/encodeOpaque ⇒ no per-ref bumps ⇒ nothing to revert
-    expect(report.totals.potentialDiskSaved).toBe(10000); // == today: only the dedup term
+    expect(report.totals.potentialDiskSaved).toBe(100000); // == today: only the dedup term
   });
 
-  it('three-way MAX kept copy + dup: dup 10000 + kept MAX 6000 = 16000 (dropped MAX reverted)', async () => {
-    // a.png & b.png byte-identical, both opaque + strippable(5000) + AVIF-transcodable.
-    // format → 6000 (saved 4000); opaque → 4000 (saved 6000); strip → 5000. Per-ref MAX = 6000 each.
-    const report = await analyze([dupImg('a.png', 5000), dupImg('b.png', 5000)], undefined, {
-      encodeImage: async () => 6000, // format saved = 4000
-      encodeOpaque: async () => 4000, // wasted-alpha saved = 6000
+  it('three-way MAX kept copy + dup: dup 100000 + kept MAX 60000 = 160000 (dropped MAX reverted)', async () => {
+    // a.png & b.png byte-identical, both opaque + strippable(50000) + AVIF-transcodable.
+    // format → 60000 (saved 40000); opaque → 40000 (saved 60000); strip → 50000. Per-ref MAX = 60000 each.
+    const report = await analyze([dupImg('a.png', 50000), dupImg('b.png', 50000)], undefined, {
+      encodeImage: async () => 60000, // format saved = 40000
+      encodeOpaque: async () => 40000, // wasted-alpha saved = 60000
       features: [
         { assetRef: 'a.png', contentHash: 'h', contentClass: 'photographic', opaque: true },
         { assetRef: 'b.png', contentHash: 'h', contentClass: 'photographic', opaque: true },
       ],
     });
-    // dup 10000 + kept (a.png) MAX 6000, dropped (b.png) 6000 reverted ⇒ 16000 (NOT 10000 + 2×6000 = 22000).
-    expect(report.totals.potentialDiskSaved).toBe(16000);
+    // dup 100000 + kept (a.png) MAX 60000, dropped (b.png) 60000 reverted ⇒ 160000 (NOT 100000 + 2×60000 = 220000).
+    expect(report.totals.potentialDiskSaved).toBe(160000);
     // Per-finding estimates each honest standalone:
-    expect(report.findings.find((f) => f.assetRef === 'a.png' && f.rule === 'wasted-alpha')?.estimate?.diskBytesSaved).toBe(6000);
-    expect(report.findings.find((f) => f.assetRef === 'b.png' && f.rule === 'wasted-alpha')?.estimate?.diskBytesSaved).toBe(6000);
-    expect(report.findings.find((f) => f.rule === 'duplicate-exact')?.estimate?.diskBytesSaved).toBe(10000);
+    expect(report.findings.find((f) => f.assetRef === 'a.png' && f.rule === 'wasted-alpha')?.estimate?.diskBytesSaved).toBe(60000);
+    expect(report.findings.find((f) => f.assetRef === 'b.png' && f.rule === 'wasted-alpha')?.estimate?.diskBytesSaved).toBe(60000);
+    expect(report.findings.find((f) => f.rule === 'duplicate-exact')?.estimate?.diskBytesSaved).toBe(100000);
   });
 
-  it('non-dup sanity — two DIFFERENT contentHashes ⇒ no dup finding, both format savings stand ⇒ 8000', async () => {
+  it('non-dup sanity — two DIFFERENT contentHashes ⇒ no dup finding, both format savings stand ⇒ 80000', async () => {
     const report = await analyze([dupImg('a.png'), dupImg('b.png')], undefined, {
-      encodeImage: async () => 6000, // each format-saving = 4000
+      encodeImage: async () => 60000, // each format-saving = 40000
       features: [
         { assetRef: 'a.png', contentHash: 'h1', contentClass: 'photographic' },
         { assetRef: 'b.png', contentHash: 'h2', contentClass: 'photographic' },
       ],
     });
     expect(report.findings.some((f) => f.rule === 'duplicate-exact')).toBe(false);
-    expect(report.totals.potentialDiskSaved).toBe(8000); // 2×4000 — cap only fires on real dup groups
+    expect(report.totals.potentialDiskSaved).toBe(80000); // 2×40000 — cap only fires on real dup groups
   });
 
-  it('atlas-page dup: dropped page format saving reverted, dedup term kept ⇒ 14000', async () => {
+  it('atlas-page dup: dropped page format saving reverted, dedup term kept ⇒ 140000', async () => {
     const dupAtlas = (name: string): Asset => ({
       kind: 'atlas',
       atlas: {
@@ -2048,17 +2156,17 @@ describe('exact-dup de-overlap vs format/alpha (potentialDiskSaved cap)', () => 
         sprites: [{ name: 's0', frame: { x: 0, y: 0, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 32, h: 32 } }],
         source: { kind: 'pixi' },
       },
-      image: { name, imageRef: name, size: { w: 1024, h: 1024 }, mime: 'image/png', byteSize: 10000 },
+      image: { name, imageRef: name, size: { w: 1024, h: 1024 }, mime: 'image/png', byteSize: 100000 },
     });
     const report = await analyze([dupAtlas('p1.png'), dupAtlas('p2.png')], undefined, {
-      encodeImage: async () => 6000, // each page format-saving = 4000
+      encodeImage: async () => 60000, // each page format-saving = 40000
       features: [
         { assetRef: 'p1.png', contentHash: 'h' },
         { assetRef: 'p2.png', contentHash: 'h' },
       ],
     });
-    // dup 10000 + kept page (p1.png === refs[0]) 4000, dropped page (p2.png) 4000 reverted ⇒ 14000.
-    expect(report.totals.potentialDiskSaved).toBe(14000);
-    expect(report.findings.find((f) => f.rule === 'duplicate-exact')?.estimate?.diskBytesSaved).toBe(10000);
+    // dup 100000 + kept page (p1.png === refs[0]) 40000, dropped page (p2.png) 40000 reverted ⇒ 140000.
+    expect(report.totals.potentialDiskSaved).toBe(140000);
+    expect(report.findings.find((f) => f.rule === 'duplicate-exact')?.estimate?.diskBytesSaved).toBe(100000);
   });
 });

@@ -38,3 +38,11 @@ image regex) — now picked up.
 - **NPOT as a single folder aggregate** instead of per-asset info (UX refinement).
 - **Atlas size cross-check** in `parseAtlas`: if `meta.size` disagrees with the paired image's real
   pixel dims, treat as a mis-pair (defensive, after the path-aware fix).
+- **`formatSaving.minBytes` (4096, CALIBRATE)**: absolute floor on the MEASURED format saving —
+  suppresses per-file warns whose byte win is noise (30% of a 2 KB icon ≈ 700 bytes). Verify on the
+  real corpus that no meaningful transcode win falls under 4 KB; adjust only from measured deltas.
+- **`duplicates.maxMeanColorDelta` (24, CALIBRATE)**: mean-color guard splitting hue-swapped symbol
+  sets out of duplicate-similar (dHash is luma-sign-only ⇒ color-blind). Run before/after
+  duplicate-similar counts on the real slot corpus: genuine re-export clusters must survive
+  (re-export shifts channel means ≲8), recolored symbol sets must split (a saturated hue swap moves
+  a channel ≳60). Adjust 24 only from those measured deltas.

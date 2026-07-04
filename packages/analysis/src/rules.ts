@@ -774,6 +774,9 @@ export async function formatFinding(
   }
   if (!best) return null;
   const saved = image.byteSize - best.bytes;
+  // Absolute floor: a high PERCENTAGE on a tiny file is byte-noise. Strict `<` so saved === minBytes
+  // fires (mirrors strippableMetadata's gate). `?? 0` keeps legacy configs without the key byte-identical.
+  if (saved < (cfg.formatSaving.minBytes ?? 0)) return null;
   const frac = saved / image.byteSize;
   if (frac < cfg.formatSaving.warn) return null;
   // Flat / alpha-art compresses better lossless (lossy q0.9 frays hard edges + flat fills), so the
