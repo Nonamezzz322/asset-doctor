@@ -102,6 +102,8 @@
   "budget.vram.label": "VRAM-Bedarf",
   "budget.draw.label": "Draw Calls",
   "budget.draw.notMeasured": "nicht gemessen",
+  "budget.draw.estimated": "geschätzte Untergrenze",
+  "budget.draw.estimatedTooltip": "{n} verschiedene Texturen laden deine Assets — die Draw-Call-Untergrenze. Sprites innerhalb eines Atlas werden zu etwa einem Draw gebündelt; führe die Render-Probe für die echten Draw Calls aus.",
   "budget.measured": "gemessen",
   "budget.disk.label": "Dateigröße",
   "budget.disk.afterTag": "nach Fix",

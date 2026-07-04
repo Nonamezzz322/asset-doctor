@@ -117,6 +117,8 @@
   "budget.vram.label": "VRAM footprint",
   "budget.draw.label": "Draw calls",
   "budget.draw.notMeasured": "not measured",
+  "budget.draw.estimated": "estimated floor",
+  "budget.draw.estimatedTooltip": "{n} distinct textures your assets load — the draw-call floor. Sprites within one atlas batch to about one draw; run the render-probe for the actual draw calls.",
   "budget.measured": "measured",
   "budget.disk.label": "Disk size",
   "budget.disk.afterTag": "after fix",

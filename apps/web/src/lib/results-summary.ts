@@ -47,7 +47,10 @@ export interface SevSegment {
 
 export interface BudgetModel {
   vram: { loaded: number; measured: { vram: number; declared: number; atlasesProbed: number } | null };
-  draw: { calls: number | null; atlasesProbed: number | null };
+  /** `calls` = the MEASURED render-probe draw calls (null when no probe ran). `estimated` = the STATIC
+   *  draw-call FLOOR = totals.loadedTextures (distinct loaded GPU textures; each is at least one draw, sprites
+   *  within an atlas batch down) — always present, so the card is never blank. NEVER conflate the two. */
+  draw: { calls: number | null; atlasesProbed: number | null; estimated: number };
   disk: { total: number; saved: number; after: number; savedPct: number };
   findings: { problems: number; crit: number; warn: number; info: number; segments: SevSegment[] };
 }
@@ -68,7 +71,7 @@ export function budgetModel(totals: NonNullable<AnalysisReport['totals']>, tally
       loaded: totals.loadedVramBytes,
       measured: p ? { vram: p.vramBytes, declared: p.declaredVramBytes, atlasesProbed: p.atlasesProbed } : null,
     },
-    draw: { calls: p ? p.drawCalls : null, atlasesProbed: p ? p.atlasesProbed : null },
+    draw: { calls: p ? p.drawCalls : null, atlasesProbed: p ? p.atlasesProbed : null, estimated: totals.loadedTextures ?? 0 },
     disk: { total: totals.diskBytes, saved: totals.potentialDiskSaved, after, savedPct },
     findings: {
       problems: tally.crit + tally.warn + tally.info,

@@ -103,6 +103,8 @@
   "budget.vram.label": "Empreinte VRAM",
   "budget.draw.label": "Draw calls",
   "budget.draw.notMeasured": "non mesuré",
+  "budget.draw.estimated": "estimation (plancher)",
+  "budget.draw.estimatedTooltip": "{n} textures distinctes chargées par vos assets — le plancher de draw calls. Les sprites d’un même atlas sont regroupés en ~1 draw ; lancez la render-probe pour les draw calls réels.",
   "budget.measured": "mesuré",
   "budget.disk.label": "Taille disque",
   "budget.disk.afterTag": "après correctif",

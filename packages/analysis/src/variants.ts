@@ -34,6 +34,12 @@ export function stemOf(name: string): string {
 interface VItem {
   name: string;
   size: Size;
+  /** Texture PAGES this variant BINDS when loaded — a loose image = 1; an atlas = 1, because the
+   *  normalized model is one Atlas per texture PAGE (multi-page atlases are split into one Atlas per page
+   *  at parse — spine-atlas.ts "One Atlas per page"), so there is no multi-page count to fabricate. Kept
+   *  per-item so the loaded-texture (draw-call-floor) count is page-accurate for what the folder actually
+   *  contains AND future-proof the day the model exposes a real multi-page count. */
+  pages: number;
 }
 const aspectBucket = (s: Size): number => (s.h > 0 ? Math.round((s.w / s.h) * 50) : 0);
 
@@ -73,11 +79,22 @@ export interface VariantGroups {
    *  count — is the true texture-bind / draw-call count. Inert to `variantsFinding`/analyze (unread there);
    *  consumed by `shouldAtlasFinding` to gate & report the loose-sprite count honestly. */
   logicalImages: number;
+  /** STRUCTURAL draw-call FLOOR: distinct loaded GPU textures over the SAME loaded set as loadedVramMax —
+   *  the ONE variant that loads per bucket (the max-VRAM tier) contributes its `pages` (loose=1, atlas=1
+   *  in the one-Atlas-per-page model). Numerically == logicalImages while every page count is 1, but kept
+   *  page-summed (not a bucket count) so it stays honest & page-accurate if the model ever exposes real
+   *  multi-page atlases. A LOWER BOUND on draw calls — NEVER the measured probe.drawCalls (surfaced on
+   *  totals as loadedTextures). Same population as loadedVramMax ⇒ the two can never drift. */
+  loadedTextures: number;
 }
 
 export function groupVariants(assets: Asset[]): VariantGroups {
   const items: VItem[] = assets.map((a) =>
-    a.kind === 'atlas' ? { name: a.atlas.name, size: a.atlas.size } : { name: a.image.name, size: a.image.size },
+    // pages: one Atlas === one texture page (multi-page atlases are already one-Atlas-per-page from the
+    // parser); a loose image is one texture. Never a fabricated page count — see VItem.pages.
+    a.kind === 'atlas'
+      ? { name: a.atlas.name, size: a.atlas.size, pages: 1 }
+      : { name: a.image.name, size: a.image.size, pages: 1 },
   );
 
   const buckets = new Map<string, VItem[]>();
@@ -98,20 +115,26 @@ export function groupVariants(assets: Asset[]): VariantGroups {
   let loadedVramMin = 0;
   let loadedVramMax = 0;
   let variantFiles = 0;
+  let loadedTextures = 0;
   const groups: { stem: string; members: VItem[] }[] = [];
 
   for (const [key, members] of buckets) {
     const vrams = members.map((m) => vramBytes(m.size));
     summedVram += vrams.reduce((s, v) => s + v, 0);
-    loadedVramMax += Math.max(...vrams); // one variant loads: at worst the largest tier
+    const maxV = Math.max(...vrams);
+    loadedVramMax += maxV; // one variant loads: at worst the largest tier
     loadedVramMin += Math.min(...vrams); // at best the smallest tier
+    // Draw-call FLOOR: the SAME one variant loadedVramMax counts (the max-VRAM tier — first max wins,
+    // deterministic; ties are page-equal in the single-page model) binds `pages` textures. Summed over
+    // the identical loaded set as loadedVramMax, never a separate dedup.
+    loadedTextures += members[vrams.indexOf(maxV)]!.pages;
     if (members.length > 1) {
       variantFiles += members.length;
       groups.push({ stem: key.split('|')[0] ?? key, members });
     }
   }
 
-  return { groups, summedVram, loadedVramMin, loadedVramMax, variantFiles, logicalImages: buckets.size };
+  return { groups, summedVram, loadedVramMin, loadedVramMax, variantFiles, logicalImages: buckets.size, loadedTextures };
 }
 
 export function variantsFinding(v: VariantGroups): Finding | null {

@@ -99,6 +99,8 @@
   "budget.vram.label": "VRAM 占用",
   "budget.draw.label": "Draw call",
   "budget.draw.notMeasured": "未测量",
+  "budget.draw.estimated": "估算下限",
+  "budget.draw.estimatedTooltip": "你的素材加载 {n} 个不同纹理——draw call 下限。同一图集内的精灵会合批为约 1 次绘制；运行 render-probe 查看实际 draw call。",
   "budget.measured": "已测量",
   "budget.disk.label": "磁盘大小",
   "budget.disk.afterTag": "修复后",

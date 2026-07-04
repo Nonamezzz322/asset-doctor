@@ -861,14 +861,19 @@ function BudgetStrip({ bm }: { bm: BudgetModel }) {
         ) : null}
       </BudgetCard>
 
-      {/* Draw calls — measured by the render-probe; absent-metric placeholder when not probed (never invented). */}
+      {/* Draw calls — the render-probe MEASURES the real draws; without a probe we show the STATIC floor
+          (bm.draw.estimated = distinct loaded textures), honestly labelled "estimated" and never as measured. */}
       <BudgetCard label={t('budget.draw.label')}>
-        <div className="font-mono text-2xl font-semibold text-ink">{bm.draw.calls != null ? bm.draw.calls : '—'}</div>
-        <div className="mt-1 font-mono text-[10px] leading-tight text-ink-soft">
-          {bm.draw.calls != null && bm.draw.atlasesProbed != null
-            ? `${t('budget.measured')} · ${t('readout.measuredScope', { n: bm.draw.atlasesProbed })}`
-            : t('budget.draw.notMeasured')}
-        </div>
+        <div className="font-mono text-2xl font-semibold text-ink">{bm.draw.calls != null ? bm.draw.calls : bm.draw.estimated}</div>
+        {bm.draw.calls != null && bm.draw.atlasesProbed != null ? (
+          <div className="mt-1 font-mono text-[10px] leading-tight text-ink-soft">
+            {t('budget.measured')} · {t('readout.measuredScope', { n: bm.draw.atlasesProbed })}
+          </div>
+        ) : (
+          <div className="mt-1 font-mono text-[10px] leading-tight text-ink-soft" title={t('budget.draw.estimatedTooltip', { n: bm.draw.estimated })}>
+            {t('budget.draw.estimated')}
+          </div>
+        )}
       </BudgetCard>
 
       {/* Disk size — total → after fix; the bar is the recoverable RATIO (savedPct), an honest fraction fill. */}

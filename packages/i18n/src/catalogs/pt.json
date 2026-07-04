@@ -103,6 +103,8 @@
   "budget.vram.label": "Pegada de VRAM",
   "budget.draw.label": "Draw calls",
   "budget.draw.notMeasured": "não medido",
+  "budget.draw.estimated": "estimativa (mínimo)",
+  "budget.draw.estimatedTooltip": "{n} texturas distintas que seus assets carregam — o mínimo de draw calls. Sprites do mesmo atlas agrupam-se em ~1 draw; rode a render-probe para os draw calls reais.",
   "budget.measured": "medido",
   "budget.disk.label": "Tamanho em disco",
   "budget.disk.afterTag": "após o fix",

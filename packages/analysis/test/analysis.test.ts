@@ -1680,6 +1680,61 @@ describe('variant grouping (VRAM inflation)', () => {
   });
 });
 
+describe('loadedTextures (static draw-call FLOOR on totals — count of distinct loaded textures)', () => {
+  const img = (name: string, w: number, h: number): Asset => ({
+    kind: 'image',
+    image: { name, imageRef: name, size: { w, h }, mime: 'image/png', byteSize: 1 },
+  });
+  const atlasAsset = (name: string, w: number, h: number): Asset => ({
+    kind: 'atlas',
+    atlas: {
+      name,
+      imageRef: `${name}.png`,
+      size: { w, h },
+      sprites: [{ name: 'f0', frame: { x: 0, y: 0, w, h }, rotated: false, trimmed: false, sourceSize: { w, h } }],
+      source: { kind: 'texturepacker-hash' },
+    },
+    image: { name, imageRef: `${name}.png`, size: { w, h }, mime: 'image/png', byteSize: 1 },
+  });
+
+  it('loose-only folder ⇒ one texture per loose image (= N)', async () => {
+    const rep = await analyze([img('a.png', 64, 64), img('b.png', 128, 128), img('c.png', 32, 32)]);
+    // N distinct loose images ⇒ N bound textures ⇒ the draw-call FLOOR is N (each is at least one draw).
+    expect(rep.totals.loadedTextures).toBe(3);
+  });
+
+  it('atlas + loose folder ⇒ atlas PAGES (1) + loose count', async () => {
+    const rep = await analyze([atlasAsset('sheet', 512, 512), img('logo.png', 64, 64), img('bg.png', 256, 256)]);
+    // one atlas page (the normalized model is one Atlas per page) + two loose images = 3 loaded textures.
+    // The atlas would batch its sprites down toward ~1 draw — exactly the win should-atlas recommends.
+    expect(rep.totals.loadedTextures).toBe(3);
+  });
+
+  it('multi-variant/multi-format asset counts the logical asset ONCE (same loaded-set dedup as loadedVramBytes)', async () => {
+    // The exact scenario from the loaded-VRAM range test: 4 hero files (two res tiers, each also carrying a
+    // format suffix) = ONE logical image, plus one singleton. loadedVramMax counts hero ONCE (v1080), so
+    // the texture floor is 2 — the SAME population, never a different dedup, never the 5 raw files.
+    const rep = await analyze([
+      img('hero_540p.png', 540, 540),
+      img('hero_540p_webp.webp', 540, 540),
+      img('hero_1080p.png', 1080, 1080),
+      img('hero_1080p_avif.avif', 1080, 1080),
+      img('other.png', 100, 100),
+    ]);
+    expect(rep.totals.loadedTextures).toBe(2);
+    // Proves it rides the identical loaded set as loadedVramBytes (hero's top tier + other, counted once):
+    expect(rep.totals.loadedVramBytes).toBe(1080 * 1080 * 4 + 100 * 100 * 4);
+  });
+
+  it('groupVariants.loadedTextures mirrors the loaded-set grouping (totals reads it verbatim)', () => {
+    const assets = [atlasAsset('sheet', 256, 256), img('x_540p.png', 540, 540), img('x_1080p.png', 1080, 1080)];
+    const v = groupVariants(assets);
+    // atlas page (1) + x's single loaded tier (1) = 2 — one variant loads per logical asset.
+    expect(v.loadedTextures).toBe(2);
+    expect(v.loadedTextures).toBe(v.logicalImages); // page-summed value == bucket count while every page is 1
+  });
+});
+
 describe('atlas fragmentation (dispersion of empty space)', () => {
   // Synthetic atlases built directly on the model (pure: no pixel read — frag operates on the rects
   // already merged). `cell` is fixed explicitly where the unit test asserts an exact frag so the grid

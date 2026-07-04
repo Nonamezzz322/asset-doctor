@@ -694,6 +694,21 @@ export interface AnalysisReport {
     loadedVramBytes: number;
     /** loadedVramBytes × 4/3 — the loaded-set ceiling IF mipmaps are enabled. Conditional, not residency. */
     loadedVramBytesMipmapped: number;
+    /** STRUCTURAL draw-call FLOOR — NOT a measurement, and NOT VRAM. The count of DISTINCT loaded GPU
+     *  textures the folder implies, computed over the SAME loaded set as loadedVramBytes (one variant per
+     *  logical asset via groupVariants: highest resolution tier, format-deduped) by summing each loaded
+     *  variant's texture-PAGE count — a loose image = 1 texture; an atlas = its page count, which is 1 in
+     *  the normalized one-Atlas-per-page model (multi-page atlases are split into one Atlas per page at
+     *  parse, so there is no page count to fabricate). Each distinct texture the GPU BINDS is AT LEAST one
+     *  draw call, so this is a LOWER BOUND on draw calls; sprites WITHIN one atlas batch down toward ~1
+     *  draw, which is exactly why a well-atlased folder has few textures. This is the FREE-diagnosis STATIC
+     *  estimate (the should-atlas / atlas-merge findings already recommend the fix that lowers it); the
+     *  render-probe MEASURES the ACTUAL draw calls in `totals.probe.drawCalls`. NEVER conflate this with the
+     *  measured probe draw calls, and NEVER conflate this texture COUNT with VRAM bytes (invariants 3 & 5) —
+     *  it is a count of textures, honestly labeled. Emitted by analyze() for every report; optional ONLY so
+     *  hand-built/partial reports stay valid (mirrors `probe?`). Same population as loadedVramBytes, so the
+     *  two never drift. */
+    loadedTextures?: number;
     potentialDiskSaved: number;
     /** MEASURED aggregate over every probed atlas (render-probe). Additive & non-blocking: present only
      *  when ≥1 atlas was probed on the main thread with WebGL available; absent ⇒ byte-identical to today.

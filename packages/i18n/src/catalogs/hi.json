@@ -102,6 +102,8 @@
   "budget.vram.label": "VRAM फुटप्रिंट",
   "budget.draw.label": "ड्रॉ कॉल",
   "budget.draw.notMeasured": "मापा नहीं गया",
+  "budget.draw.estimated": "अनुमानित न्यूनतम",
+  "budget.draw.estimatedTooltip": "आपके एसेट {n} अलग टेक्सचर लोड करते हैं — draw call की न्यूनतम सीमा। एक ही एटलस के स्प्राइट लगभग 1 draw में बैच होते हैं; वास्तविक draw calls के लिए render-probe चलाएँ।",
   "budget.measured": "मापा गया",
   "budget.disk.label": "डिस्क आकार",
   "budget.disk.afterTag": "फिक्स के बाद",

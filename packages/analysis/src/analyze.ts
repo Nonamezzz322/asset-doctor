@@ -373,6 +373,11 @@ export async function analyze(
       vramBytesMipmapped: metrics.reduce((s, m) => s + m.vramBytesMipmapped, 0),
       loadedVramBytes: variants.loadedVramMax,
       loadedVramBytesMipmapped: Math.ceil(variants.loadedVramMax * MIP_OVERHEAD),
+      // STRUCTURAL draw-call FLOOR — distinct loaded GPU textures over the SAME loaded set as
+      // loadedVramBytes (groupVariants: one variant per logical asset), summing each loaded variant's
+      // texture-page count (loose=1, atlas=1 page in the one-Atlas-per-page model). A LOWER BOUND on draw
+      // calls; NOT the measured probe.drawCalls and NOT VRAM bytes (invariants 3 & 5).
+      loadedTextures: variants.loadedTextures,
       potentialDiskSaved,
     },
     thresholds: cfg,

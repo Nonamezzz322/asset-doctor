@@ -112,6 +112,8 @@
   "budget.vram.label": "Объём VRAM",
   "budget.draw.label": "Draw calls",
   "budget.draw.notMeasured": "не измерено",
+  "budget.draw.estimated": "оценка (нижняя граница)",
+  "budget.draw.estimatedTooltip": "{n} различных текстур загружают ваши ассеты — нижняя граница draw calls. Спрайты внутри одного атласа батчатся примерно в один draw; запустите render-probe для реального числа.",
   "budget.measured": "измерено",
   "budget.disk.label": "Размер на диске",
   "budget.disk.afterTag": "после фикса",

@@ -83,12 +83,17 @@ describe('budgetModel — real metrics, probe-gated, no NaN', () => {
     const bm = budgetModel(totals({ diskBytes: 10, potentialDiskSaved: 25 }), tally({}));
     expect(bm.disk.after).toBe(0);
   });
-  it('probe absent ⇒ measured VRAM null, draw calls null', () => {
-    const bm = budgetModel(totals({ loadedVramBytes: 999 }), tally({}));
+  it('probe absent ⇒ measured VRAM null, draw calls null, but the static estimate (floor) is present', () => {
+    const bm = budgetModel(totals({ loadedVramBytes: 999, loadedTextures: 12 }), tally({}));
     expect(bm.vram.loaded).toBe(999);
     expect(bm.vram.measured).toBeNull();
     expect(bm.draw.calls).toBeNull();
     expect(bm.draw.atlasesProbed).toBeNull();
+    expect(bm.draw.estimated).toBe(12); // the draw-call floor = distinct loaded textures, always available
+  });
+  it('estimated draw-call floor is loadedTextures, defaulting to 0 when the field is absent', () => {
+    expect(budgetModel(totals({ loadedTextures: 7 }), tally({})).draw.estimated).toBe(7);
+    expect(budgetModel(totals({}), tally({})).draw.estimated).toBe(0);
   });
   it('probe present ⇒ measured + draw wired straight from the probe', () => {
     const bm = budgetModel(

@@ -103,6 +103,8 @@
   "budget.vram.label": "Impronta VRAM",
   "budget.draw.label": "Draw call",
   "budget.draw.notMeasured": "non misurato",
+  "budget.draw.estimated": "stima (minimo)",
+  "budget.draw.estimatedTooltip": "{n} texture distinte caricate dai tuoi asset — il minimo di draw call. Gli sprite di uno stesso atlante si raggruppano in ~1 draw; esegui la render-probe per i draw call reali.",
   "budget.measured": "misurato",
   "budget.disk.label": "Dimensione su disco",
   "budget.disk.afterTag": "dopo il fix",
