@@ -10,6 +10,28 @@ GitHub-кредов — пушит пользователь); хэши комм�
 
 ---
 
+## App-screen re-skin, Фаза 3b-ii — SettingsPage iOS-switch + segmented (re-skin ЗАВЕРШЁН) — 2026-07-04
+Последний кусок re-skin: стиль контролов макета поверх СУЩЕСТВУЮЩИХ ручек — без изменения функционала, без
+новых i18n-ключей, реальные доступные контролы. Реализовано impl+review-воркфлоу; я независимо проверил +
+починил единственный nit ревью. **Все экраны макета теперь переверстаны — app-screen re-skin ЗАВЕРШЁН.**
+
+- **SettingsPage re-skin** (`602d61f`)
+  — `Switch`: нативная `button role=switch` (Space/Enter, aria-checked, имя из label, ПОЗИЦИЯ кнопки кодирует
+    состояние ⇒ цвет не единственный сигнал, WCAG 1.4.1); трек bg-cta/bg-film-mute, белый пак, motion-reduce.
+    Фикс review-nit: ВСЯ строка — кнопка-свитч (full-row click, паритет со старым CheckRow-`<label>` + макет-
+    тогглами), пак aria-hidden. 17 булевых ручек мигрировано (15 CheckRow-свопов + profileEnable/tierEnable),
+    каждая читает `s.X` + пишет `patch({X})` как раньше.
+  — `Segmented`: реальный `role=radiogroup` из sr-only нативных радио (arrow-nav + Space), активная пилюля
+    `peer-checked:bg-teal-text peer-checked:text-panel` (AA обе темы, НЕ raw-teal+white макета), peer-focus-
+    visible-ринг на видимом сегменте. 5 enum-селектов мигрировано (defaultTarget, mipmap-extrude,
+    spinePageFormat, packMode, includeFileSizes) с ТЕМИ ЖЕ значениями + onChange.
+  — `SettingRow` поднимает mouse-only title-хинт в ВИДИМЫЙ текст (a11y-выигрыш). Оставлено как есть (по спеке):
+    DiagnosisCard tri-state/per-rule, per-format/per-tier/per-folder мульти-селекты, AVIF-subsample +
+    pngRecompress селекты, effort-слайдер, ThemeCard. Card-хром → `rounded-2xl p-6`. `contrast.ts`:
+    `switchKnobPasses`-пруф (белый пак ≥3:1 на cta 4.585 + film-mute 3.14, обе темы) + regression-гард.
+  Ревью 3-линзами + верификация = 0 serious; 1 nit (label-click) починен. Gate: typecheck · i18n 33 · web 926
+  · lint · build.
+
 ## App-screen re-skin, Фаза 3b-i — ledger-badge с честной ролью saving/measure — 2026-07-04
 - **ledger-badge** (`225b444`)
   — inline `metricBadge` из TriageLedger вынесен в чистый Node-тестируемый `lib/ledger-badge.ts` + добавлено
