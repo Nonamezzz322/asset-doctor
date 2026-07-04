@@ -30,7 +30,7 @@ import { API_BASE, isProUnlocked, loadStoredEntitlement, maybeRefresh, PRO_GATE_
 import { backendReachable } from './lib/backend-client';
 import { ActivatePanel, ProBadge } from './components/LicensePanel';
 import { FilmViewer } from './components/FilmViewer';
-import { Findings } from './components/Findings';
+import { Findings, DOT } from './components/Findings';
 import { VerdictBar } from './components/VerdictBar';
 import { TriageLedger } from './components/TriageLedger';
 import { PrimaryRecommendation } from './components/PrimaryRecommendation';
@@ -43,7 +43,7 @@ import { UNPARSED_DETAILS_ID, UNPARSED_SUMMARY_ID } from './lib/skipped-chip';
 import { resultsHeading } from './lib/results-heading';
 import { errorCard, errDetail, type ErrorState, type ErrorContext } from './lib/error-view';
 import { progressView } from './lib/progress-view';
-import { buildTotalsRows } from './lib/totals-rows';
+import { assetCounts, budgetModel, folderLabel, type BudgetModel } from './lib/results-summary';
 import { focusTargetAfterSwap, type SwapState } from './lib/focus-move';
 import { Landing } from './components/landing/Landing';
 import { LandingFooter } from './components/landing/LandingFooter';
@@ -55,6 +55,9 @@ import { HERO_READOUT_CELLS } from './lib/hero-readout';
 // Stable empty Set (constant identity) so the `foldIds` memo has a fixed reference when there is no report —
 // no fresh object per render, so nothing downstream needlessly recomputes. PRESENTATION only (design §5.1).
 const EMPTY_SET: ReadonlySet<string> = new Set<string>();
+
+// The FixCard root id — the "Download the fix" results-header CTA scrolls to + focuses it (app-screen Phase 2).
+const FIX_CARD_ID = 'ad-fix-card';
 
 type Phase =
   | { t: 'idle' }
@@ -454,6 +457,32 @@ export function App() {
   // debounced asset so it moves in lockstep with the film it annotates.
   const selectedFrameCount = debouncedSelected ? report?.atlasFrames?.[debouncedSelected]?.length ?? 0 : 0;
 
+  // "Download the fix" (app-screen Phase 2): scroll to + focus the FixCard — resolves in EITHER gate state
+  // (locked → the activation input; beta/unlocked → the preview button). No fake charge. Reduced-motion gated.
+  const jumpToFix = () => {
+    const el = typeof document !== 'undefined' ? document.getElementById(FIX_CARD_ID) : null;
+    const reduce = typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    el?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+    el?.querySelector<HTMLElement>('button, a, input')?.focus({ preventScroll: true });
+  };
+  // Results-screen derived summary (app-screen Phase 2) — pure, from results-summary.ts. `bm` is null off the
+  // results screen or when totals are absent (⇒ the budget strip does not render); the header still shows the
+  // honest subject + counts. `resultsSubject` falls back to a generic label, NEVER a fabricated folder name.
+  const bm: BudgetModel | null = totals && index ? budgetModel(totals, index.tally) : null;
+  const counts = report ? assetCounts(report) : null;
+  const resultsSubject = folderLabel(files.map((f) => f.path)) ?? t('results.subject.fallback');
+  const countsSuffix = counts
+    ? counts.atlases > 0
+      ? [
+          t('results.counts.atlases', { n: counts.atlases }),
+          t('results.counts.sprites', { n: counts.sprites }),
+          ...(counts.looseImages > 0 ? [t('results.counts.loose', { n: counts.looseImages })] : []),
+        ].join(' · ')
+      : counts.looseImages > 0
+        ? t('results.counts.loose', { n: counts.looseImages })
+        : ''
+    : '';
+
   return (
     <BuildSettingsProvider>
     <div className="flex min-h-full flex-col bg-bg text-ink">
@@ -517,13 +546,48 @@ export function App() {
 
         {report && phase.t === 'done' && index && selectOpts && (
           <div className="space-y-5">
-            {/* Document-level results <h1> — the Dropzone's <h1> unmounts at phase==='done', so this is the
-                top of the heading outline in the results state (fixes the WCAG 1.3.1 heading-order defect:
-                VerdictBar's <h2> below would otherwise open the outline). .ad-sr-only is position:absolute ⇒
-                removed from flow ⇒ adds NO space-y-5 gap/box ⇒ zero visual diff, while staying first in
-                DOM/AOM order so the SR rotor reads h1→h2→h2→h3 (monotonic). Same honest crit+warn+info count
-                as VerdictBar/announce.ts; never VRAM/disk. */}
-            <h1 id="ad-results-h1" tabIndex={-1} className="ad-sr-only ad-focus-anchor">{resultsHeading(index.tally, t)}</h1>
+            {/* Results header (app-screen Phase 2): a VISIBLE document-level <h1> = the folder subject + real
+                atlas/sprite/loose counts, with a green "diagnosis complete · in-browser" eyebrow (both true,
+                NO fabricated timing) and a recoverable-% stat + "Download the fix" CTA. The id ad-results-h1 is
+                PRESERVED so focus-move.ts + aria-labelledby keep working; the sr-only companion keeps the
+                honest crit+warn+info problem-count for the SR rotor so the h1's accessible name still carries
+                it. Heading outline stays h1 → h2(PrimaryRec) → h2(VerdictBar) → h2(findings.title). */}
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="mb-1.5 flex flex-wrap items-center gap-2 font-mono text-xs">
+                  <span className="flex items-center gap-1.5 text-cta-text">
+                    <span className="h-[7px] w-[7px] rounded-full bg-ok" aria-hidden="true" />
+                    {t('results.eyebrow.complete')}
+                  </span>
+                  <span className="text-ink-soft">· {t('results.eyebrow.inBrowser')}</span>
+                </div>
+                <h1 id="ad-results-h1" tabIndex={-1} className="ad-focus-anchor font-display text-2xl font-semibold tracking-tight text-ink">
+                  {resultsSubject}
+                  {countsSuffix ? <span className="ml-1.5 font-mono text-sm font-normal text-ink-soft">· {countsSuffix}</span> : null}
+                  <span className="ad-sr-only"> — {resultsHeading(index.tally, t)}</span>
+                </h1>
+              </div>
+              {report.assets.length > 0 ? (
+                <div className="flex items-center gap-3">
+                  {bm && bm.disk.saved > 0 ? (
+                    <div className="text-right">
+                      <div className="ad-label text-ink-soft">{t('results.recoverable.label')}</div>
+                      <div className="font-mono text-2xl font-semibold text-cta-text">−{bm.disk.savedPct}%</div>
+                    </div>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={jumpToFix}
+                    className="rounded-lg bg-cta px-4 py-2.5 font-sans text-sm font-semibold text-white shadow-[0_2px_6px_rgba(21,160,106,0.32)] transition hover:bg-cta-hover"
+                  >
+                    {t('results.download')}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+            {/* Budget strip — 4 REAL-metric cards (no user budgets / no over-budget bars this phase). Gated on
+                having assets (like the header CTA) so an empty folder shows the empty-state below, not a zero strip. */}
+            {bm && report.assets.length > 0 ? <BudgetStrip bm={bm} /> : null}
             {/* The PRIMARY "Build a spritesheet" recommendation (design §4.1) — rendered ONLY when the folder
                 is loose-dominated (`rec`). Sits between the results h1 and the VerdictBar so the heading
                 outline stays monotonic (h1 → this h2 → VerdictBar's h2). Absent when not dominated ⇒ the
@@ -543,19 +607,6 @@ export function App() {
               skippedCount={report.unparsed?.length ?? 0}
               onSkippedJump={jumpToUnparsed}
             />
-            {/* Results totals strip — the SINGLE invariant-5 (disk≠VRAM) honesty surface now that the
-                sidebar-shell redesign removed the top header + its HeaderMetric block. Shown at ALL widths
-                (the former md:hidden is gone — there is no desktop header counterpart to avoid duplicating).
-                buildTotalsRows drives it (declared VRAM, probe-gated measured chip, disk, saveable+percent);
-                declared uses readout.declared so it stays textually distinct from measured even when the
-                (probe-gated) measured chip is absent. */}
-            {totals ? (
-              <div className="flex flex-wrap gap-x-5 gap-y-1.5 border-b border-line pb-4">
-                {buildTotalsRows(totals, t, fmtBytes).map((r) => (
-                  <MobileTotal key={r.key} label={r.label} value={r.value} accent={r.accent} explainer={r.title} sub={r.sub} />
-                ))}
-              </div>
-            ) : null}
             {report.assets.length === 0 && index.rows.length === 0 ? (
               <p className="font-mono text-sm text-ink-soft">{t('report.noAssets')}</p>
             ) : (
@@ -730,30 +781,88 @@ function Sidebar({ view }: { view: View }) {
   );
 }
 
-// Inline-wrap-friendly totals cell for the results totals strip (shown at ALL widths now that the top header
-// was removed in the sidebar-shell redesign — it carries the invariant-5 disk≠VRAM honesty on the results
-// screen). No per-cell border/bg — a wrapping label/value list under VerdictBar. flex-col glues each label to
-// its value so wrapping never blurs declared/measured/saveable. No animation ⇒ inert under reduced-motion.
-function MobileTotal({
-  label,
-  value,
-  accent,
-  explainer,
-  sub,
-}: {
-  label: string;
-  value: string;
-  accent?: boolean;
-  explainer?: string;
-  /** Secondary muted line under the value (e.g. the measured chip's "N atlases" scope — R3). */
-  sub?: string;
-}) {
+// ── Budget strip (app-screen redesign Phase 2): 4 REAL-metric cards on the results screen — the invariant-5
+//    disk≠VRAM honesty surface. NO user budgets / NO over-budget bars this phase (the disk bar is a recoverable
+//    RATIO fill, not a budget bar). Big numbers are text-ink only (severity hues fail AA as text — the color
+//    signal lives on the decorative aria-hidden dots/segments, redundant with the numbers + VerdictBar chips).
+//    Probe-only metrics (measured VRAM, draw calls) degrade to an absent-metric placeholder, never fabricated. ──
+function BudgetCard({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex flex-col" title={explainer}>
-      <span className="ad-label-sm text-ink-soft">{label}</span>
-      <span className={`font-mono text-xs font-semibold ${accent ? 'text-cta-text' : 'text-ink'}`}>{value}</span>
-      {sub ? <span className="font-mono text-[9px] leading-tight text-ink-soft">{sub}</span> : null}
-      {explainer ? <span className="ad-sr-only">{explainer}</span> : null}
+    <div className="rounded-xl border border-line bg-panel p-4">
+      <div className="ad-label text-ink-soft">{label}</div>
+      <div className="mt-2">{children}</div>
+    </div>
+  );
+}
+
+function BudgetStrip({ bm }: { bm: BudgetModel }) {
+  const { t } = useI18n();
+  const m = bm.vram.measured;
+  const f = bm.findings;
+  const chip =
+    f.problems === 0
+      ? t('triage.allClear')
+      : f.crit > 0
+        ? t('triage.filter.crit', { n: f.crit })
+        : f.warn > 0
+          ? t('triage.filter.warn', { n: f.warn })
+          : t('triage.filter.info', { n: f.info });
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {/* VRAM footprint — declared; a measured subline appears only when the render-probe ran (probe-gated). */}
+      <BudgetCard label={t('budget.vram.label')}>
+        <div className="font-mono text-2xl font-semibold text-ink">{fmtBytes(bm.vram.loaded)}</div>
+        {m ? (
+          <div
+            className="mt-1 font-mono text-[10px] leading-tight text-ink-soft"
+            title={t('readout.measuredAggregateTooltip', { n: m.atlasesProbed, declared: m.declared })}
+          >
+            {t('metric.vramMeasured')} {fmtBytes(m.vram)} · {t('readout.measuredScope', { n: m.atlasesProbed })}
+          </div>
+        ) : null}
+      </BudgetCard>
+
+      {/* Draw calls — measured by the render-probe; absent-metric placeholder when not probed (never invented). */}
+      <BudgetCard label={t('budget.draw.label')}>
+        <div className="font-mono text-2xl font-semibold text-ink">{bm.draw.calls != null ? bm.draw.calls : '—'}</div>
+        <div className="mt-1 font-mono text-[10px] leading-tight text-ink-soft">
+          {bm.draw.calls != null && bm.draw.atlasesProbed != null
+            ? `${t('budget.measured')} · ${t('readout.measuredScope', { n: bm.draw.atlasesProbed })}`
+            : t('budget.draw.notMeasured')}
+        </div>
+      </BudgetCard>
+
+      {/* Disk size — total → after fix; the bar is the recoverable RATIO (savedPct), an honest fraction fill. */}
+      <BudgetCard label={t('budget.disk.label')}>
+        <div className="flex flex-wrap items-baseline gap-x-1.5 font-mono">
+          <span className="text-2xl font-semibold text-ink">{fmtBytes(bm.disk.total)}</span>
+          {bm.disk.saved > 0 ? (
+            <span className="text-[11px] text-ink-soft">
+              → {fmtBytes(bm.disk.after)} {t('budget.disk.afterTag')}
+            </span>
+          ) : null}
+        </div>
+        {bm.disk.saved > 0 ? (
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-line" aria-hidden="true">
+            <div className="h-full rounded-full bg-cta" style={{ width: `${bm.disk.savedPct}%` }} />
+          </div>
+        ) : null}
+      </BudgetCard>
+
+      {/* Findings — problem count + a top-severity/all-clear chip; the proportional segments are decorative. */}
+      <BudgetCard label={t('budget.findings.label')}>
+        <div className="flex flex-wrap items-baseline gap-x-1.5 font-mono">
+          <span className="text-2xl font-semibold text-ink">{f.problems}</span>
+          <span className="text-[11px] text-ink-soft">· {chip}</span>
+        </div>
+        {f.segments.length > 0 ? (
+          <div className="mt-2 flex gap-0.5" aria-hidden="true">
+            {f.segments.map((s) => (
+              <span key={s.sev} className={`h-1.5 rounded-full ${DOT[s.sev]}`} style={{ flexGrow: s.count }} />
+            ))}
+          </div>
+        ) : null}
+      </BudgetCard>
     </div>
   );
 }
@@ -1409,7 +1518,7 @@ function FixCard({ files, buildNonce }: { files: PickedFile[]; buildNonce: numbe
   // Gated + not yet unlocked → show activation instead of the run button.
   if (PRO_GATE_ENABLED && !unlocked) {
     return (
-      <div ref={cardRef} className="rounded-xl border-2 border-teal/70 bg-panel p-4 text-center">
+      <div ref={cardRef} id={FIX_CARD_ID} className="rounded-xl border-2 border-teal/70 bg-panel p-4 text-center">
         <p className="font-mono text-xs text-ink-soft">{t('pro.note')}</p>
         <ActivatePanel onUnlocked={() => setUnlocked(true)} />
       </div>
@@ -1417,7 +1526,7 @@ function FixCard({ files, buildNonce }: { files: PickedFile[]; buildNonce: numbe
   }
 
   return (
-    <div ref={cardRef} className="rounded-xl border-2 border-teal/70 bg-panel p-4 text-center">
+    <div ref={cardRef} id={FIX_CARD_ID} className="rounded-xl border-2 border-teal/70 bg-panel p-4 text-center">
       {/* AB-R2: first-class "optimize this folder" header — names the capability the SAME Pro fix engine
           already has (convert / scale variants / repack, structure preserved). Honest copy, no new claim;
           pro.note is retained below as the small Phase-2 sub-note. Token-driven (font-display / font-mono /
