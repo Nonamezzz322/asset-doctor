@@ -150,6 +150,50 @@ describe('wasted-regions overlay', () => {
   });
 });
 
+describe('occupancy — absolute wasted-VRAM floor (minWastedBytes)', () => {
+  // One sprite whose frame area sets the occupancy fraction exactly; shape mirrors the grid-merge atlas.
+  const atlasAt = (page: number, spriteW: number, spriteH: number): Atlas => ({
+    name: 'o',
+    imageRef: 'o.png',
+    size: { w: page, h: page },
+    sprites: [
+      { name: 'a', frame: { x: 0, y: 0, w: spriteW, h: spriteH }, rotated: false, trimmed: false, sourceSize: { w: spriteW, h: spriteH } },
+    ],
+    source: { kind: 'pixi' },
+  });
+
+  it('256² at occ≈0.55 (crit fraction, ~118 KB waste) demotes to info — waste stays reported', () => {
+    const f = occupancyFinding(atlasAt(256, 190, 190), DEFAULT_THRESHOLDS)!; // occ = 36100/65536 ≈ 0.551 < crit 0.6
+    expect(f).not.toBeNull();
+    expect(f.severity).toBe('info'); // (1−0.551)·262144 ≈ 117.7 KB < 256 KB floor
+    expect(f.rule).toBe('occupancy');
+    expect(f.messageKey).toBe('occupancy'); // identical copy/params — severity-only demotion
+  });
+
+  it('2048² at the same fraction keeps crit (≈7.5 MB waste clears the floor)', () => {
+    const f = occupancyFinding(atlasAt(2048, 1520, 1520), DEFAULT_THRESHOLDS)!; // occ ≈ 0.551
+    expect(f.severity).toBe('crit');
+  });
+
+  it('waste exactly === the floor keeps the fractional severity (strict <)', () => {
+    // 512² page: sprite 512×384 ⇒ occ = 0.75 exactly (warn range); waste = 0.25·1 MiB = 262144 === floor.
+    const f = occupancyFinding(atlasAt(512, 512, 384), DEFAULT_THRESHOLDS)!;
+    expect(f.severity).toBe('warn');
+  });
+
+  it('minWastedBytes: 0 override reproduces legacy fraction-only severity', () => {
+    const cfg = { ...DEFAULT_THRESHOLDS, occupancy: { ...DEFAULT_THRESHOLDS.occupancy, minWastedBytes: 0 } };
+    const f = occupancyFinding(atlasAt(256, 190, 190), cfg)!;
+    expect(f.severity).toBe('crit');
+  });
+
+  it('key absent entirely (legacy config shape) also reproduces fraction-only severity', () => {
+    const cfg = { ...DEFAULT_THRESHOLDS, occupancy: { warn: 0.8, crit: 0.6 } };
+    const f = occupancyFinding(atlasAt(256, 190, 190), cfg)!;
+    expect(f.severity).toBe('crit');
+  });
+});
+
 describe('format audit — injected encoder', () => {
   it('flags a saving past the threshold and stays silent below it', async () => {
     const r = parseImage('hero.png', readBytes('single-images/hero.png'));
@@ -1971,7 +2015,9 @@ describe('atlas fragmentation (dispersion of empty space)', () => {
 
     const occ = occupancyFinding(degenerate, DEFAULT_THRESHOLDS, {}); // no frag supplied → must default
     expect(occ).not.toBeNull();
-    expect(occ?.severity).toBe('crit'); // occ 1.6% < crit 0.6 → fires
+    // occ 1.6% < crit 0.6 → fires; the tiny page's ~1 KB waste is under minWastedBytes ⇒ demoted to info
+    // (the demotion is severity-only — B1's actual subject, the frag defaulting, is unaffected below).
+    expect(occ?.severity).toBe('info');
     expect(occ?.params?.frag).toBe(1); // B1: defaults to contiguous, never undefined
     expect(occ?.detail).not.toContain('{'); // no empty/missing interpolation leaked
     expect(occ?.detail).not.toContain('  '); // and no double-space artifact from a dropped value

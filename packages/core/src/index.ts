@@ -565,7 +565,12 @@ export interface AssetMetrics {
 
 /** Calibrated audit thresholds. Lives in config, never hardcoded inside rules. */
 export interface ThresholdConfig {
-  occupancy: { warn: number; crit: number };
+  /** Atlas packing-density gate. `warn`/`crit`: fractional occupancy floors. `minWastedBytes` (optional,
+   *  additive): absolute floor on the wasted bytes = (1−occ)·w·h·4 below which the FRACTIONAL severity
+   *  demotes to 'info' — a 256² sheet at 55% wastes ~118 KB, which is real (still reported, identical
+   *  copy/params) but not headline-grade next to megabytes on a 2048² sheet. Strict `<` (waste === floor
+   *  keeps the fractional severity). Absent ⇒ 0 (legacy fraction-only severity). */
+  occupancy: { warn: number; crit: number; minWastedBytes?: number };
   oversizePx: { warn: number; crit: number };
   /** Better-format saving gate. `warn`: fraction of disk bytes a better format must save before the
    *  per-file finding fires. `minBytes` (optional, additive): absolute floor on the MEASURED saved

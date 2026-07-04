@@ -30,7 +30,9 @@ describe('Spine .atlas pipeline (group → parseSpinePage → analyze)', () => {
     expect(r.asset.atlas.sprites).toHaveLength(2);
 
     const report = await analyze([r.asset] as Asset[]);
-    expect(report.findings.some((f) => f.rule === 'occupancy' && f.severity === 'crit')).toBe(true); // ~16%
+    // ~16% packed ⇒ the occupancy finding fires; on a 256² page the ~220 KB waste sits under
+    // occupancy.minWastedBytes (256 KB) so the fractional crit demotes to info (severity-only).
+    expect(report.findings.some((f) => f.rule === 'occupancy' && f.severity === 'info')).toBe(true);
     expect(report.assets[0]!.vramBytes).toBe(256 * 256 * 4);
   });
 });

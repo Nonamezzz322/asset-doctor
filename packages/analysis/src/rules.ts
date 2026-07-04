@@ -46,10 +46,15 @@ export function occupancyFinding(
   opts: { fragmentation?: number; largestPct?: number } = {},
 ): Finding | null {
   const occ = occupancyValue(atlas);
-  const severity: Severity =
+  let severity: Severity =
     occ < cfg.occupancy.crit ? 'crit' : occ < cfg.occupancy.warn ? 'warn' : 'ok';
   if (severity === 'ok') return null;
   const wasted = Math.max(0, 1 - occ); // belt-and-suspenders: occ is now clamped ≤1, but guard hand-built callers
+  // Absolute wasted-VRAM floor: fractional severity alone treats a 256² sheet wasting ~118 KB like a 2048²
+  // sheet wasting 7.5 MB. Below the floor the waste is REAL but not headline-grade ⇒ demote to 'info'
+  // (identical id/copy/params — the finding never disappears). Strict `<`: waste === floor keeps severity.
+  const wastedBytes = wasted * atlas.size.w * atlas.size.h * 4;
+  if (wastedBytes < (cfg.occupancy.minWastedBytes ?? 0)) severity = 'info';
   // B1: frag/largestPct can be undefined (no empty rects mapped) while occupancy still fires. Default
   // to frag = 1 (contiguous) / largestPct = wasted so the dispersion clause is never an empty
   // interpolation and stays truthful (frag = 1 ⇒ "one hole", a contiguous-waste reading).

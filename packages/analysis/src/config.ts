@@ -3,7 +3,14 @@ import type { ThresholdConfig } from '@asset-doctor/core';
 /** Default audit thresholds. Provisional — calibrate on fixtures, then on real assets.
  *  Kept here as the single source so rule logic never hardcodes magic numbers. */
 export const DEFAULT_THRESHOLDS: ThresholdConfig = {
-  occupancy: { warn: 0.8, crit: 0.6 }, // fraction of atlas area covered by frames (calibrated on real packed exports: median 0.92)
+  occupancy: { warn: 0.8, crit: 0.6, minWastedBytes: 262_144 }, // fraction of atlas area covered by frames
+  // (calibrated on real packed exports: median 0.92). minWastedBytes (CALIBRATE): absolute floor on the
+  // wasted bytes (1−occ)·w·h·4 below which the fractional severity demotes to 'info' — severity was purely
+  // fractional, so a 256² sheet wasting ≲250 KB outranked megabytes of conditional mip cost (mipmap.warn
+  // below needs 4 MB for a mere info). 256 KB = one full 256² RGBA page. The 3 surviving real-corpus warns
+  // (docs/calibration.md: ~998px sheets at occ≈0.78 ⇒ ≥~876 KB waste) clear the floor 3.3×; strict `<` in
+  // the rule so waste === floor keeps the fractional severity. The finding never disappears — the waste
+  // stays reported with identical copy/params, it just stops being headline-grade.
   oversizePx: { warn: 2048, crit: 2730 }, // longest texture edge, px (budget-Android GL_MAX often 2048; crit = mid-device danger line)
   formatSaving: { warn: 0.25, minBytes: 4096 }, // CALIBRATE — fraction of disk bytes a better format
   // could save (warn) + absolute floor on the MEASURED saved bytes (minBytes). A tiny icon "saving 35%"

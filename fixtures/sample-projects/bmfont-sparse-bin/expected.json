@@ -19,7 +19,7 @@
     },
     {
       "rule": "occupancy",
-      "severity": "crit"
+      "severity": "info"
     },
     {
       "rule": "wasted-regions",
