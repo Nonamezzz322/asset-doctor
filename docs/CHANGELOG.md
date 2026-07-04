@@ -10,6 +10,35 @@ GitHub-кредов — пушит пользователь); хэши комм�
 
 ---
 
+## Spine-въювер как отдельный экран (#spine) — 2026-07-04
+Запрос пользователя: перенести ВЕСЬ функционал pixi-spine-viewer (другой мой репозиторий) в приложение, но
+дизайн/стилистику — как у остального нашего ресурса; запустить воркфлоу с набором агентов, чтобы перенести
+как можно быстрее. Порт сделан через воркфлоу (3 дизайн-агента [движок/API-маппинг · UI/дизайн · интеграция]
+→ синтез единой спеки → impl → 3 линзы ревью [Pixi/Spine-API · a11y/честность/инварианты · дизайн/i18n]).
+Ревью = 0 блокеров/мажоров; 3 находки (minor + 2 nit) — исправил ПЕРЕД коммитом. Мой независимый gate зелёный.
+
+- **#spine viewer** (`5841bbb`)
+  — `apps/web/src/lib/spine-files.ts` (+ 23 теста) — ЧИСТАЯ логика (ноль Pixi/DOM): `modifyAtlasText`,
+    `expandSequencePath`, `extractImageNames`, лестница `findImageFile`, `groupSpineFiles`,
+    `buildAtlasFromImages`, `filterSlots`. У web нет Pixi-харнесса ⇒ несущая логика юнит-тестируется в Node.
+  — `apps/web/src/lib/spine-engine.ts` — импер-движок Pixi v8 + spine-pixi-v8 (`Application.init` async,
+    `TextureAtlas` single-arg + `page.setTexture(SpineTexture.from(source))`, `AtlasAttachmentLoader` →
+    `SkeletonJson.readSkeletonData` → `new Spine(skeletonData)`, `setAnimation`/`timeScale`/`setSkin`+
+    `setupPoseSlots`, `updateWorldTransform(Physics.update)`, слот-объект-маркеры) — вне React-дерева.
+  — `apps/web/src/components/SpineViewer.tsx` — оболочка + доступные контролы в наших токенах (тёмная film-
+    сцена, panel-карточки, teal/IBM-Plex), ровно один h1 (`ad-spine-h1`); все лейблы через `t()`.
+  — `route.ts`/`focus-move.ts`/`App.tsx` — вид `spine` + `SPINE_HASH` + якорь `ad-spine-h1` + 4-й пункт
+    сайдбара, покрыто route/focus-move-свипами. i18n: +32 ключа во всех 10 каталогах (данные-производные
+    имена анимаций/скинов/слотов НЕ переводятся). `@esotericsoftware/spine-pixi-v8` перенесён в deps.
+  — Ревью-фиксы: (1) reduced-motion при перезагрузке больше не «замораживает» скелет, пока React говорит
+    «играет» — `timeScale = this.playing ? this.speed : 0` (поле `reducedMotion` удалено, `this.playing`
+    уже кодирует старт-на-паузе); (2) страничные текстуры + их source освобождаются в `reset()`
+    (`Texture.destroy(true)`) — без утечки VRAM на N перезагрузках (инвариант 5); (3) порядок deps.
+  — Инварианты: каждый байт читается локально (`createImageBitmap` над dropped-байтами, ноль сети —
+    инвариант 1); один h1 + клавиатурные контролы + reduced-motion старт-на-паузе. Рантайм-проигрывание
+    проверено ТОЛЬКО build/typecheck (без браузера) — с чек-листом ручного браузер-теста.
+    Gate: typecheck (13 проектов) · lint · web build · web 966 тестов (1 pre-existing skip) · i18n 33 · инв-grep clean.
+
 ## Анализ количества draw calls (статическая оценка «пол») — 2026-07-04
 Запрос пользователя: добавить анализ количества draw calls. Render-probe уже МЕРЯЕТ реальные draw calls, но
 в бесплатной (без probe) диагностике числа не было. Добавил ЧЕСТНУЮ статическую оценку. Ревью (честность +
