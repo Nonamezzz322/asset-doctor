@@ -10,6 +10,16 @@ GitHub-кредов — пушит пользователь); хэши комм�
 
 ---
 
+## App-screen re-skin, Фаза 3b-i — ledger-badge с честной ролью saving/measure — 2026-07-04
+- **ledger-badge** (`225b444`)
+  — inline `metricBadge` из TriageLedger вынесен в чистый Node-тестируемый `lib/ledger-badge.ts` + добавлено
+    поле `role`, чтобы бейдж строки честно красился: только возместимый wasted-disk (DISK) — зелёный SAVING
+    (`text-cta-text`), а VRAM/OCC — нейтральные MEASUREMENT в ink (ноль выдуманного «вы сэкономите» — инв. 3/5);
+    sparse-значения по-прежнему «—». Ярлык бейджа — на токен `.ad-label-sm`. 7 юнит-тестов. Дропнул полный
+    row-reflow (severity-слово + переупорядочивание title/file) — a11y-смежная перестройка при скромном выигрыше,
+    строка и так чистая. Gate: typecheck · i18n 33 · web 920 · lint · build. Остался только 3b-ii (SettingsPage
+    Switch/Segmented re-skin).
+
 ## App-screen re-skin, Фаза 4 — честный Pro/License-экран — 2026-07-04
 Макет-экран Billing (форма карты/CVC, «Pay», тарифы $19/$49, monthly/annual) — фейковая платёжная бутафория
 без клиентского списания (инв. 2/3/4) ⇒ маппится на РЕАЛЬНЫЙ LicensePanel. Ревью 3-линзами + верификация =
