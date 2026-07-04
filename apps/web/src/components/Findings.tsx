@@ -16,7 +16,7 @@ export function Findings({
   const { t, renderFinding } = useI18n();
   if (findings.length === 0) {
     return (
-      <div className={`flex items-center gap-2 rounded-xl border border-line bg-panel p-4 font-mono text-sm ${severityLabelClass()}`}>
+      <div className={`flex items-center gap-2 rounded-2xl border border-line bg-panel p-4 font-mono text-sm ${severityLabelClass()}`}>
         <span className="h-2 w-2 rounded-full bg-ok" /> {t('findings.none')}
       </div>
     );
@@ -31,7 +31,7 @@ export function Findings({
             <button
               type="button"
               onClick={() => onSelect(selected ? undefined : f.id)}
-              className={`ad-reveal w-full rounded-xl border bg-panel p-4 text-left transition ${
+              className={`ad-reveal w-full rounded-2xl border bg-panel p-4 text-left transition ${
                 selected ? 'border-teal ring-1 ring-teal/40' : 'border-line hover:border-ink-soft'
               }`}
             >

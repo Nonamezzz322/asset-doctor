@@ -44,7 +44,7 @@ export function PrimaryRecommendation({
   return (
     <section
       aria-labelledby="ad-pack-rec-h"
-      className="rounded-xl border border-line bg-panel p-4"
+      className="rounded-2xl border border-line bg-panel p-4"
     >
       <h2 id="ad-pack-rec-h" className="font-display text-base font-semibold text-ink">
         {t('recommend.pack.title')}

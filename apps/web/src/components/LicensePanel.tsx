@@ -50,7 +50,7 @@ export function ActivatePanel({ onUnlocked }: { onUnlocked: () => void }) {
       >
         {busy ? t('license.activating') : t('license.activate')}
       </button>
-      {err && <p className="font-mono text-[10px] text-crit">{err}</p>}
+      {err && <p className="font-mono text-[10px] text-crit-text">{err}</p>}
       {CHECKOUT_URL && (
         <a
           href={CHECKOUT_URL}
@@ -71,7 +71,7 @@ export function ProBadge({ onDeactivated }: { onDeactivated: () => void }) {
   const [busy, setBusy] = useState(false);
   return (
     <div className="mt-2 flex items-center justify-center gap-2 font-mono text-[10px] text-ink-soft">
-      <span className="inline-flex items-center gap-1 text-ok">
+      <span className="inline-flex items-center gap-1 text-ink">
         <span className="h-1.5 w-1.5 rounded-full bg-ok" /> {t('license.active')}
       </span>
       <button
@@ -86,7 +86,7 @@ export function ProBadge({ onDeactivated }: { onDeactivated: () => void }) {
             onDeactivated();
           }
         }}
-        className="underline-offset-2 hover:text-crit hover:underline disabled:opacity-50"
+        className="underline-offset-2 hover:text-crit-text hover:underline disabled:opacity-50"
       >
         {t('license.deactivate')}
       </button>

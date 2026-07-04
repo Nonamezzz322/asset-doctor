@@ -788,7 +788,7 @@ function Sidebar({ view }: { view: View }) {
 //    Probe-only metrics (measured VRAM, draw calls) degrade to an absent-metric placeholder, never fabricated. ──
 function BudgetCard({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="rounded-xl border border-line bg-panel p-4">
+    <div className="rounded-2xl border border-line bg-panel p-4">
       <div className="ad-label text-ink-soft">{label}</div>
       <div className="mt-2">{children}</div>
     </div>
@@ -1518,7 +1518,7 @@ function FixCard({ files, buildNonce }: { files: PickedFile[]; buildNonce: numbe
   // Gated + not yet unlocked → show activation instead of the run button.
   if (PRO_GATE_ENABLED && !unlocked) {
     return (
-      <div ref={cardRef} id={FIX_CARD_ID} className="rounded-xl border-2 border-teal/70 bg-panel p-4 text-center">
+      <div ref={cardRef} id={FIX_CARD_ID} className="rounded-2xl border-2 border-teal/70 bg-panel p-4 text-center">
         <p className="font-mono text-xs text-ink-soft">{t('pro.note')}</p>
         <ActivatePanel onUnlocked={() => setUnlocked(true)} />
       </div>
@@ -1526,7 +1526,7 @@ function FixCard({ files, buildNonce }: { files: PickedFile[]; buildNonce: numbe
   }
 
   return (
-    <div ref={cardRef} id={FIX_CARD_ID} className="rounded-xl border-2 border-teal/70 bg-panel p-4 text-center">
+    <div ref={cardRef} id={FIX_CARD_ID} className="rounded-2xl border-2 border-teal/70 bg-panel p-4 text-center">
       {/* AB-R2: first-class "optimize this folder" header — names the capability the SAME Pro fix engine
           already has (convert / scale variants / repack, structure preserved). Honest copy, no new claim;
           pro.note is retained below as the small Phase-2 sub-note. Token-driven (font-display / font-mono /

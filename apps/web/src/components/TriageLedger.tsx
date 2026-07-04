@@ -484,7 +484,7 @@ export function TriageLedger({
         // the foldedAll case (the "show K folded notes" toggle is the escape there). h3 keeps the heading
         // outline monotonic: sr-only h1 → h2 Diagnosis → h3 card → h2 Findings.
         empty ? (
-          <div className={`space-y-2 rounded-xl border bg-panel p-4 ${CARD_BORDER[empty.kind]}`}>
+          <div className={`space-y-2 rounded-2xl border bg-panel p-4 ${CARD_BORDER[empty.kind]}`}>
             <h3 className="flex items-center gap-2 font-display text-sm font-semibold text-ink">
               {/* Clean card prefixes the SAME ok token/shape as the VerdictBar all-clear dot — visual agreement,
                   not contradiction. Decorative (aria-hidden); the title text carries the meaning. */}
@@ -512,7 +512,7 @@ export function TriageLedger({
           tabIndex={0}
           aria-activedescendant={activeId}
           onKeyDown={onListKeyDown}
-          className="overflow-auto rounded-xl border border-line bg-panel"
+          className="overflow-auto rounded-2xl border border-line bg-panel"
           style={{ maxHeight: '70vh' }}
         >
           {/* Inner spacer of the full virtual height; the visible slice is offset by padTop. */}
@@ -552,7 +552,7 @@ export function TriageLedger({
         </div>
       )}
       {isAssetAxis(opts.sort) ? (
-        <p className="font-mono text-[10px] leading-relaxed text-ink-soft/80">
+        <p className="font-mono text-[10px] leading-relaxed text-ink-soft">
           {t('triage.sort.label')}: {t(`triage.sort.${opts.sort}`)}
         </p>
       ) : null}

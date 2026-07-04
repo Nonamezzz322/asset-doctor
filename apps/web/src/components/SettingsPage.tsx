@@ -355,10 +355,10 @@ function FormatsCard({ s, patch }: Sect) {
                   <span className="font-mono text-[10px] text-ink-soft">{t('fix.profile.tierScale')}</span>
                   <input type="number" min={0.05} max={1} step={0.05} value={tt.scale} aria-label={t('fix.profile.tierScale')} onChange={(e) => patchTier(i, { scale: Number(e.target.value) })} className="w-16 rounded border border-line bg-panel px-1 font-mono text-[10px] text-ink" />
                   <input type="text" value={tt.suffix} aria-label={t('fix.profile.tierSuffix')} onChange={(e) => patchTier(i, { suffix: e.target.value })} placeholder="_540p" className={`w-20 rounded border bg-panel px-1 font-mono text-[10px] text-ink ${validSuffix ? 'border-line' : 'border-crit'}`} />
-                  <button type="button" onClick={() => removeTier(i)} className="font-mono text-[10px] text-crit hover:underline" aria-label="remove">
+                  <button type="button" onClick={() => removeTier(i)} className="font-mono text-[10px] text-crit-text hover:underline" aria-label="remove">
                     ✕
                   </button>
-                  {!validSuffix ? <span className="font-mono text-[9px] text-crit">{t('fix.profile.tierBadSuffix', { suffix: tt.suffix })}</span> : null}
+                  {!validSuffix ? <span className="font-mono text-[9px] text-crit-text">{t('fix.profile.tierBadSuffix', { suffix: tt.suffix })}</span> : null}
                 </div>
               );
             })}
@@ -384,7 +384,7 @@ function FormatsCard({ s, patch }: Sect) {
                 {o.mode !== 'lossless' ? (
                   <input type="number" min={0} max={100} step={1} value={o.quality ?? 85} aria-label={t('fix.profile.quality')} onChange={(e) => patchOverride(i, { quality: Number(e.target.value) })} className="w-14 rounded border border-line bg-panel px-1 font-mono text-[10px] text-ink" />
                 ) : null}
-                <button type="button" onClick={() => removeOverride(i)} className="font-mono text-[10px] text-crit hover:underline" aria-label="remove">
+                <button type="button" onClick={() => removeOverride(i)} className="font-mono text-[10px] text-crit-text hover:underline" aria-label="remove">
                   ✕
                 </button>
               </div>
@@ -429,7 +429,7 @@ function ResolutionsCard({ s, patch }: Sect) {
         <input type="checkbox" checked={s.tierEnable} onChange={(e) => patch({ tierEnable: e.target.checked })} className="accent-teal" />
         {t('fix.tier.enable')}
       </label>
-      <p className="font-mono text-[10px] leading-relaxed text-warn">⚠ {t('fix.tier.inlineWarn')}</p>
+      <p className="font-mono text-[10px] leading-relaxed text-ink">⚠ {t('fix.tier.inlineWarn')}</p>
 
       {s.tierEnable ? (
         <div className="space-y-2">
@@ -491,7 +491,7 @@ function PackingCard({ s, patch }: Sect) {
 
       <div className="border-t border-line pt-2">
         <CheckRow label={t('fix.pack.enable')} checked={s.packLoose} onChange={(b) => patch({ packLoose: b })} />
-        <p className="mt-1 font-mono text-[10px] leading-relaxed text-warn">⚠ {t('fix.pack.inlineWarn')}</p>
+        <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink">⚠ {t('fix.pack.inlineWarn')}</p>
 
         {s.packLoose ? (
           <div className="mt-2 space-y-2">
@@ -615,7 +615,7 @@ function RulesCard({ s, patch }: Sect) {
               }}
               className="w-14 rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink focus:border-teal"
             />
-            <button type="button" onClick={() => setOverrides(s.overrides.filter((_, j) => j !== i))} className="font-mono text-[11px] text-ink-soft hover:text-crit" aria-label="remove">
+            <button type="button" onClick={() => setOverrides(s.overrides.filter((_, j) => j !== i))} className="font-mono text-[11px] text-ink-soft hover:text-crit-text" aria-label="remove">
               ✕
             </button>
           </div>
