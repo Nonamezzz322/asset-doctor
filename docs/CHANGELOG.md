@@ -10,6 +10,41 @@ GitHub-кредов — пушит пользователь); хэши комм�
 
 ---
 
+## App-screen re-skin, Фаза 4 — честный Pro/License-экран — 2026-07-04
+Макет-экран Billing (форма карты/CVC, «Pay», тарифы $19/$49, monthly/annual) — фейковая платёжная бутафория
+без клиентского списания (инв. 2/3/4) ⇒ маппится на РЕАЛЬНЫЙ LicensePanel. Ревью 3-линзами + верификация =
+0 serious, 2 minor (staleness plan-card), починены через единый источник entitlement.
+
+- **Честный Pro-экран** (`e8f17b3`)
+  — `route.ts`: добавлено view `'pro'` + `PRO_HASH` (#pro); `viewOfHash` остаётся total/fail-open. `focus-move.ts`:
+    добавлен якорь `ad-pro-h1` + генерализация display:none-гарда до `next.view!=='main'`. Оба с тестами
+    (route 13, focus-move 17 вкл. 144-парный свип).
+  — НОВЫЙ чистый `lib/pro-view.ts` (Node-тест, пинит возвращаемые ключи против `CATALOGS.en`): `proPanel`
+    (gate OFF ⇒ beta/free, gate ON ⇒ activate|active), gate-дисциплинированный `proSubtitleKey`, plan
+    value/action-ключи. НОВЫЙ `components/ProPage.tsx`: реальные `ActivatePanel`/`ProBadge` + landing-прайсинг
+    как ИНФОРМАЦИЯ + gate-честный чип — НИКАКОЙ формы карты, «Pay», выдуманных цен, cycle-тоггла. Один h1
+    (`ad-pro-h1`), монотонно h1→h2→h3, dark-safe.
+  — `App.tsx`: ЕДИНЫЙ app-level Pro-entitlement (`proUnlocked`) — источник правды; собственный
+    probe/state FixCard вынесен наружу (теперь берёт `unlocked`/`onUnlockedChange` пропсами), ProPage берёт
+    те же ⇒ активация/деактивация на любой поверхности держит sidebar plan-card + FixCard + ProPage в
+    синхроне (фикс review-MINOR). Расширены гейт главного дерева (`hidden={view!=='main'}`) + count-guard.
+    Sidebar получил Pro-nav-пункт (aria-current) + lg-only current-plan-карточку (честную по состоянию).
+    +14 ключей ×10; ProPage зарегистрирован в i18n-app-keys-сканере. Gate: typecheck · i18n 33 · web 913 ·
+    lint · build.
+
+## App-screen re-skin, Фаза 3a — выравнивание радиуса карточек + AA-контраст — 2026-07-04
+Низкорисковая полировка доски: косметическое выравнивание радиуса под макет + локализованные AA-фиксы
+проверенными токенами (без воркфлоу-ревью — косметика/проверенные свопы, self-verified зелёным).
+
+- **Радиус + AA-контраст** (`1a4522d`)
+  — Все карточки результат-доски → `rounded-2xl` (макетные rounded-14): TriageLedger-контейнер + empty-карта,
+    Findings detail + empty, PrimaryRecommendation, budget-карточки Фазы 2, оба FixCard-root (декоративный
+    teal-бордер оставлен, non-text ≥3:1). AA-контраст (проверенные токены; каждое обесцвеченное слово держит
+    сигнал через форму/дот, WCAG 1.4.1): TriageLedger `/80`→full; SettingsPage remove/bad-suffix
+    `text-crit`→`text-crit-text`, ⚠-варны `text-warn`→`text-ink` (⚠-глиф — сигнал), override-hover;
+    LicensePanel error `text-crit`→`text-crit-text`, active-слово `text-ok`→`text-ink` (bg-ok-дот держит хью),
+    deactivate-hover. Dark-safe. Gate: typecheck · i18n 33 · web 898 · lint · build.
+
 ## App-screen re-skin, Фаза 2 — шапка результатов + budget-strip из реальных метрик — 2026-07-04
 Макет-шапка результатов (chart-header) + 4-карточная budget-strip, наполненные ТОЛЬКО реальными данными
 отчёта (без пользовательских бюджетов / без over-budget-баров в этой фазе). Ревью 3-линзами + верификация =
