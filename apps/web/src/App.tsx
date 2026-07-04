@@ -1032,14 +1032,6 @@ function Dropzone({
             {t('landing.scrollHint')}
           </a>
         </div>
-        {/* privacy pin — shield in the ok token (invariant 1: nothing is uploaded for the diagnosis). */}
-        <div className="mt-6 flex items-center justify-center gap-2 font-mono text-[12.5px] text-ink-soft lg:justify-start">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3z" stroke="var(--color-ok)" strokeWidth="1.7" strokeLinejoin="round" />
-            <path d="M9 12l2.2 2.2L15.5 10" stroke="var(--color-ok)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          {t('dropzone.privacy')}
-        </div>
         {phase.t === 'error' && <ErrorNotice state={phase.error} mt="mt-6" />}
         {/* Mobile honesty line (visible only < sm). Never promises mobile analysis (WebGL probe / FS Access
             limits) but doesn't say "impossible" either — file-input folder picking exists. */}

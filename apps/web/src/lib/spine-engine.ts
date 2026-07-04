@@ -108,6 +108,10 @@ export class SpineEngine {
     events: 'drawEvents',
   };
 
+  /** destroy() flips this; init() re-checks it AFTER its async await so a StrictMode dev double-mount
+   *  (mount → cleanup-mid-init → remount) cannot leave a zombie Application/canvas in the host. */
+  private disposed = false;
+
   constructor(cb: SpineCallbacks) {
     this.cb = cb;
   }
@@ -123,6 +127,10 @@ export class SpineEngine {
       resolution: (typeof window !== 'undefined' && window.devicePixelRatio) || 1,
       autoDensity: true,
     });
+    if (this.disposed) {
+      app.destroy(); // destroy() ran while app.init() was in flight — do not mount a zombie
+      return;
+    }
     this.app = app;
     const canvas = app.canvas as unknown as HTMLCanvasElement;
     host.appendChild(canvas);
@@ -130,7 +138,9 @@ export class SpineEngine {
     canvas.setAttribute('aria-label', host.getAttribute('aria-label') ?? 'Spine animation preview');
     // z-0 ⇒ the canvas is the BOTTOM layer. React controls (drop overlay, on-canvas islands) sit above via
     // z-10, so their clicks land on the button; a pointerdown anywhere else hits the canvas and pans (drag).
-    canvas.classList.add('absolute', 'inset-0', 'z-0', 'block', 'h-full', 'w-full', 'cursor-grab', 'touch-none');
+    // pointer-events-none until a skeleton loads: before load the canvas has NO pointer job (nothing to pan),
+    // so it physically cannot intercept the Open-files/Open-folder buttons in ANY stacking configuration.
+    canvas.classList.add('absolute', 'inset-0', 'z-0', 'block', 'h-full', 'w-full', 'cursor-grab', 'touch-none', 'pointer-events-none');
     this.placeholderTex = this.makePlaceholder();
 
     // Pan/zoom listeners on the canvas itself — they work regardless of where the (separate-column) inspector
@@ -241,6 +251,9 @@ export class SpineEngine {
       this.userOffset = { x: 0, y: 0 };
       this.userZoom = 1;
       this.fit();
+
+      // A skeleton is on stage ⇒ the canvas now has a pointer job (drag-pan / wheel-zoom).
+      (this.app.canvas as unknown as HTMLCanvasElement).classList.remove('pointer-events-none');
 
       this.cb.onLoaded({
         animations,
@@ -467,6 +480,7 @@ export class SpineEngine {
   }
 
   destroy(): void {
+    this.disposed = true; // init() re-checks after its await — see the field comment
     const canvas = this.app?.canvas as unknown as HTMLCanvasElement | undefined;
     if (canvas) {
       canvas.removeEventListener('pointerdown', this.onPointerDown);

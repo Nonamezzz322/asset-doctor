@@ -335,7 +335,6 @@ export function SpineViewer() {
                 {t(`spine.error.${errorKey}`)}
               </p>
             ) : null}
-            <p className="mt-3 px-1.5 font-mono text-[11px] text-film-mute">{t('dropzone.privacy')}</p>
             {/* Keyboard help lives HERE (always in the DOM once loaded), not inside the collapsible Playback
                 panel — so the stage aria-describedby target survives when that accordion is closed. */}
             {loaded ? (
