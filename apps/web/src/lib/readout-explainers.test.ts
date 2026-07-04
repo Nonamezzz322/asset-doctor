@@ -71,15 +71,16 @@ describe('explainerRows — determinism', () => {
   });
 });
 
-describe('explainerRows — VRAM term flips declared↔literal with the probe (mirrors the on-card relabel)', () => {
+describe('explainerRows — VRAM term is ALWAYS readout.declared (honesty round item 2: probe and no-probe identical)', () => {
   const vramTerm = (flags: Parameters<typeof explainerRows>[0]): ExplainerTerm | undefined =>
     explainerRows(flags).find((r) => r.key === 'vram')?.term;
 
-  it('no probe ⇒ the vram term is the bare literal "VRAM" (matches ReadCell label FilmViewer:150)', () => {
-    expect(vramTerm({ probe: false, mip: false, vram: true, disk: true })).toEqual({ literal: 'VRAM' });
+  it('no probe ⇒ the vram term is readout.declared (the value IS the declared w×h×4 estimate)', () => {
+    // Deliberately changed from the old { literal: 'VRAM' } pin: a bare "VRAM" label read as measured.
+    expect(vramTerm({ probe: false, mip: false, vram: true, disk: true })).toEqual({ i18nKey: 'readout.declared' });
   });
 
-  it('probe ⇒ the vram term is the existing i18n key readout.declared (matches the relabelled cell)', () => {
+  it('probe ⇒ the vram term is the same i18n key readout.declared (no flip — matches the always-relabelled cell)', () => {
     expect(vramTerm({ ...FULL })).toEqual({ i18nKey: 'readout.declared' });
   });
 });
@@ -124,10 +125,12 @@ describe('explainerRows — honesty pin (invariant 5: registry cannot be silentl
     ]);
   });
 
-  it('base terms ARE exactly the locale-independent acronym literals (no probe)', () => {
+  it('base terms ARE exactly the on-card labels: declared vram key + the acronym literals (no probe)', () => {
+    // Deliberately changed pin (honesty round item 2): vram is { i18nKey: 'readout.declared' } even
+    // without a probe — the cell label no longer flips, so the panel term must not either.
     const base = explainerRows({ probe: false, mip: false, vram: true, disk: true, occ: true, frag: true });
     expect(base.map((r) => r.term)).toEqual([
-      { literal: 'VRAM' },
+      { i18nKey: 'readout.declared' },
       { literal: 'DISK' },
       { literal: 'OCC' },
       { literal: 'FRAG' },

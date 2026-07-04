@@ -145,11 +145,12 @@ export function FilmViewer({
         <div key={name} className="ad-scanline" aria-hidden="true" />
       </div>
 
-      {/* readout strip — when a render-probe reading exists, the static VRAM is relabelled "declared"
-          (it's the manifest atlas geometry, an estimate). Without a probe it shows exactly today. */}
+      {/* readout strip — the static VRAM cell is ALWAYS labelled "vram (declared)" (honesty round,
+          item 2): probe or no probe, the value IS the declared w×h×4 estimate from manifest/image
+          geometry, never a GPU measurement — the probe-absent bare-"VRAM" label read as measured. */}
       <div className="mt-3 grid grid-cols-4 gap-px overflow-hidden rounded-lg border border-film-border bg-film-border">
         <ReadCell
-          label={probe ? t('readout.declared') : 'VRAM'}
+          label={t('readout.declared')}
           value={fmtBytes(metrics?.vramBytes ?? 0)}
           color="text-info"
         />
@@ -221,7 +222,8 @@ export function FilmViewer({
 
           {showMip ? (
             <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-film-border bg-film-border">
-              <ReadCell label="VRAM" value={fmtBytes(m.vramBytes)} color="text-info" />
+              {/* Same declared quantity as the base cell — same honest label (item 2). */}
+              <ReadCell label={t('readout.declared')} value={fmtBytes(m.vramBytes)} color="text-info" />
               <ReadCell
                 label={t('readout.mipCeiling')}
                 value={fmtBytes(m.vramBytesMipmapped)}

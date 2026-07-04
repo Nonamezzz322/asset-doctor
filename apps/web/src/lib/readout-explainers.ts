@@ -4,8 +4,9 @@
 // FilmViewer JSX is a thin renderer over this.
 //
 // HONESTY: bodyKey values are the EXISTING vetted invariant-5 strings (never re-worded here); term
-// values MIRROR the on-card cell labels — either the EXISTING i18n key the ReadCell prints, or, for
-// the base-strip acronyms (DISK/OCC/FRAG/VRAM), the same locale-independent literal the cell prints.
+// values MIRROR the on-card cell labels — either the EXISTING i18n key the ReadCell prints (vram is
+// always 'readout.declared' — the value is the declared w×h×4 estimate, probe or not), or, for the
+// base-strip acronyms (DISK/OCC/FRAG), the same locale-independent literal the cell prints.
 // So the panel's terms can never drift from the cells. Nothing in this module states a saving.
 
 import type { AssetMetrics } from '@asset-doctor/core'; // type-only; core is zero-dep / worker-safe
@@ -41,15 +42,17 @@ export interface ExplainerFlags {
 /** Canonical fixed order = the visual order of the readings on the card: base strip (VRAM · DISK ·
  *  OCC · FRAG, the grid-cols-4 cells L→R) then the measured strip → breakdown mip row → breakdown
  *  delta row. We filter THIS literal array — never build from a Set/object iteration — so output
- *  order is deterministic. `row` is a factory only so the `vram` term can flip declared↔literal with
- *  `f.probe` (mirroring the cell relabel FilmViewer:150); all other rows ignore `f`. */
+ *  order is deterministic. `row` stays a factory for uniformity; every row ignores `f` now that the
+ *  vram term is unconditional (honesty round item 2: the cell is ALWAYS "vram (declared)"). */
 const REGISTRY: { when: (f: ExplainerFlags) => boolean; row: (f: ExplainerFlags) => ExplainerRow }[] = [
   // BASE STRIP — terms MIRROR the cells; bodies are definitions (no fabricated per-asset number).
   {
     when: (f) => !!f.vram,
-    row: (f) => ({
+    row: () => ({
       key: 'vram',
-      term: f.probe ? { i18nKey: 'readout.declared' } : { literal: 'VRAM' }, // matches FilmViewer:150
+      // Unconditional (matches the always-"vram (declared)" cell label in FilmViewer): the value is
+      // the declared w×h×4 estimate with or without a probe, so the term never reads as measured.
+      term: { i18nKey: 'readout.declared' },
       bodyKey: 'landing.vram.body', // reused verbatim (the canonical disk≠VRAM teaching string)
     }),
   },

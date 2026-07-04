@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AnalysisReport, AssetMetrics, BundleAvailability, Finding, LazyMarking, Rule, Severity, SkinGuard } from '@asset-doctor/core';
 import { bundleOf, cmp } from '@asset-doctor/analysis';
 import {
@@ -47,6 +47,7 @@ import { resultsHeading } from './lib/results-heading';
 import { errorCard, errDetail, type ErrorState, type ErrorContext } from './lib/error-view';
 import { progressView } from './lib/progress-view';
 import { assetCounts, budgetModel, folderLabel, type BudgetModel } from './lib/results-summary';
+import { budgetExplainerRows } from './lib/budget-explainers';
 import { focusTargetAfterSwap, type SwapState } from './lib/focus-move';
 import { Landing } from './components/landing/Landing';
 import { LandingFooter } from './components/landing/LandingFooter';
@@ -590,7 +591,10 @@ export function App() {
               {report.assets.length > 0 ? (
                 <div className="flex items-center gap-3">
                   {bm && bm.disk.saved > 0 ? (
-                    <div className="text-right">
+                    /* title= is a redundant hover mirror of the disclosure's disk row (budget.disk.savedTooltip);
+                       the keyboard/SR delivery is the budget-strip disclosure below. The "(est.)" honesty word
+                       lives in the visible label text, so it enters the accessible name without any tooltip. */
+                    <div className="text-right" title={t('budget.disk.savedTooltip')}>
                       <div className="ad-label text-ink-soft">{t('results.recoverable.label')}</div>
                       <div className="font-mono text-2xl font-semibold text-cta-text">−{bm.disk.savedPct}%</div>
                     </div>
@@ -846,6 +850,10 @@ function BudgetStrip({ bm }: { bm: BudgetModel }) {
   const { t } = useI18n();
   const m = bm.vram.measured;
   const f = bm.findings;
+  // WAI-ARIA disclosure (same shipped pattern as the FilmViewer readings help): ONE keyboard-reachable
+  // panel under the strip re-delivers every estimate-scope string that otherwise ships as title= only.
+  const [explainOpen, setExplainOpen] = useState(false);
+  const explainPanelId = useId();
   const chip =
     f.problems === 0
       ? t('triage.allClear')
@@ -855,10 +863,19 @@ function BudgetStrip({ bm }: { bm: BudgetModel }) {
           ? t('triage.filter.warn', { n: f.warn })
           : t('triage.filter.info', { n: f.info });
   return (
+    <div>
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      {/* VRAM footprint — declared; a measured subline appears only when the render-probe ran (probe-gated). */}
+      {/* VRAM footprint — the big number is the DECLARED w×h×4 estimate on BOTH paths, so it is ALWAYS
+          visibly tagged "declared" (item 2: probe-absent it must never read as measured). Probe present ⇒
+          the measured subline (a DIFFERENT quantity, probe-gated); probe absent ⇒ the estimate-model
+          subline, mirroring the draw card's "estimated" treatment. title= mirrors the disclosure rows. */}
       <BudgetCard label={t('budget.vram.label')}>
-        <div className="font-mono text-2xl font-semibold text-ink">{fmtBytes(bm.vram.loaded)}</div>
+        <div className="flex flex-wrap items-baseline gap-x-1.5 font-mono">
+          <span className="text-2xl font-semibold text-ink">{fmtBytes(bm.vram.loaded)}</span>
+          <span className="text-[11px] text-ink-soft" title={t('budget.vram.declaredTooltip')}>
+            {t('budget.vram.declaredTag')}
+          </span>
+        </div>
         {m ? (
           <div
             className="mt-1 font-mono text-[10px] leading-tight text-ink-soft"
@@ -866,7 +883,11 @@ function BudgetStrip({ bm }: { bm: BudgetModel }) {
           >
             {t('metric.vramMeasured')} {fmtBytes(m.vram)} · {t('readout.measuredScope', { n: m.atlasesProbed })}
           </div>
-        ) : null}
+        ) : (
+          <div className="mt-1 font-mono text-[10px] leading-tight text-ink-soft" title={t('budget.vram.declaredTooltip')}>
+            {t('budget.vram.declaredModel')}
+          </div>
+        )}
       </BudgetCard>
 
       {/* Draw calls — the render-probe MEASURES the real draws; without a probe we show the STATIC floor
@@ -889,7 +910,9 @@ function BudgetStrip({ bm }: { bm: BudgetModel }) {
         <div className="flex flex-wrap items-baseline gap-x-1.5 font-mono">
           <span className="text-2xl font-semibold text-ink">{fmtBytes(bm.disk.total)}</span>
           {bm.disk.saved > 0 ? (
-            <span className="text-[11px] text-ink-soft">
+            /* "(est.)" lives in the visible tag text; title= is a redundant hover mirror of the
+               disclosure's disk row (the de-overlap model, item 6). */
+            <span className="text-[11px] text-ink-soft" title={t('budget.disk.savedTooltip')}>
               → {fmtBytes(bm.disk.after)} {t('budget.disk.afterTag')}
             </span>
           ) : null}
@@ -915,6 +938,43 @@ function BudgetStrip({ bm }: { bm: BudgetModel }) {
           </div>
         ) : null}
       </BudgetCard>
+    </div>
+
+    {/* ESTIMATES DISCLOSURE (items 2/3/6, invariant 3/5) — WAI-ARIA disclosure, the exact FilmViewer
+        readings-help pattern on light-surface tokens: a single keyboard/touch/SR-reachable trigger
+        toggling a static <dl> that re-delivers every estimate-scope string this strip otherwise ships
+        as title= only (mouse-only). Rows come from the pure Node-tested registry (budget-explainers.ts);
+        the disk row doubles as the header recoverable stat's + after-fix tag's accessible delivery
+        (all three anchors share budget.disk.savedTooltip). Trigger label REUSES readout.explainTrigger. */}
+    <div className="mt-2">
+      <button
+        type="button"
+        aria-expanded={explainOpen}
+        aria-controls={explainPanelId}
+        onClick={() => setExplainOpen((v) => !v)}
+        className="flex min-h-6 items-center gap-1.5 font-mono text-[10px] text-ink-soft underline-offset-2 hover:underline"
+      >
+        <span
+          aria-hidden="true"
+          className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border border-ink-soft text-[9px] leading-none"
+        >
+          i
+        </span>
+        {t('readout.explainTrigger')}
+      </button>
+      <dl
+        id={explainPanelId}
+        hidden={!explainOpen}
+        className="mt-1.5 space-y-2 rounded-lg border border-line bg-panel px-3 py-2.5"
+      >
+        {budgetExplainerRows(bm).map((r) => (
+          <div key={r.key}>
+            <dt className="ad-label text-ink-soft">{t(r.termKey)}</dt>
+            <dd className="mt-0.5 text-[11px] leading-relaxed text-ink-soft">{t(r.bodyKey, r.params)}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
     </div>
   );
 }
