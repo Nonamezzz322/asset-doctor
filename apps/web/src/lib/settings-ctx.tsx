@@ -12,8 +12,9 @@
 // nothing, the same discipline as the old all-setters apply). Backend-op toggles live in BuildSettings as
 // LIVE UI state only — they are never serialized (build-config.ts whitelist) and consent is never here.
 
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
-import { patchSettings, settingsDefaults, type BuildSettings } from './build-settings';
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { patchSettings, type BuildSettings } from './build-settings';
+import { loadBuildSettings, saveBuildSettings } from './settings-persist';
 
 export interface BuildSettingsValue {
   /** The live settings the next fix run will use. */
@@ -27,7 +28,14 @@ export interface BuildSettingsValue {
 const BuildSettingsContext = createContext<BuildSettingsValue | null>(null);
 
 export function BuildSettingsProvider({ children }: { children: ReactNode }) {
-  const [settings, setSettings] = useState<BuildSettings>(settingsDefaults);
+  // Durable settings: seed from localStorage (fail-closed to defaults) so a changed knob survives a reload /
+  // re-visit instead of silently reverting — settings-persist.ts owns the guarded load/save. The save effect
+  // below re-persists on EVERY change (from the Settings page OR a config load), so the store never drifts
+  // from the live state. Backend-op toggles are structurally excluded from the stored shape (consent per-run).
+  const [settings, setSettings] = useState<BuildSettings>(loadBuildSettings);
+  useEffect(() => {
+    saveBuildSettings(settings);
+  }, [settings]);
   const value = useMemo<BuildSettingsValue>(
     () => ({
       settings,
