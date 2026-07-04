@@ -617,6 +617,8 @@
     "other": "Atlas {name}, {regions} hervorgehobene Bereiche"
   },
   "settings.nav": "Einstellungen",
+  "nav.label": "Primär",
+  "nav.scan": "Scan & Ergebnisse",
   "settings.title": "Build-Einstellungen",
   "settings.back": "Zurück zu den Ergebnissen",
   "settings.backHome": "Zurück",

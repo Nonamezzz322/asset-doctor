@@ -597,6 +597,8 @@
   "fix.crossSheetFramesDedupedDiskOnly": { "$count": "n", "one": "Deduped {n} duplicate frame across merged sheets onto a shared region — same VRAM tier, disk only (all frame names still resolve)", "other": "Deduped {n} duplicate frames across merged sheets onto a shared region — same VRAM tier, disk only (all frame names still resolve)" },
   "fix.trimmedOnRepack": { "$count": "n", "one": "Trimmed {n} untrimmed sprite to its opaque bounds — reclaimed {area} px, VRAM {before:bytes} → {after:bytes} (all names still resolve)", "other": "Trimmed {n} untrimmed sprites to their opaque bounds — reclaimed {area} px, VRAM {before:bytes} → {after:bytes} (all names still resolve)" },
   "settings.nav": "Settings",
+  "nav.label": "Primary",
+  "nav.scan": "Scan & results",
   "settings.title": "Build settings",
   "settings.back": "Back to results",
   "settings.backHome": "Back",

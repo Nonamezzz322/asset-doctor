@@ -621,6 +621,8 @@
     "other": "Atlas {name}, {regions} regioni evidenziate"
   },
   "settings.nav": "Impostazioni",
+  "nav.label": "Principale",
+  "nav.scan": "Scansione e risultati",
   "settings.title": "Impostazioni di build",
   "settings.back": "Torna ai risultati",
   "settings.backHome": "Indietro",

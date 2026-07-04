@@ -715,6 +715,8 @@
     "other": "Обрізано необрізаних спрайтів: {n} до непрозорих меж — звільнено {area} px, VRAM {before:bytes} → {after:bytes} (усі імена все ще розв’язуються)"
   },
   "settings.nav": "Налаштування",
+  "nav.label": "Основне",
+  "nav.scan": "Скан і звіт",
   "settings.title": "Налаштування збірки",
   "settings.back": "Назад до результатів",
   "settings.backHome": "Назад",

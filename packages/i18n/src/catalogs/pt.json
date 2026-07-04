@@ -621,6 +621,8 @@
     "other": "Atlas {name}, {regions} regiões destacadas"
   },
   "settings.nav": "Configurações",
+  "nav.label": "Principal",
+  "nav.scan": "Verificação e resultados",
   "settings.title": "Configurações de compilação",
   "settings.back": "Voltar aos resultados",
   "settings.backHome": "Voltar",

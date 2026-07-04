@@ -320,11 +320,18 @@ body {
   outline: none;
 }
 
-/* Landing full-bleed strip (the one dark privacy band): escapes <main>'s max-w-6xl px-6 to the viewport
-   edge. Paired with overflow-x:clip on html below — calc(50% - 50vw) overhangs by the scrollbar width
-   otherwise. */
+/* Landing full-bleed strip (the one dark privacy band): escapes the content column padding. On MOBILE the
+   sidebar is absent (a sticky top bar), so a true viewport bleed is correct. On lg+ a 236px sidebar sits to
+   the left, so a viewport bleed would overflow to the right — instead cancel only the content-column padding
+   (the ad-main-pad lg:px-8 = 2rem) so the band spans the max-w-6xl column, sidebar-consistent. Paired with
+   overflow-x:clip on html below. */
 .ad-bleed {
   margin-inline: calc(50% - 50vw);
+}
+@media (min-width: 1024px) {
+  .ad-bleed {
+    margin-inline: -2rem;
+  }
 }
 /* Kill the phantom horizontal scroll from the bleed. `clip` (NOT hidden) does not create a scroll
    container, so the sticky header keeps sticking to the viewport. */

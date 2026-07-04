@@ -617,6 +617,8 @@
     "other": "एटलस {name}, {regions} हाइलाइट किए गए क्षेत्र"
   },
   "settings.nav": "सेटिंग्स",
+  "nav.label": "मुख्य",
+  "nav.scan": "स्कैन और परिणाम",
   "settings.title": "बिल्ड सेटिंग्स",
   "settings.back": "परिणामों पर वापस",
   "settings.backHome": "वापस",

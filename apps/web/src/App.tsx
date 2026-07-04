@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AnalysisReport, AssetMetrics, BundleAvailability, Finding, LazyMarking, Rule, Severity, SkinGuard } from '@asset-doctor/core';
 import { bundleOf, cmp } from '@asset-doctor/analysis';
 import {
@@ -250,7 +250,6 @@ export function App() {
   }
 
   const totals = report?.totals;
-  const savedPct = totals && totals.diskBytes > 0 ? Math.round((totals.potentialDiskSaved / totals.diskBytes) * 100) : 0;
 
   // ── Triage index + ordered rows. buildIndex is ONE O(assets+findings) pass per report identity (it
   // re-runs on the probe re-set — cheap, and the order is stable because the probe feeds no sort key).
@@ -457,7 +456,7 @@ export function App() {
 
   return (
     <BuildSettingsProvider>
-    <div className="min-h-full bg-bg text-ink">
+    <div className="flex min-h-full flex-col bg-bg text-ink">
       {/* a11y: skip-to-content (WCAG 2.4.1) — the FIRST tab stop on every view/phase (inserted before the
           sticky <header>), visually hidden until keyboard focus (.ad-skip-link). preventDefault keeps
           location.hash untouched: the hash namespace belongs to the settings router (lib/route.ts,
@@ -474,51 +473,16 @@ export function App() {
       >
         {t('a11y.skipToContent')}
       </a>
-      <header className="sticky top-0 z-50 border-b border-line bg-bg/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-3">
-          <div className="flex items-center gap-2.5">
-            <Logo />
-            <span className="font-display text-[16.5px] font-semibold tracking-tight">Asset Doctor</span>
-            <span className="hidden font-mono text-[11px] text-ink-soft sm:inline">{t('app.tag')}</span>
-          </div>
-          <div className="flex items-center gap-4">
-            {report ? (
-              <div className="hidden items-stretch gap-px overflow-hidden rounded-lg border border-line bg-line md:flex">
-                <HeaderMetric label={t('metric.disk')} value={fmtBytes(totals?.diskBytes ?? 0)} />
-                <HeaderMetric label={t('metric.vram')} value={`${fmtBytes(totals?.loadedVramBytes ?? 0)}`} />
-                {/* MEASURED aggregate, additive — appears only once the render-probe has run (WebGL
-                    present, ≥1 atlas). It's the REAL decoded footprint, a different quantity from the
-                    declared estimate beside it — never a savings delta (BLOCKER1). The "N atlases" scope
-                    sub + the aggregate-scoped tooltip disclose that this is a naive sum over the N PROBED
-                    atlases (all variant tiers; loose/un-probed excluded), NOT the whole-folder deduplicated
-                    "vram" beside it — and hand the manifest-vs-pixels claim a like-for-like partner
-                    (probe.declaredVramBytes) so the pair is honest, not a mis-attributed scope gap (R3). */}
-                {totals?.probe ? (
-                  <HeaderMetric
-                    label={t('metric.vramMeasured')}
-                    value={fmtBytes(totals.probe.vramBytes)}
-                    sub={t('readout.measuredScope', { n: totals.probe.atlasesProbed })}
-                    explainer={t('readout.measuredAggregateTooltip', { n: totals.probe.atlasesProbed, declared: totals.probe.declaredVramBytes })}
-                  />
-                ) : null}
-                <HeaderMetric label={t('metric.saveable')} value={`${fmtBytes(totals?.potentialDiskSaved ?? 0)} · ${savedPct}%`} accent />
-              </div>
-            ) : null}
-            {/* Settings-page nav (design §5.1): a real hash link so the page is reachable from any state and
-                deep-linkable. Styled like the existing mono-teal links. */}
-            <a href={SETTINGS_HASH} className="font-mono text-xs text-teal-text underline-offset-2 hover:underline">
-              {t('settings.nav')}
-            </a>
-            <LanguageSwitcher />
-          </div>
-        </div>
-      </header>
-
-      {/* a11y: id/tabIndex make <main> the skip-link target + the focus landing when the skip link is used.
-          ad-focus-anchor suppresses the focus ring on this programmatic (tabIndex=-1) target. Honest on BOTH
-          views — SettingsPage renders inside this same <main>, so "skip to content" always lands on real
-          content. */}
-      <main id="ad-main" tabIndex={-1} className="ad-focus-anchor mx-auto max-w-6xl px-6 py-10">
+      {/* Persistent sidebar SHELL (redesign app-screen Phase 1). The sidebar is the single banner landmark
+          (logo + primary nav + language switch); the header/metrics moved onto the results screen. Below lg
+          the sidebar collapses to a sticky top bar (flex-wrap, no drawer/JS). */}
+      <div className="flex-1 lg:flex">
+        <Sidebar view={view} />
+        {/* a11y: id/tabIndex make <main> the skip-link target + the focus landing when the skip link is used.
+            ad-focus-anchor suppresses the focus ring on this programmatic (tabIndex=-1) target. Honest on BOTH
+            views — SettingsPage renders inside this same <main>, so "skip to content" always lands on real
+            content. */}
+        <main id="ad-main" tabIndex={-1} className="ad-focus-anchor min-w-0 flex-1">
         {/* a11y: ONE persistent polite live region, mounted unconditionally as the FIRST child of <main> so it
             survives the Dropzone↔results swap (mounting a region and its text in the same tick is unreliable in
             some SRs). role=status + aria-live=polite for non-urgent announcements; aria-atomic so the whole
@@ -529,6 +493,8 @@ export function App() {
           {live.text}
           {live.nudge ? ' ' : ''}
         </span>
+        {/* content column — the max-w-6xl padding the old <main> carried (now that <main> is the flex child). */}
+        <div className="ad-main-pad mx-auto max-w-6xl px-6 py-8 lg:px-8">
         {/* The main Dropzone/results tree stays MOUNTED but `hidden` while the Settings page shows (design
             §5.1) — `hidden` ⇒ display:none ⇒ the whole subtree (incl. its h1) leaves the AOM, so exactly one
             h1 renders per view and no analysis/fix state is lost on navigation. The live region above stays
@@ -577,14 +543,14 @@ export function App() {
               skippedCount={report.unparsed?.length ?? 0}
               onSkippedJump={jumpToUnparsed}
             />
-            {/* Sub-md totals strip — the EXACT inverse breakpoint of the desktop header block (md:flex):
-                below md the header totals are display:none, so without this the disk≠VRAM honesty pin
-                (invariant 5) and the saveable instant-wow payoff are 100% invisible on phones/small
-                tablets. md:hidden ⇒ the two NEVER co-exist on any viewport (no duplication). Reuses the
-                EXACT totals values + fmtBytes + savedPct; declared uses readout.declared so it stays
-                textually distinct from measured even when the (probe-gated) measured chip is absent. */}
+            {/* Results totals strip — the SINGLE invariant-5 (disk≠VRAM) honesty surface now that the
+                sidebar-shell redesign removed the top header + its HeaderMetric block. Shown at ALL widths
+                (the former md:hidden is gone — there is no desktop header counterpart to avoid duplicating).
+                buildTotalsRows drives it (declared VRAM, probe-gated measured chip, disk, saveable+percent);
+                declared uses readout.declared so it stays textually distinct from measured even when the
+                (probe-gated) measured chip is absent. */}
             {totals ? (
-              <div className="flex flex-wrap gap-x-5 gap-y-1.5 border-b border-line pb-4 md:hidden">
+              <div className="flex flex-wrap gap-x-5 gap-y-1.5 border-b border-line pb-4">
                 {buildTotalsRows(totals, t, fmtBytes).map((r) => (
                   <MobileTotal key={r.key} label={r.label} value={r.value} accent={r.accent} explainer={r.title} sub={r.sub} />
                 ))}
@@ -662,7 +628,9 @@ export function App() {
         {view === 'settings' ? (
           <SettingsPage hasResults={!!report} hiddenRules={hiddenRules} onChangeHiddenRules={setHiddenRulesPersisted} />
         ) : null}
-      </main>
+        </div>
+        </main>
+      </div>
 
       {/* The landing footer — the app's first honest contentinfo landmark (a <footer> nested in <main>
           does NOT map to contentinfo, so it renders here as a top-level sibling). UX-4 reserved this slot
@@ -697,38 +665,75 @@ function LanguageSwitcher() {
   );
 }
 
-// `explainer` (UX-4): the invariant-5 measured-vs-declared honesty note. Delivered BOTH as title=
-// (mouse hover, kept) AND as an ad-sr-only span so it's read by every SR in browse mode on this
-// non-focusable chip (aria-describedby is unreliable on a generic div) — zero visible header width.
-function HeaderMetric({
-  label,
-  value,
-  accent,
-  explainer,
-  sub,
-}: {
-  label: string;
-  value: string;
-  accent?: boolean;
-  explainer?: string;
-  /** Secondary muted line under the value (e.g. the measured chip's "N atlases" scope — R3). Read by
-   *  sighted users at a glance; the full scope story stays in `explainer` (title + ad-sr-only). */
-  sub?: string;
-}) {
+// ── The persistent sidebar SHELL (app-screen redesign Phase 1). Inline like Dropzone/LanguageSwitcher so
+//    its t() literals are auto-scanned by i18n-app-keys. The <header> is the single banner landmark (brand +
+//    primary <nav> + language switch); NO heading inside (the h1 lives on each screen). At lg+ it is a 236px
+//    full-height STICKY column; below lg it collapses to a top bar that flex-wraps (no drawer/JS/focus-trap)
+//    and is NOT sticky — a wrapped 2-3 row bar would be taller than the landing sections' scroll-mt-20 (80px)
+//    anchor offset and hide headings behind it, so on mobile the bar scrolls away with the page instead. ──
+function NavIcon({ d }: { d: 'scan' | 'settings' }) {
   return (
-    <div className="bg-panel px-3 py-1.5" title={explainer}>
-      <div className="ad-label-sm text-ink-soft">{label}</div>
-      <div className={`font-mono text-xs font-semibold ${accent ? 'text-cta-text' : 'text-ink'}`}>{value}</div>
-      {sub ? <div className="mt-0.5 font-mono text-[9px] leading-tight text-ink-soft">{sub}</div> : null}
-      {explainer ? <span className="ad-sr-only">{explainer}</span> : null}
-    </div>
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      {d === 'scan' ? (
+        <>
+          <circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" strokeWidth="1.7" />
+          <path d="M15.5 15.5L20 20" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+        </>
+      ) : (
+        <>
+          <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.7" />
+          <path
+            d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+          />
+        </>
+      )}
+    </svg>
   );
 }
 
-// Mirrors HeaderMetric but inline-wrap-friendly for the sub-md totals strip: no per-cell border/bg
-// (unlike the header's bg-line divider grid) — a wrapping label/value list under VerdictBar. flex-col
-// glues each label to its own value so wrapping never blurs declared/measured/saveable. No animation
-// ⇒ inert under prefers-reduced-motion. Token-driven only (text-ink/text-ink-soft/text-cta-text).
+// Active fill = bg-teal-text + text-panel (AA-proven in BOTH themes — chipLabelPassesAABothThemes); inactive
+// text-ink-soft (AA on panel) + hover:bg-bg (bg is one step below panel in the elevation order ⇒ a hover well).
+function NavItem({ href, active, icon, label }: { href: string; active: boolean; icon: ReactNode; label: string }) {
+  return (
+    <a
+      href={href}
+      aria-current={active ? 'page' : undefined}
+      className={`flex items-center gap-2.5 rounded-lg px-3 py-2 font-sans text-sm font-medium transition ${
+        active ? 'bg-teal-text text-panel' : 'text-ink-soft hover:bg-bg hover:text-ink'
+      }`}
+    >
+      {icon}
+      {label}
+    </a>
+  );
+}
+
+function Sidebar({ view }: { view: View }) {
+  const { t } = useI18n();
+  return (
+    <header className="z-50 flex shrink-0 flex-wrap items-center gap-2 border-b border-line bg-panel px-4 py-2.5 lg:sticky lg:top-0 lg:h-screen lg:w-[236px] lg:flex-col lg:flex-nowrap lg:items-stretch lg:gap-0 lg:border-b-0 lg:border-r lg:p-0">
+      <a href="#" className="flex items-center gap-2.5 lg:w-full lg:border-b lg:border-line lg:px-5 lg:py-5">
+        <Logo />
+        <span className="font-display text-[16px] font-semibold tracking-tight text-ink">Asset Doctor</span>
+      </a>
+      <nav aria-label={t('nav.label')} className="flex flex-row gap-1 lg:mt-0 lg:w-full lg:flex-1 lg:flex-col lg:gap-0.5 lg:p-3">
+        <NavItem href="#" active={view === 'main'} icon={<NavIcon d="scan" />} label={t('nav.scan')} />
+        <NavItem href={SETTINGS_HASH} active={view === 'settings'} icon={<NavIcon d="settings" />} label={t('settings.nav')} />
+      </nav>
+      <div className="ml-auto lg:ml-0 lg:w-full lg:border-t lg:border-line lg:p-3.5">
+        <LanguageSwitcher />
+      </div>
+    </header>
+  );
+}
+
+// Inline-wrap-friendly totals cell for the results totals strip (shown at ALL widths now that the top header
+// was removed in the sidebar-shell redesign — it carries the invariant-5 disk≠VRAM honesty on the results
+// screen). No per-cell border/bg — a wrapping label/value list under VerdictBar. flex-col glues each label to
+// its value so wrapping never blurs declared/measured/saveable. No animation ⇒ inert under reduced-motion.
 function MobileTotal({
   label,
   value,

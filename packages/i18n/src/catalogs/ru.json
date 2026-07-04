@@ -643,6 +643,8 @@
     "other": "Атлас {name}, выделенных областей: {regions}"
   },
   "settings.nav": "Настройки",
+  "nav.label": "Основное",
+  "nav.scan": "Скан и отчёт",
   "settings.title": "Настройки сборки",
   "settings.back": "Назад к результатам",
   "settings.backHome": "Назад",
