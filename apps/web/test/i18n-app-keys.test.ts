@@ -101,6 +101,12 @@ const GRAN_SUFFIXES = ['folder', 'one', 'bundle'];
 // resolves to the concrete per-option keys (never leaks a `${...}` literal into the assertion).
 // spine.error.${errorKey} (SpineViewer.tsx) — mirrors the SpineErrorKey union in lib/spine-engine.ts.
 const SPINE_ERROR_SUFFIXES = ['noJson', 'load', 'read'];
+// spine.debug.${key} + spine.debug.${key}Hint (SpineViewer.tsx) — mirrors the DebugKey union / DEBUG_KEYS in
+// lib/spine-engine.ts. Both the label and the `${key}Hint` template share the `spine.debug.` prefix, so the
+// branch below emits both the base key and its Hint sibling for every suffix.
+const SPINE_DEBUG_SUFFIXES = ['bones', 'regions', 'meshTriangles', 'meshHull', 'clipping', 'boundingBoxes', 'paths', 'events'];
+// spine.kind.${s.kind} (SpineViewer.tsx slot badges) — mirrors the AttachmentKind union in lib/spine-inspect.ts.
+const SPINE_KIND_SUFFIXES = ['mesh', 'region', 'clip', 'bbox', 'path', 'point', 'none', 'other'];
 const TRIAGE_FILTER_SUFFIXES = ['crit', 'warn', 'info'];
 const TRIAGE_SORT_SUFFIXES = ['severity', 'wastedDisk', 'vram', 'occupancy'];
 const TRIAGE_SCOPE_SUFFIXES = ['asset', 'folder'];
@@ -141,6 +147,13 @@ function expandedDynamicKeys(src: string): Set<string> {
     else if (tmpl.startsWith('triage.sort.')) TRIAGE_SORT_SUFFIXES.forEach((s) => keys.add(`triage.sort.${s}`));
     else if (tmpl.startsWith('triage.scope.')) TRIAGE_SCOPE_SUFFIXES.forEach((s) => keys.add(`triage.scope.${s}`));
     else if (tmpl.startsWith('spine.error.')) SPINE_ERROR_SUFFIXES.forEach((s) => keys.add(`spine.error.${s}`));
+    // spine.debug. covers BOTH t(`spine.debug.${key}`) and t(`spine.debug.${key}Hint`) — emit base + Hint.
+    else if (tmpl.startsWith('spine.debug.'))
+      SPINE_DEBUG_SUFFIXES.forEach((s) => {
+        keys.add(`spine.debug.${s}`);
+        keys.add(`spine.debug.${s}Hint`);
+      });
+    else if (tmpl.startsWith('spine.kind.')) SPINE_KIND_SUFFIXES.forEach((s) => keys.add(`spine.kind.${s}`));
     else if (tmpl.startsWith('severity.')) SEVERITY_SUFFIXES.forEach((s) => keys.add(`severity.${s}`));
     else if (tmpl.startsWith('license.err.')) LICENSE_ERR_SUFFIXES.forEach((s) => keys.add(`license.err.${s}`));
     // fix.lazy. / fix.op. are branched AFTER the more-specific fix.pack.mode./fix.pack.grouping. above; none

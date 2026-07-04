@@ -14,7 +14,7 @@
 // the mipmap card is COPY + the existing extrude knob only (raster formats cannot store mip levels — the GPU
 // generates them at load; the opt-in KTX2 backend op bakes real mips). No network, no asset bytes leave.
 
-import { useId, useRef, useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import type { ExportFormat, ResolutionTier, Rule } from '@asset-doctor/core';
 import type { PackMode, StaticGranularity } from '@asset-doctor/ingest';
 import { DEFAULT_SCALE_TIERS, isSafeSuffix } from '@asset-doctor/fix';
@@ -27,6 +27,7 @@ import { FORMAT_KEYS, OVERRIDE_MODE_KEYS, type OverrideMode } from '../lib/profi
 import { BUILD_CONFIG_VERSION, parseBuildConfig, serializeBuildConfig } from '../lib/build-config';
 import { PROFILE_PANEL_ANCHOR } from '../lib/optimize-entry';
 import { API_BASE, loadStoredEntitlement } from '../lib/license';
+import { NumberRow, Switch, Segmented } from './controls';
 
 // Browser-only text download (the build-config JSON) — Blob → object-URL → <a download> → click → revoke.
 // Local mirror of App's downloadZip; no network, zero asset bytes (invariant 1).
@@ -56,146 +57,6 @@ function Card({ id, title, children }: { id?: string; title: string; children: R
   );
 }
 
-// A labelled integer input (padding/maxSize/maxEdge/defaultQuality). min/max/step are guidance (the config
-// parse clamps on load; buildFixOptions passes the live value raw — these are power-user knobs).
-function NumberRow({
-  label,
-  hint,
-  value,
-  min,
-  max,
-  step,
-  onChange,
-}: {
-  label: string;
-  hint?: string;
-  value: number;
-  min: number;
-  max: number;
-  step?: number;
-  onChange: (n: number) => void;
-}) {
-  return (
-    <label className="flex items-center justify-between gap-2 font-mono text-[13px] text-ink-soft" title={hint}>
-      {label}
-      <input
-        type="number"
-        min={min}
-        max={max}
-        step={step ?? 1}
-        value={value}
-        aria-label={label}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-24 rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[13px] text-ink focus:border-teal"
-      />
-    </label>
-  );
-}
-
-// ── SettingRow — the shared knob-row layout (app-screen re-skin §1). Promotes each knob's former mouse-only
-//    title={hint} to a VISIBLE hint line under the label (an a11y win — no new copy, reuses the existing hint
-//    keys). `labelId` lets an interactive control (Switch button / Segmented radiogroup) take its accessible
-//    name from the visible label via aria-labelledby. Pure layout, no t() of its own. ──
-function SettingRow({ label, hint, labelId, control }: { label: string; hint?: string; labelId?: string; control: ReactNode }) {
-  return (
-    <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
-      <div className="min-w-0 flex-1">
-        <span id={labelId} className="font-mono text-[13px] text-ink-soft">
-          {label}
-        </span>
-        {hint ? <p className="mt-0.5 font-mono text-[12px] leading-relaxed text-ink-soft">{hint}</p> : null}
-      </div>
-      <div className="shrink-0">{control}</div>
-    </div>
-  );
-}
-
-// ── Switch — a native <button role="switch"> DROP-IN for the old CheckRow (identical props
-//    label/hint/checked/onChange), so migrating a boolean knob is a mechanical tag swap. Space/Enter toggle
-//    for free (native button); the SR announces on/off via aria-checked + aria-labelledby; the KNOB POSITION
-//    encodes state (WCAG 1.4.1 — colour is never the sole signal). Track: on ⇒ bg-cta, off ⇒ bg-film-mute
-//    (both theme-INDEPENDENT — proven by contrast.ts switchKnobPasses); the puck is a fixed white bg-white;
-//    motion-reduce kills both transitions. ──
-function Switch({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (b: boolean) => void }) {
-  const labelId = useId();
-  return (
-    // The WHOLE row is the role=switch button ⇒ a full-row click target (parity with the old CheckRow <label>
-    // and the mockup's full-row toggles). Accessible name = the label span only (aria-labelledby, so the hint
-    // is NOT folded into the name); the puck is decorative (aria-hidden) — aria-checked conveys state and the
-    // KNOB POSITION encodes it visually (WCAG 1.4.1). Space/Enter toggle for free (native button).
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-labelledby={labelId}
-      onClick={() => onChange(!checked)}
-      className="flex w-full flex-wrap items-start justify-between gap-x-3 gap-y-1 rounded text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal"
-    >
-      <span className="min-w-0 flex-1">
-        <span id={labelId} className="block font-mono text-[13px] text-ink-soft">
-          {label}
-        </span>
-        {hint ? <span className="mt-0.5 block font-mono text-[12px] leading-relaxed text-ink-soft">{hint}</span> : null}
-      </span>
-      <span
-        aria-hidden="true"
-        className={`relative mt-0.5 inline-flex h-5 w-9 shrink-0 items-center rounded-full border border-line/60 transition-colors motion-reduce:transition-none ${
-          checked ? 'bg-cta' : 'bg-film-mute'
-        }`}
-      >
-        <span
-          className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform motion-reduce:transition-none ${
-            checked ? 'translate-x-4' : 'translate-x-0.5'
-          }`}
-        />
-      </span>
-    </button>
-  );
-}
-
-// ── Segmented — a native role=radiogroup of visually-hidden radios sharing one generated name, so arrow-key
-//    navigation + Space selection come for free (WCAG keyboard). The active pill = peer-checked:bg-teal-text
-//    peer-checked:text-panel (AA-proven in BOTH themes — chipLabelPassesAABothThemes; deliberately NOT the
-//    mockup raw teal+white, which fails AA); track bg-bg; peer-focus-visible puts the ring on the VISIBLE
-//    segment. Replaces the small enum <select>s with the SAME option values + the SAME onChange. Optional
-//    `disabled` mirrors a <select disabled> (dependent knob) — the radios go native-disabled + the group dims. ──
-function Segmented<T extends string>({
-  label,
-  hint,
-  value,
-  options,
-  onChange,
-  disabled,
-}: {
-  label: string;
-  hint?: string;
-  value: T;
-  options: { value: T; label: string }[];
-  onChange: (v: T) => void;
-  disabled?: boolean;
-}) {
-  const labelId = useId();
-  const name = useId();
-  return (
-    <SettingRow
-      label={label}
-      hint={hint}
-      labelId={labelId}
-      control={
-        <div role="radiogroup" aria-labelledby={labelId} className={`inline-flex flex-wrap gap-0.5 rounded-lg border border-line bg-bg p-0.5 ${disabled ? 'opacity-60' : ''}`}>
-          {options.map((o) => (
-            <label key={o.value} className={disabled ? 'cursor-not-allowed' : 'cursor-pointer'}>
-              <input type="radio" name={name} value={o.value} checked={value === o.value} disabled={disabled} onChange={() => onChange(o.value)} className="peer sr-only" />
-              <span className="block rounded-md px-2 py-0.5 font-mono text-[13px] text-ink-soft transition peer-checked:bg-teal-text peer-checked:text-panel peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-1 peer-focus-visible:outline-teal motion-reduce:transition-none">
-                {o.label}
-              </span>
-            </label>
-          ))}
-        </div>
-      }
-    />
-  );
-}
 
 // ── Card: Appearance — the durable DISPLAY-theme preference (auto/light/dark). A sibling of the diagnosis
 //    view-filter: a localStorage-durable UI pref applied IMMEDIATELY (precedent: the locale switch), NOT part

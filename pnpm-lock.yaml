@@ -115,6 +115,9 @@ importers:
       '@asset-doctor/probe':
         specifier: workspace:*
         version: link:../../packages/probe
+      '@esotericsoftware/spine-core':
+        specifier: ^4.3.9
+        version: 4.3.9
       '@esotericsoftware/spine-pixi-v8':
         specifier: ^4.3.9
         version: 4.3.9(pixi.js@8.19.0)
