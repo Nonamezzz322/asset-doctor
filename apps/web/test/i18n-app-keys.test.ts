@@ -53,6 +53,10 @@ const appSrc =
   // nowhere else; without scanning it a renamed license.* key would silently render a raw dotted key.
   comp('LicensePanel.tsx') +
   '\n' +
+  // ProPage.tsx (app-screen Phase 4) owns the pro.screen.* / pro.plan.* static keys + reuses landing.pricing.*
+  // and pro.note; its subtitle/plan keys come via pro-view.ts helpers (pinned by pro-view.test.ts).
+  comp('ProPage.tsx') +
+  '\n' +
   // SettingsPage.tsx owns the moved fix.* panel keys + the new settings.* keys (the whole build-config UI
   // moved off the FixCard onto the dedicated page). App.tsx only references settings.nav/settings.open, so
   // without scanning SettingsPage a renamed moved key would silently render a raw dotted key.

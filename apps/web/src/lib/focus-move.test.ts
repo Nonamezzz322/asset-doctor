@@ -8,7 +8,7 @@ import { focusTargetAfterSwap, FOCUS_ANCHORS, type SwapState, type PhaseT } from
 import type { View } from './route';
 
 const PHASES: PhaseT[] = ['idle', 'analyzing', 'done', 'error'];
-const VIEWS: View[] = ['main', 'settings'];
+const VIEWS: View[] = ['main', 'settings', 'pro'];
 const s = (view: View, phase: PhaseT): SwapState => ({ view, phase });
 
 describe('FOCUS_ANCHORS — frozen markup contract', () => {
@@ -17,6 +17,7 @@ describe('FOCUS_ANCHORS — frozen markup contract', () => {
       results: 'ad-results-h1',
       dropzone: 'ad-dropzone-h1',
       settings: 'ad-settings-h1',
+      pro: 'ad-pro-h1',
     });
   });
 });
@@ -74,8 +75,32 @@ describe('focusTargetAfterSwap — view swaps (settings router; ONE focus owner,
   });
 });
 
+describe('focusTargetAfterSwap — Pro view swaps (app-screen Phase 4)', () => {
+  it('main→pro ⇒ pro h1 regardless of phase', () => {
+    for (const p of PHASES) expect(focusTargetAfterSwap(s('main', p), s('pro', p))).toBe(FOCUS_ANCHORS.pro);
+  });
+
+  it('settings↔pro ⇒ the target page h1 (both are display:none siblings of main)', () => {
+    for (const p of PHASES) {
+      expect(focusTargetAfterSwap(s('settings', p), s('pro', p))).toBe(FOCUS_ANCHORS.pro);
+      expect(focusTargetAfterSwap(s('pro', p), s('settings', p))).toBe(FOCUS_ANCHORS.settings);
+    }
+  });
+
+  it('pro→main with phase done ⇒ results h1, else ⇒ dropzone h1', () => {
+    expect(focusTargetAfterSwap(s('pro', 'done'), s('main', 'done'))).toBe(FOCUS_ANCHORS.results);
+    for (const p of ['idle', 'analyzing', 'error'] as PhaseT[])
+      expect(focusTargetAfterSwap(s('pro', p), s('main', p))).toBe(FOCUS_ANCHORS.dropzone);
+  });
+
+  it('phase flip while view=pro ⇒ null (never focus a display:none subtree)', () => {
+    expect(focusTargetAfterSwap(s('pro', 'analyzing'), s('pro', 'done'))).toBeNull();
+    expect(focusTargetAfterSwap(s('pro', 'done'), s('pro', 'idle'))).toBeNull();
+  });
+});
+
 describe('focusTargetAfterSwap — exhaustive determinism sweep', () => {
-  it('all 64 (prev,next) pairs return null or a known anchor, and repeat calls are identical', () => {
+  it('all 144 (prev,next) pairs return null or a known anchor, and repeat calls are identical', () => {
     const known = new Set<string | null>([null, ...Object.values(FOCUS_ANCHORS)]);
     for (const pv of VIEWS)
       for (const pp of PHASES)

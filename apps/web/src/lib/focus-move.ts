@@ -15,9 +15,10 @@ export interface SwapState {
 /** Frozen DOM anchor ids (repo convention: 'ad-' prefix, cf. PROFILE_PANEL_ANCHOR='ad-export-profile').
  *  These are a CONTRACT with App.tsx / SettingsPage markup — the test freezes them. */
 export const FOCUS_ANCHORS = {
-  results: 'ad-results-h1', // the sr-only results <h1> (App.tsx)
+  results: 'ad-results-h1', // the results <h1> (App.tsx)
   dropzone: 'ad-dropzone-h1', // the Dropzone <h1> (App.tsx)
   settings: 'ad-settings-h1', // SettingsPage <h1>
+  pro: 'ad-pro-h1', // ProPage <h1> (app-screen re-skin Phase 4)
 } as const;
 export type FocusAnchor = (typeof FOCUS_ANCHORS)[keyof typeof FOCUS_ANCHORS];
 
@@ -37,9 +38,10 @@ export type FocusAnchor = (typeof FOCUS_ANCHORS)[keyof typeof FOCUS_ANCHORS];
 export function focusTargetAfterSwap(prev: SwapState, next: SwapState): FocusAnchor | null {
   if (prev.view !== next.view) {
     if (next.view === 'settings') return FOCUS_ANCHORS.settings;
+    if (next.view === 'pro') return FOCUS_ANCHORS.pro;
     return next.phase === 'done' ? FOCUS_ANCHORS.results : FOCUS_ANCHORS.dropzone;
   }
-  if (next.view === 'settings') return null;
+  if (next.view !== 'main') return null; // settings OR pro: the main tree is display:none — its anchors are unfocusable.
   if (prev.phase === next.phase) return null;
   if (next.phase === 'done') return FOCUS_ANCHORS.results;
   if (prev.phase === 'done' && next.phase === 'idle') return FOCUS_ANCHORS.dropzone;

@@ -17,7 +17,7 @@ import { planFix, runFix, type FixOutcome, type FixProgress } from './lib/fix-cl
 import type { BackendOptions, FixChange, FixPlanSummary, FixReceipt, NativeOpKind, SheetDiff } from './worker/fix-protocol';
 import { buildFixOptions } from './lib/build-settings';
 import { BuildSettingsProvider, useBuildSettings } from './lib/settings-ctx';
-import { viewOfHash, SETTINGS_HASH, type View } from './lib/route';
+import { viewOfHash, SETTINGS_HASH, PRO_HASH, type View } from './lib/route';
 import { SettingsPage } from './components/SettingsPage';
 import { fmtBytes } from './lib/format';
 import { OPTIMIZE_ENTRY, optimizeEntryEnabled } from './lib/optimize-entry';
@@ -29,6 +29,8 @@ import { renderCorrelated } from '@asset-doctor/i18n';
 import { API_BASE, isProUnlocked, loadStoredEntitlement, maybeRefresh, PRO_GATE_ENABLED } from './lib/license';
 import { backendReachable } from './lib/backend-client';
 import { ActivatePanel, ProBadge } from './components/LicensePanel';
+import { ProPage } from './components/ProPage';
+import { planActionKey, planValueKey, proPanel, type ProPanel } from './lib/pro-view';
 import { FilmViewer } from './components/FilmViewer';
 import { Findings, DOT } from './components/Findings';
 import { VerdictBar } from './components/VerdictBar';
@@ -88,6 +90,23 @@ export function App() {
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
+  // App-level Pro entitlement for the sidebar plan card (app-screen Phase 4; mirrors FixCard's probe). Seed
+  // to !gate (beta ⇒ free), then refresh + verify the offline ed25519 entitlement when the gate is ON. This
+  // async re-set NEVER feeds focus-move (its deps stay [view, phase.t]) — it only drives the plan-card copy.
+  const [proUnlocked, setProUnlocked] = useState(!PRO_GATE_ENABLED);
+  useEffect(() => {
+    if (!PRO_GATE_ENABLED) return;
+    let alive = true;
+    void (async () => {
+      await maybeRefresh();
+      const ok = await isProUnlocked();
+      if (alive) setProUnlocked(ok);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const plan: ProPanel = proPanel(PRO_GATE_ENABLED, proUnlocked);
   // a11y (UX-4): move focus on view/phase swaps — the pure decision lives in lib/focus-move.ts (Node-tested).
   // Every swap unmounts (or display:none-s, via the settings `hidden` wrapper below) the focused control,
   // dropping keyboard/SR focus to <body> at the exact ≤10s payoff moment. Deps are ONLY the swap coordinates
@@ -414,7 +433,7 @@ export function App() {
     // while the ledger is display:none. Without this, "Showing N of M" would be spoken out of context on the
     // settings page (competing with the DiagnosisCard's own hidden-count status). In-ledger controls
     // (severity chips/search/sort/fold) still announce because they only run on the results view.
-    if (!report || phase.t !== 'done' || view === 'settings') return;
+    if (!report || phase.t !== 'done' || view !== 'main') return;
     if (countAnnouncedFor.current !== report) {
       // Fresh report: the diagnosis-ready announcement already covered this settle; arm for the NEXT change.
       countAnnouncedFor.current = report;
@@ -506,7 +525,7 @@ export function App() {
           (logo + primary nav + language switch); the header/metrics moved onto the results screen. Below lg
           the sidebar collapses to a sticky top bar (flex-wrap, no drawer/JS). */}
       <div className="flex-1 lg:flex">
-        <Sidebar view={view} />
+        <Sidebar view={view} plan={plan} />
         {/* a11y: id/tabIndex make <main> the skip-link target + the focus landing when the skip link is used.
             ad-focus-anchor suppresses the focus ring on this programmatic (tabIndex=-1) target. Honest on BOTH
             views — SettingsPage renders inside this same <main>, so "skip to content" always lands on real
@@ -528,7 +547,7 @@ export function App() {
             §5.1) — `hidden` ⇒ display:none ⇒ the whole subtree (incl. its h1) leaves the AOM, so exactly one
             h1 renders per view and no analysis/fix state is lost on navigation. The live region above stays
             OUTSIDE the wrapper (a display:none live region is not announced by SRs). */}
-        <div hidden={view === 'settings'}>
+        <div hidden={view !== 'main'}>
         {phase.t !== 'done' && (
           <>
             <Dropzone
@@ -649,7 +668,7 @@ export function App() {
                   )}
                   <h2 className="font-mono text-xs uppercase tracking-[0.06em] text-teal-text">{t('findings.title')}</h2>
                   <Findings findings={assetFindings} selectedId={selectedFinding} onSelect={setSelectedFinding} />
-                  <FixCard files={files} buildNonce={buildNonce} />
+                  <FixCard files={files} buildNonce={buildNonce} unlocked={proUnlocked} onUnlockedChange={setProUnlocked} />
                   {/* AB-R2 → settings-page: first-class deep-link to the build config. Gated on having files
                       (inert otherwise). A real hash link to the Settings page; the Formats card ("Форматы
                       вывода") carries PROFILE_PANEL_ANCHOR as a stable target id. (The diagnosis view-filter
@@ -679,6 +698,7 @@ export function App() {
         {view === 'settings' ? (
           <SettingsPage hasResults={!!report} hiddenRules={hiddenRules} onChangeHiddenRules={setHiddenRulesPersisted} />
         ) : null}
+        {view === 'pro' ? <ProPage unlocked={proUnlocked} onUnlockedChange={setProUnlocked} /> : null}
         </div>
         </main>
       </div>
@@ -722,7 +742,7 @@ function LanguageSwitcher() {
 //    full-height STICKY column; below lg it collapses to a top bar that flex-wraps (no drawer/JS/focus-trap)
 //    and is NOT sticky — a wrapped 2-3 row bar would be taller than the landing sections' scroll-mt-20 (80px)
 //    anchor offset and hide headings behind it, so on mobile the bar scrolls away with the page instead. ──
-function NavIcon({ d }: { d: 'scan' | 'settings' }) {
+function NavIcon({ d }: { d: 'scan' | 'settings' | 'pro' }) {
   return (
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       {d === 'scan' ? (
@@ -730,7 +750,7 @@ function NavIcon({ d }: { d: 'scan' | 'settings' }) {
           <circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" strokeWidth="1.7" />
           <path d="M15.5 15.5L20 20" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
         </>
-      ) : (
+      ) : d === 'settings' ? (
         <>
           <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.7" />
           <path
@@ -739,6 +759,11 @@ function NavIcon({ d }: { d: 'scan' | 'settings' }) {
             strokeWidth="1.7"
             strokeLinecap="round"
           />
+        </>
+      ) : (
+        <>
+          <rect x="3" y="6" width="18" height="12" rx="2" stroke="currentColor" strokeWidth="1.7" />
+          <path d="M3 10h18" stroke="currentColor" strokeWidth="1.7" />
         </>
       )}
     </svg>
@@ -762,7 +787,7 @@ function NavItem({ href, active, icon, label }: { href: string; active: boolean;
   );
 }
 
-function Sidebar({ view }: { view: View }) {
+function Sidebar({ view, plan }: { view: View; plan: ProPanel }) {
   const { t } = useI18n();
   return (
     <header className="z-50 flex shrink-0 flex-wrap items-center gap-2 border-b border-line bg-panel px-4 py-2.5 lg:sticky lg:top-0 lg:h-screen lg:w-[236px] lg:flex-col lg:flex-nowrap lg:items-stretch lg:gap-0 lg:border-b-0 lg:border-r lg:p-0">
@@ -773,7 +798,21 @@ function Sidebar({ view }: { view: View }) {
       <nav aria-label={t('nav.label')} className="flex flex-row gap-1 lg:mt-0 lg:w-full lg:flex-1 lg:flex-col lg:gap-0.5 lg:p-3">
         <NavItem href="#" active={view === 'main'} icon={<NavIcon d="scan" />} label={t('nav.scan')} />
         <NavItem href={SETTINGS_HASH} active={view === 'settings'} icon={<NavIcon d="settings" />} label={t('settings.nav')} />
+        <NavItem href={PRO_HASH} active={view === 'pro'} icon={<NavIcon d="pro" />} label={t('nav.pro')} />
       </nav>
+      {/* Current-plan card (lg only, no heading) — honest per gate/entitlement state via pro-view.ts; the
+          action always routes to the Pro screen (#pro), never a checkout. */}
+      <div className="hidden lg:block lg:w-full lg:border-t lg:border-line lg:p-3.5">
+        <div className="rounded-xl border border-line bg-bg p-3">
+          <div className="ad-label-sm text-ink-soft">{t('pro.plan.label')}</div>
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <span className="font-display text-[15px] font-semibold text-ink">{t(planValueKey(plan))}</span>
+            <a href={PRO_HASH} className="font-mono text-[11px] text-teal-text underline-offset-2 hover:underline">
+              {t(planActionKey(plan))} →
+            </a>
+          </div>
+        </div>
+      </div>
       <div className="ml-auto lg:ml-0 lg:w-full lg:border-t lg:border-line lg:p-3.5">
         <LanguageSwitcher />
       </div>
@@ -1226,14 +1265,25 @@ function BundlesPanel({
 // The Phase-2 fix: repack + transcode the loaded folder in a worker, then download a drop-in
 // optimized .zip. Assets never leave the device. The Pro gate is OFF by default (free) and only
 // engages when VITE_PRO_GATE === 'true' — then a valid offline-verified entitlement is required.
-function FixCard({ files, buildNonce }: { files: PickedFile[]; buildNonce: number }) {
+function FixCard({
+  files,
+  buildNonce,
+  unlocked,
+  onUnlockedChange,
+}: {
+  files: PickedFile[];
+  buildNonce: number;
+  /** Pro entitlement — a SINGLE source owned by App (also drives the sidebar plan card + ProPage), so
+   *  activating/deactivating here keeps every entitlement surface in sync (review Phase 4 MINOR fix). */
+  unlocked: boolean;
+  onUnlockedChange: (v: boolean) => void;
+}) {
   const { t } = useI18n();
   // The full build-config surface now lives in the shared BuildSettings context (edited on the Settings
   // page). FixCard only READS it — to build the run's FixOptions (buildFixOptions) and to gate two
   // run-surface UI decisions (aggressive → BundlesPanel; the manifest auto-pair note).
   const { settings } = useBuildSettings();
   const [phase, setPhase] = useState<FixPhase>({ t: 'idle' });
-  const [unlocked, setUnlocked] = useState(!PRO_GATE_ENABLED);
   // The card's root — the buildNonce effect scrolls it into view (behavior:'auto' — reduced-motion-safe).
   const cardRef = useRef<HTMLDivElement>(null);
 
@@ -1295,19 +1345,8 @@ function FixCard({ files, buildNonce }: { files: PickedFile[]; buildNonce: numbe
     return { folders, rootLoose };
   }, [files]);
   const showBundles = bundles.folders.length >= 2;
-
-  useEffect(() => {
-    if (!PRO_GATE_ENABLED) return;
-    let alive = true;
-    void (async () => {
-      await maybeRefresh();
-      const ok = await isProUnlocked();
-      if (alive) setUnlocked(ok);
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
+  // (Pro entitlement is probed ONCE at the App level and passed in as `unlocked` — see the app-level effect;
+  //  FixCard no longer probes independently, so every entitlement surface reads the same source.)
 
   // OPT-IN backend healthz probe (round12 §4 + round13): fire the GET probe ONLY AFTER Pro unlock + a
   // configured host + EITHER backend op toggle ON (ktx2 or pngquant), so a non-paying / pre-opt-in visitor's
@@ -1520,7 +1559,7 @@ function FixCard({ files, buildNonce }: { files: PickedFile[]; buildNonce: numbe
     return (
       <div ref={cardRef} id={FIX_CARD_ID} className="rounded-2xl border-2 border-teal/70 bg-panel p-4 text-center">
         <p className="font-mono text-xs text-ink-soft">{t('pro.note')}</p>
-        <ActivatePanel onUnlocked={() => setUnlocked(true)} />
+        <ActivatePanel onUnlocked={() => onUnlockedChange(true)} />
       </div>
     );
   }
@@ -1600,7 +1639,7 @@ function FixCard({ files, buildNonce }: { files: PickedFile[]; buildNonce: numbe
         </>
       )}
       {phase.t === 'error' && <ErrorNotice state={phase.error} ctx="fix" mt="mt-2" />}
-      {PRO_GATE_ENABLED && unlocked && <ProBadge onDeactivated={() => setUnlocked(false)} />}
+      {PRO_GATE_ENABLED && unlocked && <ProBadge onDeactivated={() => onUnlockedChange(false)} />}
     </div>
   );
 }
