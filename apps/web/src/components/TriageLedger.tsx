@@ -14,6 +14,7 @@ import {
   type TriageIndex,
 } from '../lib/triage';
 import { emptyLedgerCard, emptyLedgerReason, type EmptyLedgerReason } from '../lib/ledger-empty';
+import { metricBadge } from '../lib/ledger-badge';
 
 // The virtualized triage ledger — the scalable replacement for the old AssetSelector chip wall. Default
 // unit is the PROBLEM (one row per finding), worst-first, driven by the pure buildIndex/selectRows index.
@@ -70,16 +71,6 @@ function optionId(rowId: string): string {
 function midTruncate(ref: string, head = 16, tail = 22): string {
   if (ref.length <= head + tail + 1) return ref;
   return `${ref.slice(0, head)}…${ref.slice(-tail)}`;
-}
-
-/** A scope/metric badge for a row. Labelled (DISK/VRAM/OCC) so disk≠VRAM stays explicit; sparse ⇒ "—". */
-function metricBadge(row: LedgerRow, sort: SortKey): { label: string; value: string } | null {
-  // Under an asset-axis sort, surface that asset metric; otherwise prefer the row's measured wasted-disk.
-  if (sort === 'vram') return { label: 'VRAM', value: row.metric.vram === undefined ? '—' : fmtBytes(row.metric.vram) };
-  if (sort === 'occupancy')
-    return { label: 'OCC', value: row.metric.occupancy === undefined ? '—' : `${Math.round(row.metric.occupancy * 100)}%` };
-  if (row.metric.wastedDisk !== undefined) return { label: 'DISK', value: fmtBytes(row.metric.wastedDisk) };
-  return null;
 }
 
 function LedgerRowView({
@@ -142,8 +133,12 @@ function LedgerRowView({
         </span>
         {badge ? (
           <span className="w-[68px] text-right">
-            <span className="block font-mono text-[8.5px] uppercase tracking-[0.06em] text-ink-soft">{badge.label}</span>
-            <span className="block font-mono text-[11px] font-semibold text-ink">{badge.value}</span>
+            <span className="ad-label-sm block text-ink-soft">{badge.label}</span>
+            {/* honest role coloring: only a recoverable wasted-disk SAVING reads green; VRAM/OCC are neutral
+                MEASUREMENTS in ink (never a fabricated savings claim — invariant 3/5). */}
+            <span className={`block font-mono text-[11px] font-semibold ${badge.role === 'saving' ? 'text-cta-text' : 'text-ink'}`}>
+              {badge.value}
+            </span>
           </span>
         ) : null}
       </div>
