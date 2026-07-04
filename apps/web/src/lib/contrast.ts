@@ -158,6 +158,18 @@ export function tealDecorLargePassesAA(surface: keyof typeof SURFACE): boolean {
   return contrastRatio(TEAL_DECOR, SURFACE[surface]) >= AA_LARGE;
 }
 
+// ── switch / segmented interactive-surface AA proof (app-screen re-skin Phase 3b-ii) ─────────────
+// The Switch is a native role=switch button whose WHITE knob POSITION encodes on/off (WCAG 1.4.1 — colour
+// is never the sole signal). Its two track colours are theme-INDEPENDENT (--color-cta fill when on,
+// --color-film-mute when off — neither is overridden under [data-theme=dark]), so ONE proof covers both
+// themes. The knob must clear the 3:1 non-text (1.4.11) floor over each track so the puck stays visible
+// against its track. SWITCH_OFF mirrors --color-film-mute (index.css:22); KNOB is a fixed white puck.
+export const SWITCH_OFF = '#8593A0'; // = --color-film-mute (theme-independent)
+export const KNOB = '#FFFFFF';
+export function switchKnobPasses(track: string): boolean {
+  return contrastRatio(KNOB, track) >= AA_LARGE;
+}
+
 // ── dark-theme AA proof ──────────────────────────────────────────────────────
 // The dark palette OVERRIDES the same @theme --color-* tokens under [data-theme='dark'] /
 // @media(prefers-color-scheme:dark) — mirrored here from index.css as the single source of truth so a

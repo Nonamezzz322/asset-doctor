@@ -14,7 +14,7 @@
 // the mipmap card is COPY + the existing extrude knob only (raster formats cannot store mip levels — the GPU
 // generates them at load; the opt-in KTX2 backend op bakes real mips). No network, no asset bytes leave.
 
-import { useRef, useState, type ReactNode } from 'react';
+import { useId, useRef, useState, type ReactNode } from 'react';
 import type { ExportFormat, ResolutionTier, Rule } from '@asset-doctor/core';
 import type { PackMode, StaticGranularity } from '@asset-doctor/ingest';
 import { DEFAULT_SCALE_TIERS, isSafeSuffix } from '@asset-doctor/fix';
@@ -45,11 +45,11 @@ interface Sect {
   patch: Patch;
 }
 
-// ── Shared card chrome — the "open card" replacement for the old <details>. Tokens only: rounded-xl border
-//    border-line bg-panel p-4 + a mono [10px] uppercase teal section title (design §5.2). ──
+// ── Shared card chrome — the "open card" replacement for the old <details>. Tokens only: rounded-2xl border
+//    border-line bg-panel p-6 + the ad-label text-teal-text eyebrow (app-screen re-skin §3, mockup chrome). ──
 function Card({ id, title, children }: { id?: string; title: string; children: ReactNode }) {
   return (
-    <section id={id} className="rounded-xl border border-line bg-panel p-4 text-left">
+    <section id={id} className="rounded-2xl border border-line bg-panel p-6 text-left">
       <h2 className="ad-label text-teal-text">{title}</h2>
       <div className="mt-3 space-y-2">{children}</div>
     </section>
@@ -92,22 +92,108 @@ function NumberRow({
   );
 }
 
-function CheckRow({
+// ── SettingRow — the shared knob-row layout (app-screen re-skin §1). Promotes each knob's former mouse-only
+//    title={hint} to a VISIBLE hint line under the label (an a11y win — no new copy, reuses the existing hint
+//    keys). `labelId` lets an interactive control (Switch button / Segmented radiogroup) take its accessible
+//    name from the visible label via aria-labelledby. Pure layout, no t() of its own. ──
+function SettingRow({ label, hint, labelId, control }: { label: string; hint?: string; labelId?: string; control: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+      <div className="min-w-0 flex-1">
+        <span id={labelId} className="font-mono text-[10px] text-ink-soft">
+          {label}
+        </span>
+        {hint ? <p className="mt-0.5 font-mono text-[9px] leading-relaxed text-ink-soft">{hint}</p> : null}
+      </div>
+      <div className="shrink-0">{control}</div>
+    </div>
+  );
+}
+
+// ── Switch — a native <button role="switch"> DROP-IN for the old CheckRow (identical props
+//    label/hint/checked/onChange), so migrating a boolean knob is a mechanical tag swap. Space/Enter toggle
+//    for free (native button); the SR announces on/off via aria-checked + aria-labelledby; the KNOB POSITION
+//    encodes state (WCAG 1.4.1 — colour is never the sole signal). Track: on ⇒ bg-cta, off ⇒ bg-film-mute
+//    (both theme-INDEPENDENT — proven by contrast.ts switchKnobPasses); the puck is a fixed white bg-white;
+//    motion-reduce kills both transitions. ──
+function Switch({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (b: boolean) => void }) {
+  const labelId = useId();
+  return (
+    // The WHOLE row is the role=switch button ⇒ a full-row click target (parity with the old CheckRow <label>
+    // and the mockup's full-row toggles). Accessible name = the label span only (aria-labelledby, so the hint
+    // is NOT folded into the name); the puck is decorative (aria-hidden) — aria-checked conveys state and the
+    // KNOB POSITION encodes it visually (WCAG 1.4.1). Space/Enter toggle for free (native button).
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-labelledby={labelId}
+      onClick={() => onChange(!checked)}
+      className="flex w-full flex-wrap items-start justify-between gap-x-3 gap-y-1 rounded text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal"
+    >
+      <span className="min-w-0 flex-1">
+        <span id={labelId} className="block font-mono text-[10px] text-ink-soft">
+          {label}
+        </span>
+        {hint ? <span className="mt-0.5 block font-mono text-[9px] leading-relaxed text-ink-soft">{hint}</span> : null}
+      </span>
+      <span
+        aria-hidden="true"
+        className={`relative mt-0.5 inline-flex h-5 w-9 shrink-0 items-center rounded-full border border-line/60 transition-colors motion-reduce:transition-none ${
+          checked ? 'bg-cta' : 'bg-film-mute'
+        }`}
+      >
+        <span
+          className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform motion-reduce:transition-none ${
+            checked ? 'translate-x-4' : 'translate-x-0.5'
+          }`}
+        />
+      </span>
+    </button>
+  );
+}
+
+// ── Segmented — a native role=radiogroup of visually-hidden radios sharing one generated name, so arrow-key
+//    navigation + Space selection come for free (WCAG keyboard). The active pill = peer-checked:bg-teal-text
+//    peer-checked:text-panel (AA-proven in BOTH themes — chipLabelPassesAABothThemes; deliberately NOT the
+//    mockup raw teal+white, which fails AA); track bg-bg; peer-focus-visible puts the ring on the VISIBLE
+//    segment. Replaces the small enum <select>s with the SAME option values + the SAME onChange. Optional
+//    `disabled` mirrors a <select disabled> (dependent knob) — the radios go native-disabled + the group dims. ──
+function Segmented<T extends string>({
   label,
   hint,
-  checked,
+  value,
+  options,
   onChange,
+  disabled,
 }: {
   label: string;
   hint?: string;
-  checked: boolean;
-  onChange: (b: boolean) => void;
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+  disabled?: boolean;
 }) {
+  const labelId = useId();
+  const name = useId();
   return (
-    <label className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={hint}>
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="accent-teal" />
-      {label}
-    </label>
+    <SettingRow
+      label={label}
+      hint={hint}
+      labelId={labelId}
+      control={
+        <div role="radiogroup" aria-labelledby={labelId} className={`inline-flex flex-wrap gap-0.5 rounded-lg border border-line bg-bg p-0.5 ${disabled ? 'opacity-60' : ''}`}>
+          {options.map((o) => (
+            <label key={o.value} className={disabled ? 'cursor-not-allowed' : 'cursor-pointer'}>
+              <input type="radio" name={name} value={o.value} checked={value === o.value} disabled={disabled} onChange={() => onChange(o.value)} className="peer sr-only" />
+              <span className="block rounded-md px-2 py-0.5 font-mono text-[10px] text-ink-soft transition peer-checked:bg-teal-text peer-checked:text-panel peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-1 peer-focus-visible:outline-teal motion-reduce:transition-none">
+                {o.label}
+              </span>
+            </label>
+          ))}
+        </div>
+      }
+    />
   );
 }
 
@@ -251,30 +337,19 @@ function FormatsCard({ s, patch }: Sect) {
 
       {/* Defaults (profile OFF path) — replaces the two old buildOptions hardcodes. */}
       <div className="rounded border border-line/70 p-1.5">
-        <label className="flex items-center justify-between gap-2 font-mono text-[10px] text-ink-soft" title={t('settings.defaultTarget.hint')}>
-          {t('settings.defaultTarget')}
-          <select
-            aria-label={t('settings.defaultTarget')}
-            value={s.defaultTarget}
-            onChange={(e) => patch({ defaultTarget: e.target.value as ExportFormat })}
-            className="rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink-soft transition hover:border-teal focus:border-teal"
-          >
-            {FORMAT_KEYS.map(({ mime, key }) => (
-              <option key={mime} value={mime}>
-                {t(key)}
-              </option>
-            ))}
-          </select>
-        </label>
+        <Segmented
+          label={t('settings.defaultTarget')}
+          hint={t('settings.defaultTarget.hint')}
+          value={s.defaultTarget}
+          options={FORMAT_KEYS.map(({ mime, key }) => ({ value: mime, label: t(key) }))}
+          onChange={(v) => patch({ defaultTarget: v })}
+        />
         <div className="mt-1.5">
           <NumberRow label={t('settings.defaultQuality')} value={s.defaultQuality} min={0} max={100} onChange={(n) => patch({ defaultQuality: n })} />
         </div>
       </div>
 
-      <label className="mt-1 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
-        <input type="checkbox" checked={s.profileEnable} onChange={(e) => patch({ profileEnable: e.target.checked })} className="accent-teal" />
-        {t('fix.profile.enable')}
-      </label>
+      <Switch label={t('fix.profile.enable')} checked={s.profileEnable} onChange={(b) => patch({ profileEnable: b })} />
 
       {s.profileEnable ? (
         <div className="mt-1 space-y-3">
@@ -425,10 +500,7 @@ function ResolutionsCard({ s, patch }: Sect) {
       <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.tier.hint')}</p>
       <NumberRow label={t('settings.maxEdge')} value={s.maxEdge} min={128} max={16384} step={128} onChange={(n) => patch({ maxEdge: n })} />
 
-      <label className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
-        <input type="checkbox" checked={s.tierEnable} onChange={(e) => patch({ tierEnable: e.target.checked })} className="accent-teal" />
-        {t('fix.tier.enable')}
-      </label>
+      <Switch label={t('fix.tier.enable')} checked={s.tierEnable} onChange={(b) => patch({ tierEnable: b })} />
       <p className="font-mono text-[10px] leading-relaxed text-ink">⚠ {t('fix.tier.inlineWarn')}</p>
 
       {s.tierEnable ? (
@@ -471,40 +543,33 @@ function PackingCard({ s, patch }: Sect) {
       <NumberRow label={t('settings.padding')} value={s.padding} min={0} max={32} onChange={(n) => patch({ padding: n })} />
       <NumberRow label={t('settings.maxSize')} value={s.maxSize} min={128} max={8192} step={128} onChange={(n) => patch({ maxSize: n })} />
 
-      <CheckRow label={t('fix.polygon')} hint={t('fix.polygonHint')} checked={s.polygon} onChange={(b) => patch({ polygon: b })} />
+      <Switch label={t('fix.polygon')} hint={t('fix.polygonHint')} checked={s.polygon} onChange={(b) => patch({ polygon: b })} />
 
       {/* Spine sheet-page format (design §0.1). Default 'png' ⇒ runtime-safe today; 'profile' ⇒ Spine
           repack/pack pages follow the profile/legacy target (tier-loop Spine pages stay PNG in v1). */}
-      <label className="flex items-center justify-between gap-2 font-mono text-[10px] text-ink-soft" title={t('settings.spineFormat.hint')}>
-        {t('settings.spineFormat')}
-        <select
-          aria-label={t('settings.spineFormat')}
-          value={s.spinePageFormat}
-          onChange={(e) => patch({ spinePageFormat: e.target.value === 'profile' ? 'profile' : 'png' })}
-          className="rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink-soft transition hover:border-teal focus:border-teal"
-        >
-          <option value="png">{t('settings.spineFormat.png')}</option>
-          <option value="profile">{t('settings.spineFormat.profile')}</option>
-        </select>
-      </label>
+      <Segmented
+        label={t('settings.spineFormat')}
+        value={s.spinePageFormat}
+        options={[
+          { value: 'png', label: t('settings.spineFormat.png') },
+          { value: 'profile', label: t('settings.spineFormat.profile') },
+        ]}
+        onChange={(v) => patch({ spinePageFormat: v })}
+      />
       <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('settings.spineFormat.hint')}</p>
 
       <div className="border-t border-line pt-2">
-        <CheckRow label={t('fix.pack.enable')} checked={s.packLoose} onChange={(b) => patch({ packLoose: b })} />
+        <Switch label={t('fix.pack.enable')} checked={s.packLoose} onChange={(b) => patch({ packLoose: b })} />
         <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink">⚠ {t('fix.pack.inlineWarn')}</p>
 
         {s.packLoose ? (
           <div className="mt-2 space-y-2">
-            <label className="flex items-center justify-between gap-2 font-mono text-[10px] text-ink-soft">
-              {t('fix.pack.mode.label')}
-              <select aria-label={t('fix.pack.mode.label')} value={s.packMode} onChange={(e) => patch({ packMode: e.target.value as PackMode })} className="rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink-soft transition hover:border-teal focus:border-teal">
-                {modes.map((m) => (
-                  <option key={m} value={m}>
-                    {t(`fix.pack.mode.${modeKey[m]}`)}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <Segmented
+              label={t('fix.pack.mode.label')}
+              value={s.packMode}
+              options={modes.map((m) => ({ value: m, label: t(`fix.pack.mode.${modeKey[m]}`) }))}
+              onChange={(v) => patch({ packMode: v })}
+            />
             <label className="flex items-center justify-between gap-2 font-mono text-[10px] text-ink-soft">
               {t('fix.pack.grouping.label')}
               <select aria-label={t('fix.pack.grouping.label')} value={s.packGranularity} onChange={(e) => patch({ packGranularity: e.target.value as StaticGranularity })} className="rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink-soft transition hover:border-teal focus:border-teal">
@@ -515,7 +580,7 @@ function PackingCard({ s, patch }: Sect) {
                 ))}
               </select>
             </label>
-            <CheckRow label={t('fix.pack.trim')} checked={s.packTrim} onChange={(b) => patch({ packTrim: b })} />
+            <Switch label={t('fix.pack.trim')} checked={s.packTrim} onChange={(b) => patch({ packTrim: b })} />
             <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.pack.spinePng')}</p>
           </div>
         ) : null}
@@ -532,16 +597,12 @@ function MipmapsCard({ s, patch }: Sect) {
   const opts = [0, 1, 2];
   return (
     <Card title={t('settings.section.mip')}>
-      <label className="flex items-center justify-between gap-2 font-mono text-[10px] text-ink-soft">
-        {t('fix.extrude')}
-        <select aria-label={t('fix.extrude')} title={t('fix.extrudeHint', { px: s.extrude || 1 })} value={s.extrude} onChange={(e) => patch({ extrude: Number(e.target.value) })} className="rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink-soft transition hover:border-teal focus:border-teal">
-          {opts.map((n) => (
-            <option key={n} value={n}>
-              {n === 0 ? t('fix.extrude.off') : t('fix.extrude.px', { n })}
-            </option>
-          ))}
-        </select>
-      </label>
+      <Segmented
+        label={t('fix.extrude')}
+        value={String(s.extrude)}
+        options={opts.map((n) => ({ value: String(n), label: n === 0 ? t('fix.extrude.off') : t('fix.extrude.px', { n }) }))}
+        onChange={(v) => patch({ extrude: Number(v) })}
+      />
       <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.extrudeHint', { px: s.extrude || 1 })}</p>
       <p className="border-t border-line pt-2 font-mono text-[10px] leading-relaxed text-ink-soft">{t('settings.mip.copy')}</p>
     </Card>
@@ -555,7 +616,7 @@ function RulesCard({ s, patch }: Sect) {
   const setOverrides = (o: { match: string; quality: number }[]): void => patch({ overrides: o });
   return (
     <Card title={t('settings.section.rules')}>
-      <CheckRow label={t('fix.merge')} checked={s.aggressive} onChange={(b) => patch({ aggressive: b })} />
+      <Switch label={t('fix.merge')} checked={s.aggressive} onChange={(b) => patch({ aggressive: b })} />
 
       <label className="block font-mono text-[10px] text-ink-soft">
         <span className="flex items-center justify-between" title={t('fix.settings.effortHint')}>
@@ -564,8 +625,8 @@ function RulesCard({ s, patch }: Sect) {
         <input type="range" min={0} max={6} step={1} value={s.effort} aria-label={t('fix.settings.effort')} onChange={(e) => patch({ effort: Number(e.target.value) })} className="mt-1 w-full accent-teal" />
       </label>
 
-      <CheckRow label={t('fix.settings.scaleAware')} hint={t('fix.settings.scaleAwareHint')} checked={s.scaleAwareQ} onChange={(b) => patch({ scaleAwareQ: b })} />
-      <CheckRow label={t('fix.settings.nearLossless')} hint={t('fix.settings.nearLosslessHint')} checked={s.webpNearLossless} onChange={(b) => patch({ webpNearLossless: b })} />
+      <Switch label={t('fix.settings.scaleAware')} hint={t('fix.settings.scaleAwareHint')} checked={s.scaleAwareQ} onChange={(b) => patch({ scaleAwareQ: b })} />
+      <Switch label={t('fix.settings.nearLossless')} hint={t('fix.settings.nearLosslessHint')} checked={s.webpNearLossless} onChange={(b) => patch({ webpNearLossless: b })} />
 
       {/* PNG lossless-recompress LEVEL (replaces the old boolean; 0 = off, 1..6 oxipng effort). */}
       <label className="flex items-center justify-between gap-2 font-mono text-[10px] text-ink-soft" title={t('settings.pngLevel.hint')}>
@@ -579,10 +640,10 @@ function RulesCard({ s, patch }: Sect) {
         </select>
       </label>
 
-      <CheckRow label={t('fix.settings.opaqueAlpha')} hint={t('fix.settings.opaqueAlphaHint')} checked={s.opaqueAlpha} onChange={(b) => patch({ opaqueAlpha: b })} />
-      <CheckRow label={t('fix.settings.bestFormat')} hint={t('fix.settings.bestFormatHint')} checked={s.bestFormatPerImage} onChange={(b) => patch({ bestFormatPerImage: b })} />
-      <CheckRow label={t('fix.settings.frameRedundancy')} hint={t('fix.settings.frameRedundancyHint')} checked={s.frameRedundancy} onChange={(b) => patch({ frameRedundancy: b })} />
-      <CheckRow label={t('fix.settings.trimMargin')} hint={t('fix.settings.trimMarginHint')} checked={s.trimMargin} onChange={(b) => patch({ trimMargin: b })} />
+      <Switch label={t('fix.settings.opaqueAlpha')} hint={t('fix.settings.opaqueAlphaHint')} checked={s.opaqueAlpha} onChange={(b) => patch({ opaqueAlpha: b })} />
+      <Switch label={t('fix.settings.bestFormat')} hint={t('fix.settings.bestFormatHint')} checked={s.bestFormatPerImage} onChange={(b) => patch({ bestFormatPerImage: b })} />
+      <Switch label={t('fix.settings.frameRedundancy')} hint={t('fix.settings.frameRedundancyHint')} checked={s.frameRedundancy} onChange={(b) => patch({ frameRedundancy: b })} />
+      <Switch label={t('fix.settings.trimMargin')} hint={t('fix.settings.trimMarginHint')} checked={s.trimMargin} onChange={(b) => patch({ trimMargin: b })} />
 
       <div className="border-t border-line pt-2">
         <p className="ad-label text-ink-soft" title={t('fix.settings.overridesHint')}>
@@ -642,22 +703,22 @@ function OutputCard({ s, patch }: Sect) {
   const { t } = useI18n();
   return (
     <Card title={t('settings.section.output')}>
-      <CheckRow label={t('fix.pixiManifest')} hint={t('fix.pixiManifestHint')} checked={s.emitPixiManifest} onChange={(b) => patch({ emitPixiManifest: b })} />
-      <label className="ml-5 flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.includeFileSizesHint')}>
-        {t('fix.includeFileSizes')}
-        <select
-          aria-label={t('fix.includeFileSizes')}
+      <Switch label={t('fix.pixiManifest')} hint={t('fix.pixiManifestHint')} checked={s.emitPixiManifest} onChange={(b) => patch({ emitPixiManifest: b })} />
+      <div className="ml-5">
+        <Segmented
+          label={t('fix.includeFileSizes')}
+          hint={t('fix.includeFileSizesHint')}
           value={s.includeFileSizes}
           disabled={!s.emitPixiManifest}
-          onChange={(e) => patch({ includeFileSizes: e.target.value as 'off' | 'raw' | 'gzip' })}
-          className="rounded border border-line bg-panel px-1 py-0.5 font-mono text-[10px] text-ink disabled:opacity-60"
-        >
-          <option value="off">{t('fix.includeFileSizes.off')}</option>
-          <option value="raw">{t('fix.includeFileSizes.raw')}</option>
-          <option value="gzip">{t('fix.includeFileSizes.gzip')}</option>
-        </select>
-      </label>
-      <CheckRow label={t('fix.hashFilenames')} hint={t('fix.hashFilenamesHint')} checked={s.hashFilenames} onChange={(b) => patch({ hashFilenames: b })} />
+          options={[
+            { value: 'off', label: t('fix.includeFileSizes.off') },
+            { value: 'raw', label: t('fix.includeFileSizes.raw') },
+            { value: 'gzip', label: t('fix.includeFileSizes.gzip') },
+          ]}
+          onChange={(v) => patch({ includeFileSizes: v })}
+        />
+      </div>
+      <Switch label={t('fix.hashFilenames')} hint={t('fix.hashFilenamesHint')} checked={s.hashFilenames} onChange={(b) => patch({ hashFilenames: b })} />
     </Card>
   );
 }
@@ -675,9 +736,9 @@ function BackendCard({ s, patch }: Sect) {
         <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.backend.unconfigured')}</p>
       ) : (
         <>
-          <CheckRow label={t('fix.backend.ktx2')} hint={t('fix.backend.ktx2Hint')} checked={s.ktx2Enable} onChange={(b) => patch({ ktx2Enable: b })} />
-          <CheckRow label={t('fix.backend.pngquant')} hint={t('fix.backend.pngquantHint')} checked={s.pngquantEnable} onChange={(b) => patch({ pngquantEnable: b })} />
-          <CheckRow label={t('fix.backend.resample')} hint={t('fix.backend.resampleHint')} checked={s.resampleEnable} onChange={(b) => patch({ resampleEnable: b })} />
+          <Switch label={t('fix.backend.ktx2')} hint={t('fix.backend.ktx2Hint')} checked={s.ktx2Enable} onChange={(b) => patch({ ktx2Enable: b })} />
+          <Switch label={t('fix.backend.pngquant')} hint={t('fix.backend.pngquantHint')} checked={s.pngquantEnable} onChange={(b) => patch({ pngquantEnable: b })} />
+          <Switch label={t('fix.backend.resample')} hint={t('fix.backend.resampleHint')} checked={s.resampleEnable} onChange={(b) => patch({ resampleEnable: b })} />
           <p className="border-t border-line pt-2 font-mono text-[10px] leading-relaxed text-ink-soft">{t('settings.backend.consentNote')}</p>
         </>
       )}

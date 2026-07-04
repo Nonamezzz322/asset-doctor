@@ -14,8 +14,10 @@ import {
   FILM_SOFT,
   INK,
   INK_SOFT,
+  KNOB,
   SEVERITY_HEX,
   SURFACE,
+  SWITCH_OFF,
   TEAL_DECOR,
   TEAL_TEXT,
   WHITE,
@@ -34,6 +36,7 @@ import {
   relLuminance,
   severityDotDarkPasses,
   severityHuePassesAA,
+  switchKnobPasses,
   tealDecorDarkLargePasses,
   tealDecorLargePassesAA,
   tealTextWhiteBgPassesAA,
@@ -225,5 +228,37 @@ describe('contrast — dark theme AA (the [data-theme=dark] token overrides mirr
   it('every severity DOT clears the 3:1 non-text floor on both dark surfaces (color is never the sole signal)', () => {
     for (const sev of ['crit', 'warn', 'ok', 'info'] as const)
       for (const s of ['bg', 'panel'] as const) expect(severityDotDarkPasses(sev, s)).toBe(true);
+  });
+});
+
+describe('contrast — switch / segmented interactive surfaces (app-screen re-skin Phase 3b-ii)', () => {
+  // The Switch knob is a fixed WHITE puck; its track is theme-independent (cta fill ON / film-mute OFF).
+  // The knob must clear the 3:1 non-text (1.4.11) floor over BOTH tracks so the puck stays visible — and
+  // because both track colours are theme-independent this ONE proof covers light AND dark.
+  it('the white knob clears the 3:1 non-text floor over BOTH track colours (~4.585 on / ~3.16 off)', () => {
+    expect(switchKnobPasses(CTA)).toBe(true);
+    expect(switchKnobPasses(SWITCH_OFF)).toBe(true);
+    expect(contrastRatio(KNOB, CTA)).toBeCloseTo(4.585, 2);
+  });
+  it('the off-track knob contrast is ~3.16 and stays at/above the 3:1 floor (else darken the off token)', () => {
+    expect(contrastRatio(KNOB, SWITCH_OFF)).toBeCloseTo(3.16, 1);
+    expect(contrastRatio(KNOB, SWITCH_OFF)).toBeGreaterThanOrEqual(AA_LARGE);
+  });
+  it('the interactive tokens mirror index.css (SWITCH_OFF = --color-film-mute, KNOB = white)', () => {
+    expect(SWITCH_OFF).toBe('#8593A0');
+    expect(KNOB).toBe('#FFFFFF');
+  });
+
+  // The Segmented active pill reuses the shipped chip proof (panel-on-teal-text, AA in BOTH themes); the
+  // inactive label reuses the full-strength ink-soft proof on bg. Never white-on-decorative-teal (below).
+  it('the segmented ACTIVE pill (panel-on-teal-text) passes AA in BOTH themes — reuses the chip proof', () => {
+    expect(chipLabelPassesAABothThemes()).toBe(true);
+  });
+  it('the segmented INACTIVE label (full ink-soft on bg) passes AA — reuses the ink-soft proof', () => {
+    expect(inkSoftPassesAA(1, 'bg')).toBe(true);
+  });
+  it('regression guard: WHITE on decorative teal FAILS normal-text AA (4.079) — why active is text-panel, never white on teal', () => {
+    expect(contrastRatio(WHITE, TEAL_DECOR)).toBeLessThan(AA_NORMAL);
+    expect(contrastRatio(WHITE, TEAL_DECOR)).toBeCloseTo(4.079, 2);
   });
 });
