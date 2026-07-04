@@ -486,6 +486,8 @@
   "fix.sheetDiff.measuredBadge": "auf deiner GPU in diesem Lauf gemessen",
   "fix.tier.title": "Auflösungsstufen erzeugen",
   "fix.tier.hint": "Erzeugt herunterskalierte Kopien jedes Assets, damit das Spiel die zum Gerät passende Auflösung lädt.",
+  "fix.tier.profileNote": "Auflösungen kommen aus dem aktiven Export-Profil (Karte Formate).",
+  "settings.defaults.atlasScopeNote": "Bei aktivem Profil gilt dies nur für vorgefertigte Atlas-Seiten; Formate loser Bilder kommen aus dem Profil unten.",
   "fix.tier.enable": "Auflösungsstufen erzeugen",
   "fix.tier.preset.three": "1080p / 720p / 540p",
   "fix.tier.preset.two": "1080p / 540p",

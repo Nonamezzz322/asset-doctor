@@ -347,6 +347,11 @@ function FormatsCard({ s, patch }: Sect) {
         <div className="mt-1.5">
           <NumberRow label={t('settings.defaultQuality')} value={s.defaultQuality} min={0} max={100} onChange={(n) => patch({ defaultQuality: n })} />
         </div>
+        {/* Under an active profile these still govern PREBUILT-ATLAS-PAGE transcodes (the profile governs loose
+            images + composed sheets), so they are NOT a dead duplicate of the per-format list below — say so. */}
+        {s.profileEnable ? (
+          <p className="mt-1.5 font-mono text-[12px] leading-relaxed text-ink-soft">{t('settings.defaults.atlasScopeNote')}</p>
+        ) : null}
       </div>
 
       <Switch label={t('fix.profile.enable')} checked={s.profileEnable} onChange={(b) => patch({ profileEnable: b })} />
@@ -500,10 +505,16 @@ function ResolutionsCard({ s, patch }: Sect) {
       <p className="font-mono text-[13px] leading-relaxed text-ink-soft">{t('fix.tier.hint')}</p>
       <NumberRow label={t('settings.maxEdge')} value={s.maxEdge} min={128} max={16384} step={128} onChange={(n) => patch({ maxEdge: n })} />
 
-      <Switch label={t('fix.tier.enable')} checked={s.tierEnable} onChange={(b) => patch({ tierEnable: b })} />
-      <p className="font-mono text-[13px] leading-relaxed text-ink">⚠ {t('fix.tier.inlineWarn')}</p>
+      {/* The legacy scale-tier ladder is wire-omitted whenever an export profile is sent (buildFixOptions; the
+          worker prefers the profile tiers), so it does NOTHING under a profile — the profile's own customTiers
+          editor (Formats card) is then the resolution source. Hidden when a profile is active; maxEdge above
+          stays visible (it is additive on both paths). State persists + reappears when the profile is off. */}
+      {!s.profileEnable ? (
+        <>
+          <Switch label={t('fix.tier.enable')} checked={s.tierEnable} onChange={(b) => patch({ tierEnable: b })} />
+          <p className="font-mono text-[13px] leading-relaxed text-ink">⚠ {t('fix.tier.inlineWarn')}</p>
 
-      {s.tierEnable ? (
+          {s.tierEnable ? (
         <div className="space-y-2">
           <div className="space-y-1">
             {DEFAULT_SCALE_TIERS.map((tier) => {
@@ -525,7 +536,11 @@ function ResolutionsCard({ s, patch }: Sect) {
             {s.resampleEnable ? <li className="text-teal-text">{t('settings.resampleTierHint')}</li> : null}
           </ul>
         </div>
-      ) : null}
+          ) : null}
+        </>
+      ) : (
+        <p className="font-mono text-[13px] leading-relaxed text-ink-soft">{t('fix.tier.profileNote')}</p>
+      )}
     </Card>
   );
 }
@@ -626,7 +641,12 @@ function RulesCard({ s, patch }: Sect) {
       </label>
 
       <Switch label={t('fix.settings.scaleAware')} hint={t('fix.settings.scaleAwareHint')} checked={s.scaleAwareQ} onChange={(b) => patch({ scaleAwareQ: b })} />
-      <Switch label={t('fix.settings.nearLossless')} hint={t('fix.settings.nearLosslessHint')} checked={s.webpNearLossless} onChange={(b) => patch({ webpNearLossless: b })} />
+      {/* Legacy global WebP near-lossless is HARD-dead under an export profile (buildFixOptions omits it; the
+          profile's own per-format near checkbox is then the sole source). Hidden when a profile is active so it
+          is not a dead duplicate. Default profileEnable:false ⇒ still rendered ⇒ the default run is unchanged. */}
+      {!s.profileEnable ? (
+        <Switch label={t('fix.settings.nearLossless')} hint={t('fix.settings.nearLosslessHint')} checked={s.webpNearLossless} onChange={(b) => patch({ webpNearLossless: b })} />
+      ) : null}
 
       {/* PNG lossless-recompress LEVEL (replaces the old boolean; 0 = off, 1..6 oxipng effort). */}
       <label className="flex items-center justify-between gap-2 font-mono text-[13px] text-ink-soft" title={t('settings.pngLevel.hint')}>

@@ -473,6 +473,8 @@
   "fix.sheetDiff.measuredBadge": "本次运行在你的 GPU 上实测",
   "fix.tier.title": "生成分辨率层级",
   "fix.tier.hint": "为每个资源输出缩小的副本，让游戏加载适合设备的分辨率。",
+  "fix.tier.profileNote": "分辨率来自当前启用的导出配置（“格式”卡片）。",
+  "settings.defaults.atlasScopeNote": "启用配置时，这仅适用于预制图集页；独立图片的格式来自下方的配置。",
   "fix.tier.enable": "生成分辨率层级",
   "fix.tier.preset.three": "1080p / 720p / 540p",
   "fix.tier.preset.two": "1080p / 540p",

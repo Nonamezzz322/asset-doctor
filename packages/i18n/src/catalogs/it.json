@@ -490,6 +490,8 @@
   "fix.sheetDiff.measuredBadge": "misurato sulla tua GPU in questa esecuzione",
   "fix.tier.title": "Genera livelli di risoluzione",
   "fix.tier.hint": "Emette copie ridotte di ogni risorsa così il gioco carica la risoluzione adatta al dispositivo.",
+  "fix.tier.profileNote": "Le risoluzioni provengono dal profilo di esportazione attivo (scheda Formati).",
+  "settings.defaults.atlasScopeNote": "Con un profilo attivo, questo vale solo per le pagine di atlante predefinite; i formati delle immagini sciolte vengono dal profilo sotto.",
   "fix.tier.enable": "Genera livelli di risoluzione",
   "fix.tier.preset.three": "1080p / 720p / 540p",
   "fix.tier.preset.two": "1080p / 540p",

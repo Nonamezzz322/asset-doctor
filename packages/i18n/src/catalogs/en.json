@@ -481,6 +481,8 @@
   "fix.sheetDiff.measuredBadge": "measured on your GPU this run",
   "fix.tier.title": "Generate resolution tiers",
   "fix.tier.hint": "Emit downscaled copies of each asset so the game loads the resolution that fits the device.",
+  "fix.tier.profileNote": "Resolutions come from the active export profile (Formats card).",
+  "settings.defaults.atlasScopeNote": "While a profile is active, this applies to prebuilt atlas pages only; loose-image formats come from the profile below.",
   "fix.tier.enable": "Generate resolution tiers",
   "fix.tier.preset.three": "1080p / 720p / 540p",
   "fix.tier.preset.two": "1080p / 540p",

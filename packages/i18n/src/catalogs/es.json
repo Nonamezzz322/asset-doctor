@@ -490,6 +490,8 @@
   "fix.sheetDiff.measuredBadge": "medido en tu GPU en esta ejecución",
   "fix.tier.title": "Generar niveles de resolución",
   "fix.tier.hint": "Emite copias reducidas de cada recurso para que el juego cargue la resolución que se ajusta al dispositivo.",
+  "fix.tier.profileNote": "Las resoluciones vienen del perfil de exportación activo (tarjeta Formatos).",
+  "settings.defaults.atlasScopeNote": "Con un perfil activo, esto se aplica solo a páginas de atlas prediseñadas; los formatos de imágenes sueltas vienen del perfil de abajo.",
   "fix.tier.enable": "Generar niveles de resolución",
   "fix.tier.preset.three": "1080p / 720p / 540p",
   "fix.tier.preset.two": "1080p / 540p",
