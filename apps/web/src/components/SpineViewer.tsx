@@ -17,11 +17,27 @@ import { useI18n } from '../lib/i18n';
 import { filesFromDataTransfer, filesFromInput, pickFolder, supportsDirectoryPicker, type PickedFile } from '../lib/import';
 import { SpineEngine, type DebugKey, type SpineErrorKey, type SpineLoadResult } from '../lib/spine-engine';
 import {
+  addToQueue,
   addTrackModel,
+  clampTrimEnd,
+  clampTrimStart,
+  clearEntities,
+  DEBUG_ENTITY_TYPES,
   defaultTracks,
+  emptyEntityIndex,
+  emptyEntitySelection,
+  filterNames,
   filterSlotInfos,
+  removeFromQueue,
   removeTrackModel,
+  selectAllEntities,
+  setTrackAlphaModel,
+  toggleEntity,
+  toggleName,
   toggleSkin,
+  type DebugEntityType,
+  type EntityIndex,
+  type EntitySelection,
   type SlotInfo,
   type TrackModel,
 } from '../lib/spine-inspect';
@@ -96,6 +112,33 @@ export function SpineViewer() {
   const [markerScale, setMarkerScale] = useState(1);
   const [defaultMix, setDefaultMix] = useState(0);
 
+  // Phase A — playback parity: queue (engine-authoritative index), timeline+trim, fps, marker visibility.
+  const [queue, setQueue] = useState<string[]>([]);
+  const [queueIndex, setQueueIndex] = useState(-1);
+  const [queueLoop, setQueueLoop] = useState(false); // user preference — survives reloads
+  const [animTime, setAnimTime] = useState(0);
+  const [animDuration, setAnimDuration] = useState(0);
+  const [trimEnabled, setTrimEnabled] = useState(false);
+  const [trimStart, setTrimStart] = useState(0);
+  const [trimEnd, setTrimEnd] = useState(0);
+  const [fps, setFps] = useState(0);
+  const [markerHidden, setMarkerHidden] = useState<Set<string>>(new Set());
+  const [queuePick, setQueuePick] = useState(''); // value-holding queue-add select (Add is an explicit button)
+  // Trim source-of-truth mirror + last-seen duration, readable inside the memoized onTimeline callback.
+  // end === null ⇒ not yet initialized for this skeleton (distinct from a genuine user-set 0).
+  const durRef = useRef(0);
+  const trimRef = useRef<{ enabled: boolean; start: number; end: number | null }>({ enabled: false, start: 0, end: null });
+
+  // Phase B — bone inspector + granular per-entity debug selection.
+  const [boneNames, setBoneNames] = useState<string[]>([]);
+  const [entityIndex, setEntityIndex] = useState<EntityIndex>(emptyEntityIndex);
+  // OFF by default — a clean first view, coherent with the global SpineDebugRenderer toggles (noDebug()).
+  const [showBones, setShowBones] = useState(false);
+  const [selBones, setSelBones] = useState<string[]>([]);
+  const [selEntities, setSelEntities] = useState<EntitySelection>(emptyEntitySelection);
+  const [granType, setGranType] = useState<'bones' | DebugEntityType>('bones');
+  const [granFilter, setGranFilter] = useState('');
+
   // Accordion open state — Playback default open, the rest collapsed.
   const [open, setOpen] = useState({ playback: true, tracks: false, skins: false, debug: false, slots: false });
   const toggle = (k: keyof typeof open) => setOpen((o) => ({ ...o, [k]: !o[k] }));
@@ -116,21 +159,68 @@ export function SpineViewer() {
     setAttached([]);
     setSlotFilter('');
     setDefaultMix(0);
+    // Phase A resets — a fresh skeleton clears the playlist/timeline/trim/marker-visibility (queueLoop is a
+    // user preference and survives).
+    setQueue([]);
+    setQueueIndex(-1);
+    setAnimTime(0);
+    setAnimDuration(0);
+    setTrimEnabled(false);
+    setTrimStart(0);
+    setTrimEnd(0);
+    setMarkerHidden(new Set());
+    // Phase B resets + the initial granular push (everything OFF — a clean first view, like the global
+    // debug toggles; the overlay is created lazily when the user first enables something).
+    setBoneNames(r.bones);
+    setEntityIndex(r.entities);
+    setShowBones(false);
+    setSelBones([]);
+    setSelEntities(emptyEntitySelection());
+    setGranType('bones');
+    setGranFilter('');
+    setQueuePick('');
+    durRef.current = 0;
+    trimRef.current = { enabled: false, start: 0, end: null };
+    engineRef.current?.setGranularSelection({ showBones: false, bones: [], entities: emptyEntitySelection() });
   }, []);
   const onError = useCallback((key: SpineErrorKey) => setErrorKey(key), []);
   const onSlots = useCallback((next: SlotInfo[]) => setSlots(next), []);
+  // Queue auto-advance mirror: the engine's complete-listener is authoritative; the track-0 selector follows
+  // the currently-playing queued animation (upstream setSelectedAnimation(queue[nextIdx]) parity).
+  const onQueueIndex = useCallback((i: number, anim: string | null) => {
+    setQueueIndex(i);
+    if (anim !== null) setTracks((ts) => ts.map((t) => (t.index === 0 ? { ...t, animation: anim } : t)));
+  }, []);
+  const onTimeline = useCallback((time: number, d: number) => {
+    setAnimTime(time);
+    // Trim is duration-scoped: reconcile ONLY when the track-0 duration actually changes (animation switch /
+    // first load) — clamp the window into the new duration AND re-push it to the engine, so the teal trim
+    // region never claims a range the wrap isn't enforcing. end === null ⇒ not yet initialized (a genuine
+    // user-set 0 is preserved, never snapped back to full duration).
+    if (durRef.current !== d) {
+      durRef.current = d;
+      setAnimDuration(d);
+      const tr = trimRef.current;
+      tr.start = Math.min(tr.start, d);
+      tr.end = tr.end === null ? d : Math.min(tr.end, d);
+      setTrimStart(tr.start);
+      setTrimEnd(tr.end);
+      if (tr.enabled) engineRef.current?.setTrim(true, tr.start, tr.end);
+    }
+  }, []);
+  const onFps = useCallback((n: number) => setFps(n), []);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const eng = new SpineEngine({ onLoaded, onError, onSlots });
+    const eng = new SpineEngine({ onLoaded, onError, onSlots, onQueueIndex, onTimeline, onFps });
     engineRef.current = eng;
     readyRef.current = eng.init(host, { reducedMotion: reducedMotion() });
     return () => {
       eng.destroy();
       engineRef.current = null;
     };
-  }, [onLoaded, onError, onSlots]);
+  }, [onLoaded, onError, onSlots, onQueueIndex, onTimeline, onFps]);
 
   const doLoad = useCallback(async (files: PickedFile[]) => {
     setErrorKey(null);
@@ -216,18 +306,84 @@ export function SpineViewer() {
     setTracks((ts) => ts.map((t) => (t.index === index ? { ...t, animation: name } : t)));
     if (name === '') engineRef.current?.setEmptyTrack(index, defaultMix);
     else {
-      const loop = tracks.find((t) => t.index === index)?.loop ?? true;
-      engineRef.current?.setTrackAnimation(index, name, loop);
+      const row = tracks.find((t) => t.index === index);
+      engineRef.current?.setTrackAnimation(index, name, row?.loop ?? true, row?.alpha ?? 1); // alpha survives (App.jsx parity)
     }
   };
   const onTrackLoop = (index: number, loop: boolean): void => {
     setTracks((ts) => ts.map((t) => (t.index === index ? { ...t, loop } : t)));
-    const anim = tracks.find((t) => t.index === index)?.animation ?? '';
-    if (anim !== '') engineRef.current?.setTrackAnimation(index, anim, loop);
+    const row = tracks.find((t) => t.index === index);
+    if (row && row.animation !== '') engineRef.current?.setTrackAnimation(index, row.animation, loop, row.alpha);
+  };
+  const onTrackAlpha = (index: number, alpha: number): void => {
+    setTracks((ts) => setTrackAlphaModel(ts, index, alpha));
+    engineRef.current?.setTrackAlpha(index, alpha);
   };
   const onTrackRemove = (index: number): void => {
     engineRef.current?.clearTrack(index);
     setTracks((ts) => removeTrackModel(ts, index));
+  };
+
+  // ── Queue handlers (React mirrors the list; the engine owns the cursor + auto-advance) ─────────────────
+  const onQueueAdd = (name: string): void => {
+    if (name === '') return;
+    engineRef.current?.enqueue(name);
+    setQueue((q) => addToQueue(q, name));
+  };
+  const onQueueRemove = (i: number): void => {
+    engineRef.current?.removeFromQueueAt(i); // pushes the reconciled cursor via onQueueIndex
+    setQueue((q) => removeFromQueue(q, i, queueIndex).queue);
+  };
+  const onQueueClear = (): void => {
+    engineRef.current?.clearQueue();
+    setQueue([]);
+  };
+
+  // ── Timeline / trim handlers (pure clamps; the engine wraps trackTime in its ticker) ────────────────────
+  const onScrub = (v: number): void => {
+    setAnimTime(v);
+    engineRef.current?.scrub(v);
+  };
+  // All three write through trimRef (the onTimeline reconciler reads it) and push the engine verbatim.
+  const onTrimToggle = (b: boolean): void => {
+    const tr = trimRef.current;
+    tr.enabled = b;
+    if (tr.end === null) tr.end = animDuration;
+    setTrimEnabled(b);
+    setTrimEnd(tr.end);
+    engineRef.current?.setTrim(b, tr.start, tr.end);
+  };
+  const onTrimStart = (v: number): void => {
+    const tr = trimRef.current;
+    tr.start = clampTrimStart(v, tr.end ?? animDuration);
+    setTrimStart(tr.start);
+    engineRef.current?.setTrim(tr.enabled, tr.start, tr.end ?? animDuration);
+  };
+  const onTrimEnd = (v: number): void => {
+    const tr = trimRef.current;
+    tr.end = clampTrimEnd(v, tr.start, animDuration);
+    setTrimEnd(tr.end);
+    engineRef.current?.setTrim(tr.enabled, tr.start, tr.end);
+  };
+
+  // ── Marker visibility ────────────────────────────────────────────────────────────────────────────────
+  const onMarkerVisible = (slot: string, visible: boolean): void => {
+    setMarkerHidden((prev) => {
+      const next = new Set(prev);
+      if (visible) next.delete(slot);
+      else next.add(slot);
+      return next;
+    });
+    engineRef.current?.setMarkerVisible(slot, visible);
+  };
+
+  // ── Granular debug push — sends the WHOLE selection each time (the engine keeps Sets, React keeps lists) ─
+  const pushGranular = (next: Partial<{ showBones: boolean; bones: string[]; entities: EntitySelection }>): void => {
+    engineRef.current?.setGranularSelection({
+      showBones: next.showBones ?? showBones,
+      bones: next.bones ?? selBones,
+      entities: next.entities ?? selEntities,
+    });
   };
 
   const filtered = filterSlotInfos(slots, slotFilter).filter((s) => !attached.includes(s.name));
@@ -306,6 +462,13 @@ export function SpineViewer() {
                 </div>
               ) : (
                 <>
+                  {/* FPS badge — real ticker.FPS pushed ~1 Hz by the engine; informational, aria-hidden (the
+                      readout is decorative telemetry, not a control). Rendered only once a real frame was measured. */}
+                  {fps > 0 ? (
+                    <span aria-hidden="true" className="absolute right-2 top-2 z-10 rounded bg-film-2 px-2 py-0.5 font-mono text-[11px] text-film-soft">
+                      {t('spine.fps', { n: fps })}
+                    </span>
+                  ) : null}
                   {/* Mouse-convenience on-canvas toggle — the ACCESSIBLE toggle is the Playback panel button, so
                       this one is hidden from the AOM + tab order (aria-hidden + tabIndex -1). z-10 above canvas. */}
                   <button
@@ -392,6 +555,73 @@ export function SpineViewer() {
                   className="mt-1 w-full accent-teal"
                 />
               </label>
+              {/* Timeline + trim — the REAL control is the labeled range (keyboard scrubbing for free); the
+                  bar above it is a decorative aria-hidden readout. The two style attributes are the D11
+                  data-driven % exceptions (FilmViewer precedent) — everything else is tokens. */}
+              {animDuration > 0 ? (
+                <div className="space-y-2">
+                  <p className="font-mono text-[12px] text-ink-soft">
+                    {t('spine.timeline.label')} ·{' '}
+                    <span className="text-ink">
+                      {animTime.toFixed(2)}s / {animDuration.toFixed(2)}s
+                    </span>
+                  </p>
+                  <div aria-hidden="true" className="relative h-2 overflow-hidden rounded bg-line">
+                    {trimEnabled ? (
+                      <div
+                        className="absolute inset-y-0 bg-teal/25"
+                        style={{
+                          left: `${(trimStart / animDuration) * 100}%`,
+                          width: `${(Math.max(0, trimEnd - trimStart) / animDuration) * 100}%`,
+                        }}
+                      />
+                    ) : null}
+                    <div className="absolute inset-y-0 w-0.5 bg-teal-text" style={{ left: `${(Math.min(animTime, animDuration) / animDuration) * 100}%` }} />
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={animDuration}
+                    step={0.01}
+                    value={Math.min(animTime, animDuration)}
+                    aria-label={t('spine.timeline.scrub')}
+                    aria-valuetext={t('spine.timeline.pos', { t: animTime.toFixed(2), d: animDuration.toFixed(2) })}
+                    onChange={(e) => onScrub(Number(e.target.value))}
+                    className="w-full accent-teal"
+                  />
+                  <Switch label={t('spine.trim.enable')} checked={trimEnabled} onChange={onTrimToggle} />
+                  {trimEnabled ? (
+                    <>
+                      <label className="block font-mono text-[12px] text-ink-soft">
+                        {t('spine.trim.start')} · {trimStart.toFixed(2)}s
+                        <input
+                          type="range"
+                          min={0}
+                          max={animDuration}
+                          step={0.01}
+                          value={trimStart}
+                          aria-label={t('spine.trim.start')}
+                          onChange={(e) => onTrimStart(Number(e.target.value))}
+                          className="mt-1 w-full accent-teal"
+                        />
+                      </label>
+                      <label className="block font-mono text-[12px] text-ink-soft">
+                        {t('spine.trim.end')} · {trimEnd.toFixed(2)}s
+                        <input
+                          type="range"
+                          min={0}
+                          max={animDuration}
+                          step={0.01}
+                          value={trimEnd}
+                          aria-label={t('spine.trim.end')}
+                          onChange={(e) => onTrimEnd(Number(e.target.value))}
+                          className="mt-1 w-full accent-teal"
+                        />
+                      </label>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
               <button
                 type="button"
                 onClick={resetView}
@@ -407,32 +637,123 @@ export function SpineViewer() {
                 <p className="font-mono text-[13px] text-ink-soft">{t('spine.animation.none')}</p>
               ) : (
                 <>
-                  <div className="space-y-2">
-                    {tracks.map((track, i) => (
-                      <div key={track.index} className="flex items-center gap-2 rounded border border-line px-2 py-1.5">
-                        <select
-                          aria-label={t('spine.track.animation', { n: i + 1 })}
-                          value={track.animation}
-                          onChange={(e) => onTrackAnim(track.index, e.target.value)}
-                          className="w-full rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[13px] text-ink-soft hover:border-teal focus:border-teal"
-                        >
-                          <option value="">{t('spine.track.empty')}</option>
-                          {animations.map((name) => (
-                            <option key={name} value={name}>
-                              {name}
-                            </option>
-                          ))}
-                        </select>
-                        <Switch label={t('spine.track.loop', { n: i + 1 })} checked={track.loop} onChange={(b) => onTrackLoop(track.index, b)} />
+                  {/* Queue — a sequential playlist over track 0; the engine auto-advances on `complete` and
+                      mirrors the cursor here. The current row is marked by aria-current + a left border
+                      (never colour alone). Entry names are data-derived — rendered verbatim. */}
+                  <div className="space-y-2 rounded border border-line p-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="ad-label-sm text-ink-soft">{t('spine.queue.label')}</span>
+                      {queue.length > 0 ? (
                         <button
                           type="button"
-                          aria-label={t('spine.track.remove', { n: i + 1 })}
-                          disabled={i === 0}
-                          onClick={() => onTrackRemove(track.index)}
-                          className="shrink-0 rounded border border-line px-2 font-mono text-[13px] text-crit-text hover:border-crit-text disabled:opacity-40"
+                          onClick={onQueueClear}
+                          className="shrink-0 rounded border border-line px-2 py-0.5 font-mono text-[12px] text-crit-text hover:border-crit-text"
                         >
-                          ✕
+                          {t('spine.queue.clear')}
                         </button>
+                      ) : null}
+                    </div>
+                    <Switch
+                      label={t('spine.queue.loop')}
+                      checked={queueLoop}
+                      onChange={(b) => {
+                        setQueueLoop(b);
+                        engineRef.current?.setQueueLoop(b);
+                      }}
+                    />
+                    {queue.length > 0 ? (
+                      <ol className="space-y-1">
+                        {queue.map((name, i) => (
+                          <li
+                            key={`${name}-${i}`}
+                            aria-current={i === queueIndex ? 'true' : undefined}
+                            className={`flex items-center justify-between gap-2 rounded border border-line px-2 py-1 ${
+                              i === queueIndex ? 'border-l-2 border-l-teal bg-teal/10' : ''
+                            }`}
+                          >
+                            <span className="truncate font-mono text-[13px] text-ink">
+                              {i + 1}. {name}
+                            </span>
+                            <button
+                              type="button"
+                              aria-label={t('spine.queue.remove', { n: i + 1 })}
+                              onClick={() => onQueueRemove(i)}
+                              className="shrink-0 rounded border border-line px-2 font-mono text-[13px] text-crit-text hover:border-crit-text"
+                            >
+                              ✕
+                            </button>
+                          </li>
+                        ))}
+                      </ol>
+                    ) : null}
+                    {/* Value-holding select + an EXPLICIT Add button — a select-as-action would enqueue on
+                        every arrow keypress (keyboard users browse options via arrows on a closed select). */}
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={queuePick}
+                        aria-label={t('spine.queue.add')}
+                        onChange={(e) => setQueuePick(e.target.value)}
+                        className="w-full rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[13px] text-ink-soft hover:border-teal focus:border-teal"
+                      >
+                        <option value="">{t('spine.queue.add')}</option>
+                        {animations.map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        disabled={queuePick === ''}
+                        aria-label={t('spine.queue.add')}
+                        onClick={() => onQueueAdd(queuePick)}
+                        className="shrink-0 rounded border border-line px-2 py-0.5 font-mono text-[13px] text-teal-text hover:border-teal disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    {tracks.map((track, i) => (
+                      <div key={track.index} className="space-y-1.5 rounded border border-line px-2 py-1.5">
+                        <div className="flex items-center gap-2">
+                          <select
+                            aria-label={t('spine.track.animation', { n: i + 1 })}
+                            value={track.animation}
+                            onChange={(e) => onTrackAnim(track.index, e.target.value)}
+                            className="w-full rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[13px] text-ink-soft hover:border-teal focus:border-teal"
+                          >
+                            <option value="">{t('spine.track.empty')}</option>
+                            {animations.map((name) => (
+                              <option key={name} value={name}>
+                                {name}
+                              </option>
+                            ))}
+                          </select>
+                          <Switch label={t('spine.track.loop', { n: i + 1 })} checked={track.loop} onChange={(b) => onTrackLoop(track.index, b)} />
+                          <button
+                            type="button"
+                            aria-label={t('spine.track.remove', { n: i + 1 })}
+                            disabled={i === 0}
+                            onClick={() => onTrackRemove(track.index)}
+                            className="shrink-0 rounded border border-line px-2 font-mono text-[13px] text-crit-text hover:border-crit-text disabled:opacity-40"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                        <label className="block font-mono text-[12px] text-ink-soft">
+                          {t('spine.track.alpha', { n: i + 1 })} · {track.alpha.toFixed(2)}
+                          <input
+                            type="range"
+                            min={0}
+                            max={1}
+                            step={0.01}
+                            value={track.alpha}
+                            aria-label={t('spine.track.alpha', { n: i + 1 })}
+                            onChange={(e) => onTrackAlpha(track.index, Number(e.target.value))}
+                            className="mt-1 w-full accent-teal"
+                          />
+                        </label>
                       </div>
                     ))}
                   </div>
@@ -505,6 +826,136 @@ export function SpineViewer() {
                 />
               ))}
               <p className="font-mono text-[12px] leading-relaxed text-ink-soft">{t('spine.debug.note')}</p>
+
+              {/* Granular per-entity selection — a coherent SUPERSET of the global toggles above (those draw
+                  ALL of a type; this highlights NAMED bones/attachments). Rows are native aria-pressed
+                  buttons (keyboard-operable); selected rows add a border + tint (never colour alone). All
+                  bone/entity names are data-derived — rendered verbatim, never translated. */}
+              <div className="space-y-2 border-t border-line pt-3">
+                <p className="ad-label-sm text-ink-soft">{t('spine.debug.gran.title')}</p>
+                <p className="font-mono text-[12px] leading-relaxed text-ink-soft">{t('spine.debug.gran.hint')}</p>
+                <label className="block font-mono text-[12px] text-ink-soft">
+                  {t('spine.debug.gran.type')}
+                  <select
+                    value={granType}
+                    aria-label={t('spine.debug.gran.type')}
+                    onChange={(e) => {
+                      setGranType(e.target.value as 'bones' | DebugEntityType);
+                      setGranFilter('');
+                    }}
+                    className="mt-1 w-full rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[13px] text-ink-soft hover:border-teal focus:border-teal"
+                  >
+                    <option value="bones">{`${t('spine.debug.gran.bones')} (${boneNames.length})`}</option>
+                    {DEBUG_ENTITY_TYPES.map((ty) => (
+                      <option key={ty} value={ty}>
+                        {`${t(`spine.debug.gran.${ty}`)} (${entityIndex[ty].length})`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <input
+                  type="text"
+                  value={granFilter}
+                  placeholder={t('spine.debug.gran.filter')}
+                  aria-label={t('spine.debug.gran.filter')}
+                  onChange={(e) => setGranFilter(e.target.value)}
+                  className="w-full rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[13px] text-ink focus:border-teal"
+                />
+                {granType === 'bones' ? (
+                  <>
+                    <Switch
+                      label={t('spine.debug.gran.showBones')}
+                      checked={showBones}
+                      onChange={(b) => {
+                        setShowBones(b);
+                        pushGranular({ showBones: b });
+                      }}
+                    />
+                    {boneNames.length === 0 ? (
+                      <p className="font-mono text-[12px] text-ink-soft">{t('spine.debug.gran.empty')}</p>
+                    ) : (
+                      <ul className="max-h-64 space-y-1 overflow-y-auto">
+                        {filterNames(boneNames, granFilter).map((name) => (
+                          <li key={name}>
+                            <button
+                              type="button"
+                              aria-pressed={selBones.includes(name)}
+                              onClick={() => {
+                                const next = toggleName(selBones, name);
+                                setSelBones(next);
+                                pushGranular({ bones: next });
+                              }}
+                              className={`w-full truncate rounded border px-2 py-1 text-left font-mono text-[13px] ${
+                                selBones.includes(name)
+                                  ? 'border-line border-l-2 border-l-warn bg-warn/10 text-ink'
+                                  : 'border-line text-ink-soft hover:border-teal'
+                              }`}
+                            >
+                              {name}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = selectAllEntities(selEntities, granType, entityIndex[granType]);
+                          setSelEntities(next);
+                          pushGranular({ entities: next });
+                        }}
+                        className="rounded border border-line px-2 py-0.5 font-mono text-[12px] text-teal-text hover:border-teal"
+                      >
+                        {t('spine.debug.gran.all')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = clearEntities(selEntities, granType);
+                          setSelEntities(next);
+                          pushGranular({ entities: next });
+                        }}
+                        className="rounded border border-line px-2 py-0.5 font-mono text-[12px] text-ink-soft hover:border-teal"
+                      >
+                        {t('spine.debug.gran.none')}
+                      </button>
+                    </div>
+                    {granType === 'regionAttachments' ? (
+                      <p className="font-mono text-[12px] leading-relaxed text-ink-soft">{t('spine.debug.gran.regionsHint')}</p>
+                    ) : null}
+                    {entityIndex[granType].length === 0 ? (
+                      <p className="font-mono text-[12px] text-ink-soft">{t('spine.debug.gran.empty')}</p>
+                    ) : (
+                      <ul className="max-h-64 space-y-1 overflow-y-auto">
+                        {filterNames(entityIndex[granType], granFilter).map((key) => (
+                          <li key={key}>
+                            <button
+                              type="button"
+                              aria-pressed={selEntities[granType].includes(key)}
+                              onClick={() => {
+                                const next = toggleEntity(selEntities, granType, key);
+                                setSelEntities(next);
+                                pushGranular({ entities: next });
+                              }}
+                              className={`w-full truncate rounded border px-2 py-1 text-left font-mono text-[13px] ${
+                                selEntities[granType].includes(key)
+                                  ? 'border-line border-l-2 border-l-teal bg-teal/10 text-ink'
+                                  : 'border-line text-ink-soft hover:border-teal'
+                              }`}
+                            >
+                              {key}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </>
+                )}
+              </div>
             </Section>
 
             {/* (e) Slots — folds the marker size + attached list + the filterable index */}
@@ -532,19 +983,28 @@ export function SpineViewer() {
               ) : (
                 <ul className="space-y-1">
                   {attached.map((slot) => (
-                    <li key={slot} className="flex items-center justify-between gap-2 rounded border border-line px-2 py-1">
-                      <span className="truncate font-mono text-[13px] text-ink">{slot}</span>
-                      <button
-                        type="button"
-                        aria-label={t('spine.marker.remove', { slot })}
-                        onClick={() => {
-                          engineRef.current?.removeMarker(slot);
-                          setAttached((a) => a.filter((s) => s !== slot));
-                        }}
-                        className="shrink-0 rounded border border-line px-2 font-mono text-[13px] text-crit-text hover:border-crit-text"
-                      >
-                        ✕
-                      </button>
+                    <li key={slot} className="space-y-1 rounded border border-line px-2 py-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate font-mono text-[13px] text-ink">{slot}</span>
+                        <button
+                          type="button"
+                          aria-label={t('spine.marker.remove', { slot })}
+                          onClick={() => {
+                            engineRef.current?.removeMarker(slot);
+                            setAttached((a) => a.filter((s) => s !== slot));
+                            // No orphan hidden-state: a re-attached marker starts visible again.
+                            setMarkerHidden((prev) => {
+                              const next = new Set(prev);
+                              next.delete(slot);
+                              return next;
+                            });
+                          }}
+                          className="shrink-0 rounded border border-line px-2 font-mono text-[13px] text-crit-text hover:border-crit-text"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      <Switch label={t('spine.marker.visible', { slot })} checked={!markerHidden.has(slot)} onChange={(b) => onMarkerVisible(slot, b)} />
                     </li>
                   ))}
                 </ul>

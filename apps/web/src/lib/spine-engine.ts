@@ -19,7 +19,7 @@
 //   spine.debug = new SpineDebugRenderer() (registers) / spine.debug = undefined (unregisters)
 //   spine.addSlotObject(slot, container) / removeSlotObject(container) / removeSlotObjects()
 
-import { Application, Container, Graphics, Text, Texture } from 'pixi.js';
+import { Application, Container, Graphics, Text, Texture, type Ticker } from 'pixi.js';
 import {
   Spine,
   SpineTexture,
@@ -29,6 +29,14 @@ import {
   SpineDebugRenderer,
   Skin,
   Physics,
+  MeshAttachment,
+  RegionAttachment,
+  ClippingAttachment,
+  BoundingBoxAttachment,
+  PathAttachment,
+  type AnimationStateListener,
+  type TrackEntry,
+  type SkeletonData,
 } from '@esotericsoftware/spine-pixi-v8';
 import type { PickedFile } from './import';
 import {
@@ -39,7 +47,23 @@ import {
   type Dim,
   type SkeletonLike,
 } from './spine-files';
-import { classifyAttachment, type SlotInfo } from './spine-inspect';
+import {
+  classifyAttachment,
+  classifyEntityType,
+  emptyEntityIndex,
+  addToQueue,
+  clearQueue,
+  removeFromQueue,
+  nextQueueIndex,
+  queueEntryLoop,
+  trimWrapTrackTime,
+  clampScrub,
+  DEBUG_ENTITY_TYPES,
+  type DebugEntityType,
+  type EntityIndex,
+  type EntitySelection,
+  type SlotInfo,
+} from './spine-inspect';
 
 export interface SpineLoadResult {
   animations: string[];
@@ -47,6 +71,10 @@ export interface SpineLoadResult {
   slots: SlotInfo[];
   firstAnimation: string | null;
   skeletonName: string;
+  /** All bone names, in skeleton order (data-derived, rendered verbatim — the bone inspector list). */
+  bones: string[];
+  /** Every `slot/attachment` key per granular debug bucket, deduped, built once at load. */
+  entities: EntityIndex;
 }
 
 export type SpineErrorKey = 'noJson' | 'load' | 'read';
@@ -56,6 +84,12 @@ export interface SpineCallbacks {
   onError(key: SpineErrorKey): void;
   /** Skin-driven re-classification push: attachment kinds can change when the active skin(s) change. */
   onSlots?(slots: SlotInfo[]): void;
+  /** Queue auto-advance / finish: the new cursor (-1 = no queued entry active) + its animation (null at -1). */
+  onQueueIndex?(index: number, animation: string | null): void;
+  /** Track-0 timeline readout (throttled to centisecond changes; duration from the live TrackEntry). */
+  onTimeline?(time: number, duration: number): void;
+  /** ~1 Hz FPS push from the Application ticker (real measured frames — never fabricated). */
+  onFps?(fps: number): void;
 }
 
 /** The eight SpineDebugRenderer entity toggles the UI exposes. Short union ⇒ clean i18n key derivation;
@@ -81,6 +115,27 @@ export class SpineEngine {
   private scaleFactor = 1;
   private markerScale = 1;
   private fitScale = 1;
+
+  // ── Queue (playlist) — the ENGINE is authoritative (auto-advance happens inside the Pixi `complete`
+  //    listener); React mirrors via onQueueIndex. The queue owns track 0 while non-empty; baseAnimation is
+  //    the track-0 fallback the queue returns to when emptied (upstream semantics). ──
+  private queue: string[] = [];
+  private queueIndex = -1;
+  private queueLoop = false;
+  private baseAnimation = '';
+  private completeListener: AnimationStateListener | null = null;
+  /** Last user-set alpha per track — applyAnimation falls back to it so a queue advance / base resume never
+   *  silently snaps a faded layer back to 1 while the React slider still shows the old value. */
+  private trackAlphas = new Map<number, number>();
+
+  // Trim sub-range loop (track 0). Wrapping happens in onTick via trimWrapTrackTime — pure, tested.
+  private trim = { enabled: false, start: 0, end: 0 };
+
+  // onTick throttles: timeline pushes only on DECIsecond change (10 Hz — a per-frame centisecond push would
+  // re-render the whole inspector at 60 Hz); FPS accumulates to ~1 Hz.
+  private lastTimePushed = -1;
+  private lastDurPushed = -1;
+  private fpsAccumMs = 0;
 
   // View transform (single source of truth; see applyTransform). All in Pixi SCREEN px == CSS px (autoDensity).
   private userZoom = 1; // clamped [0.1, 8]
@@ -108,9 +163,52 @@ export class SpineEngine {
     events: 'drawEvents',
   };
 
+  // ── Granular per-entity overlay (D3): a SECOND, independent Container added as a child of this.spine
+  //    (skeleton-local coordinates — same attach point as SpineDebugRenderer's parentDebugContainer, so no
+  //    manual worldTransform math). zIndex 9_999_998 keeps it just below the global overlay (9999999). ──
+  private granularRoot: Container | null = null;
+  private granG: {
+    bones: Graphics;
+    regions: Graphics;
+    meshTri: Graphics;
+    meshHull: Graphics;
+    pathCurve: Graphics;
+    pathLine: Graphics;
+    bbox: Graphics;
+    clip: Graphics;
+  } | null = null;
+  private granSel: { showBones: boolean; bones: Set<string>; ent: Record<DebugEntityType, Set<string>> } | null = null;
+
   /** destroy() flips this; init() re-checks it AFTER its async await so a StrictMode dev double-mount
    *  (mount → cleanup-mid-init → remount) cannot leave a zombie Application/canvas in the host. */
   private disposed = false;
+
+  /** THE single ticker callback (one registration in init(), one removal in destroy() — one teardown path):
+   *  (1) FPS accumulate → ~1 Hz push, (2) track-0 timeline read + trim wrap + throttled push, (3) granular
+   *  overlay redraw. Null-guards everything, so it is safe across reloads (reset() only nulls the state). */
+  private onTick = (tk: Ticker): void => {
+    this.fpsAccumMs += tk.deltaMS;
+    if (this.fpsAccumMs >= 1000) {
+      this.fpsAccumMs = 0;
+      this.cb.onFps?.(Math.round(tk.FPS));
+    }
+    const e = this.spine?.state.getTrack(0);
+    if (e) {
+      const time = e.getAnimationTime();
+      const dur = e.animation ? e.animation.duration : 0;
+      if (this.trim.enabled && dur > 0) {
+        const nt = trimWrapTrackTime(time, e.trackTime, this.trim.start, this.trim.end);
+        if (nt !== null) e.trackTime = nt;
+      }
+      const ds = Math.round(time * 10); // decisecond bucket — 10 Hz max push rate while playing
+      if (ds !== this.lastTimePushed || dur !== this.lastDurPushed) {
+        this.lastTimePushed = ds;
+        this.lastDurPushed = dur;
+        this.cb.onTimeline?.(time, dur);
+      }
+    }
+    if (this.granSel && this.granularRoot) this.renderGranular();
+  };
 
   constructor(cb: SpineCallbacks) {
     this.cb = cb;
@@ -169,6 +267,9 @@ export class SpineEngine {
     canvas.addEventListener('pointerup', this.onPointerUp);
     canvas.addEventListener('pointerleave', this.onPointerUp);
     canvas.addEventListener('wheel', this.onWheel, { passive: false });
+
+    // ONE ticker callback for FPS + timeline/trim + granular overlay (removed in destroy()).
+    app.ticker.add(this.onTick);
   }
 
   /** Honest 2×2 texture wired into any atlas page whose image genuinely could not be resolved — the region
@@ -235,6 +336,32 @@ export class SpineEngine {
       const animations = skeletonData.animations.map((a) => a.name);
       const skins = skeletonData.skins.map((s) => s.name);
       const firstAnimation = animations[0] ?? null;
+      const firstDuration = skeletonData.animations[0]?.duration ?? 0;
+
+      // Fresh playback state for the fresh skeleton (reset() already cleared the previous listener/queue).
+      this.baseAnimation = firstAnimation ?? '';
+      this.queue = [];
+      this.queueIndex = -1;
+      this.trackAlphas.clear(); // React resets every track row to alpha 1 on load
+      this.trim = { enabled: false, start: 0, end: firstDuration };
+      this.lastTimePushed = -1;
+      this.lastDurPushed = -1;
+
+      // Queue auto-advance: a track-0 `complete` steps the cursor (pure nextQueueIndex) and starts the next
+      // queued animation via applyAnimation (NOT setTrackAnimation — the public setter resets the queue).
+      this.completeListener = {
+        complete: (entry: TrackEntry) => {
+          if (entry.trackIndex !== 0 || this.queue.length === 0) return;
+          // Parked-finished (cursor === length): the LAST entry was left looping and spine-core fires
+          // `complete` on EVERY loop cycle — without this guard each cycle would restart the whole queue.
+          if (this.queueIndex >= this.queue.length) return;
+          const next = nextQueueIndex(this.queueIndex, this.queue.length, this.queueLoop);
+          this.queueIndex = next;
+          if (next < this.queue.length) this.applyAnimation(0, this.queue[next]!, queueEntryLoop(next, this.queue.length, this.queueLoop));
+          this.cb.onQueueIndex?.(next, next < this.queue.length ? this.queue[next]! : null);
+        },
+      };
+      spine.state.addListener(this.completeListener);
 
       if (firstAnimation) this.setTrackAnimation(0, firstAnimation, true);
       // Honor the CURRENT play state on every (re)load. this.playing already encodes the reduced-motion
@@ -261,7 +388,11 @@ export class SpineEngine {
         slots,
         firstAnimation,
         skeletonName: baseName(group.jsonName),
+        bones: skeletonData.bones.map((b) => b.name),
+        entities: this.classifyEntities(skeletonData),
       });
+      // Seed the timeline so the scrubber renders immediately (before the first tick pushes).
+      this.cb.onTimeline?.(0, firstDuration);
     } catch {
       this.cb.onError('load');
     }
@@ -335,10 +466,91 @@ export class SpineEngine {
   }
 
   // ── Multi-track animation ──────────────────────────────────────────────────
-  setTrackAnimation(track: number, name: string, loop: boolean): void {
+  /** RAW setAnimation + alpha + timeScale preservation, NO queue side-effects — used by the complete-listener
+   *  and the internal queue methods (D2: the public setter below would clobber the queue cursor). alpha omitted
+   *  ⇒ the LAST user-set alpha for that track (trackAlphas) — a queue advance never snaps a faded layer to 1. */
+  private applyAnimation(track: number, name: string, loop: boolean, alpha?: number): void {
     if (!this.spine) return;
-    this.spine.state.setAnimation(track, name, loop);
+    const e = this.spine.state.setAnimation(track, name, loop);
+    e.alpha = Math.max(0, Math.min(1, alpha ?? this.trackAlphas.get(track) ?? 1));
     this.spine.state.timeScale = this.playing ? this.speed : 0; // preserve pause/speed
+  }
+
+  /** The React entry point: picking a track-0 animation defines the queue's FALLBACK base animation and
+   *  resets the queue highlight (upstream: handleAnimationSelect parks queueIndex at -1). */
+  setTrackAnimation(track: number, name: string, loop: boolean, alpha = 1): void {
+    if (track === 0) {
+      this.baseAnimation = name;
+      if (this.queueIndex !== -1) {
+        this.queueIndex = -1;
+        this.cb.onQueueIndex?.(-1, null);
+      }
+    }
+    this.trackAlphas.set(track, alpha);
+    this.applyAnimation(track, name, loop, alpha);
+  }
+
+  /** Live per-track alpha blend (TrackEntry.alpha), clamped [0,1]; remembered so queue advances keep it. */
+  setTrackAlpha(track: number, alpha: number): void {
+    this.trackAlphas.set(track, alpha);
+    const e = this.spine?.state.getTrack(track);
+    if (e) e.alpha = Math.max(0, Math.min(1, alpha));
+  }
+
+  // ── Queue (playlist over track 0) ──────────────────────────────────────────
+  /** Append to the playlist; the CURRENT base entry stops looping so its next complete hands over. The
+   *  trackTime is re-phased into the current cycle first: a looping entry accumulates trackTime across
+   *  cycles, and with loop=false getAnimationTime() clamps to the end — an un-phased flip would fire
+   *  `complete` on the very next frame, snapping the base out mid-pose instead of finishing its cycle. */
+  enqueue(name: string): void {
+    this.queue = addToQueue(this.queue, name);
+    const cur = this.spine?.state.getTrack(0);
+    if (cur) {
+      const dur = cur.animation ? cur.animation.duration : 0;
+      if (cur.loop && dur > 0) cur.trackTime = cur.trackTime % dur;
+      cur.loop = false;
+    }
+  }
+
+  removeFromQueueAt(i: number): void {
+    const r = removeFromQueue(this.queue, i, this.queueIndex);
+    this.queue = r.queue;
+    this.queueIndex = r.index;
+    if (r.queue.length === 0 && this.baseAnimation) this.applyAnimation(0, this.baseAnimation, true);
+    this.cb.onQueueIndex?.(this.queueIndex, this.queue[this.queueIndex] ?? null);
+  }
+
+  clearQueue(): void {
+    this.queue = clearQueue();
+    this.queueIndex = -1;
+    if (this.baseAnimation) this.applyAnimation(0, this.baseAnimation, true);
+    this.cb.onQueueIndex?.(-1, null);
+  }
+
+  setQueueLoop(on: boolean): void {
+    this.queueLoop = on;
+  }
+
+  // ── Timeline scrub + trim + marker visibility ──────────────────────────────
+  /** Jump the track-0 playhead (paused scrubbing included — timeScale 0 freezes advance, not trackTime). */
+  scrub(time: number): void {
+    const e = this.spine?.state.getTrack(0);
+    if (!e) return;
+    const dur = e.animation ? e.animation.duration : 0;
+    e.trackTime = clampScrub(time, dur);
+    this.cb.onTimeline?.(e.getAnimationTime(), dur); // immediate feedback while paused
+  }
+
+  setTrim(enabled: boolean, start: number, end: number): void {
+    this.trim = { enabled, start, end };
+  }
+
+  /** Hide/show one attached marker. Toggles the INNER dot Graphics — Spine's per-frame updateSlotObjects
+   *  unconditionally overwrites the OUTER wrapper's .visible (= slot renderability), so toggling the wrapper
+   *  would be undone on the next frame; the inner child is ours alone (same pattern as markerScale). */
+  setMarkerVisible(slot: string, visible: boolean): void {
+    const dot = this.markers.get(slot);
+    if (dot) dot.visible = visible;
   }
 
   setEmptyTrack(track: number, mixDuration = 0): void {
@@ -412,6 +624,197 @@ export class SpineEngine {
     (d as unknown as Record<string, boolean>)[SpineEngine.DEBUG_FIELD[key]] = on;
   }
 
+  // ── Granular per-entity debug overlay (Phase B) ────────────────────────────
+  /** Build the `slot/attachment` key index per bucket, walking EVERY skin's SkinEntry list once at load.
+   *  D8: keyed on slot name + the LIVE attachment name (not the skin placeholder) — the draw loop below keys
+   *  identically, so linked meshes / renamed placeholders still match (a deliberate upstream-bug fix). */
+  private classifyEntities(sd: SkeletonData): EntityIndex {
+    const index = emptyEntityIndex();
+    const seen = new Set<string>();
+    for (const skin of sd.skins) {
+      for (const e of skin.getAttachments()) {
+        const key = `${sd.slots[e.slotIndex]?.name ?? `slot_${e.slotIndex}`}/${e.attachment.name}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const bucket = classifyEntityType(e.attachment);
+        if (bucket) index[bucket].push(key);
+      }
+    }
+    return index;
+  }
+
+  /** Lazy overlay graph (first setGranularSelection after each load). Mirrors SpineDebugRenderer.registerSpine:
+   *  a child of the Spine (skeleton-local coords), input+AOM-inert, zIndex just below the global overlay. */
+  private ensureGranularOverlay(): void {
+    if (this.granularRoot || !this.spine) return;
+    const root = new Container();
+    root.zIndex = 9_999_998; // below SpineDebugRenderer's 9999999 — both overlays coexist without fighting
+    root.eventMode = 'none';
+    root.interactiveChildren = false;
+    root.accessibleChildren = false;
+    const g = {
+      bones: new Graphics(),
+      regions: new Graphics(),
+      meshTri: new Graphics(),
+      meshHull: new Graphics(),
+      pathCurve: new Graphics(),
+      pathLine: new Graphics(),
+      bbox: new Graphics(),
+      clip: new Graphics(),
+    };
+    for (const gr of Object.values(g)) root.addChild(gr);
+    this.spine.addChild(root);
+    this.granularRoot = root;
+    this.granG = g;
+  }
+
+  /** React pushes the whole selection (show-bones flag + selected bone names + per-bucket entity keys);
+   *  the shared onTick redraws every frame while a selection object exists. */
+  setGranularSelection(s: { showBones: boolean; bones: string[]; entities: EntitySelection }): void {
+    if (!this.spine) return;
+    this.ensureGranularOverlay();
+    this.granSel = {
+      showBones: s.showBones,
+      bones: new Set(s.bones),
+      ent: Object.fromEntries(DEBUG_ENTITY_TYPES.map((k) => [k, new Set(s.entities[k])])) as Record<DebugEntityType, Set<string>>,
+    };
+  }
+
+  /** Per-frame granular draw. Coordinate handling mirrors the installed SpineDebugRenderer.js verbatim (D6):
+   *  the overlay is a CHILD of the Spine ⇒ computeWorldVertices output feeds poly/moveTo/lineTo directly;
+   *  bones add only skeleton.x/y; stroke widths divide by |spine.scale| so they stay ~constant on screen.
+   *  Every vertex is read live from the skeleton — nothing fabricated. Region "highlight" is an honest quad
+   *  OUTLINE (D7): spine-pixi-v8 exposes no per-slot container, so the upstream ColorMatrixFilter brighten is
+   *  unreachable — we outline instead of faking it (stated in spine.debug.gran.regionsHint). */
+  private renderGranular(): void {
+    const spine = this.spine;
+    const sel = this.granSel;
+    const g = this.granG;
+    if (!spine || !sel || !g) return;
+    g.bones.clear();
+    g.regions.clear();
+    g.meshTri.clear();
+    g.meshHull.clear();
+    g.pathCurve.clear();
+    g.pathLine.clear();
+    g.bbox.clear();
+    g.clip.clear();
+    const k = 1 / Math.abs(spine.scale.x || spine.scale.y || 1); // renderDebug's scale division
+    const lw = 2 * k;
+    const skeleton = spine.skeleton;
+
+    // Bones — line + tip dot (D10): selected = warn line + crit tip, idle = teal. Per-bone stroke (colors
+    // differ per glyph); every other type accumulates its path and strokes ONCE after the slot loop.
+    if (sel.showBones) {
+      for (const bone of skeleton.bones) {
+        if (bone.data.name === 'root' || bone.data.parent === null) continue;
+        const applied = bone.appliedPose;
+        const sx = skeleton.x + applied.worldX;
+        const sy = skeleton.y + applied.worldY;
+        const ex = skeleton.x + bone.data.length * applied.a + applied.worldX;
+        const ey = skeleton.y + bone.data.length * applied.b + applied.worldY;
+        const isSel = sel.bones.has(bone.data.name);
+        g.bones
+          .moveTo(sx, sy)
+          .lineTo(ex, ey)
+          .stroke({ width: (isSel ? 3 : 2) * k, color: isSel ? 0xd98a00 : 0x0e8c8c })
+          .circle(ex, ey, (isSel ? 5 : 3) * k)
+          .fill({ color: isSel ? 0xe5484d : 0x0e8c8c });
+      }
+    }
+
+    for (const slot of skeleton.slots) {
+      if (!slot.bone.active) continue;
+      const att = slot.appliedPose.getAttachment();
+      if (!att) continue;
+      const key = `${slot.data.name}/${att.name}`;
+      if (att instanceof RegionAttachment) {
+        if (!sel.ent.regionAttachments.has(key)) continue;
+        const v = new Float32Array(8);
+        att.computeWorldVertices(slot, att.getOffsets(slot.appliedPose), v, 0, 2); // 4.3.9 5-arg + offsets form
+        g.regions.poly(Array.from(v));
+      } else if (att instanceof MeshAttachment) {
+        if (!sel.ent.meshes.has(key)) continue;
+        const v = new Float32Array(att.worldVerticesLength);
+        att.computeWorldVertices(skeleton, slot, 0, att.worldVerticesLength, v, 0, 2); // 4.3.9 7-arg form
+        const tri = att.triangles;
+        for (let i = 0; i < tri.length; i += 3) {
+          const v1 = tri[i]! * 2;
+          const v2 = tri[i + 1]! * 2;
+          const v3 = tri[i + 2]! * 2;
+          g.meshTri.moveTo(v[v1]!, v[v1 + 1]!).lineTo(v[v2]!, v[v2 + 1]!).lineTo(v[v3]!, v[v3 + 1]!);
+        }
+        let hullLength = att.hullLength;
+        if (hullLength > 0) {
+          hullLength = (hullLength >> 1) * 2;
+          let lastX = v[hullLength - 2]!;
+          let lastY = v[hullLength - 1]!;
+          for (let i = 0; i < hullLength; i += 2) {
+            const x = v[i]!;
+            const y = v[i + 1]!;
+            g.meshHull.moveTo(x, y).lineTo(lastX, lastY);
+            lastX = x;
+            lastY = y;
+          }
+        }
+      } else if (att instanceof ClippingAttachment) {
+        if (!sel.ent.clipping.has(key)) continue;
+        const nn = att.worldVerticesLength;
+        const world = new Float32Array(nn);
+        att.computeWorldVertices(skeleton, slot, 0, nn, world, 0, 2);
+        g.clip.poly(Array.from(world));
+      } else if (att instanceof BoundingBoxAttachment) {
+        // D9: per-attachment polygon via the same 7-arg call (SkeletonBounds aggregates — cannot filter to one key).
+        if (!sel.ent.boundingBoxes.has(key)) continue;
+        const nn = att.worldVerticesLength;
+        const world = new Float32Array(nn);
+        att.computeWorldVertices(skeleton, slot, 0, nn, world, 0, 2);
+        g.bbox.poly(Array.from(world));
+      } else if (att instanceof PathAttachment) {
+        if (!sel.ent.paths.has(key)) continue;
+        let nn = att.worldVerticesLength;
+        const world = new Float32Array(nn);
+        att.computeWorldVertices(skeleton, slot, 0, nn, world, 0, 2);
+        let x1 = world[2]!;
+        let y1 = world[3]!;
+        let x2 = 0;
+        let y2 = 0;
+        if (att.closed) {
+          const cx1 = world[0]!;
+          const cy1 = world[1]!;
+          const cx2 = world[nn - 2]!;
+          const cy2 = world[nn - 1]!;
+          x2 = world[nn - 4]!;
+          y2 = world[nn - 3]!;
+          g.pathCurve.moveTo(x1, y1).bezierCurveTo(cx1, cy1, cx2, cy2, x2, y2);
+          g.pathLine.moveTo(x1, y1).lineTo(cx1, cy1).moveTo(x2, y2).lineTo(cx2, cy2);
+        }
+        nn -= 4;
+        for (let ii = 4; ii < nn; ii += 6) {
+          const cx1 = world[ii]!;
+          const cy1 = world[ii + 1]!;
+          const cx2 = world[ii + 2]!;
+          const cy2 = world[ii + 3]!;
+          x2 = world[ii + 4]!;
+          y2 = world[ii + 5]!;
+          g.pathCurve.moveTo(x1, y1).bezierCurveTo(cx1, cy1, cx2, cy2, x2, y2);
+          g.pathLine.moveTo(x1, y1).lineTo(cx1, cy1).moveTo(x2, y2).lineTo(cx2, cy2);
+          x1 = x2;
+          y1 = y2;
+        }
+      }
+    }
+    // ONE stroke per Graphics after the loop (reference pattern). Colors = ensureDebug()'s token palette
+    // (a WebGL canvas cannot read CSS vars — same rationale, one palette across both overlays).
+    g.regions.stroke({ color: 0x2b8fc9, width: lw * 1.5 }); // info, thicker — the honest region highlight (D7)
+    g.meshTri.stroke({ width: lw, color: 0x1f9d63 }); // ok
+    g.meshHull.stroke({ width: lw, color: 0x0e8c8c }); // teal
+    g.clip.stroke({ width: lw, color: 0xd98a00, alpha: 1 }); // warn
+    g.bbox.stroke({ width: lw, color: 0xe5484d }); // crit
+    g.pathCurve.stroke({ width: lw, color: 0x2b8fc9 }); // info
+    g.pathLine.stroke({ width: lw, color: 0x9fb0bd }); // film-soft
+  }
+
   // ── Slot classification ────────────────────────────────────────────────────
   private classifySlots(): SlotInfo[] {
     return (this.spine?.skeleton.slots ?? []).map((slot) => ({
@@ -462,12 +865,22 @@ export class SpineEngine {
   /** Tear down the current spine + its markers + its debug renderer (a reload); keeps the Application alive. */
   reset(): void {
     if (this.spine) {
+      if (this.completeListener) this.spine.state.removeListener(this.completeListener); // before the Spine dies
       if (this.debug) this.spine.debug = undefined; // unregisterSpine before the Spine is destroyed
+      // Destroy the granular overlay BEFORE spine.destroy() (it is a child of the Spine); the shared onTick
+      // null-guards, so no ticker unhook is needed until destroy().
+      this.granularRoot?.destroy({ children: true });
       this.spine.removeSlotObjects();
       this.app?.stage.removeChild(this.spine);
       this.spine.destroy();
       this.spine = null;
     }
+    this.completeListener = null;
+    this.queue = [];
+    this.queueIndex = -1;
+    this.granularRoot = null;
+    this.granG = null;
+    this.granSel = null;
     this.debug = null;
     // Destroy the (now-detached) marker wrappers: removeSlotObjects() above detaches them from the Spine but
     // does NOT free their Graphics/Text GPU resources, so without this they leak once per marker × reload.
@@ -481,6 +894,7 @@ export class SpineEngine {
 
   destroy(): void {
     this.disposed = true; // init() re-checks after its await — see the field comment
+    this.app?.ticker.remove(this.onTick); // the single ticker callback — one registration, one removal
     const canvas = this.app?.canvas as unknown as HTMLCanvasElement | undefined;
     if (canvas) {
       canvas.removeEventListener('pointerdown', this.onPointerDown);

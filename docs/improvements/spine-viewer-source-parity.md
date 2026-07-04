@@ -75,15 +75,21 @@ user selects WHICH named entities to draw (per-type Set + All/None + text filter
 - Error messages, empty/drop overlay, on-canvas controls (play, open, debug).
 
 ## Gap to close (this round) — everything the upstream has that v1+v2 will NOT
-1. Animation **queue** (playlist + loop + auto-advance + current highlight).
-2. **Timeline** readout + **scrubber** (drag to set `trackTime`).
-3. **Trim** (loop a sub-range; timeline trim region).
-4. **FPS** badge.
-5. Per-track **alpha** (confirm; add if v2 omitted).
-6. **Bone inspector**: list + filter + per-bone select/highlight + show-bones.
-7. **Granular per-entity debug selection** for regions/meshes/paths/bounding-boxes/clipping (All/None + filter),
-   with real overlay drawing (triangles/hull/bezier/polygon) + region **ColorMatrixFilter** highlight.
-8. Per-marker **visibility** toggle.
+1. ~~Animation **queue** (playlist + loop + auto-advance + current highlight).~~ **CLOSED (v3 Phase A)** —
+   engine-authoritative playlist over track 0 (`enqueue/removeFromQueueAt/clearQueue/setQueueLoop` + a
+   `state.addListener({complete})` auto-advance; pure `nextQueueIndex/queueEntryLoop/removeFromQueue` tested).
+2. ~~**Timeline** readout + **scrubber**.~~ **CLOSED (v3 Phase A)** — ticker reads `getTrack(0).getAnimationTime()`
+   + `animation.duration`; the real control is a labeled `<input type=range>` (mouse drag AND arrow keys).
+3. ~~**Trim**.~~ **CLOSED (v3 Phase A)** — `trimWrapTrackTime` in the shared ticker + a teal trim region on the bar.
+4. ~~**FPS** badge.~~ **CLOSED (v3 Phase A)** — real `ticker.FPS` pushed ~1 Hz, aria-hidden on-canvas island.
+5. ~~Per-track **alpha**.~~ **CLOSED (v3 Phase A)** — `TrackEntry.alpha` slider per row; survives anim/loop changes.
+6. ~~**Bone inspector**.~~ **CLOSED (v3 Phase B)** — list + filter + per-bone select (warn/crit highlight) +
+   show-bones; custom line+dot glyphs on a skeleton-local overlay (child of the Spine, reference coordinates).
+7. ~~**Granular per-entity debug selection**.~~ **CLOSED (v3 Phase B)** — per-type key lists (All/None + filter)
+   with real overlay drawing mirroring SpineDebugRenderer.js (region 5-arg + `getOffsets`; mesh/path/bbox/clip
+   7-arg `computeWorldVertices`); region highlight is the HONEST outline (no per-slot container in
+   spine-pixi-v8 ⇒ the ColorMatrixFilter brighten is unreachable — stated in `spine.debug.gran.regionsHint`).
+8. ~~Per-marker **visibility** toggle.~~ **CLOSED (v3 Phase A)** — wrapper `.visible` Switch per attached marker.
 
 ## Porting notes for Pixi v8 + spine-pixi-v8 4.3.9 (vs the v7/pixi-spine-v4 source)
 - **Custom overlay drawing:** the source used `spine.worldTransform` (Matrix a/b/c/d/tx/ty) to map skeleton→

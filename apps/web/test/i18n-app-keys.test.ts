@@ -105,6 +105,9 @@ const SPINE_ERROR_SUFFIXES = ['noJson', 'load', 'read'];
 // lib/spine-engine.ts. Both the label and the `${key}Hint` template share the `spine.debug.` prefix, so the
 // branch below emits both the base key and its Hint sibling for every suffix.
 const SPINE_DEBUG_SUFFIXES = ['bones', 'regions', 'meshTriangles', 'meshHull', 'clipping', 'boundingBoxes', 'paths', 'events'];
+// spine.debug.gran.${granType} (SpineViewer.tsx granular type-picker options) — mirrors 'bones' +
+// DEBUG_ENTITY_TYPES (lib/spine-inspect.ts). MUST be branched BEFORE the broader spine.debug. prefix.
+const SPINE_GRAN_SUFFIXES = ['bones', 'regionAttachments', 'meshes', 'paths', 'boundingBoxes', 'clipping'];
 // spine.kind.${s.kind} (SpineViewer.tsx slot badges) — mirrors the AttachmentKind union in lib/spine-inspect.ts.
 const SPINE_KIND_SUFFIXES = ['mesh', 'region', 'clip', 'bbox', 'path', 'point', 'none', 'other'];
 const TRIAGE_FILTER_SUFFIXES = ['crit', 'warn', 'info'];
@@ -147,6 +150,8 @@ function expandedDynamicKeys(src: string): Set<string> {
     else if (tmpl.startsWith('triage.sort.')) TRIAGE_SORT_SUFFIXES.forEach((s) => keys.add(`triage.sort.${s}`));
     else if (tmpl.startsWith('triage.scope.')) TRIAGE_SCOPE_SUFFIXES.forEach((s) => keys.add(`triage.scope.${s}`));
     else if (tmpl.startsWith('spine.error.')) SPINE_ERROR_SUFFIXES.forEach((s) => keys.add(`spine.error.${s}`));
+    // spine.debug.gran. is MORE SPECIFIC than spine.debug. — must be branched first.
+    else if (tmpl.startsWith('spine.debug.gran.')) SPINE_GRAN_SUFFIXES.forEach((s) => keys.add(`spine.debug.gran.${s}`));
     // spine.debug. covers BOTH t(`spine.debug.${key}`) and t(`spine.debug.${key}Hint`) — emit base + Hint.
     else if (tmpl.startsWith('spine.debug.'))
       SPINE_DEBUG_SUFFIXES.forEach((s) => {
