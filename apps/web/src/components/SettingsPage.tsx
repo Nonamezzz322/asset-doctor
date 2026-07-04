@@ -76,7 +76,7 @@ function NumberRow({
   onChange: (n: number) => void;
 }) {
   return (
-    <label className="flex items-center justify-between gap-2 font-mono text-[10px] text-ink-soft" title={hint}>
+    <label className="flex items-center justify-between gap-2 font-mono text-[13px] text-ink-soft" title={hint}>
       {label}
       <input
         type="number"
@@ -86,7 +86,7 @@ function NumberRow({
         value={value}
         aria-label={label}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-24 rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink focus:border-teal"
+        className="w-24 rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[13px] text-ink focus:border-teal"
       />
     </label>
   );
@@ -100,10 +100,10 @@ function SettingRow({ label, hint, labelId, control }: { label: string; hint?: s
   return (
     <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
       <div className="min-w-0 flex-1">
-        <span id={labelId} className="font-mono text-[10px] text-ink-soft">
+        <span id={labelId} className="font-mono text-[13px] text-ink-soft">
           {label}
         </span>
-        {hint ? <p className="mt-0.5 font-mono text-[9px] leading-relaxed text-ink-soft">{hint}</p> : null}
+        {hint ? <p className="mt-0.5 font-mono text-[12px] leading-relaxed text-ink-soft">{hint}</p> : null}
       </div>
       <div className="shrink-0">{control}</div>
     </div>
@@ -132,10 +132,10 @@ function Switch({ label, hint, checked, onChange }: { label: string; hint?: stri
       className="flex w-full flex-wrap items-start justify-between gap-x-3 gap-y-1 rounded text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal"
     >
       <span className="min-w-0 flex-1">
-        <span id={labelId} className="block font-mono text-[10px] text-ink-soft">
+        <span id={labelId} className="block font-mono text-[13px] text-ink-soft">
           {label}
         </span>
-        {hint ? <span className="mt-0.5 block font-mono text-[9px] leading-relaxed text-ink-soft">{hint}</span> : null}
+        {hint ? <span className="mt-0.5 block font-mono text-[12px] leading-relaxed text-ink-soft">{hint}</span> : null}
       </span>
       <span
         aria-hidden="true"
@@ -186,7 +186,7 @@ function Segmented<T extends string>({
           {options.map((o) => (
             <label key={o.value} className={disabled ? 'cursor-not-allowed' : 'cursor-pointer'}>
               <input type="radio" name={name} value={o.value} checked={value === o.value} disabled={disabled} onChange={() => onChange(o.value)} className="peer sr-only" />
-              <span className="block rounded-md px-2 py-0.5 font-mono text-[10px] text-ink-soft transition peer-checked:bg-teal-text peer-checked:text-panel peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-1 peer-focus-visible:outline-teal motion-reduce:transition-none">
+              <span className="block rounded-md px-2 py-0.5 font-mono text-[13px] text-ink-soft transition peer-checked:bg-teal-text peer-checked:text-panel peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-1 peer-focus-visible:outline-teal motion-reduce:transition-none">
                 {o.label}
               </span>
             </label>
@@ -219,12 +219,12 @@ function ThemeCard() {
   ];
   return (
     <Card title={t('settings.section.appearance')}>
-      <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('settings.theme.intro')}</p>
+      <p className="font-mono text-[13px] leading-relaxed text-ink-soft">{t('settings.theme.intro')}</p>
       <fieldset className="rounded border border-line/70 p-2">
         <legend className="px-1 ad-label text-ink-soft">{t('settings.theme.legend')}</legend>
         <div className="mt-1 space-y-1">
           {options.map(({ v, label }) => (
-            <label key={v} className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
+            <label key={v} className="flex items-center gap-1.5 font-mono text-[13px] text-ink-soft">
               <input
                 type="radio"
                 name="ad-theme"
@@ -257,10 +257,10 @@ function DiagnosisCard({ hidden, onChange }: { hidden: ReadonlySet<Rule>; onChan
   const hiddenCount = hidden.size;
   return (
     <Card title={t('settings.section.diagnosis')}>
-      <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('settings.diagnosis.intro')}</p>
+      <p className="font-mono text-[13px] leading-relaxed text-ink-soft">{t('settings.diagnosis.intro')}</p>
       <div className="flex items-center justify-between gap-2">
         {/* Live hidden-count — role=status so a screen reader hears it change as boxes toggle (design §9). */}
-        <p role="status" aria-live="polite" className="font-mono text-[10px] text-ink-soft">
+        <p role="status" aria-live="polite" className="font-mono text-[13px] text-ink-soft">
           {t('settings.diagnosis.hiddenSummary', { n: hiddenCount })}
         </p>
         {/* One-click "show all types" reset — the card-level escape (mirrors the ledger H-line's clear).
@@ -269,7 +269,7 @@ function DiagnosisCard({ hidden, onChange }: { hidden: ReadonlySet<Rule>; onChan
           type="button"
           disabled={hiddenCount === 0}
           onClick={() => onChange(new Set())}
-          className="shrink-0 rounded border border-line px-2 py-0.5 font-mono text-[10px] text-teal-text transition hover:border-teal disabled:opacity-60 disabled:hover:border-line"
+          className="shrink-0 rounded border border-line px-2 py-0.5 font-mono text-[13px] text-teal-text transition hover:border-teal disabled:opacity-60 disabled:hover:border-line"
         >
           {t('settings.diagnosis.showAll')}
         </button>
@@ -299,7 +299,7 @@ function DiagnosisCard({ hidden, onChange }: { hidden: ReadonlySet<Rule>; onChan
               </legend>
               <div className="mt-1 space-y-1">
                 {RULES_IN_GROUP[g].map((r) => (
-                  <label key={r} className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
+                  <label key={r} className="flex items-center gap-1.5 font-mono text-[13px] text-ink-soft">
                     <input type="checkbox" checked={!hidden.has(r)} onChange={() => onChange(toggleRule(hidden, r))} className="accent-teal" />
                     {t(`rule.${r}`)}
                   </label>
@@ -333,7 +333,7 @@ function FormatsCard({ s, patch }: Sect) {
 
   return (
     <Card id={PROFILE_PANEL_ANCHOR} title={t('settings.section.formats')}>
-      <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.profile.hint')}</p>
+      <p className="font-mono text-[13px] leading-relaxed text-ink-soft">{t('fix.profile.hint')}</p>
 
       {/* Defaults (profile OFF path) — replaces the two old buildOptions hardcodes. */}
       <div className="rounded border border-line/70 p-1.5">
@@ -363,37 +363,37 @@ function FormatsCard({ s, patch }: Sect) {
                 const isPng = mime === 'image/png';
                 return (
                   <div key={mime} className="rounded border border-line/70 p-1.5">
-                    <label className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
+                    <label className="flex items-center gap-1.5 font-mono text-[13px] text-ink-soft">
                       <input type="checkbox" checked={f.enabled} onChange={(e) => patchFormat(mime, { enabled: e.target.checked })} className="accent-teal" />
                       {t(key)}
                     </label>
                     {f.enabled ? (
                       <div className="mt-1.5 space-y-1 pl-4">
                         {!isPng && !f.lossless ? (
-                          <label className="flex items-center justify-between font-mono text-[10px] text-ink-soft">
+                          <label className="flex items-center justify-between font-mono text-[13px] text-ink-soft">
                             <span>
                               {t('fix.profile.quality')} <span className="text-ink">{f.quality}</span>
                             </span>
                             <input type="range" min={0} max={100} step={1} value={f.quality} onChange={(e) => patchFormat(mime, { quality: Number(e.target.value) })} className="ml-2 w-1/2 accent-teal" />
                           </label>
                         ) : null}
-                        <label className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={isAvif ? t('fix.profile.avifNoLossless') : undefined}>
+                        <label className="flex items-center gap-1.5 font-mono text-[13px] text-ink-soft" title={isAvif ? t('fix.profile.avifNoLossless') : undefined}>
                           <input type="checkbox" checked={!isAvif && f.lossless} disabled={isAvif} onChange={(e) => patchFormat(mime, { lossless: e.target.checked })} className="accent-teal disabled:opacity-60" />
                           {t('fix.profile.lossless')}
                         </label>
                         {isPng ? (
-                          <label className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft" title={t('fix.profile.pngLossyHint')}>
+                          <label className="flex items-center gap-1.5 font-mono text-[13px] text-ink-soft" title={t('fix.profile.pngLossyHint')}>
                             <input type="checkbox" checked={!!f.pngLossy} onChange={(e) => patchFormat(mime, { pngLossy: e.target.checked })} className="accent-teal" />
                             {t('fix.profile.pngLossy')}
                           </label>
                         ) : null}
                         {mime === 'image/webp' && !f.lossless ? (
-                          <label className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
+                          <label className="flex items-center gap-1.5 font-mono text-[13px] text-ink-soft">
                             <input type="checkbox" checked={f.near} onChange={(e) => patchFormat(mime, { near: e.target.checked })} className="accent-teal" />
                             {t('fix.profile.nearLossless')}
                           </label>
                         ) : null}
-                        {isAvif ? <p className="font-mono text-[9px] leading-relaxed text-ink-soft">{t('fix.profile.avifNoLossless')}</p> : null}
+                        {isAvif ? <p className="font-mono text-[12px] leading-relaxed text-ink-soft">{t('fix.profile.avifNoLossless')}</p> : null}
                       </div>
                     ) : null}
                   </div>
@@ -409,7 +409,7 @@ function FormatsCard({ s, patch }: Sect) {
                 aria-label={t('fix.profile.avifSubsample')}
                 value={s.profileAvifSubsample === undefined ? 'default' : String(s.profileAvifSubsample)}
                 onChange={(e) => patch({ profileAvifSubsample: e.target.value === 'default' ? undefined : Number(e.target.value) })}
-                className="mt-1 rounded border border-line bg-panel px-1 py-0.5 font-mono text-[10px] text-ink"
+                className="mt-1 rounded border border-line bg-panel px-1 py-0.5 font-mono text-[13px] text-ink"
               >
                 <option value="default">{t('fix.profile.avifSubsample.default')}</option>
                 <option value="3">{t('fix.profile.avifSubsample.444')}</option>
@@ -422,22 +422,22 @@ function FormatsCard({ s, patch }: Sect) {
           {/* ── Resolutions ── */}
           <div>
             <p className="ad-label text-ink-soft">{t('fix.profile.resolutions')}</p>
-            <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-soft">{DEFAULT_SCALE_TIERS.map((tt) => tt.suffix).join('  ')}</p>
+            <p className="mt-1 font-mono text-[13px] leading-relaxed text-ink-soft">{DEFAULT_SCALE_TIERS.map((tt) => tt.suffix).join('  ')}</p>
             {s.customTiers.map((tt, i) => {
               const validSuffix = isSafeSuffix(tt.suffix);
               return (
                 <div key={i} className="mt-1 flex items-center gap-1.5">
-                  <span className="font-mono text-[10px] text-ink-soft">{t('fix.profile.tierScale')}</span>
-                  <input type="number" min={0.05} max={1} step={0.05} value={tt.scale} aria-label={t('fix.profile.tierScale')} onChange={(e) => patchTier(i, { scale: Number(e.target.value) })} className="w-16 rounded border border-line bg-panel px-1 font-mono text-[10px] text-ink" />
-                  <input type="text" value={tt.suffix} aria-label={t('fix.profile.tierSuffix')} onChange={(e) => patchTier(i, { suffix: e.target.value })} placeholder="_540p" className={`w-20 rounded border bg-panel px-1 font-mono text-[10px] text-ink ${validSuffix ? 'border-line' : 'border-crit'}`} />
-                  <button type="button" onClick={() => removeTier(i)} className="font-mono text-[10px] text-crit-text hover:underline" aria-label="remove">
+                  <span className="font-mono text-[13px] text-ink-soft">{t('fix.profile.tierScale')}</span>
+                  <input type="number" min={0.05} max={1} step={0.05} value={tt.scale} aria-label={t('fix.profile.tierScale')} onChange={(e) => patchTier(i, { scale: Number(e.target.value) })} className="w-16 rounded border border-line bg-panel px-1 font-mono text-[13px] text-ink" />
+                  <input type="text" value={tt.suffix} aria-label={t('fix.profile.tierSuffix')} onChange={(e) => patchTier(i, { suffix: e.target.value })} placeholder="_540p" className={`w-20 rounded border bg-panel px-1 font-mono text-[13px] text-ink ${validSuffix ? 'border-line' : 'border-crit'}`} />
+                  <button type="button" onClick={() => removeTier(i)} className="font-mono text-[13px] text-crit-text hover:underline" aria-label="remove">
                     ✕
                   </button>
-                  {!validSuffix ? <span className="font-mono text-[9px] text-crit-text">{t('fix.profile.tierBadSuffix', { suffix: tt.suffix })}</span> : null}
+                  {!validSuffix ? <span className="font-mono text-[12px] text-crit-text">{t('fix.profile.tierBadSuffix', { suffix: tt.suffix })}</span> : null}
                 </div>
               );
             })}
-            <button type="button" onClick={addTier} className="mt-1 font-mono text-[10px] text-teal-text hover:underline">
+            <button type="button" onClick={addTier} className="mt-1 font-mono text-[13px] text-teal-text hover:underline">
               + {t('fix.profile.addTier')}
             </button>
           </div>
@@ -445,11 +445,11 @@ function FormatsCard({ s, patch }: Sect) {
           {/* ── Per-folder overrides ── */}
           <div>
             <p className="ad-label text-ink-soft">{t('fix.profile.overrides')}</p>
-            <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.profile.overridesHint')}</p>
+            <p className="mt-1 font-mono text-[13px] leading-relaxed text-ink-soft">{t('fix.profile.overridesHint')}</p>
             {s.profileOverrides.map((o, i) => (
               <div key={i} className="mt-1 flex flex-wrap items-center gap-1.5">
-                <input type="text" value={o.match} onChange={(e) => patchOverride(i, { match: e.target.value })} placeholder={t('fix.profile.overrideMatchPlaceholder')} aria-label={t('fix.profile.overrides')} className="w-28 rounded border border-line bg-panel px-1 font-mono text-[10px] text-ink" />
-                <select value={o.mode} aria-label={t('fix.profile.overrides')} onChange={(e) => patchOverride(i, { mode: e.target.value as OverrideMode })} className="rounded border border-line bg-panel px-1 font-mono text-[10px] text-ink">
+                <input type="text" value={o.match} onChange={(e) => patchOverride(i, { match: e.target.value })} placeholder={t('fix.profile.overrideMatchPlaceholder')} aria-label={t('fix.profile.overrides')} className="w-28 rounded border border-line bg-panel px-1 font-mono text-[13px] text-ink" />
+                <select value={o.mode} aria-label={t('fix.profile.overrides')} onChange={(e) => patchOverride(i, { mode: e.target.value as OverrideMode })} className="rounded border border-line bg-panel px-1 font-mono text-[13px] text-ink">
                   {OVERRIDE_MODE_KEYS.map(({ mode, key }) => (
                     <option key={mode} value={mode}>
                       {t(key)}
@@ -457,24 +457,24 @@ function FormatsCard({ s, patch }: Sect) {
                   ))}
                 </select>
                 {o.mode !== 'lossless' ? (
-                  <input type="number" min={0} max={100} step={1} value={o.quality ?? 85} aria-label={t('fix.profile.quality')} onChange={(e) => patchOverride(i, { quality: Number(e.target.value) })} className="w-14 rounded border border-line bg-panel px-1 font-mono text-[10px] text-ink" />
+                  <input type="number" min={0} max={100} step={1} value={o.quality ?? 85} aria-label={t('fix.profile.quality')} onChange={(e) => patchOverride(i, { quality: Number(e.target.value) })} className="w-14 rounded border border-line bg-panel px-1 font-mono text-[13px] text-ink" />
                 ) : null}
-                <button type="button" onClick={() => removeOverride(i)} className="font-mono text-[10px] text-crit-text hover:underline" aria-label="remove">
+                <button type="button" onClick={() => removeOverride(i)} className="font-mono text-[13px] text-crit-text hover:underline" aria-label="remove">
                   ✕
                 </button>
               </div>
             ))}
             <div className="mt-1 flex flex-wrap gap-3">
-              <button type="button" onClick={addFonts444} className="font-mono text-[10px] text-teal-text hover:underline">
+              <button type="button" onClick={addFonts444} className="font-mono text-[13px] text-teal-text hover:underline">
                 + {t('fix.profile.overrideFonts444')}
               </button>
-              <button type="button" onClick={addOverride} className="font-mono text-[10px] text-teal-text hover:underline">
+              <button type="button" onClick={addOverride} className="font-mono text-[13px] text-teal-text hover:underline">
                 + {t('fix.profile.addOverride')}
               </button>
             </div>
           </div>
 
-          <ul className="space-y-1 border-t border-line pt-2 font-mono text-[10px] leading-relaxed text-ink-soft">
+          <ul className="space-y-1 border-t border-line pt-2 font-mono text-[13px] leading-relaxed text-ink-soft">
             <li>{t('fix.profile.noBundleNote')}</li>
             <li>{t('fix.profile.diskNote')}</li>
             <li>{t('fix.skipped.whyNoKernel')}</li>
@@ -497,11 +497,11 @@ function ResolutionsCard({ s, patch }: Sect) {
   };
   return (
     <Card title={t('settings.section.resolutions')}>
-      <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.tier.hint')}</p>
+      <p className="font-mono text-[13px] leading-relaxed text-ink-soft">{t('fix.tier.hint')}</p>
       <NumberRow label={t('settings.maxEdge')} value={s.maxEdge} min={128} max={16384} step={128} onChange={(n) => patch({ maxEdge: n })} />
 
       <Switch label={t('fix.tier.enable')} checked={s.tierEnable} onChange={(b) => patch({ tierEnable: b })} />
-      <p className="font-mono text-[10px] leading-relaxed text-ink">⚠ {t('fix.tier.inlineWarn')}</p>
+      <p className="font-mono text-[13px] leading-relaxed text-ink">⚠ {t('fix.tier.inlineWarn')}</p>
 
       {s.tierEnable ? (
         <div className="space-y-2">
@@ -509,16 +509,16 @@ function ResolutionsCard({ s, patch }: Sect) {
             {DEFAULT_SCALE_TIERS.map((tier) => {
               const top = tier.scale >= 1;
               return (
-                <label key={tier.suffix} title={top ? t('fix.tier.inlineWarn') : undefined} className="flex items-center gap-1.5 font-mono text-[10px] text-ink-soft">
+                <label key={tier.suffix} title={top ? t('fix.tier.inlineWarn') : undefined} className="flex items-center gap-1.5 font-mono text-[13px] text-ink-soft">
                   <input type="checkbox" checked={top || s.tierSuffixes.includes(tier.suffix)} disabled={top} onChange={(e) => toggle(tier.suffix, e.target.checked)} className="accent-teal disabled:opacity-60" />
                   {t(labelKey(tier.suffix))}
                 </label>
               );
             })}
           </div>
-          <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.tier.diskNote')}</p>
-          <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.tier.repackNote')}</p>
-          <ul className="space-y-1 border-t border-line pt-2 font-mono text-[10px] leading-relaxed text-ink-soft">
+          <p className="font-mono text-[13px] leading-relaxed text-ink-soft">{t('fix.tier.diskNote')}</p>
+          <p className="font-mono text-[13px] leading-relaxed text-ink-soft">{t('fix.tier.repackNote')}</p>
+          <ul className="space-y-1 border-t border-line pt-2 font-mono text-[13px] leading-relaxed text-ink-soft">
             <li>{t('fix.skipped.whyNoKernel')}</li>
             <li>{t('fix.skipped.whyNoPreBlur')}</li>
             {/* Softened, consent-agnostic tier hint (the per-run consent lives in the FixCard). */}
@@ -556,11 +556,11 @@ function PackingCard({ s, patch }: Sect) {
         ]}
         onChange={(v) => patch({ spinePageFormat: v })}
       />
-      <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('settings.spineFormat.hint')}</p>
+      <p className="font-mono text-[13px] leading-relaxed text-ink-soft">{t('settings.spineFormat.hint')}</p>
 
       <div className="border-t border-line pt-2">
         <Switch label={t('fix.pack.enable')} checked={s.packLoose} onChange={(b) => patch({ packLoose: b })} />
-        <p className="mt-1 font-mono text-[10px] leading-relaxed text-ink">⚠ {t('fix.pack.inlineWarn')}</p>
+        <p className="mt-1 font-mono text-[13px] leading-relaxed text-ink">⚠ {t('fix.pack.inlineWarn')}</p>
 
         {s.packLoose ? (
           <div className="mt-2 space-y-2">
@@ -570,9 +570,9 @@ function PackingCard({ s, patch }: Sect) {
               options={modes.map((m) => ({ value: m, label: t(`fix.pack.mode.${modeKey[m]}`) }))}
               onChange={(v) => patch({ packMode: v })}
             />
-            <label className="flex items-center justify-between gap-2 font-mono text-[10px] text-ink-soft">
+            <label className="flex items-center justify-between gap-2 font-mono text-[13px] text-ink-soft">
               {t('fix.pack.grouping.label')}
-              <select aria-label={t('fix.pack.grouping.label')} value={s.packGranularity} onChange={(e) => patch({ packGranularity: e.target.value as StaticGranularity })} className="rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink-soft transition hover:border-teal focus:border-teal">
+              <select aria-label={t('fix.pack.grouping.label')} value={s.packGranularity} onChange={(e) => patch({ packGranularity: e.target.value as StaticGranularity })} className="rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[13px] text-ink-soft transition hover:border-teal focus:border-teal">
                 {grans.map((g) => (
                   <option key={g} value={g}>
                     {t(`fix.pack.grouping.${granKey[g]}`)}
@@ -581,7 +581,7 @@ function PackingCard({ s, patch }: Sect) {
               </select>
             </label>
             <Switch label={t('fix.pack.trim')} checked={s.packTrim} onChange={(b) => patch({ packTrim: b })} />
-            <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.pack.spinePng')}</p>
+            <p className="font-mono text-[13px] leading-relaxed text-ink-soft">{t('fix.pack.spinePng')}</p>
           </div>
         ) : null}
       </div>
@@ -603,8 +603,8 @@ function MipmapsCard({ s, patch }: Sect) {
         options={opts.map((n) => ({ value: String(n), label: n === 0 ? t('fix.extrude.off') : t('fix.extrude.px', { n }) }))}
         onChange={(v) => patch({ extrude: Number(v) })}
       />
-      <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.extrudeHint', { px: s.extrude || 1 })}</p>
-      <p className="border-t border-line pt-2 font-mono text-[10px] leading-relaxed text-ink-soft">{t('settings.mip.copy')}</p>
+      <p className="font-mono text-[13px] leading-relaxed text-ink-soft">{t('fix.extrudeHint', { px: s.extrude || 1 })}</p>
+      <p className="border-t border-line pt-2 font-mono text-[13px] leading-relaxed text-ink-soft">{t('settings.mip.copy')}</p>
     </Card>
   );
 }
@@ -618,7 +618,7 @@ function RulesCard({ s, patch }: Sect) {
     <Card title={t('settings.section.rules')}>
       <Switch label={t('fix.merge')} checked={s.aggressive} onChange={(b) => patch({ aggressive: b })} />
 
-      <label className="block font-mono text-[10px] text-ink-soft">
+      <label className="block font-mono text-[13px] text-ink-soft">
         <span className="flex items-center justify-between" title={t('fix.settings.effortHint')}>
           {t('fix.settings.effort')} <span className="text-ink">{s.effort}</span>
         </span>
@@ -629,9 +629,9 @@ function RulesCard({ s, patch }: Sect) {
       <Switch label={t('fix.settings.nearLossless')} hint={t('fix.settings.nearLosslessHint')} checked={s.webpNearLossless} onChange={(b) => patch({ webpNearLossless: b })} />
 
       {/* PNG lossless-recompress LEVEL (replaces the old boolean; 0 = off, 1..6 oxipng effort). */}
-      <label className="flex items-center justify-between gap-2 font-mono text-[10px] text-ink-soft" title={t('settings.pngLevel.hint')}>
+      <label className="flex items-center justify-between gap-2 font-mono text-[13px] text-ink-soft" title={t('settings.pngLevel.hint')}>
         {t('settings.pngLevel')}
-        <select aria-label={t('settings.pngLevel')} value={s.pngRecompressLevel} onChange={(e) => patch({ pngRecompressLevel: Number(e.target.value) })} className="rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink-soft transition hover:border-teal focus:border-teal">
+        <select aria-label={t('settings.pngLevel')} value={s.pngRecompressLevel} onChange={(e) => patch({ pngRecompressLevel: Number(e.target.value) })} className="rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[13px] text-ink-soft transition hover:border-teal focus:border-teal">
           {[0, 1, 2, 3, 4, 5, 6].map((n) => (
             <option key={n} value={n}>
               {n === 0 ? t('fix.extrude.off') : String(n)}
@@ -660,7 +660,7 @@ function RulesCard({ s, patch }: Sect) {
                 next[i] = { ...o, match: e.target.value };
                 setOverrides(next);
               }}
-              className="min-w-0 flex-1 rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink focus:border-teal"
+              className="min-w-0 flex-1 rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[13px] text-ink focus:border-teal"
             />
             <input
               type="number"
@@ -674,19 +674,19 @@ function RulesCard({ s, patch }: Sect) {
                 next[i] = { ...o, quality: Math.max(0, Math.min(100, Number(e.target.value))) / 100 };
                 setOverrides(next);
               }}
-              className="w-14 rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[10px] text-ink focus:border-teal"
+              className="w-14 rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[13px] text-ink focus:border-teal"
             />
-            <button type="button" onClick={() => setOverrides(s.overrides.filter((_, j) => j !== i))} className="font-mono text-[11px] text-ink-soft hover:text-crit-text" aria-label="remove">
+            <button type="button" onClick={() => setOverrides(s.overrides.filter((_, j) => j !== i))} className="font-mono text-[13px] text-ink-soft hover:text-crit-text" aria-label="remove">
               ✕
             </button>
           </div>
         ))}
-        <button type="button" onClick={() => setOverrides([...s.overrides, { match: '', quality: 0.85 }])} className="mt-1.5 font-mono text-[10px] text-teal-text underline-offset-2 hover:underline">
+        <button type="button" onClick={() => setOverrides([...s.overrides, { match: '', quality: 0.85 }])} className="mt-1.5 font-mono text-[13px] text-teal-text underline-offset-2 hover:underline">
           + {t('fix.settings.overrides')}
         </button>
       </div>
 
-      <ul className="space-y-1 border-t border-line pt-2 font-mono text-[10px] leading-relaxed text-ink-soft">
+      <ul className="space-y-1 border-t border-line pt-2 font-mono text-[13px] leading-relaxed text-ink-soft">
         <li>{t('fix.skipped.whyNoKernel')}</li>
         <li>{t('fix.skipped.whyNoPreBlur')}</li>
         <li>{t('fix.skipped.whyNoPngquant')}</li>
@@ -731,15 +731,15 @@ function BackendCard({ s, patch }: Sect) {
   const configured = API_BASE !== '' && loadStoredEntitlement() != null;
   return (
     <Card title={t('settings.section.backend')}>
-      <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.backend.hint')}</p>
+      <p className="font-mono text-[13px] leading-relaxed text-ink-soft">{t('fix.backend.hint')}</p>
       {!configured ? (
-        <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.backend.unconfigured')}</p>
+        <p className="font-mono text-[13px] leading-relaxed text-ink-soft">{t('fix.backend.unconfigured')}</p>
       ) : (
         <>
           <Switch label={t('fix.backend.ktx2')} hint={t('fix.backend.ktx2Hint')} checked={s.ktx2Enable} onChange={(b) => patch({ ktx2Enable: b })} />
           <Switch label={t('fix.backend.pngquant')} hint={t('fix.backend.pngquantHint')} checked={s.pngquantEnable} onChange={(b) => patch({ pngquantEnable: b })} />
           <Switch label={t('fix.backend.resample')} hint={t('fix.backend.resampleHint')} checked={s.resampleEnable} onChange={(b) => patch({ resampleEnable: b })} />
-          <p className="border-t border-line pt-2 font-mono text-[10px] leading-relaxed text-ink-soft">{t('settings.backend.consentNote')}</p>
+          <p className="border-t border-line pt-2 font-mono text-[13px] leading-relaxed text-ink-soft">{t('settings.backend.consentNote')}</p>
         </>
       )}
     </Card>
@@ -777,10 +777,10 @@ function ConfigCard({ s }: { s: BuildSettings }) {
   return (
     <Card title={t('settings.section.config')}>
       <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={onSave} className="rounded border border-line px-2 py-1 font-mono text-[11px] text-teal-text transition hover:border-teal">
+        <button type="button" onClick={onSave} className="rounded border border-line px-2 py-1 font-mono text-[13px] text-teal-text transition hover:border-teal">
           ↓ {t('fix.config.save')}
         </button>
-        <button type="button" onClick={() => cfgInputRef.current?.click()} className="rounded border border-line px-2 py-1 font-mono text-[11px] text-teal-text transition hover:border-teal">
+        <button type="button" onClick={() => cfgInputRef.current?.click()} className="rounded border border-line px-2 py-1 font-mono text-[13px] text-teal-text transition hover:border-teal">
           ↑ {t('fix.config.load')}
         </button>
         <input
@@ -795,9 +795,9 @@ function ConfigCard({ s }: { s: BuildSettings }) {
           }}
         />
       </div>
-      <p className="font-mono text-[10px] leading-relaxed text-ink-soft">{t('fix.config.hint')}</p>
+      <p className="font-mono text-[13px] leading-relaxed text-ink-soft">{t('fix.config.hint')}</p>
       {cfgStatus ? (
-        <p role="status" aria-live="polite" className="font-mono text-[10px] leading-relaxed text-ink">
+        <p role="status" aria-live="polite" className="font-mono text-[13px] leading-relaxed text-ink">
           {cfgStatus}
         </p>
       ) : (
@@ -837,7 +837,7 @@ export function SettingsPage({
         <h1 id="ad-settings-h1" tabIndex={-1} className="ad-focus-anchor font-display text-2xl font-semibold tracking-tight">
           {t('settings.title')}
         </h1>
-        <p className="mt-2 max-w-xl font-mono text-[11px] leading-relaxed text-ink-soft">{t('settings.applyNote')}</p>
+        <p className="mt-2 max-w-xl font-mono text-[13px] leading-relaxed text-ink-soft">{t('settings.applyNote')}</p>
       </div>
       <div className="space-y-4">
         {/* Appearance (theme) FIRST — a durable display pref that applies immediately, sibling to the diagnosis
