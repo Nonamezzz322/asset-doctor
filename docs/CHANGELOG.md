@@ -10,6 +10,30 @@ GitHub-кредов — пушит пользователь); хэши комм�
 
 ---
 
+## App-screen re-skin, Фаза 2 — шапка результатов + budget-strip из реальных метрик — 2026-07-04
+Макет-шапка результатов (chart-header) + 4-карточная budget-strip, наполненные ТОЛЬКО реальными данными
+отчёта (без пользовательских бюджетов / без over-budget-баров в этой фазе). Ревью 3-линзами + верификация =
+1 реальная находка (мёртвая CTA), починена.
+
+- **Шапка результатов + budget-strip** (`9da7e39`)
+  — новый чистый `lib/results-summary.ts` (Node-тест, 18 тестов): `folderLabel` (имя папки из общего префикса
+    путей выбранных файлов — null при FS-Access bare-root / смешанных корнях ⇒ честный generic-фолбэк, НИКОГДА
+    не выдуманное имя), `assetCounts` (атласы/спрайты/loose из atlasFrames), `budgetModel` (VRAM declared +
+    probe-gated measured, draw calls probe-gated, disk total→after + реальный savedPct, findings tally +
+    severity-сегменты — каждое значение измерено, probe-only метрики вырождаются в null).
+  — sr-only h1 результатов стал ВИДИМОЙ шапкой — зелёный eyebrow «diagnosis complete · in-browser» (БЕЗ
+    выдуманного тайминга), h1 = имя папки + реальные N атласов / M спрайтов / K loose, стат recoverable-%
+    (скрыт при 0) + CTA «Download the fix» (`jumpToFix` скроллит+фокусит FixCard; ОБА gate-root несут
+    `FIX_CARD_ID` — фикс review-BLOCKER: main/default-root не имел id ⇒ CTA была no-op в gate-OFF-бете). id
+    `ad-results-h1` сохранён ⇒ focus-move + aria-labelledby целы; ad-sr-only-компаньон держит честный
+    problem-count в имени h1; outline монотонен h1→h2→h2→h2.
+  — новые `BudgetStrip/BudgetCard`: VRAM footprint / Draw calls (probe-gated ⇒ «—» без замера) / Disk size
+    (total→after, aria-hidden recoverable-RATIO-заливка, НЕ budget-бар) / Findings (problems + top-severity-
+    чип + декоративные aria-hidden severity-сегменты). Большие числа `text-ink` (severity-хью проваливают AA
+    как текст); токен-поверхности dark-safe. Ретайр Phase-1-полосы (`MobileTotal`/`buildTotalsRows`); +15
+    ключей ×10 (3 plural, ru/uk few/many). Gate: typecheck · i18n 33 · web 898 · lint · build. **Дальше:**
+    Фаза 3 — re-skin вьюера/находок + карточные настройки; Фаза 4 — честный Pro/License-экран.
+
 ## App-screen re-skin, Фаза 1 — постоянный сайдбар-шелл — 2026-07-04
 2-й макет (`redesign-mockup-app-screen.html`) — экран приложения. Тик ~6 утра. Design-воркфлоу `wkq91mvp9`
 (4 трека + скептик-синтезатор) выдал фазированную спеку (`docs/improvements/redesign-spec-appscreen.md`) с
