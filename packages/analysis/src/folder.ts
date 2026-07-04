@@ -64,8 +64,8 @@ export function duplicateExactFindings(assets: Asset[], features: ImageFeatures[
       relatedRefs: refs,
       title: `${refs.length}× identical file`,
       detail:
-        `Byte-identical copies: ${refs.join(', ')}. Keep one and reference it — each copy is ` +
-        `also a separate texture upload (${fmtBytes(perVram)} VRAM each).`,
+        `Byte-identical copies: ${refs.join(', ')}. Keep one and reference it — each copy the ` +
+        `game actually loads is a separate texture upload (${fmtBytes(perVram)} VRAM each).`,
       fix: 'De-duplicate: keep a single copy and update references.',
       estimate: {
         diskBytesSaved: perDisk * (refs.length - 1),
@@ -269,7 +269,7 @@ export function formatAggregateFinding(formatFindings: Finding[]): Finding | nul
     assetRef: refs[0]!,
     relatedRefs: refs,
     title: `${formatFindings.length} images could shrink — ${fmtBytes(totalSaved)} total`,
-    detail: `Transcoding ${formatFindings.length} images to AVIF/WebP saves ~${fmtBytes(totalSaved)} of download across the folder.`,
+    detail: `Transcoding ${formatFindings.length} images to AVIF/WebP saves ~${fmtBytes(totalSaved)} of download across the folder. Sum of per-image Canvas estimates; lossless parity needs wasm codecs.`,
     fix: 'Batch-transcode to AVIF/WebP for delivery.',
     estimate: { diskBytesSaved: totalSaved },
     messageKey: 'format-aggregate',

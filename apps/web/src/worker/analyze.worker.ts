@@ -392,8 +392,9 @@ function makeEncoder(imageBytes: Map<string, ArrayBuffer>): EncodeSizer {
 }
 
 /** MEASURE the disk size of an asset re-encoded OPAQUE (alpha channel dropped) to its SAME format. Used
- *  only to size the wasted-alpha finding's honest disk saving (byteSize − this) — it sizes, it never emits
- *  a file (invariant 3). Composes onto an `{alpha:false}` OffscreenCanvas (a genuinely opaque surface —
+ *  only to size the wasted-alpha finding's realizable opaque re-encode saving (byteSize − this; the delta
+ *  bundles the dropped channel with this encoder's recompression, and the finding's copy attributes it to
+ *  the RE-ENCODE, never to the channel alone) — it sizes, it never emits a file (invariant 3). Composes onto an `{alpha:false}` OffscreenCanvas (a genuinely opaque surface —
  *  the strongest signal that the encoder may omit the channel), then convertToBlob to the source mime.
  *  Returns null when OffscreenCanvas is unavailable, the bytes are missing, or convertToBlob falls back to
  *  a different codec (so the size is never miscounted). */

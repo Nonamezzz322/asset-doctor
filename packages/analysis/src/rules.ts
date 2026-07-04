@@ -399,21 +399,25 @@ export function trimMarginFinding(
 }
 
 /** Re-encode an asset's image OPAQUELY (compose onto an opaque canvas, dropping the dead alpha channel)
- *  to the SAME source format and return the resulting byte size — or null if unavailable. The MEASURED
- *  honest disk cost of the alpha channel = source byteSize − this. Same kind of injected sizer as
- *  EncodeSizer (measurement, not generation: it sizes, it never emits a file — the actual opaque file is
- *  the Pro fix's job, invariant 3). Browser/worker supplies it via an `{alpha:false}` OffscreenCanvas;
- *  headless/CLI omits it ⇒ the finding never fires. */
+ *  to the SAME source format and return the resulting byte size — or null if unavailable. source byteSize −
+ *  this = a realizable same-format opaque re-encode saving measured with our canvas encoder (it BUNDLES the
+ *  dropped channel with the encoder's recompression — never presented as the channel's isolated cost).
+ *  Same kind of injected sizer as EncodeSizer (measurement, not generation: it sizes, it never emits a
+ *  file — the actual opaque file is the Pro fix's job, invariant 3). Browser/worker supplies it via an
+ *  `{alpha:false}` OffscreenCanvas; headless/CLI omits it ⇒ the finding never fires. */
 export type OpaqueEncodeSizer = (assetRef: string, mime: ImageMime) => Promise<number | null>;
 
 /** Fully-opaque LOOSE image that still carries an alpha channel (PNG / WebP-with-alpha). Its alpha is
  *  255 on EVERY pixel (host full-frame scan), so the channel is dead weight on DISK — a PNG/WebP encoder
- *  spends bytes storing a constant plane. We MEASURE that DISK cost by re-encoding the image OPAQUE to the
- *  SAME format (the injected sizer); the saving is `byteSize − opaqueBytes`. HONESTY (invariant 5): this is
- *  a DOWNLOAD/disk saving ONLY — the GPU still decodes to RGBA8888 and allocates the same VRAM, so the
- *  finding carries `diskBytesSaved` and NEVER `vramBytesSaved`. We never emit the opaque image (that is the
- *  fix engine's job — invariant 3). Loose-only; the worker sets `opaque` from a full-resolution scan (NOT
- *  the 9×8 sample — one transparent pixel must not average away). Returns null below the gates, on a JPEG /
+ *  spends bytes storing a constant plane. We MEASURE an opaque re-encode of the image to the SAME format
+ *  (the injected sizer); `byteSize − opaqueBytes` is a realizable same-format opaque re-encode saving
+ *  measured with our canvas encoder — it BUNDLES the dropped channel with the encoder's recompression
+ *  (q0.9 for WebP / the canvas PNG compressor), so the copy attributes the delta to the RE-ENCODE, never
+ *  to the channel in isolation (invariant 3 honesty). HONESTY (invariant 5): this is a DOWNLOAD/disk
+ *  saving ONLY — the GPU still decodes to RGBA8888 and allocates the same VRAM, so the finding carries
+ *  `diskBytesSaved` and NEVER `vramBytesSaved`. We never emit the opaque image (that is the fix engine's
+ *  job — invariant 3). Loose-only; the worker sets `opaque` from a full-resolution scan (NOT the 9×8
+ *  sample — one transparent pixel must not average away). Returns null below the gates, on a JPEG /
  *  AVIF source (JPEG has no alpha; AVIF is already the recommended target), or with no sizer / no saving. */
 export async function wastedAlphaFinding(
   ref: string,
@@ -438,11 +442,12 @@ export async function wastedAlphaFinding(
     rule: 'wasted-alpha',
     severity: 'warn',
     assetRef: ref,
-    title: `${label} carries an unused alpha channel — ${fmtBytes(saved)} of dead weight`,
+    title: `${label} carries an unused alpha channel — opaque re-encode saves ~${fmtBytes(saved)}`,
     detail:
       `Every pixel is fully opaque (alpha 255), yet this ${label} still stores an alpha channel. ` +
-      `Dropping it (re-encode opaque, same format) cuts ~${fmtBytes(saved)} (${pct1(frac)}%) of DOWNLOAD. ` +
-      `This is a DISK saving only — the GPU still decodes to RGBA8888, so VRAM is unchanged.`,
+      `An opaque re-encode with our canvas encoder measures ${fmtBytes(opaqueBytes)} — ~${fmtBytes(saved)} (${pct1(frac)}%) less DOWNLOAD. ` +
+      `That delta is a realizable re-encode saving (dropped channel plus our encoder's recompression), not the channel's cost in isolation. ` +
+      `DISK only — the GPU still decodes to RGBA8888, so VRAM is unchanged.`,
     fix: `Re-encode opaque (RGB) for delivery, or switch to a format without an alpha channel.`,
     // DISK only: the dead channel costs download bytes; it costs NOTHING on the GPU (RGBA8888 regardless,
     // invariant 5). NO vramBytesSaved — that would be a faked win.
