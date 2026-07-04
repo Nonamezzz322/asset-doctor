@@ -19,6 +19,7 @@ export const FOCUS_ANCHORS = {
   dropzone: 'ad-dropzone-h1', // the Dropzone <h1> (App.tsx)
   settings: 'ad-settings-h1', // SettingsPage <h1>
   pro: 'ad-pro-h1', // ProPage <h1> (app-screen re-skin Phase 4)
+  spine: 'ad-spine-h1', // SpineViewer <h1> (pixi-spine viewer)
 } as const;
 export type FocusAnchor = (typeof FOCUS_ANCHORS)[keyof typeof FOCUS_ANCHORS];
 
@@ -39,6 +40,7 @@ export function focusTargetAfterSwap(prev: SwapState, next: SwapState): FocusAnc
   if (prev.view !== next.view) {
     if (next.view === 'settings') return FOCUS_ANCHORS.settings;
     if (next.view === 'pro') return FOCUS_ANCHORS.pro;
+    if (next.view === 'spine') return FOCUS_ANCHORS.spine;
     return next.phase === 'done' ? FOCUS_ANCHORS.results : FOCUS_ANCHORS.dropzone;
   }
   if (next.view !== 'main') return null; // settings OR pro: the main tree is display:none — its anchors are unfocusable.

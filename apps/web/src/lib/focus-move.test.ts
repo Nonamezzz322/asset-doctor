@@ -8,7 +8,7 @@ import { focusTargetAfterSwap, FOCUS_ANCHORS, type SwapState, type PhaseT } from
 import type { View } from './route';
 
 const PHASES: PhaseT[] = ['idle', 'analyzing', 'done', 'error'];
-const VIEWS: View[] = ['main', 'settings', 'pro'];
+const VIEWS: View[] = ['main', 'settings', 'pro', 'spine'];
 const s = (view: View, phase: PhaseT): SwapState => ({ view, phase });
 
 describe('FOCUS_ANCHORS — frozen markup contract', () => {
@@ -18,6 +18,7 @@ describe('FOCUS_ANCHORS — frozen markup contract', () => {
       dropzone: 'ad-dropzone-h1',
       settings: 'ad-settings-h1',
       pro: 'ad-pro-h1',
+      spine: 'ad-spine-h1',
     });
   });
 });
@@ -99,8 +100,34 @@ describe('focusTargetAfterSwap — Pro view swaps (app-screen Phase 4)', () => {
   });
 });
 
+describe('focusTargetAfterSwap — Spine view swaps (pixi-spine viewer)', () => {
+  it('main→spine ⇒ spine h1 regardless of phase', () => {
+    for (const p of PHASES) expect(focusTargetAfterSwap(s('main', p), s('spine', p))).toBe(FOCUS_ANCHORS.spine);
+  });
+
+  it('settings↔spine and pro↔spine ⇒ the target page h1 (all display:none siblings of main)', () => {
+    for (const p of PHASES) {
+      expect(focusTargetAfterSwap(s('settings', p), s('spine', p))).toBe(FOCUS_ANCHORS.spine);
+      expect(focusTargetAfterSwap(s('spine', p), s('settings', p))).toBe(FOCUS_ANCHORS.settings);
+      expect(focusTargetAfterSwap(s('pro', p), s('spine', p))).toBe(FOCUS_ANCHORS.spine);
+      expect(focusTargetAfterSwap(s('spine', p), s('pro', p))).toBe(FOCUS_ANCHORS.pro);
+    }
+  });
+
+  it('spine→main with phase done ⇒ results h1, else ⇒ dropzone h1', () => {
+    expect(focusTargetAfterSwap(s('spine', 'done'), s('main', 'done'))).toBe(FOCUS_ANCHORS.results);
+    for (const p of ['idle', 'analyzing', 'error'] as PhaseT[])
+      expect(focusTargetAfterSwap(s('spine', p), s('main', p))).toBe(FOCUS_ANCHORS.dropzone);
+  });
+
+  it('phase flip while view=spine ⇒ null (never focus a display:none subtree)', () => {
+    expect(focusTargetAfterSwap(s('spine', 'analyzing'), s('spine', 'done'))).toBeNull();
+    expect(focusTargetAfterSwap(s('spine', 'done'), s('spine', 'idle'))).toBeNull();
+  });
+});
+
 describe('focusTargetAfterSwap — exhaustive determinism sweep', () => {
-  it('all 144 (prev,next) pairs return null or a known anchor, and repeat calls are identical', () => {
+  it('all 256 (prev,next) pairs return null or a known anchor, and repeat calls are identical', () => {
     const known = new Set<string | null>([null, ...Object.values(FOCUS_ANCHORS)]);
     for (const pv of VIEWS)
       for (const pp of PHASES)

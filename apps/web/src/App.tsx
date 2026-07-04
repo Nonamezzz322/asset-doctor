@@ -17,8 +17,9 @@ import { planFix, runFix, type FixOutcome, type FixProgress } from './lib/fix-cl
 import type { BackendOptions, FixChange, FixPlanSummary, FixReceipt, NativeOpKind, SheetDiff } from './worker/fix-protocol';
 import { buildFixOptions } from './lib/build-settings';
 import { BuildSettingsProvider, useBuildSettings } from './lib/settings-ctx';
-import { viewOfHash, SETTINGS_HASH, PRO_HASH, type View } from './lib/route';
+import { viewOfHash, SETTINGS_HASH, PRO_HASH, SPINE_HASH, type View } from './lib/route';
 import { SettingsPage } from './components/SettingsPage';
+import { SpineViewer } from './components/SpineViewer';
 import { fmtBytes } from './lib/format';
 import { OPTIMIZE_ENTRY, optimizeEntryEnabled } from './lib/optimize-entry';
 import { groupOps, OP_KIND_ORDER, REFERENCE_CHANGING, type OpKind } from './lib/op-manifest';
@@ -699,6 +700,7 @@ export function App() {
           <SettingsPage hasResults={!!report} hiddenRules={hiddenRules} onChangeHiddenRules={setHiddenRulesPersisted} />
         ) : null}
         {view === 'pro' ? <ProPage unlocked={proUnlocked} onUnlockedChange={setProUnlocked} /> : null}
+        {view === 'spine' ? <SpineViewer /> : null}
         </div>
         </main>
       </div>
@@ -742,10 +744,15 @@ function LanguageSwitcher() {
 //    full-height STICKY column; below lg it collapses to a top bar that flex-wraps (no drawer/JS/focus-trap)
 //    and is NOT sticky — a wrapped 2-3 row bar would be taller than the landing sections' scroll-mt-20 (80px)
 //    anchor offset and hide headings behind it, so on mobile the bar scrolls away with the page instead. ──
-function NavIcon({ d }: { d: 'scan' | 'settings' | 'pro' }) {
+function NavIcon({ d }: { d: 'scan' | 'settings' | 'pro' | 'spine' }) {
   return (
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      {d === 'scan' ? (
+      {d === 'spine' ? (
+        <>
+          <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="1.7" />
+          <path d="M10 9l5 3-5 3z" fill="currentColor" />
+        </>
+      ) : d === 'scan' ? (
         <>
           <circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" strokeWidth="1.7" />
           <path d="M15.5 15.5L20 20" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
@@ -799,6 +806,7 @@ function Sidebar({ view, plan }: { view: View; plan: ProPanel }) {
         <NavItem href="#" active={view === 'main'} icon={<NavIcon d="scan" />} label={t('nav.scan')} />
         <NavItem href={SETTINGS_HASH} active={view === 'settings'} icon={<NavIcon d="settings" />} label={t('settings.nav')} />
         <NavItem href={PRO_HASH} active={view === 'pro'} icon={<NavIcon d="pro" />} label={t('nav.pro')} />
+        <NavItem href={SPINE_HASH} active={view === 'spine'} icon={<NavIcon d="spine" />} label={t('nav.spine')} />
       </nav>
       {/* Current-plan card (lg only, no heading) — honest per gate/entitlement state via pro-view.ts; the
           action always routes to the Pro screen (#pro), never a checkout. */}

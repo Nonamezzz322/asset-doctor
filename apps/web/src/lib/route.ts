@@ -10,19 +10,22 @@
 // survives navigation — that wiring lives in App.tsx; this module only decides the view.
 
 /** The views the app can show. 'main' = Dropzone/results (default); 'settings' = the build-settings page;
- *  'pro' = the honest Pro/License screen (app-screen re-skin Phase 4). */
-export type View = 'main' | 'settings' | 'pro';
+ *  'pro' = the honest Pro/License screen (app-screen re-skin Phase 4); 'spine' = the pixi-spine viewer. */
+export type View = 'main' | 'settings' | 'pro' | 'spine';
 
-/** The hashes that route to the Settings and Pro pages — shared by the sidebar nav links, the optimize-entry
- *  deep-link anchor and the hashchange listener so source and target can never drift. */
+/** The hashes that route to the Settings, Pro and Spine-viewer pages — shared by the sidebar nav links, the
+ *  optimize-entry deep-link anchor and the hashchange listener so source and target can never drift. */
 export const SETTINGS_HASH = '#settings';
 export const PRO_HASH = '#pro';
+export const SPINE_HASH = '#spine';
 
 /** Map a location.hash string to the view to render. Total + deterministic: exactly SETTINGS_HASH ⇒
- *  'settings', exactly PRO_HASH ⇒ 'pro'; ANYTHING else (empty, '#', case-mismatch, extra segments, unknown)
- *  ⇒ 'main' (fail-open to the main view — a bad deep-link never blanks the app). */
+ *  'settings', exactly PRO_HASH ⇒ 'pro', exactly SPINE_HASH ⇒ 'spine'; ANYTHING else (empty, '#',
+ *  case-mismatch, extra segments, unknown) ⇒ 'main' (fail-open to the main view — a bad deep-link never
+ *  blanks the app). */
 export function viewOfHash(hash: string): View {
   if (hash === SETTINGS_HASH) return 'settings';
   if (hash === PRO_HASH) return 'pro';
+  if (hash === SPINE_HASH) return 'spine';
   return 'main';
 }

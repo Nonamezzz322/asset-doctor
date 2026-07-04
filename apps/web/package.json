@@ -21,6 +21,7 @@
     "@asset-doctor/ingest": "workspace:*",
     "@asset-doctor/parsers": "workspace:*",
     "@asset-doctor/probe": "workspace:*",
+    "@esotericsoftware/spine-pixi-v8": "^4.3.9",
     "@fontsource/ibm-plex-mono": "^5",
     "@fontsource/ibm-plex-sans": "^5",
     "@fontsource/space-grotesk": "^5",

@@ -86,7 +86,12 @@ const appSrc =
   comp('landing/Landing.tsx') +
   '\n' +
   // LandingFooter.tsx owns landing.footer.* (+ reuses dropzone.footnote), referenced nowhere else.
-  comp('landing/LandingFooter.tsx');
+  comp('landing/LandingFooter.tsx') +
+  '\n' +
+  // SpineViewer.tsx owns every spine.* t() literal (the #spine viewer shell + controls) + reuses
+  // dropzone.privacy; App.tsx only references nav.spine, so without scanning it a renamed spine.* key would
+  // silently render a raw dotted key. Its dynamic t(`spine.error.${…}`) is expanded via the branch below.
+  comp('SpineViewer.tsx');
 
 // Suffix maps mirrored from App.tsx (modeKey / granKey) so dynamic option keys resolve to concrete keys.
 const MODE_SUFFIXES = ['auto', 'static', 'spine'];
@@ -94,6 +99,8 @@ const GRAN_SUFFIXES = ['folder', 'one', 'bundle'];
 // Triage suffix maps mirrored from VerdictBar (CHIP_SEVERITIES → triage.filter.${sev}) and TriageLedger
 // (SORT_KEYS → triage.sort.${k}, row.scope → triage.scope.${scope}) so each template t(`triage.x.${k}`)
 // resolves to the concrete per-option keys (never leaks a `${...}` literal into the assertion).
+// spine.error.${errorKey} (SpineViewer.tsx) — mirrors the SpineErrorKey union in lib/spine-engine.ts.
+const SPINE_ERROR_SUFFIXES = ['noJson', 'load', 'read'];
 const TRIAGE_FILTER_SUFFIXES = ['crit', 'warn', 'info'];
 const TRIAGE_SORT_SUFFIXES = ['severity', 'wastedDisk', 'vram', 'occupancy'];
 const TRIAGE_SCOPE_SUFFIXES = ['asset', 'folder'];
@@ -133,6 +140,7 @@ function expandedDynamicKeys(src: string): Set<string> {
     else if (tmpl.startsWith('triage.filter.')) TRIAGE_FILTER_SUFFIXES.forEach((s) => keys.add(`triage.filter.${s}`));
     else if (tmpl.startsWith('triage.sort.')) TRIAGE_SORT_SUFFIXES.forEach((s) => keys.add(`triage.sort.${s}`));
     else if (tmpl.startsWith('triage.scope.')) TRIAGE_SCOPE_SUFFIXES.forEach((s) => keys.add(`triage.scope.${s}`));
+    else if (tmpl.startsWith('spine.error.')) SPINE_ERROR_SUFFIXES.forEach((s) => keys.add(`spine.error.${s}`));
     else if (tmpl.startsWith('severity.')) SEVERITY_SUFFIXES.forEach((s) => keys.add(`severity.${s}`));
     else if (tmpl.startsWith('license.err.')) LICENSE_ERR_SUFFIXES.forEach((s) => keys.add(`license.err.${s}`));
     // fix.lazy. / fix.op. are branched AFTER the more-specific fix.pack.mode./fix.pack.grouping. above; none
