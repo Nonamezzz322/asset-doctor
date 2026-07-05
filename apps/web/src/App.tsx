@@ -47,6 +47,7 @@ import { resultsHeading } from './lib/results-heading';
 import { errorCard, errDetail, type ErrorState, type ErrorContext } from './lib/error-view';
 import { progressView } from './lib/progress-view';
 import { assetCounts, budgetModel, folderLabel, type BudgetModel } from './lib/results-summary';
+import { reportContent, reportFilename, REPORT_MIME, type ReportFormat } from './lib/report-export';
 import { budgetExplainerRows } from './lib/budget-explainers';
 import { loadBudgets, saveBudgets, type Budgets } from './lib/budget-prefs';
 import { budgetVerdicts, type BudgetMetric, type BudgetVerdict } from './lib/budget-verdicts';
@@ -505,7 +506,10 @@ export function App() {
   // honest subject + counts. `resultsSubject` falls back to a generic label, NEVER a fabricated folder name.
   const bm: BudgetModel | null = totals && index ? budgetModel(totals, index.tally) : null;
   const counts = report ? assetCounts(report) : null;
-  const resultsSubject = folderLabel(files.map((f) => f.path)) ?? t('results.subject.fallback');
+  // The REAL folder name (null when it can't be derived) — passed to the report export as the honest
+  // subject (⇒ `<name>-audit.md`); the header uses the generic fallback label for display only.
+  const folderName = folderLabel(files.map((f) => f.path));
+  const resultsSubject = folderName ?? t('results.subject.fallback');
   const countsSuffix = counts
     ? counts.atlases > 0
       ? [
@@ -623,6 +627,10 @@ export function App() {
                 </div>
               ) : null}
             </div>
+            {/* Export / share the audit (Feature: portable report). A thin sibling of the header (NOT a heading —
+                the h1→h2 outline is untouched). Same asset-gate as the CTA. Copies MD / downloads JSON·MD·CSV,
+                all built in-browser from the MEASURED report by the pure report-export.ts serializers. */}
+            {report.assets.length > 0 ? <ReportActions report={report} subject={folderName ?? undefined} /> : null}
             {/* Budget strip — 4 REAL-metric cards (no user budgets / no over-budget bars this phase). Gated on
                 having assets (like the header CTA) so an empty folder shows the empty-state below, not a zero strip. */}
             {bm && report.assets.length > 0 ? <BudgetStrip bm={bm} budgets={budgets} /> : null}
@@ -1298,6 +1306,68 @@ function downloadZip(zip: Blob): void {
   a.download = 'optimized-folder.zip';
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// Local mirror of downloadZip for a text artifact (the JSON/MD/CSV audit export). Same object-URL +
+// synthetic-anchor pattern; a text/* Blob keeps the bytes local (no network, invariant 1).
+function downloadReport(text: string, filename: string, mime: string): void {
+  const url = URL.createObjectURL(new Blob([text], { type: mime }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Export / share the audit (Feature: portable report). All decision logic is in the PURE, Node-tested
+// report-export.ts (JSON=budget-verbatim, MD/CSV=purpose-built findings serializers over the MEASURED
+// report); this component is a thin renderer. Copy uses the SAME clipboard-then-execCommand fallback the
+// loader-migration snippet uses (fallbackCopy), and copies the human Markdown. The JSON/MD/CSV button
+// labels are CODE (format identifiers), never catalog keys — precedent: the PixiJS/Phaser engine labels.
+function ReportActions({ report, subject }: { report: AnalysisReport; subject?: string }): ReactNode {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  const copy = (): void => {
+    const md = reportContent(report, 'md', subject);
+    const done = (): void => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(md).then(done, () => fallbackCopy(md) && done());
+    } else if (fallbackCopy(md)) {
+      done();
+    }
+  };
+  return (
+    <div role="group" aria-label={t('results.export.label')} className="flex flex-wrap items-center gap-2">
+      <span className="ad-label text-ink-soft">{t('results.export.label')}</span>
+      <button
+        type="button"
+        onClick={copy}
+        className="rounded border border-line px-2.5 py-1 font-mono text-xs text-teal-text transition hover:border-teal"
+      >
+        {copied ? '✓ ' : ''}
+        {t('results.export.copy')}
+      </button>
+      {(['json', 'md', 'csv'] as const).map((f: ReportFormat) => (
+        <button
+          key={f}
+          type="button"
+          onClick={() => downloadReport(reportContent(report, f, subject), reportFilename(subject, f), REPORT_MIME[f])}
+          className="rounded border border-line px-2.5 py-1 font-mono text-xs text-ink-soft transition hover:border-teal hover:text-teal-text"
+        >
+          {f.toUpperCase()}
+        </button>
+      ))}
+      {/* SR copy confirmation (WCAG 4.1.3): a focused button's changed accessible name (the ✓ prefix) is not
+          reliably re-announced, so the success rides a dedicated polite live region — the same role=status
+          pattern the results/probe readouts use. Clipped by .ad-sr-only (no layout, no focus). */}
+      <span role="status" aria-live="polite" aria-atomic="true" className="ad-sr-only">
+        {copied ? t('results.export.copied') : ''}
+      </span>
+    </div>
+  );
 }
 
 // OPT-IN backend consent surface (round12 §4) — the CONSENT half of the old BackendKtx2Panel, kept on the

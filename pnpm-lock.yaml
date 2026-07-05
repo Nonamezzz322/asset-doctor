@@ -94,6 +94,9 @@ importers:
       '@asset-doctor/analysis':
         specifier: workspace:*
         version: link:../../packages/analysis
+      '@asset-doctor/budget':
+        specifier: workspace:*
+        version: link:../../packages/budget
       '@asset-doctor/core':
         specifier: workspace:*
         version: link:../../packages/core
