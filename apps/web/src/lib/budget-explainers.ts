@@ -10,10 +10,11 @@
 // nothing in this module states a saving as measured.
 
 import type { BudgetModel } from './results-summary';
+import type { Budgets } from './budget-prefs';
 
 export interface BudgetExplainerRow {
   /** Stable row id (React key + extension point). */
-  key: 'vramDeclared' | 'vramMeasured' | 'drawEstimated' | 'diskRecoverable';
+  key: 'vramDeclared' | 'vramMeasured' | 'drawEstimated' | 'diskRecoverable' | 'budgetVram' | 'budgetDraw' | 'budgetDisk';
   /** i18n key of the on-card term the row explains (card label / subline label). */
   termKey: string;
   /** i18n key of the explainer body — an estimate-scope/model string. */
@@ -62,6 +63,21 @@ const REGISTRY: {
   },
 ];
 
-export function budgetExplainerRows(bm: BudgetModel): BudgetExplainerRow[] {
-  return REGISTRY.filter((e) => e.when(bm)).map((e) => e.row(bm));
+// User-set BUDGET semantics rows (user-settable budgets round): APPENDED after the existing 4-row estimate
+// registry, in card order (vram → draw → disk), ONE per metric the user gave a budget for. This makes the new
+// comparison semantics — ESPECIALLY the draw-call floor asymmetry — keyboard/SR-reachable through the same
+// estimates-disclosure that already delivers the estimate-scope strings (mirrors HEAD's pattern; the bodyKeys
+// resolve via t(r.bodyKey), a VARIABLE invisible to the static scanner, so they are pinned by the drift-guard
+// test). termKeys REUSE the existing on-card labels (all present in en.json) so the panel can never drift from
+// the cards; only the 3 bodyKeys are new. Default budgets={} ⇒ nothing appended ⇒ byte-identical to today.
+const BUDGET_ROWS: { field: keyof Budgets; row: BudgetExplainerRow }[] = [
+  { field: 'vramBytes', row: { key: 'budgetVram', termKey: 'budget.vram.label', bodyKey: 'budget.explain.vram' } },
+  { field: 'drawCalls', row: { key: 'budgetDraw', termKey: 'budget.draw.label', bodyKey: 'budget.explain.draw' } },
+  { field: 'diskBytes', row: { key: 'budgetDisk', termKey: 'budget.disk.label', bodyKey: 'budget.explain.disk' } },
+];
+
+export function budgetExplainerRows(bm: BudgetModel, budgets: Budgets = {}): BudgetExplainerRow[] {
+  const rows = REGISTRY.filter((e) => e.when(bm)).map((e) => e.row(bm));
+  for (const { field, row } of BUDGET_ROWS) if (budgets[field] !== undefined) rows.push(row);
+  return rows;
 }

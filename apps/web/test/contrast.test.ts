@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AA_LARGE,
   AA_NORMAL,
+  CRIT_TEXT,
   CTA,
   CTA_HOVER,
   CTA_TEXT,
@@ -25,6 +26,7 @@ import {
   chipLabelPassesAABothThemes,
   compositeAlpha,
   contrastRatio,
+  critTextPassesAA,
   ctaHoverPassesAA,
   ctaTextPassesAA,
   ctaWhitePassesAA,
@@ -124,6 +126,22 @@ describe('contrast — severity-label decolorize (round5): hues fail AA as label
   it('the label class is bound to the AA-proven ink token, never a hue', () => {
     expect(severityLabelClass()).toBe('text-ink'); // ties the class string → INK hex → the passing proof
     expect(severityLabelClass('warn')).toBe('text-ink'); // even the worst hue (2.77:1) is not emitted
+  });
+});
+
+describe('contrast — light crit-text readable-error token (over-budget verdict caption)', () => {
+  // The over-budget verdict caption renders text-crit-text on bg AND panel — pin it clears normal-text AA on
+  // both. Previously only DARK_CRIT_TEXT was pinned; the light --color-crit-text was UNPINNED until this round.
+  it('light crit-text (#C42B33) passes AA on BOTH light surfaces (~4.72 bg / ~5.61 panel)', () => {
+    expect(CRIT_TEXT).toBe('#C42B33');
+    expect(critTextPassesAA('bg')).toBe(true);
+    expect(critTextPassesAA('panel')).toBe(true);
+    expect(contrastRatio(CRIT_TEXT, SURFACE.bg)).toBeCloseTo(4.72, 2);
+    expect(contrastRatio(CRIT_TEXT, SURFACE.panel)).toBeCloseTo(5.61, 2);
+  });
+  it('the DECORATIVE crit hue (#E5484D) does NOT pass AA as text on panel (3.91) — why the caption uses crit-text', () => {
+    // this is why the over-budget verdict TEXT is text-crit-text and the bar fill (bg-crit) is aria-hidden only.
+    expect(contrastRatio(SEVERITY_HEX.crit, SURFACE.panel)).toBeLessThan(AA_NORMAL);
   });
 });
 

@@ -119,6 +119,17 @@ export function inkPassesAA(surface: 'bg' | 'panel'): boolean {
   return contrastRatio(INK, SURFACE[surface]) >= AA_NORMAL;
 }
 
+// The light readable-ERROR token (--color-crit-text, index.css:25) — the AA-safe crit for readable text (the
+// over-budget verdict caption uses text-crit-text; the decorative --color-crit #E5484D fails AA as text, so it
+// is dots/overlays/bars only). Mirrored here as the SoT so a regression that lightens it below AA on either
+// light surface is caught by a unit test; the light-crit token was previously UNPINNED (only DARK_CRIT_TEXT was).
+export const CRIT_TEXT = '#C42B33';
+// The over-budget verdict caption renders on bg AND panel, so it must clear normal-text AA on BOTH (~4.72 bg /
+// ~5.61 panel, index.css:25 comment).
+export function critTextPassesAA(surface: keyof typeof SURFACE): boolean {
+  return contrastRatio(CRIT_TEXT, SURFACE[surface]) >= AA_NORMAL;
+}
+
 // ── round5 CTA/teal role-split AA proof ──────────────────────────────────────
 // Brand hexes mirrored from index.css @theme (SoT). These pin the role-split remap so a regression that
 // lightens a role back below AA is caught by a deterministic unit test. All pure/O(1), no new deps.

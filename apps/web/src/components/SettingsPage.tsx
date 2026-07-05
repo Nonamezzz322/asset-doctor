@@ -22,6 +22,7 @@ import { useI18n } from '../lib/i18n';
 import { useBuildSettings } from '../lib/settings-ctx';
 import type { BuildSettings } from '../lib/build-settings';
 import { GROUP_ORDER, groupState, RULES_IN_GROUP, setGroupHidden, toggleRule } from '../lib/view-prefs';
+import { bytesToMb, mbToBytes, parseBudgetInput, setBudgetField, type Budgets } from '../lib/budget-prefs';
 import { applyTheme, loadTheme, saveTheme, type Theme } from '../lib/theme';
 import { FORMAT_KEYS, OVERRIDE_MODE_KEYS, type OverrideMode } from '../lib/profile-ui-types';
 import { BUILD_CONFIG_VERSION, parseBuildConfig, serializeBuildConfig } from '../lib/build-config';
@@ -169,6 +170,82 @@ function DiagnosisCard({ hidden, onChange }: { hidden: ReadonlySet<Rule>; onChan
             </fieldset>
           );
         })}
+      </div>
+    </Card>
+  );
+}
+
+// ── BudgetRow — a nullable numeric budget input. UNLIKE NumberRow it can express "off" (a null value renders
+//    an empty field with the 'off' placeholder — NumberRow's `value:number` + `Number('')===0` would print a
+//    literal 0 = a budget of zero = everything over). Reuses NumberRow's field markup + a wrapping <label> for
+//    the accessible name; the parse lives in the pure module (parseBudgetInput, Node-tested). ──
+function BudgetRow({ label, hint, value, onChange }: { label: string; hint?: string; value: number | null; onChange: (n: number | null) => void }) {
+  const { t } = useI18n();
+  return (
+    <label className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1 font-mono text-[13px] text-ink-soft">
+      <span className="min-w-0 flex-1">
+        <span className="block">{label}</span>
+        {hint ? <span className="mt-0.5 block font-mono text-[12px] leading-relaxed text-ink-soft">{hint}</span> : null}
+      </span>
+      <input
+        type="number"
+        min={0}
+        value={value == null ? '' : String(value)}
+        placeholder={t('settings.budgets.off')}
+        aria-label={label}
+        onChange={(e) => onChange(parseBudgetInput(e.target.value))}
+        className="w-24 shrink-0 rounded border border-line bg-panel px-1.5 py-0.5 font-mono text-[13px] text-ink focus:border-teal"
+      />
+    </label>
+  );
+}
+
+// ── Card: Бюджеты (Budgets) — the user's OWN metric budgets that drive the results-strip over-budget bars +
+//    verdicts. A sibling of the diagnosis view-filter: a localStorage-durable view pref (budget-prefs.ts / App
+//    state) applied IMMEDIATELY, NOT part of BuildSettings/build-config — absent from the export, never
+//    invalidates a pending fix. HONESTY (invariant 3): there is NO default/suggested budget — an empty field is
+//    "off" and the strip stays byte-identical to today; a bar + over-budget verdict appears ONLY for a metric
+//    the user gives a number. VRAM/disk are entered in MB (converted to bytes at THIS boundary, so the strip's
+//    fmtBytes renders them back identically); draw is a raw count. Labels/hints are LITERAL t() so the static
+//    i18n scanner covers them. The "clear" button (disabled when nothing is set) mirrors DiagnosisCard's showAll. ──
+function BudgetsCard({ budgets, onChange }: { budgets: Budgets; onChange: (next: Budgets) => void }) {
+  const { t } = useI18n();
+  const anySet = budgets.vramBytes !== undefined || budgets.drawCalls !== undefined || budgets.diskBytes !== undefined;
+  return (
+    <Card title={t('settings.section.budgets')}>
+      <p className="font-mono text-[13px] leading-relaxed text-ink-soft">{t('settings.budgets.intro')}</p>
+      <div className="flex justify-end">
+        <button
+          type="button"
+          disabled={!anySet}
+          onClick={() => onChange({})}
+          className="shrink-0 rounded border border-line px-2 py-0.5 font-mono text-[13px] text-teal-text transition hover:border-teal disabled:opacity-60 disabled:hover:border-line"
+        >
+          {t('settings.budgets.clear')}
+        </button>
+      </div>
+      <div className="space-y-3">
+        {/* VRAM budget is stored in bytes but edited in MB (bytesToMb ⇄ mbToBytes at this boundary). */}
+        <BudgetRow
+          label={t('settings.budgets.vram')}
+          hint={t('settings.budgets.vram.hint')}
+          value={budgets.vramBytes == null ? null : bytesToMb(budgets.vramBytes)}
+          onChange={(mb) => onChange(setBudgetField(budgets, 'vramBytes', mb == null ? undefined : mbToBytes(mb)))}
+        />
+        {/* Draw-call budget is a raw count (rounded to an integer; setBudgetField re-validates). */}
+        <BudgetRow
+          label={t('settings.budgets.draw')}
+          hint={t('settings.budgets.draw.hint')}
+          value={budgets.drawCalls ?? null}
+          onChange={(n) => onChange(setBudgetField(budgets, 'drawCalls', n == null ? undefined : Math.round(n)))}
+        />
+        {/* Disk budget in MB, same MB⇄bytes boundary as VRAM. */}
+        <BudgetRow
+          label={t('settings.budgets.disk')}
+          hint={t('settings.budgets.disk.hint')}
+          value={budgets.diskBytes == null ? null : bytesToMb(budgets.diskBytes)}
+          onChange={(mb) => onChange(setBudgetField(budgets, 'diskBytes', mb == null ? undefined : mbToBytes(mb)))}
+        />
       </div>
     </Card>
   );
@@ -697,12 +774,18 @@ export function SettingsPage({
   hasResults,
   hiddenRules,
   onChangeHiddenRules,
+  budgets,
+  onChangeBudgets,
 }: {
   hasResults: boolean;
   /** The user's finding-type visibility set (view-prefs slice, App-owned + localStorage-durable). */
   hiddenRules: ReadonlySet<Rule>;
   /** Persist + apply a new hidden set (App threads this to saveHiddenRules + state). */
   onChangeHiddenRules: (next: Set<Rule>) => void;
+  /** The user's metric budgets (view-prefs slice, App-owned + localStorage-durable). */
+  budgets: Budgets;
+  /** Persist + apply new budgets (App threads this to saveBudgets + state). */
+  onChangeBudgets: (next: Budgets) => void;
 }) {
   const { t } = useI18n();
   const { settings, patch } = useBuildSettings();
@@ -727,6 +810,9 @@ export function SettingsPage({
         {/* The diagnosis-VIEW filter: applies immediately and is separate from the build/export cards below
             (governed by the page-level "applies to the NEXT run" note). */}
         <DiagnosisCard hidden={hiddenRules} onChange={onChangeHiddenRules} />
+        {/* User metric budgets: like the diagnosis filter it applies immediately (a durable view pref), so it
+            sits ABOVE the build cards that "apply to the NEXT run". */}
+        <BudgetsCard budgets={budgets} onChange={onChangeBudgets} />
         <FormatsCard s={settings} patch={patch} />
         <ResolutionsCard s={settings} patch={patch} />
         <PackingCard s={settings} patch={patch} />

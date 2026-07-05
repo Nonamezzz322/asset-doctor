@@ -83,6 +83,39 @@ describe('budgetExplainerRows — i18n drift guard (precedent readout-explainers
   });
 });
 
+describe('budgetExplainerRows — user-budget semantics rows (appended after the estimate registry)', () => {
+  it('default budgets={} ⇒ byte-identical to the no-arg call (the estimate registry is unchanged)', () => {
+    const bm = base({ disk: { total: 1000, saved: 300, after: 700, savedPct: 30 } });
+    expect(budgetExplainerRows(bm, {})).toEqual(budgetExplainerRows(bm));
+  });
+
+  it('all 3 budgets set ⇒ [budgetVram, budgetDraw, budgetDisk] appended AFTER the existing rows in card order', () => {
+    const rows = budgetExplainerRows(base(), { vramBytes: 1, drawCalls: 1, diskBytes: 1 });
+    // existing rows come first (base ⇒ vramDeclared, drawEstimated), then the budget rows in card order.
+    expect(ids(rows)).toEqual(['vramDeclared', 'drawEstimated', 'budgetVram', 'budgetDraw', 'budgetDisk']);
+  });
+
+  it('each budget field individually appends ONLY its row', () => {
+    expect(ids(budgetExplainerRows(base(), { vramBytes: 1 })).filter((k) => k.startsWith('budget'))).toEqual(['budgetVram']);
+    expect(ids(budgetExplainerRows(base(), { drawCalls: 1 })).filter((k) => k.startsWith('budget'))).toEqual(['budgetDraw']);
+    expect(ids(budgetExplainerRows(base(), { diskBytes: 1 })).filter((k) => k.startsWith('budget'))).toEqual(['budgetDisk']);
+  });
+
+  it('i18n drift guard: every budget row termKey + bodyKey exists in CATALOGS.en', () => {
+    const rows = budgetExplainerRows(base(), { vramBytes: 1, drawCalls: 1, diskBytes: 1 }).filter((r) => r.key.startsWith('budget'));
+    expect(rows).toHaveLength(3);
+    for (const row of rows) {
+      expect(CATALOGS.en[row.termKey], `${row.termKey} must exist in en.json`).toBeDefined();
+      expect(CATALOGS.en[row.bodyKey], `${row.bodyKey} must exist in en.json`).toBeDefined();
+    }
+  });
+
+  it('honesty pin: the budget bodyKeys are exactly the 3 vetted comparison-semantics strings', () => {
+    const rows = budgetExplainerRows(base(), { vramBytes: 1, drawCalls: 1, diskBytes: 1 }).filter((r) => r.key.startsWith('budget'));
+    expect(rows.map((r) => r.bodyKey)).toEqual(['budget.explain.vram', 'budget.explain.draw', 'budget.explain.disk']);
+  });
+});
+
 describe('budgetExplainerRows — honesty pin (registry cannot be silently repointed at new copy)', () => {
   it('bodyKeys ARE exactly the four vetted estimate-scope strings, in visual order', () => {
     const all = budgetExplainerRows({

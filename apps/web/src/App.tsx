@@ -26,7 +26,7 @@ import { groupOps, OP_KIND_ORDER, REFERENCE_CHANGING, type OpKind } from './lib/
 import { migrationSnippet, type Engine } from './lib/loader-migration';
 import { LOCALES, NATIVE_NAME, useI18n } from './lib/i18n';
 import { correlateFix } from '@asset-doctor/correlate';
-import { renderCorrelated } from '@asset-doctor/i18n';
+import { renderCorrelated, type T } from '@asset-doctor/i18n';
 import { API_BASE, isProUnlocked, loadStoredEntitlement, maybeRefresh, PRO_GATE_ENABLED } from './lib/license';
 import { backendReachable } from './lib/backend-client';
 import { ActivatePanel, ProBadge } from './components/LicensePanel';
@@ -48,6 +48,8 @@ import { errorCard, errDetail, type ErrorState, type ErrorContext } from './lib/
 import { progressView } from './lib/progress-view';
 import { assetCounts, budgetModel, folderLabel, type BudgetModel } from './lib/results-summary';
 import { budgetExplainerRows } from './lib/budget-explainers';
+import { loadBudgets, saveBudgets, type Budgets } from './lib/budget-prefs';
+import { budgetVerdicts, type BudgetMetric, type BudgetVerdict } from './lib/budget-verdicts';
 import { focusTargetAfterSwap, type SwapState } from './lib/focus-move';
 import { Landing } from './components/landing/Landing';
 import { LandingFooter } from './components/landing/LandingFooter';
@@ -156,6 +158,18 @@ export function App() {
     setHiddenRules(next);
   };
   const clearHiddenRules = (): void => setHiddenRulesPersisted(new Set<Rule>());
+  // ── User-set metric BUDGETS (view-prefs sibling of hiddenRules — a durable, localStorage-'ad.budgets' view
+  //    pref that drives the results-strip over-budget bars/verdicts; NOT BuildSettings, so absent from the
+  //    build-config export + never invalidates a pending fix). HONESTY (invariant 3): default = {} ⇒ no budgets
+  //    ⇒ the strip is byte-identical to today; a bar + verdict appears ONLY for a metric the user gave a number,
+  //    never a baked-in default threshold. Loaded once (lazy init, fail-closed); the persisting setter writes
+  //    storage + state together so the durable value and the live strip can never diverge. Stores three NUMBERS
+  //    only — never asset bytes — so invariant 1 stays intact. ──
+  const [budgets, setBudgets] = useState<Budgets>(loadBudgets);
+  const setBudgetsPersisted = (next: Budgets): void => {
+    saveBudgets(next);
+    setBudgets(next);
+  };
   const [problemsOnly, setProblemsOnly] = useState(true);
   const [groupByFolder, setGroupByFolder] = useState(false);
   const [showClean, setShowClean] = useState(false);
@@ -611,7 +625,7 @@ export function App() {
             </div>
             {/* Budget strip — 4 REAL-metric cards (no user budgets / no over-budget bars this phase). Gated on
                 having assets (like the header CTA) so an empty folder shows the empty-state below, not a zero strip. */}
-            {bm && report.assets.length > 0 ? <BudgetStrip bm={bm} /> : null}
+            {bm && report.assets.length > 0 ? <BudgetStrip bm={bm} budgets={budgets} /> : null}
             {/* The PRIMARY "Build a spritesheet" recommendation (design §4.1) — rendered ONLY when the folder
                 is loose-dominated (`rec`). Sits between the results h1 and the VerdictBar so the heading
                 outline stays monotonic (h1 → this h2 → VerdictBar's h2). Absent when not dominated ⇒ the
@@ -701,7 +715,7 @@ export function App() {
         )}
         </div>
         {view === 'settings' ? (
-          <SettingsPage hasResults={!!report} hiddenRules={hiddenRules} onChangeHiddenRules={setHiddenRulesPersisted} />
+          <SettingsPage hasResults={!!report} hiddenRules={hiddenRules} onChangeHiddenRules={setHiddenRulesPersisted} budgets={budgets} onChangeBudgets={setBudgetsPersisted} />
         ) : null}
         {view === 'pro' ? <ProPage unlocked={proUnlocked} onUnlockedChange={setProUnlocked} /> : null}
         {view === 'spine' ? <SpineViewer /> : null}
@@ -833,10 +847,11 @@ function Sidebar({ view, plan }: { view: View; plan: ProPanel }) {
 }
 
 // ── Budget strip (app-screen redesign Phase 2): 4 REAL-metric cards on the results screen — the invariant-5
-//    disk≠VRAM honesty surface. NO user budgets / NO over-budget bars this phase (the disk bar is a recoverable
-//    RATIO fill, not a budget bar). Big numbers are text-ink only (severity hues fail AA as text — the color
-//    signal lives on the decorative aria-hidden dots/segments, redundant with the numbers + VerdictBar chips).
-//    Probe-only metrics (measured VRAM, draw calls) degrade to an absent-metric placeholder, never fabricated. ──
+//    disk≠VRAM honesty surface. Big numbers are text-ink only (severity hues fail AA as text — the color signal
+//    lives on the decorative aria-hidden dots/segments, redundant with the numbers + VerdictBar chips). Probe-
+//    only metrics (measured VRAM, draw calls) degrade to an absent-metric placeholder, never fabricated. Over-
+//    budget bars/verdicts (BudgetMeter) render ONLY for metrics the USER gave a budget (budget-verdicts.ts); with
+//    no budgets set the strip is byte-identical to before (budgetVerdicts(bm,{}) ⇒ [] ⇒ every find() undefined). ──
 function BudgetCard({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="rounded-2xl border border-line bg-panel p-4">
@@ -846,10 +861,61 @@ function BudgetCard({ label, children }: { label: string; children: ReactNode })
   );
 }
 
-function BudgetStrip({ bm }: { bm: BudgetModel }) {
+// The over-budget verdict caption for one comparison. EXHAUSTIVE switch over the 6 states — each maps to exactly
+// ONE literal budget.state.* key, so the static i18n scanner (i18n-app-keys.test.ts) covers all copy for free.
+// `amount` is PRE-FORMATTED here (fmtBytes for vram/disk bytes, String for the draw count) and passed as a raw
+// {amount} string; a new state without copy fails typecheck via the `never` assert. (Verdict semantics are
+// tested in budget-verdicts.test.ts; this is the thin key-mapping.)
+function budgetStateText(t: T, v: BudgetVerdict): string {
+  const amount = v.metric === 'draw' ? String(v.overBy) : fmtBytes(v.overBy);
+  switch (v.state) {
+    case 'over':
+      return t('budget.state.over', { amount });
+    case 'overDeclared':
+      return t('budget.state.overDeclared', { amount });
+    case 'floorOver':
+      return t('budget.state.floorOver', { amount });
+    case 'floorUnknown':
+      return t('budget.state.floorUnknown');
+    case 'within':
+      return t('budget.state.within');
+    case 'withinDeclared':
+      return t('budget.state.withinDeclared');
+    default: {
+      const never: never = v.state;
+      return never;
+    }
+  }
+}
+
+// The over-budget METER: the verdict text (the primary, non-color signal — a real DOM text node, WCAG 1.4.1
+// satisfied by text) above a decorative aria-hidden bar (disk-bar geometry verbatim). textTone → text-crit-text
+// (AA-safe, pinned by critTextPassesAA) / text-ink-soft (AA-safe, pinned by inkSoftPassesAA); barFill fills are
+// aria-hidden + redundant with the text, so the disk-bar precedent (unpinned decorative bg-cta) governs.
+const BUDGET_BAR_FILL: Record<BudgetVerdict['barFill'], string> = { crit: 'bg-crit', ok: 'bg-cta', neutral: 'bg-film-mute' };
+function BudgetMeter({ v }: { v: BudgetVerdict }) {
+  const { t } = useI18n();
+  return (
+    <div className="mt-2">
+      <div className={`font-mono text-[10px] leading-tight ${v.textTone === 'crit' ? 'text-crit-text' : 'text-ink-soft'}`}>{budgetStateText(t, v)}</div>
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-line" aria-hidden="true">
+        <div className={`h-full rounded-full ${BUDGET_BAR_FILL[v.barFill]}`} style={{ width: `${v.clampPct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function BudgetStrip({ bm, budgets }: { bm: BudgetModel; budgets: Budgets }) {
   const { t } = useI18n();
   const m = bm.vram.measured;
   const f = bm.findings;
+  // Over-budget verdicts (pure, budget-verdicts.ts). {} ⇒ [] ⇒ every find() is undefined ⇒ ZERO added DOM ⇒ the
+  // strip is byte-identical to today for an untouched user. A card/meter appears ONLY for a set budget.
+  const cards = budgetVerdicts(bm, budgets);
+  const find = (metric: BudgetMetric): (typeof cards)[number] | undefined => cards.find((c) => c.metric === metric);
+  const vramCard = find('vram');
+  const drawCard = find('draw');
+  const diskCard = find('disk');
   // WAI-ARIA disclosure (same shipped pattern as the FilmViewer readings help): ONE keyboard-reachable
   // panel under the strip re-delivers every estimate-scope string that otherwise ships as title= only.
   const [explainOpen, setExplainOpen] = useState(false);
@@ -888,6 +954,22 @@ function BudgetStrip({ bm }: { bm: BudgetModel }) {
             {t('budget.vram.declaredModel')}
           </div>
         )}
+        {/* User VRAM budget (declared basis — the like-for-like with the big number above). The measured
+            footprint, when the probe ran, is a SEPARATE text line (no second bar) — declared/measured never
+            blended into one verdict. */}
+        {vramCard ? (
+          <>
+            <BudgetMeter v={vramCard.primary} />
+            {vramCard.secondary ? (
+              // Measured is the EXACT footprint — a measured overage must never read SOFTER than the
+              // estimate-based declared bar above it, so the secondary line honors its own crit tone
+              // (same mapping as BudgetMeter), not a hardcoded neutral.
+              <div className={`mt-1 font-mono text-[10px] leading-tight ${vramCard.secondary.textTone === 'crit' ? 'text-crit-text' : 'text-ink-soft'}`}>
+                {t('budget.measured')} · {budgetStateText(t, vramCard.secondary)}
+              </div>
+            ) : null}
+          </>
+        ) : null}
       </BudgetCard>
 
       {/* Draw calls — the render-probe MEASURES the real draws; without a probe we show the STATIC floor
@@ -903,6 +985,10 @@ function BudgetStrip({ bm }: { bm: BudgetModel }) {
             {t('budget.draw.estimated')}
           </div>
         )}
+        {/* User draw-call budget. Measured draws (probe) compare normally; without a probe the FLOOR ASYMMETRY
+            governs: floor > budget ⇒ crit "floor already over"; floor ≤ budget ⇒ NEUTRAL "run the probe to
+            verify" — never a green pass (the real draws can be higher). */}
+        {drawCard ? <BudgetMeter v={drawCard.primary} /> : null}
       </BudgetCard>
 
       {/* Disk size — total → after fix; the bar is the recoverable RATIO (savedPct), an honest fraction fill. */}
@@ -922,6 +1008,9 @@ function BudgetStrip({ bm }: { bm: BudgetModel }) {
             <div className="h-full rounded-full bg-cta" style={{ width: `${bm.disk.savedPct}%` }} />
           </div>
         ) : null}
+        {/* User disk budget vs the MEASURED total on disk (never the after-fix estimate). The two bars coexist,
+            each captioned: the recoverable bar by its "→ after fix (est.)" tag above, this one by its verdict. */}
+        {diskCard ? <BudgetMeter v={diskCard.primary} /> : null}
       </BudgetCard>
 
       {/* Findings — problem count + a top-severity/all-clear chip; the proportional segments are decorative. */}
@@ -967,7 +1056,7 @@ function BudgetStrip({ bm }: { bm: BudgetModel }) {
         hidden={!explainOpen}
         className="mt-1.5 space-y-2 rounded-lg border border-line bg-panel px-3 py-2.5"
       >
-        {budgetExplainerRows(bm).map((r) => (
+        {budgetExplainerRows(bm, budgets).map((r) => (
           <div key={r.key}>
             <dt className="ad-label text-ink-soft">{t(r.termKey)}</dt>
             <dd className="mt-0.5 text-[11px] leading-relaxed text-ink-soft">{t(r.bodyKey, r.params)}</dd>
