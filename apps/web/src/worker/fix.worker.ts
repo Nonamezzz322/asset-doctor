@@ -49,6 +49,10 @@ import {
   emitSpineAtlasText,
   emitTexturePackerJson,
   planFix,
+  // PURE lossless ancillary-metadata strip (the `strip` FixOp) — removes the exact ICC/EXIF/XMP + PNG
+  // text/tIME chunks WITHOUT decoding (pixels + format byte-identical). Single Vitest-covered source so the
+  // worker's byte production can't drift; DISK-only (invariant 5 — VRAM unchanged).
+  stripImageMetadata,
   polygonWins,
   repackAtlases,
   repackAtlasesPolygon,
@@ -608,6 +612,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         // Opaque-alpha (round15): forward the Pro toggle so the plan stamps `opaque:true` on the transcode op
         // for every wasted-alpha-flagged loose ref (DISK-only saving, invariant 5). Off ⇒ no op carries opaque.
         opaqueAlpha: opts.opaqueAlpha,
+        // Lossless metadata strip: forward the toggle so a `strippable-metadata` finding on a ref no other op
+        // re-encodes emits its OWN `strip` op (executed byte-for-byte below via stripImageMetadata — DISK-only,
+        // invariant 5). Off ⇒ no `strip` op ⇒ byte-identical to today.
+        stripMetadata: opts.stripMetadata,
         // Per-image MEASURED best-format pick (round17): forward the Pro toggle so the plan routes each LOOSE
         // `format` transcode op to the winner the diagnosis already measured (params.bestMime) instead of the
         // single global targetMime. Off ⇒ every op carries opts.targetMime ⇒ byte-identical to today.
@@ -3830,6 +3838,39 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     // no-op ⇒ skipped[] / receipt byte-identical to today.
     for (const s of deselectedSkips(excluded, wouldRunByKind)) skipped.push(s);
 
+    // ── Lossless metadata-strip pass (the `strip` FixOp — pass 2c) ────────────────────────────────────
+    // Removes the exact ancillary chunks (ICC/EXIF/XMP + PNG text/tIME) from an image via the PURE
+    // stripImageMetadata — NO decode, NO re-encode, so the format + pixels stay byte-for-byte identical and
+    // only DOWNLOAD bytes drop. HONESTY (invariant 5): DISK-only — the GPU decodes to RGBA8888 regardless, so
+    // VRAM is UNCHANGED and the strip contributes 0 to vramSaved; the receipt's disk delta is MEASURED
+    // (diskAfter simply omits the removed bytes). The plan only emits a strip op for a ref NO other op
+    // re-encodes (a transcode/repack already strips it) and never a dedup owner, so the source path is NOT
+    // `replaced`/`dropped` ⇒ it flows to the pass-through below. Rather than emit here (which would bypass the
+    // pass-through's manifest recordVariant + cache-bust hashing), we stage the stripped bytes by PATH and the
+    // pass-through swaps them in — keeping the file's name + manifest entry + optional content-hash intact (a
+    // drop-in shrink). removed===0 (unreachable given the detector's ≥minBytes gate, but guarded) ⇒ nothing is
+    // staged ⇒ the byte-identical original passes through. No strip ops (default OFF) ⇒ empty map ⇒ no-op.
+    const strippedByPath = new Map<string, Uint8Array>();
+    for (const op of plan.ops) {
+      if (op.kind !== 'strip' || !runs(op)) continue;
+      const ref = op.assetRef;
+      const path = pathByRef.get(ref);
+      const srcBytes = bytesByRef.get(ref);
+      if (!path || !srcBytes) {
+        skipped.push({ assetRef: ref, reason: 'strip skipped: image unavailable' });
+        continue;
+      }
+      if (replaced.has(path) || dropped.has(path)) continue; // fail-safe — another op already owns this file
+      const res = stripImageMetadata(new Uint8Array(srcBytes));
+      if (res.removed <= 0) {
+        skipped.push({ assetRef: ref, reason: 'strip skipped: no strippable metadata found' });
+        continue;
+      }
+      strippedByPath.set(path, res.bytes);
+      // Leading token 'strip' is the OpKind classifyOp buckets on (op-manifest.ts). DISK-only byte delta.
+      operations.push(`strip ${basename(path)} (−${res.removed} B)`);
+    }
+
     // ── pass-through untouched files → drop-in optimized folder ──
     // Pixi manifest: a pass-through that is a PARSED LOOSE IMAGE still belongs in the asset map (a complete
     // load map). Reverse-index the loose-image refs by path so we record ONLY those — a non-image / non-asset
@@ -3843,7 +3884,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       : undefined;
     for (const f of files) {
       if (replaced.has(f.path) || dropped.has(f.path)) continue;
-      const bytes = new Uint8Array(f.bytes);
+      // Lossless metadata-strip (pass 2c): swap in the stripped bytes for a strip-op'd file so the drop-in
+      // shrink flows through the SAME manifest recordVariant + cache-bust hashing as any pass-through file
+      // (same name, same references, just smaller). Absent ⇒ the original bytes (byte-identical to today).
+      const bytes = strippedByPath.get(f.path) ?? new Uint8Array(f.bytes);
       const looseRef = looseRefByPath?.get(f.path);
       // Cache-bust (round9 BLOCKER-0): a non-transformed LOOSE dedup OWNER was pre-hashed before Phase C (its
       // hashed name is already in ownerActualName.image, which the consumer's meta.image now points at). Emit

@@ -599,6 +599,7 @@ function RulesCard({ s, patch }: Sect) {
       </label>
 
       <Switch label={t('fix.settings.opaqueAlpha')} hint={t('fix.settings.opaqueAlphaHint')} checked={s.opaqueAlpha} onChange={(b) => patch({ opaqueAlpha: b })} />
+      <Switch label={t('fix.settings.stripMetadata')} hint={t('fix.settings.stripMetadataHint')} checked={s.stripMetadata} onChange={(b) => patch({ stripMetadata: b })} />
       <Switch label={t('fix.settings.bestFormat')} hint={t('fix.settings.bestFormatHint')} checked={s.bestFormatPerImage} onChange={(b) => patch({ bestFormatPerImage: b })} />
       <Switch label={t('fix.settings.frameRedundancy')} hint={t('fix.settings.frameRedundancyHint')} checked={s.frameRedundancy} onChange={(b) => patch({ frameRedundancy: b })} />
       <Switch label={t('fix.settings.trimMargin')} hint={t('fix.settings.trimMarginHint')} checked={s.trimMargin} onChange={(b) => patch({ trimMargin: b })} />

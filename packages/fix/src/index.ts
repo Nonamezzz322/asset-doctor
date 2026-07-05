@@ -35,6 +35,12 @@ export { scanSkeleton, verifySpineSkeleton } from './spine-verify';
 export type { RequiredRegion, SkeletonScan, SpineVerifyResult } from './spine-verify';
 export { planFix } from './plan';
 export type { PlanOptions } from './plan';
+// PURE lossless ancillary-metadata strip (the drop-in sibling of the `strippable-metadata` detector) —
+// removes EXACTLY the ancillary chunks @asset-doctor/parsers' strippableMetadataBytes COUNTS, without
+// decoding/re-encoding (pixels byte-identical). The fix worker imports this for the `strip` FixOp so the
+// byte production can't drift from its cross-checked test. DISK-only (invariant 5): VRAM is unchanged.
+export { stripImageMetadata } from './strip';
+export type { StripResult } from './strip';
 export { scaleAwareQuality, resolveOptions, SCALE_QUALITY_FLOOR, formatEncode, DEFAULT_FORMAT_QUALITY, resolveProfileForRef } from './settings';
 export type { EffectiveOptions, FixOverride, FixAssetKind, FormatEncode, FormatEncodeGlobal, ProfileOverride, ResolvedProfile } from './settings';
 // PURE scale-tier helpers (design docs/scale-tiers-design.md §1/§2) — the loose-image analogue of

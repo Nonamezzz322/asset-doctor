@@ -100,6 +100,21 @@ const solidFinding = (ref: string, w: number, h: number): Finding => ({
   estimate: { vramBytesSaved: vram(w, h) - 4 },
 });
 
+// strippable-metadata (rules.ts shape): the EXACT header-measured strippable bytes ride on params.bytes +
+// estimate.diskBytesSaved. A surviving `strip` op credits `params.bytes` to DISK (never VRAM).
+const strippableFinding = (ref: string, bytes: number): Finding => ({
+  id: `${ref}:strippable-metadata`,
+  rule: 'strippable-metadata',
+  severity: bytes >= 65536 ? 'warn' : 'info',
+  scope: 'asset',
+  assetRef: ref,
+  title: 'strippable-metadata',
+  detail: '',
+  messageKey: 'strippable-metadata',
+  params: { label: 'PNG', bytes },
+  estimate: { diskBytesSaved: bytes },
+});
+
 // Near-duplicate (folder scope, relatedRefs). In aggressive mode planFix (no groups) bare-drops every copy
 // after the first — the op the fix-honesty guard below asserts contributes ZERO hard VRAM to the preview.
 const duplicateSimilarFinding = (a: string, b: string): Finding => ({
@@ -179,6 +194,34 @@ describe('summarizeFixPlanFootprint — honest pre-compose footprint buckets (ro
     expect(fp.diskBytesSaved).toBe(4000); // codec matches ⇒ credited exactly as before
     expect(fp.estimated).toBe(true);
     expect(fp.deferredOps).toBe(0);
+  });
+
+  // Lossless metadata strip (pass 2c): a strippable-metadata ref with a surviving `strip` op credits the
+  // EXACT header-measured bytes to DISK — never VRAM (invariant 5), never `estimated` (it's an exact count,
+  // not a lossy-encode estimate).
+  it('DISK: a strippable ref with a surviving strip op → params.bytes; NOT estimated, NOT VRAM', () => {
+    const r = report([strippableFinding('logo.png', 8192)]);
+    const plan = planFix(r, baseOpts({ stripMetadata: true }));
+    expect(plan.ops.some((o) => o.kind === 'strip' && o.assetRef === 'logo.png')).toBe(true);
+    const fp = summarizeFixPlanFootprint(r, plan.ops, EMPTY_MASK)!;
+    expect(fp.diskBytesSaved).toBe(8192);
+    expect(fp.vramBytesSaved).toBe(0); // a strip NEVER feeds VRAM (invariant 5)
+    expect(fp.estimated).toBe(false); // exact header count, not a lossy estimate
+    expect(fp.deferredOps).toBe(0);
+  });
+
+  it('a strippable ref with the strip op DESELECTED contributes nothing (mask honored)', () => {
+    const r = report([strippableFinding('logo.png', 8192)]);
+    const plan = planFix(r, baseOpts({ stripMetadata: true }));
+    const fp = summarizeFixPlanFootprint(r, plan.ops, new Set<OpKind>(['strip']));
+    expect(fp).toBeUndefined(); // only a deselected strip existed ⇒ nothing knowable ⇒ counts-only card
+  });
+
+  it('stripMetadata OFF ⇒ no strip op ⇒ the strippable finding contributes nothing', () => {
+    const r = report([strippableFinding('logo.png', 8192)]);
+    const plan = planFix(r, baseOpts()); // stripMetadata omitted
+    expect(plan.ops.some((o) => o.kind === 'strip')).toBe(false);
+    expect(summarizeFixPlanFootprint(r, plan.ops, EMPTY_MASK)).toBeUndefined();
   });
 
   it('bestFormatPerImage ON: op stamps the measured winner ⇒ credited even at a divergent global target', () => {

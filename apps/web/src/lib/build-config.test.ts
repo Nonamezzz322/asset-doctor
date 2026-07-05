@@ -161,6 +161,7 @@ describe('determinism', () => {
   "rules": {
     "aggressive": false,
     "opaqueAlpha": false,
+    "stripMetadata": false,
     "bestFormatPerImage": false,
     "frameRedundancy": true,
     "trimMargin": true,

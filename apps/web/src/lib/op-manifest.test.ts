@@ -10,6 +10,7 @@ const SAMPLES: Record<string, OpKind | null> = {
   'resize atlas big.png → 2048×2048': 'resize', // line 661 (resize atlas …)
   'resize huge.png → 2048×1024 webp': 'resize', // line 682 (resize …)
   'transcode photo.png → webp': 'transcode', // line 709
+  'strip metadata hero.png (−5000 B)': 'strip', // lossless metadata strip (pass 2c)
   'drop duplicate copy.png': 'drop', // line 723 (drop duplicate → first token 'drop')
   'pack 12 loose → ui sheet (1 page)': 'pack', // line 916
   'dedup a.png → b.png (repoint meta.image)': 'dedup', // lines 982 & 1009
@@ -62,6 +63,7 @@ describe('groupOps', () => {
       'repack b → 1×1',
       'resize c → 2×2',
       'transcode d.png → webp',
+      'strip metadata s.png (−4096 B)', // NEW op kind (pass 2c) — a drop-in, so refChanging must be false
       'drop duplicate e.png',
       'merge 2 → 1 sheet',
       'pack 3 loose → s sheet (1 page)',
@@ -91,6 +93,7 @@ describe('groupOps', () => {
 const repack = (atlasRefs: string[]): FixOp => ({ kind: 'repack', atlasRefs, targetMime: 'image/webp', pot: true, allowRotation: false, padding: 2, maxSize: 4096 });
 const resize = (assetRef: string): FixOp => ({ kind: 'resize', assetRef, to: { w: 1024, h: 512 }, targetMime: 'image/webp', quality: 0.85 });
 const transcode = (assetRef: string): FixOp => ({ kind: 'transcode', assetRef, targetMime: 'image/webp', quality: 0.85, lossless: false });
+const strip = (assetRef: string): FixOp => ({ kind: 'strip', assetRef });
 const dropLegacy = (assetRef: string): FixOp => ({ kind: 'drop', assetRef, reason: 'duplicate-exact' });
 const dropOwned = (assetRef: string, ownerRef: string): FixOp => ({ kind: 'drop', assetRef, reason: 'duplicate-exact', ownerRef });
 const pack = (id: string): FixOp => ({ kind: 'pack', group: { id, kind: 'static', regions: [] } as unknown as PackGroup, targetMime: 'image/webp', trim: true, padding: 2, maxSize: 4096, allowRotation: false });
@@ -109,6 +112,10 @@ describe('summarizeOpCounts (structured FixOp[] tally)', () => {
   it('counts resize / transcode / pack literally', () => {
     const counts = summarizeOpCounts([resize('a'), transcode('b'), transcode('c'), pack('g1')], 0);
     expect(counts).toEqual({ resize: 1, transcode: 2, pack: 1 });
+  });
+
+  it('counts strip ops literally (the lossless metadata strip, pass 2c)', () => {
+    expect(summarizeOpCounts([strip('a'), strip('b'), transcode('c')], 0)).toEqual({ transcode: 1, strip: 2 });
   });
 
   it('folds the worker tier multiplier into counts.tier', () => {

@@ -31,6 +31,14 @@ export interface PlanOptions {
    *  emitting a standalone opaque transcode when format didn't fire. DEFAULT OFF ⇒ no op carries `opaque` ⇒
    *  byte-identical to today (the wasted-alpha finding stays a diagnosis-only verdict). */
   opaqueAlpha?: boolean;
+  /** Lossless ancillary-metadata strip: a `strippable-metadata` finding on a ref NO other op re-encodes
+   *  (not repacked/resized/dropped/packed/tiered/transcoded, and never a dedup owner) gets a standalone
+   *  `strip` op — the worker removes the exact strippable chunks (ICC/EXIF/XMP + PNG text/tIME) WITHOUT
+   *  decoding, so the format + pixels are byte-identical and only DOWNLOAD bytes drop (invariant 5 — never a
+   *  VRAM claim). This is the ONLY way the fix recovers the metadata saving when a file keeps its original
+   *  format (a transcode/repack already strips it via re-encode, so those refs are de-overlapped here — no
+   *  double-emit). DEFAULT OFF ⇒ no `strip` op ⇒ byte-identical to today (the finding stays diagnosis-only). */
+  stripMetadata?: boolean;
   /** Per-image MEASURED best-format pick (round17). formatFinding ALREADY measured every candidate
    *  (FORMAT_TARGETS) and recorded the winner in `params.bestMime`. When ON, the pass-2 LOOSE `format`
    *  transcode op targets that measured winner instead of the single global `opts.targetMime`; absent/
@@ -427,6 +435,37 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
     if (transcoded.has(ref) || resized.has(ref) || dropped.has(ref) || packed.has(ref) || tiered.has(ref)) continue;
     transcoded.add(ref);
     ops.push({ kind: 'transcode', assetRef: ref, targetMime: opts.targetMime, quality: opts.quality, lossless: opts.lossless, opaque: true });
+  }
+
+  // pass 2c (lossless metadata strip): a `strippable-metadata`-flagged ref that NO other op re-encodes gets
+  // its OWN `strip` op — the worker removes the exact ancillary chunks (ICC/EXIF/XMP + PNG text/tIME) without
+  // decoding, so the file keeps its format + pixels and only DOWNLOAD bytes drop (invariant 5 — never VRAM).
+  // DE-OVERLAP: a transcode/repack/resize/pack/tier re-encode ALREADY strips this metadata, so those refs are
+  // excluded (mirrors analyze.ts's bumpBest three-way MAX — never double-counted). Owners are excluded too:
+  // stripping an owner would change its bytes (and, under cache-bust, its emitted name), which the two-phase
+  // owner-name resolution + consumer repoints don't model — a strip op stays on plain, unclaimed files. Only
+  // when the UI opted in (opts.stripMetadata); a folder-scope finding has no single op target. Empty/OFF ⇒
+  // no `strip` op ⇒ byte-identical to today. `stripped` guards against a duplicate finding on one ref.
+  if (opts.stripMetadata) {
+    const stripped = new Set<string>();
+    for (const f of report.findings) {
+      if (f.rule !== 'strippable-metadata' || f.scope === 'folder') continue;
+      const ref = f.assetRef;
+      if (
+        stripped.has(ref) ||
+        transcoded.has(ref) ||
+        resized.has(ref) ||
+        dropped.has(ref) ||
+        packed.has(ref) ||
+        tiered.has(ref) ||
+        repacked.has(ref) ||
+        protectedOwners.has(ref)
+      ) {
+        continue;
+      }
+      stripped.add(ref);
+      ops.push({ kind: 'strip', assetRef: ref });
+    }
   }
   return { ops, thresholds: report.thresholds };
 }

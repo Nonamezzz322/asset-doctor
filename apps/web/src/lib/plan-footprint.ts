@@ -70,6 +70,7 @@ export function summarizeFixPlanFootprint(
   const transcodeTarget = new Map<string, ImageMime>();
   const opaqueRefs = new Set<string>(); // refs whose surviving transcode drops the dead alpha channel
   const resizeTo = new Map<string, Size>(); // ref → surviving resize target (VRAM-measurable)
+  const stripRefs = new Set<string>(); // refs whose surviving strip op removes ancillary metadata (DISK-only)
   let deferredOps = 0; // repack/merge/pack/dedup — sized at download
   for (const op of ops) {
     if (excluded.has(fixOpKind(op))) continue; // deselected ⇒ does no work ⇒ contributes nothing
@@ -78,6 +79,8 @@ export function summarizeFixPlanFootprint(
       if (op.opaque === true) opaqueRefs.add(op.assetRef);
     } else if (op.kind === 'resize') {
       resizeTo.set(op.assetRef, op.to);
+    } else if (op.kind === 'strip') {
+      stripRefs.add(op.assetRef);
     } else if (DEFERRED_KINDS.has(fixOpKind(op))) {
       deferredOps++;
     }
@@ -114,6 +117,15 @@ export function summarizeFixPlanFootprint(
     } else if (f.rule === 'wasted-alpha' && opaqueRefs.has(ref) && !disced.has(ref)) {
       // DISK — wasted-alpha (MEASURED channel drop): srcBytes − opaqueBytes. Not an estimate.
       diskBytesSaved += Math.max(0, num(p?.srcBytes) - num(p?.opaqueBytes));
+    } else if (f.rule === 'strippable-metadata' && stripRefs.has(ref) && !disced.has(ref)) {
+      // DISK — lossless metadata strip: the EXACT header-measured strippable bytes (params.bytes ===
+      // strippableMetadataBytes, an EXACT count, not a lossy encode ESTIMATE). The worker's strip removes AT
+      // LEAST this (a pad byte more for an odd RIFF chunk), so this is a conservative TRUE lower bound of the
+      // real delta ⇒ `estimated` stays FALSE. DISK-only (invariant 5) — the GPU decodes to RGBA8888
+      // regardless, so a strip NEVER feeds vramBytesSaved. A strip ref is disjoint from transcode refs (plan
+      // de-overlaps), so no double-count; disced kept for symmetry.
+      disced.add(ref);
+      diskBytesSaved += num(p?.bytes);
     } else if (f.rule === 'dimensions-oversize' && resizeTo.has(ref)) {
       // VRAM — oversize × resize: the MEASURED pre-resize w·h·4 (params.vram, rules.ts) − to.w·to.h·4.
       // `before` uses the finding's measured vram so the two sides never drift from vramBytes(); `after`

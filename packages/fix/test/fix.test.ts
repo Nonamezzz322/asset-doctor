@@ -581,6 +581,88 @@ describe('planFix — opaque-alpha (wasted-alpha fix)', () => {
   });
 });
 
+// ── Lossless metadata strip (pass 2c) — the drop-in fix for `strippable-metadata` findings ───────────
+// planFix's `opts.stripMetadata` emits a `strip` op for every strippable-metadata-flagged ref that NO other
+// op re-encodes (a transcode/repack/resize/pack/tier already strips it — de-overlapped; owners excluded).
+// Pure data assertions: OFF ⇒ no strip op (byte-identical); ON ⇒ exactly one strip op per unclaimed ref,
+// carrying ONLY {kind,assetRef}; de-overlap with every re-encoding op; folder-scope ignored; owner excluded.
+describe('planFix — lossless metadata strip (strippable-metadata fix)', () => {
+  const base = { targetMime: 'image/avif' as const, quality: 0.85, lossless: false, padding: 2, maxSize: 4096, maxEdge: 2048 };
+  const strips = (plan: { ops: FixOp[] }) => plan.ops.filter((o): o is Extract<FixOp, { kind: 'strip' }> => o.kind === 'strip');
+  const meta = (ref: string): AnalysisReport['findings'][number] =>
+    ({ id: `${ref}:strippable-metadata`, rule: 'strippable-metadata', severity: 'info', assetRef: ref, title: '', detail: '', messageKey: 'strippable-metadata', params: { label: 'PNG', bytes: 5000 }, estimate: { diskBytesSaved: 5000 } });
+  const format = (ref: string): AnalysisReport['findings'][number] =>
+    ({ id: `${ref}:format`, rule: 'format', severity: 'warn', assetRef: ref, title: '', detail: '' });
+  const occupancy = (ref: string): AnalysisReport['findings'][number] =>
+    ({ id: `${ref}:occupancy`, rule: 'occupancy', severity: 'warn', assetRef: ref, title: '', detail: '' });
+  const oversize = (ref: string): AnalysisReport['findings'][number] =>
+    ({ id: `${ref}:oversize`, rule: 'dimensions-oversize', severity: 'crit', assetRef: ref, title: '', detail: '', messageKey: 'oversize', params: { w: 4096, h: 4096, edge: 4096, budget: 2730, sev: 'crit', vram: 0 } });
+  const reportOf = (findings: AnalysisReport['findings']): AnalysisReport => ({
+    assets: findings.map((f) => ({ assetRef: f.assetRef, diskBytes: 1000, vramBytes: 0 })),
+    findings,
+    totals: { diskBytes: 1000, vramBytes: 0, loadedVramBytes: 0, potentialDiskSaved: 0 },
+    thresholds: DEFAULT_THRESHOLDS,
+  });
+
+  it('OFF ⇒ no strip op (byte-identical to today; the finding stays diagnosis-only)', () => {
+    const plan = planFix(reportOf([meta('hero.png')]), { ...base, aggressive: false }); // stripMetadata omitted
+    expect(strips(plan)).toHaveLength(0);
+  });
+
+  it('ON, strippable-only ref ⇒ exactly one strip op carrying ONLY {kind, assetRef}', () => {
+    const plan = planFix(reportOf([meta('hero.png')]), { ...base, aggressive: false, stripMetadata: true });
+    const ss = strips(plan);
+    expect(ss).toHaveLength(1);
+    expect(ss[0]).toEqual({ kind: 'strip', assetRef: 'hero.png' }); // no extra fields — the set is fixed
+  });
+
+  it('ON, strippable + format on the SAME ref ⇒ NO strip op (the transcode re-encode already strips it)', () => {
+    const plan = planFix(reportOf([format('hero.png'), meta('hero.png')]), { ...base, aggressive: false, stripMetadata: true });
+    expect(plan.ops.some((o) => o.kind === 'transcode' && o.assetRef === 'hero.png')).toBe(true);
+    expect(strips(plan)).toHaveLength(0);
+  });
+
+  it('ON, order-independent: strippable BEFORE the format finding still de-overlaps to zero strip ops', () => {
+    const plan = planFix(reportOf([meta('hero.png'), format('hero.png')]), { ...base, aggressive: false, stripMetadata: true });
+    expect(strips(plan)).toHaveLength(0);
+  });
+
+  it('ON, strippable + oversize (resize) ⇒ NO strip op (resize owns the re-encode)', () => {
+    const plan = planFix(reportOf([oversize('big.png'), meta('big.png')]), { ...base, aggressive: false, stripMetadata: true });
+    expect(plan.ops.some((o) => o.kind === 'resize' && o.assetRef === 'big.png')).toBe(true);
+    expect(strips(plan)).toHaveLength(0);
+  });
+
+  it('ON, strippable on a REPACKED atlas page ⇒ NO strip op (the repack re-encodes the page)', () => {
+    const plan = planFix(reportOf([occupancy('sheet.png'), meta('sheet.png')]), { ...base, aggressive: false, stripMetadata: true });
+    expect(plan.ops.some((o) => o.kind === 'repack' && o.atlasRefs.includes('sheet.png'))).toBe(true);
+    expect(strips(plan)).toHaveLength(0);
+  });
+
+  it('ON, a folder-scope strippable finding is ignored (no single op target)', () => {
+    const plan = planFix(reportOf([{ ...meta('hero.png'), scope: 'folder' as const }]), { ...base, aggressive: false, stripMetadata: true });
+    expect(strips(plan)).toHaveLength(0);
+  });
+
+  it('ON, a strippable dedup OWNER is excluded (stripping would change the repointed owner bytes/name)', () => {
+    const groups: DedupGroup[] = [
+      { contentHash: 'h1', pool: 'pixi', skinGroup: 'general', owners: ['owner.png'], consumers: [{ ref: 'copy.png', ownerRef: 'owner.png', reason: 'eager-owner' }] },
+    ];
+    const plan = planFix(reportOf([meta('owner.png')]), { ...base, aggressive: true, stripMetadata: true }, groups);
+    expect(strips(plan)).toHaveLength(0);
+  });
+
+  it('ON, duplicate strippable findings on ONE ref ⇒ a single strip op (the stripped guard)', () => {
+    const plan = planFix(reportOf([meta('hero.png'), { ...meta('hero.png'), id: 'hero.png:strippable-metadata-2' }]), { ...base, aggressive: false, stripMetadata: true });
+    expect(strips(plan)).toHaveLength(1);
+  });
+
+  it('ON, two independent strippable refs ⇒ one strip op each, in finding order', () => {
+    const plan = planFix(reportOf([meta('a.png'), meta('b.png')]), { ...base, aggressive: false, stripMetadata: true });
+    expect(strips(plan).map((s) => s.assetRef)).toEqual(['a.png', 'b.png']);
+  });
+});
+
 // ── Per-image MEASURED best-format pick (round17) ─────────────────────────────────────────────────
 // planFix's `opts.bestFormatPerImage` routes each LOOSE `format` transcode op to the winner the diagnosis
 // ALREADY measured (params.bestMime) instead of the single global opts.targetMime. Pure data assertions:

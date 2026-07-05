@@ -58,6 +58,7 @@ export interface BuildConfigFile {
   rules: {
     aggressive: boolean;
     opaqueAlpha: boolean;
+    stripMetadata: boolean;
     bestFormatPerImage: boolean;
     frameRedundancy: boolean;
     trimMargin: boolean;
@@ -236,6 +237,7 @@ export function serializeBuildConfig(state: BuildSettings | BuildConfigState): s
     rules: {
       aggressive: s.aggressive,
       opaqueAlpha: s.opaqueAlpha,
+      stripMetadata: s.stripMetadata,
       bestFormatPerImage: s.bestFormatPerImage,
       frameRedundancy: s.frameRedundancy,
       trimMargin: s.trimMargin,
@@ -388,6 +390,7 @@ export function pickSettings(raw: unknown): BuildSettings {
     pngRecompressLevel,
     aggressive: bool(rules.aggressive, def.aggressive),
     opaqueAlpha: bool(rules.opaqueAlpha, def.opaqueAlpha),
+    stripMetadata: bool(rules.stripMetadata, def.stripMetadata),
     bestFormatPerImage: bool(rules.bestFormatPerImage, def.bestFormatPerImage),
     frameRedundancy: bool(rules.frameRedundancy, def.frameRedundancy),
     trimMargin: bool(rules.trimMargin, def.trimMargin),

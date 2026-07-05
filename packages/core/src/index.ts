@@ -784,6 +784,13 @@ export type FixOp =
        *  delta, never a VRAM claim. Absent/false ⇒ today's alpha-preserving transcode (byte-identical). */
       opaque?: boolean }
   | { kind: 'resize'; assetRef: string; to: Size; targetMime: ImageMime; quality: number }
+  // LOSSLESS ancillary-metadata strip — the drop-in Pro fix for a `strippable-metadata` finding on a ref no
+  // other op re-encodes. The worker removes the exact strippable chunks (ICC/EXIF/XMP + PNG text/tIME) via
+  // the pure stripImageMetadata (no decode, no re-encode ⇒ pixels byte-identical, format unchanged). HONESTY
+  // (invariant 5): a DISK/DOWNLOAD saving ONLY — the GPU decodes to RGBA8888 regardless, so VRAM is
+  // UNCHANGED; the receipt carries the MEASURED byte delta (never a VRAM claim). No fields beyond the ref:
+  // the removal set is fixed (== the detector's allow-set), so there is nothing to parameterize.
+  | { kind: 'strip'; assetRef: string }
   | { kind: 'drop'; assetRef: string; reason: 'duplicate-exact' | 'duplicate-similar';
       /** Owner-aware drop (Feature 1): retained ref this drop's references repoint to. Absent ⇒ legacy
        *  bare-delete (today's behavior). */

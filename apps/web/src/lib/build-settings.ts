@@ -65,6 +65,10 @@ export interface BuildSettings {
   // ── rules ──
   aggressive: boolean;
   opaqueAlpha: boolean;
+  /** Lossless ancillary-metadata strip: for a `strippable-metadata` finding on a ref no other op re-encodes,
+   *  remove the exact ICC/EXIF/XMP + PNG text/tIME chunks without decoding (format + pixels byte-identical,
+   *  DISK-only). DEFAULT OFF ⇒ wire sends undefined ⇒ no `strip` op ⇒ byte-identical to today. */
+  stripMetadata: boolean;
   bestFormatPerImage: boolean;
   /** DEFAULT ON — wire sends `false` only on opt-out (undefined ≙ on; keeps the default bag identical). */
   frameRedundancy: boolean;
@@ -128,6 +132,7 @@ export function settingsDefaults(): BuildSettings {
     pngRecompressLevel: 0,
     aggressive: false,
     opaqueAlpha: false,
+    stripMetadata: false,
     bestFormatPerImage: false,
     frameRedundancy: true,
     trimMargin: true,
@@ -225,6 +230,8 @@ export function buildFixOptions(s: BuildSettings, run: PerRunOptions): BuildFixO
     pngRecompressLevel: s.pngRecompressLevel > 0 ? s.pngRecompressLevel : undefined,
     // Opaque-alpha (round15) — forwarded only when enabled; off ⇒ undefined ⇒ byte-identical to today.
     opaqueAlpha: s.opaqueAlpha || undefined,
+    // Lossless metadata strip — forwarded only when enabled; off ⇒ undefined ⇒ no `strip` op ⇒ byte-identical.
+    stripMetadata: s.stripMetadata || undefined,
     // Per-image MEASURED best-format pick (round17) — forwarded only when enabled; off ⇒ undefined.
     bestFormatPerImage: s.bestFormatPerImage || undefined,
     // Frame-redundancy aliasing (round19) — DEFAULT ON: the worker treats undefined as ON, so we only

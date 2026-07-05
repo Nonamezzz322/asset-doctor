@@ -53,6 +53,14 @@ export interface FixOptions {
    *  measures the real byte delta (honest skip if no win). Absent/false ⇒ no op carries `opaque` ⇒ byte-
    *  identical to today (the wasted-alpha finding stays a diagnosis-only verdict). */
   opaqueAlpha?: boolean;
+  /** Lossless ancillary-metadata strip: for a `strippable-metadata` finding on a ref NO other op re-encodes,
+   *  the worker removes the exact strippable chunks (ICC/EXIF/XMP + PNG text/tIME) via the pure
+   *  stripImageMetadata — NO decode, NO re-encode ⇒ the format + pixels are byte-identical, only DOWNLOAD
+   *  bytes drop. HONESTY (invariant 5): DISK-only — the GPU decodes to RGBA8888 regardless, so VRAM is
+   *  UNCHANGED; the receipt carries the MEASURED byte delta (b.length − out.length), never a VRAM claim. A
+   *  transcode/repack/resize already strips metadata via re-encode, so the plan de-overlaps those refs (no
+   *  double-emit). Absent/false ⇒ no `strip` op ⇒ byte-identical to today (the finding stays diagnosis-only). */
+  stripMetadata?: boolean;
   /** Per-image MEASURED best-format pick (round17-per-image-measured-best-format-pick). The diagnosis
    *  ALREADY measured the smallest real encode per loose image (formatFinding compares real encoded sizes
    *  and records the winner in `params.bestMime`). When ON, the LOOSE `format` transcode op targets that
@@ -564,7 +572,7 @@ export interface FixReceipt {
  *  drop/dedup split by ownerRef; resize/transcode/pack literal) PLUS the worker-side `tier` multiplier
  *  (an upper bound — tiering can still be refused at pixel time). Zero-count kinds are OMITTED. */
 export type PlanOpCounts = Partial<
-  Record<'repack' | 'resize' | 'transcode' | 'drop' | 'merge' | 'pack' | 'dedup' | 'tier', number>
+  Record<'repack' | 'resize' | 'transcode' | 'strip' | 'drop' | 'merge' | 'pack' | 'dedup' | 'tier', number>
 >;
 
 /** HONEST fix-simulation footprint preview (round22 #2, docs/improvements/round22-honest-fix-simulation-

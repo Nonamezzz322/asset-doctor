@@ -15,14 +15,16 @@
 import type { FixOp } from '@asset-doctor/core';
 import type { FixPlanSummary, PlanOpCounts } from '../worker/fix-protocol';
 
-/** Op verbs — the closed set emitted by the 11 operations.push sites (8 distinct verbs) in fix.worker.ts. */
-export type OpKind = 'repack' | 'merge' | 'resize' | 'transcode' | 'drop' | 'pack' | 'dedup' | 'tier';
+/** Op verbs — the closed set emitted by the operations.push sites in fix.worker.ts. `strip` is the lossless
+ *  ancillary-metadata strip (drop-in: format/pixels/name unchanged, only DOWNLOAD bytes drop). */
+export type OpKind = 'repack' | 'merge' | 'resize' | 'transcode' | 'strip' | 'drop' | 'pack' | 'dedup' | 'tier';
 
-/** Verbs whose op rewrites/changes asset references (NOT a drop-in) → rendered with the warn token. */
+/** Verbs whose op rewrites/changes asset references (NOT a drop-in) → rendered with the warn token. `strip`
+ *  is DELIBERATELY absent: it keeps the file's exact name + format (only shrinks it), so it is a pure drop-in. */
 export const REFERENCE_CHANGING: ReadonlySet<OpKind> = new Set<OpKind>(['merge', 'dedup', 'pack', 'tier']);
 
 /** Deterministic group display order: drop-in ops first, reference-changing next, tier last. */
-export const OP_KIND_ORDER: readonly OpKind[] = ['repack', 'resize', 'transcode', 'drop', 'merge', 'pack', 'dedup', 'tier'];
+export const OP_KIND_ORDER: readonly OpKind[] = ['repack', 'resize', 'transcode', 'strip', 'drop', 'merge', 'pack', 'dedup', 'tier'];
 
 const KNOWN: ReadonlySet<string> = new Set<string>(OP_KIND_ORDER);
 
@@ -96,7 +98,7 @@ export function fixOpKind(op: FixOp): Exclude<OpKind, 'tier'> {
  *  through `fixOpKind` (the single source of truth). The worker-side `tier` multiplier is folded in from
  *  `g.tierAssets`. Zero-count kinds are OMITTED. Pure, deterministic. */
 export function summarizeOpCounts(ops: readonly FixOp[], tierAssets: number): PlanOpCounts {
-  const counts: Record<OpKind, number> = { repack: 0, merge: 0, resize: 0, transcode: 0, drop: 0, pack: 0, dedup: 0, tier: 0 };
+  const counts: Record<OpKind, number> = { repack: 0, merge: 0, resize: 0, transcode: 0, strip: 0, drop: 0, pack: 0, dedup: 0, tier: 0 };
   for (const op of ops) counts[fixOpKind(op)]++;
   counts.tier += Math.max(0, tierAssets);
   const out: PlanOpCounts = {};
