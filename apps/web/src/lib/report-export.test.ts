@@ -6,9 +6,11 @@ import {
   reportToJSON,
   reportToMarkdown,
   reportToCSV,
+  reportToHTML,
   reportContent,
   reportFilename,
   sortFindings,
+  escapeHtml,
   REPORT_MIME,
 } from './report-export';
 
@@ -235,7 +237,12 @@ describe('reportContent + REPORT_MIME dispatch', () => {
     expect(reportContent(r, 'csv', 'S')).toBe(reportToCSV(r));
   });
   it('maps every format to a correct MIME type', () => {
-    expect(REPORT_MIME).toEqual({ json: 'application/json', md: 'text/markdown', csv: 'text/csv' });
+    expect(REPORT_MIME).toEqual({
+      json: 'application/json',
+      md: 'text/markdown',
+      csv: 'text/csv',
+      html: 'text/html',
+    });
   });
 });
 
@@ -279,5 +286,199 @@ describe('honesty — invariant 5 (disk ≠ VRAM, never summed)', () => {
     expect(est).toEqual({ diskBytesSaved: 1000, vramBytesSaved: 2000 });
     expect(json).not.toContain('totalSaved');
     expect(json).not.toContain('totalBytes');
+  });
+});
+
+describe('escapeHtml — exhaustive metacharacter coverage (the #1 review focus)', () => {
+  it('escapes each of the five HTML metacharacters', () => {
+    expect(escapeHtml('&')).toBe('&amp;');
+    expect(escapeHtml('<')).toBe('&lt;');
+    expect(escapeHtml('>')).toBe('&gt;');
+    expect(escapeHtml('"')).toBe('&quot;');
+    expect(escapeHtml("'")).toBe('&#39;');
+  });
+
+  it('escapes ampersand FIRST and never double-escapes an inserted entity', () => {
+    expect(escapeHtml('<&>')).toBe('&lt;&amp;&gt;');
+    // a literal "&amp;" in the input becomes "&amp;amp;" — the '&' is escaped, the rest is literal text
+    expect(escapeHtml('&amp;')).toBe('&amp;amp;');
+  });
+
+  it('neutralizes an attribute-context breakout value (quote escaped, no raw quote survives)', () => {
+    const out = escapeHtml('" onmouseover="x');
+    expect(out).toContain('&quot;');
+    expect(out).not.toContain('"'); // no raw double-quote can close an attribute
+  });
+
+  it('coerces a number without throwing', () => {
+    expect(escapeHtml(4096)).toBe('4096');
+  });
+});
+
+describe('reportToHTML — self-contained document shape (invariant 1: zero network)', () => {
+  it('is a complete standalone document with an inline <style> and correct terminators', () => {
+    const html = reportToHTML(makeReport());
+    expect(html.startsWith('<!doctype html>')).toBe(true);
+    expect(html.endsWith('</html>\n')).toBe(true);
+    expect(html).toContain('<meta charset="utf-8">');
+    expect(html).toContain('<style>');
+    expect(html).toContain('</style>');
+  });
+
+  it('embeds ZERO remote/fetchable references (no script/link/img/src/href/url/@import/http)', () => {
+    // A CLEAN report (no findings) so no escaped-"src=" text from finding data can false-fail these checks.
+    const html = reportToHTML(makeReport());
+    for (const forbidden of ['<script', '<link', '<img', 'src=', 'href=', 'url(', '@import', 'http']) {
+      expect(html).not.toContain(forbidden);
+    }
+  });
+});
+
+describe('reportToHTML — injection safety (ADVERSARIAL, the #1 review focus)', () => {
+  it('neutralizes a <script> asset name (escaped, no live tag)', () => {
+    const r = makeReport({ findings: [finding({ assetRef: '<script>alert(1)</script>.png' })] });
+    const html = reportToHTML(r);
+    expect(html).toContain('&lt;script&gt;');
+    expect(html).not.toContain('<script'); // no live script tag anywhere in the document
+  });
+
+  it('neutralizes an attribute-breakout asset name ("><img …>) — no tag or attr escapes text context', () => {
+    const r = makeReport({ findings: [finding({ assetRef: '"><img src=x onerror=alert(1)>.png' })] });
+    const html = reportToHTML(r);
+    expect(html).toContain('&quot;&gt;&lt;img');
+    expect(html).not.toContain('<img'); // the injected image tag never materializes
+    expect(html).not.toContain('"><img'); // and the quote/bracket breakout is fully neutralized
+  });
+
+  it('escapes HTML metacharacters in title and detail (raw <b> never appears)', () => {
+    const r = makeReport({ findings: [finding({ assetRef: 'a.png', title: '<b>&"', detail: '<b>&"' })] });
+    const html = reportToHTML(r);
+    expect(html).toContain('&lt;b&gt;&amp;&quot;');
+    expect(html).not.toContain('<b>');
+  });
+});
+
+describe('reportToHTML — subject in <title> and <h1>', () => {
+  it('escapes a nasty subject in BOTH the title and the heading', () => {
+    const html = reportToHTML(makeReport(), { subject: 'A<b>&"C' });
+    // both the <title> and the <h1> carry the escaped subject
+    expect(html).toContain('<title>Asset Doctor — audit: A&lt;b&gt;&amp;&quot;C</title>');
+    expect(html).toContain('<h1>Asset Doctor — audit: A&lt;b&gt;&amp;&quot;C</h1>');
+    expect(html).not.toContain('<b>');
+  });
+
+  it('omits the subject suffix entirely when no subject is given', () => {
+    const html = reportToHTML(makeReport());
+    expect(html).toContain('<title>Asset Doctor — audit</title>');
+    expect(html).not.toContain('audit:');
+  });
+});
+
+describe('reportToHTML — summary header (invariant 3: measured-only)', () => {
+  it('carries assets count, disk, VRAM(loaded) and the honest draw-call floor', () => {
+    const r = makeReport();
+    const html = reportToHTML(r);
+    expect(html).toContain('2 assets');
+    expect(html).toContain(`disk ${fmtBytes(r.totals.diskBytes)}`);
+    expect(html).toContain(`VRAM(loaded) ${fmtBytes(r.totals.loadedVramBytes)}`);
+    expect(html).toContain('draw-call floor ≥ 7'); // loadedTextures, not assets.length
+  });
+
+  it('falls back to assets.length for the floor when loadedTextures is absent', () => {
+    const r = makeReport({ totals: { ...makeReport().totals, loadedTextures: undefined } as AnalysisReport['totals'] });
+    expect(reportToHTML(r)).toContain('draw-call floor ≥ 2');
+  });
+
+  it('reuses the disk≠VRAM note with {naive}→fmtBytes(vramBytes) and no rollup total', () => {
+    const r = makeReport();
+    const html = reportToHTML(r);
+    expect(html).toContain(fmtBytes(r.totals.vramBytes));
+    expect(html).not.toContain('{naive}');
+    expect(html).not.toContain(fmtBytes(r.totals.potentialDiskSaved)); // no total-savings rollup
+  });
+
+  it('carries the "(est.)" honesty qualifier in BOTH savings column headers', () => {
+    // a finding is present so the findings table (and its headers) is rendered
+    const html = reportToHTML(makeReport({ findings: [finding({ assetRef: 'a.png' })] }));
+    expect(html).toContain('Disk saved (est.)');
+    expect(html).toContain('VRAM saved (est.)');
+  });
+});
+
+describe('reportToHTML — determinism & sorted order', () => {
+  it('is byte-identical across calls (no Date.now / random — not a timestamp)', () => {
+    const r = makeReport({ findings: [finding({ assetRef: 'a.png' })] });
+    expect(reportToHTML(r)).toBe(reportToHTML(r));
+  });
+
+  it('emits one severity row per finding in sortFindings() order', () => {
+    const findings = [
+      finding({ severity: 'ok', assetRef: 'ok.png' }),
+      finding({ severity: 'info', assetRef: 'b.png' }),
+      finding({ severity: 'info', assetRef: 'a.png' }),
+      finding({ severity: 'crit', assetRef: 'c.png' }),
+      finding({ severity: 'warn', assetRef: 'w.png' }),
+    ];
+    const r = makeReport({ findings });
+    const html = reportToHTML(r);
+    const sorted = sortFindings(findings).map((f) => f.assetRef);
+    const order = sorted.map((n) => html.indexOf(n));
+    expect(order).toEqual([...order].sort((x, y) => x - y)); // ascending ⇒ same order as sortFindings
+    // exactly one data row (severity <span>) per finding
+    expect((html.match(/class="sev /g) || []).length).toBe(findings.length);
+  });
+});
+
+describe('reportToHTML — SEPARATE disk/VRAM columns, blank-not-zero (invariants 3 & 5)', () => {
+  it('has two distinct estimate header cells', () => {
+    const html = reportToHTML(makeReport({ findings: [finding({})] }));
+    expect(html).toContain('<th class="num">Disk saved (est.)</th>');
+    expect(html).toContain('<th class="num">VRAM saved (est.)</th>');
+  });
+
+  it('renders a disk-only saving with an EMPTY vram cell (no fabricated 0)', () => {
+    const r = makeReport({ findings: [finding({ assetRef: 'meta.png', estimate: { diskBytesSaved: 4096 } })] });
+    const html = reportToHTML(r);
+    expect(html).toContain(`<td class="num">${fmtBytes(4096)}</td><td class="num"></td>`);
+  });
+
+  it('renders a vram-only saving with an EMPTY disk cell (symmetric)', () => {
+    const r = makeReport({ findings: [finding({ assetRef: 'dup.png', estimate: { vramBytesSaved: 16 * 1048576 } })] });
+    const html = reportToHTML(r);
+    expect(html).toContain(`<td class="num"></td><td class="num">${fmtBytes(16 * 1048576)}</td>`);
+  });
+
+  it('never sums disk+vram into a single figure (1000 & 2000 present, 3000 absent)', () => {
+    const r = makeReport({
+      findings: [finding({ assetRef: 'both.png', estimate: { diskBytesSaved: 1000, vramBytesSaved: 2000 } })],
+    });
+    const html = reportToHTML(r);
+    expect(html).toContain(fmtBytes(1000));
+    expect(html).toContain(fmtBytes(2000));
+    expect(html).not.toContain('3000');
+    expect(html).not.toContain(fmtBytes(3000));
+    expect(html).toContain('never summed'); // the note is present
+  });
+});
+
+describe('reportToHTML — empty findings', () => {
+  it('shows the empty-state paragraph and no table on a clean report', () => {
+    const html = reportToHTML(makeReport());
+    expect(html).toContain('<p class="empty">No findings.</p>');
+    expect(html).not.toContain('<table');
+    expect(html).not.toContain('class="sev');
+    expect(html).toContain('0 findings.');
+  });
+});
+
+describe('reportToHTML — dispatch, filename, MIME', () => {
+  it('reportContent routes html to reportToHTML with the subject', () => {
+    const r = makeReport({ findings: [finding({ assetRef: 'a.png' })] });
+    expect(reportContent(r, 'html', 'S')).toBe(reportToHTML(r, { subject: 'S' }));
+  });
+
+  it('maps html to text/html and produces a .html filename', () => {
+    expect(REPORT_MIME.html).toBe('text/html');
+    expect(reportFilename('My Game', 'html')).toBe('my-game-audit.html');
   });
 });

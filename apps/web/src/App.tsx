@@ -1355,7 +1355,7 @@ function ReportActions({ report, subject }: { report: AnalysisReport; subject?: 
         {copied ? '✓ ' : ''}
         {t('results.export.copy')}
       </button>
-      {(['json', 'md', 'csv'] as const).map((f: ReportFormat) => (
+      {(['json', 'md', 'csv', 'html'] as const).map((f: ReportFormat) => (
         <button
           key={f}
           type="button"
