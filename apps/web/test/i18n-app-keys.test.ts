@@ -79,6 +79,13 @@ const appSrc =
   // literals live in the PURE mapper, not App.tsx — so it must be scanned or a renamed key would render raw.
   lib('error-view.ts') +
   '\n' +
+  // film-loupe.ts owns the loupe.frame / loupe.frameNamed / loupe.noSpriteHere / loupe.noFrame t() literals
+  // (the inspect-readout composition lives in the PURE module's formatInspect, not FilmViewer.tsx), so it must
+  // be scanned or a renamed loupe readout key would silently render a raw dotted key. The remaining loupe.*
+  // keys (controls/stage/instructions/zoomIn/zoomOut/reset/zoomLevel/hint) are static literals in FilmViewer.tsx,
+  // already covered by scanning that component above.
+  lib('film-loupe.ts') +
+  '\n' +
   // Landing.tsx owns every landing.* t() literal (the whole idle-screen landing below the Dropzone). Its
   // nav labels + the pricing-status line resolve through registry/gate constants (landing-nav.ts, pinned by
   // landing-nav.test.ts + the i18n parity test), but the section copy is static t('landing.*') and must

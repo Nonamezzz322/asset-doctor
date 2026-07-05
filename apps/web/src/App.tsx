@@ -689,7 +689,12 @@ export function App() {
                     swap is style-inert (no aside selector in index.css). */}
                 <section aria-label={t('region.filmDetail')} className="space-y-3 lg:sticky lg:top-20">
                   {selectedBytes && debouncedSelected ? (
-                    <FilmViewer bytes={selectedBytes} findings={assetFindings} highlightId={debouncedHighlight} name={debouncedSelected} metrics={selectedMetrics} frameCount={selectedFrameCount} />
+                    // HERO gets the interactive loupe: zoom + pan + click/keyboard inspect. `frames` = the real
+                    // parsed packed rects (report.atlasFrames), the honest hit-test source; undefined for a loose
+                    // image ⇒ inspect reports frame:null honestly. `frameNames` is intentionally NOT passed — the
+                    // sprite-name field is a flagged additive `core` change awaiting sign-off (design §8); until
+                    // then the inspect readout uses the real array ordinal ("Frame N · W×H"), fully honest.
+                    <FilmViewer bytes={selectedBytes} findings={assetFindings} highlightId={debouncedHighlight} name={debouncedSelected} metrics={selectedMetrics} frameCount={selectedFrameCount} interactive frames={report?.atlasFrames?.[debouncedSelected]} />
                   ) : (
                     <p className="rounded-xl border border-line bg-panel p-4 font-mono text-sm text-ink-soft">{t('report.noImage')}</p>
                   )}

@@ -23,6 +23,13 @@ const LABEL_KEY: Record<OverlayZone['kind'], string> = {
   'duplicate-frame': 'legend.duplicateFrame',
 };
 
+/** The i18n label key for an overlay kind — the SAME key the legend swatch prints. Exported so the loupe's
+ *  inspect readout (film-loupe.ts `formatInspect`) names an anomaly with the identical word the legend uses;
+ *  the two can never drift. Thin, total wrapper over the private LABEL_KEY map. */
+export function legendLabelKey(kind: OverlayZone['kind']): string {
+  return LABEL_KEY[kind];
+}
+
 export interface LegendItem {
   kind: OverlayZone['kind'];
   labelKey: string;

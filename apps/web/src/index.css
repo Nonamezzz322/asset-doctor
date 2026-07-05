@@ -228,6 +228,47 @@ body {
   animation: ad-scan 2.1s ease-in-out 0.2s both;
 }
 
+/* Loupe: crisp NEAREST texels for the magnified atlas (sprite inspection). Applied to the canvas ONLY when
+   zoom > 1; at fit the browser's smooth downscale is kept (== today). No animation ⇒ reduced-motion safe. */
+.ad-pixelated {
+  image-rendering: pixelated;
+}
+
+/* Loupe: the fixed center crosshair — the keyboard-inspect target (Enter/Space inspects here) + pan reference.
+   Two 1px rules via pseudo-elements; decorative (aria-hidden in JSX). STATIC (no animation/transition) so it is
+   reduced-motion safe by construction and the zoom/pan it references is an instant state→redraw. */
+.ad-loupe-crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+  pointer-events: none;
+}
+.ad-loupe-crosshair::before,
+.ad-loupe-crosshair::after {
+  content: '';
+  position: absolute;
+  background: var(--color-film-soft);
+  opacity: 0.85;
+}
+.ad-loupe-crosshair::before {
+  left: 50%;
+  top: 0;
+  width: 1px;
+  height: 100%;
+  transform: translateX(-50%);
+}
+.ad-loupe-crosshair::after {
+  top: 50%;
+  left: 0;
+  height: 1px;
+  width: 100%;
+  transform: translateY(-50%);
+}
+
 /* a11y: determinate progress bar for the analyzing state. Token-driven (reuses teal→cta + film-border),
    honest (the fill width reflects the worker's REAL done/total via progressView() → role=progressbar).
    Reduced-motion safe BY CONSTRUCTION: the fill is a STATIC width and the indeterminate fallback is a
