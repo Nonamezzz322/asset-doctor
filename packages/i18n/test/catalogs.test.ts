@@ -263,4 +263,42 @@ describe('catalog completeness (all 10 locales)', () => {
       for (const k of ['error.noFiles', 'error.analysisFailed', 'error.fixFailed', 'error.detailsLabel'])
         expect(translate(loc, k), `${loc} ${k}`).not.toContain('{');
   });
+
+  // user-settable budgets round: the 3 over-budget state keys carry {amount} (a pre-formatted raw string); the 3
+  // non-token state keys + the 3 explainer bodies + the 10 settings keys are static. Key/token parity is already
+  // enforced by `same keys as en` above (so all 10 locales carry exactly {amount} in the 3 over-keys and nothing
+  // elsewhere); this pins that they RENDER brace-free (with the interpolated amount, never a leftover brace).
+  it('every locale renders the budget over-budget + settings keys without leftover braces', () => {
+    const amountKeys = ['budget.state.over', 'budget.state.overDeclared', 'budget.state.floorOver'];
+    const staticKeys = [
+      'budget.state.floorUnknown',
+      'budget.state.within',
+      'budget.state.withinDeclared',
+      'budget.explain.vram',
+      'budget.explain.draw',
+      'budget.explain.disk',
+      'settings.section.budgets',
+      'settings.budgets.intro',
+      'settings.budgets.vram',
+      'settings.budgets.vram.hint',
+      'settings.budgets.draw',
+      'settings.budgets.draw.hint',
+      'settings.budgets.disk',
+      'settings.budgets.disk.hint',
+      'settings.budgets.off',
+      'settings.budgets.clear',
+    ];
+    for (const loc of LOCALES) {
+      for (const k of amountKeys) {
+        const rendered = translate(loc, k, { amount: '4.0 MB' });
+        expect(rendered, `${loc} ${k}`).not.toContain('{');
+        expect(rendered, `${loc} ${k} interpolates {amount}`).toContain('4.0 MB');
+      }
+      for (const k of staticKeys) {
+        const v = CATALOGS[loc][k];
+        expect(typeof v === 'string' && v.length > 0, `${loc} "${k}" present`).toBe(true);
+        expect(translate(loc, k), `${loc} ${k}`).not.toContain('{');
+      }
+    }
+  });
 });
