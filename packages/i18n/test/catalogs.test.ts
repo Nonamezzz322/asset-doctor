@@ -301,4 +301,30 @@ describe('catalog completeness (all 10 locales)', () => {
       }
     }
   });
+
+  // report-export (portable audit): the export-chrome keys (the eyebrow label, the Copy button, the SR
+  // copy-confirmation status) exist in all 10 locales and render brace-free. They carry NO placeholder token
+  // (static copy), so the render lock is trivially satisfied; key/token parity is enforced by `same keys as
+  // en` above.
+  it('every locale renders the report-export chrome keys without leftover braces', () => {
+    for (const loc of LOCALES) {
+      for (const k of ['results.export.label', 'results.export.copy', 'results.export.copied']) {
+        expect(translate(loc, k), `${loc} ${k}`).not.toContain('{');
+      }
+    }
+  });
+
+  // Lossless metadata strip (the `strip` FixOp): the receipt/preview op-group label + the Settings toggle
+  // label/hint exist in all 10 locales and render brace-free. Static copy (no token) — parity is enforced by
+  // `same keys as en` above; the fix.op.strip key is ALSO demanded by the app-keys scanner (fix.op.* expands
+  // over OP_KIND_ORDER, which now carries 'strip'). This pins the render for the new UI copy.
+  it('every locale renders the metadata-strip op label + settings keys without leftover braces', () => {
+    for (const loc of LOCALES) {
+      for (const k of ['fix.op.strip', 'fix.settings.stripMetadata', 'fix.settings.stripMetadataHint']) {
+        const v = CATALOGS[loc][k];
+        expect(typeof v === 'string' && v.length > 0, `${loc} "${k}" present`).toBe(true);
+        expect(translate(loc, k), `${loc} ${k}`).not.toContain('{');
+      }
+    }
+  });
 });
