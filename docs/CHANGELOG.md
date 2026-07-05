@@ -10,6 +10,25 @@ GitHub-кредов — пушит пользователь); хэши комм�
 
 ---
 
+## Функционал — standalone HTML-отчёт аудита (расширение экспорта JSON/MD/CSV) — 2026-07-05
+Тема ФУНКЦИОНАЛ: верифицированный follow-up к экспорту отчёта — веб мог отдавать JSON/MD/CSV, но НЕ
+стилизованную самодостаточную HTML-страницу, которую нетехнический коллега просто откроет в браузере.
+Скептик-дизайн NARROWED (отложил film-thumbnail/canvas как тяжёлое — только summary + таблица находок).
+Расширяет чистый `report-export.ts`. Все 3 линзы ревью (injection/self-contained · honesty · regression)
+вернули пусто; я САМ провёл аудит escape (security-ось — не доверяю пустым ревью на инъекциях): каждое
+динамическое значение (subject/assetRef/title/detail/scope/вывод fmtBytes) через `escapeHtml`, severity —
+закрытый enum, ноль внешних ресурсов — чисто.
+- **`reportToHTML`** (`4fae419`) — полный `<!doctype html>`-документ: inline `<style>` (system-font stack,
+  БЕЗ url()/@font-face/`<script>`/`<img>`/`<link>`/удалённых ссылок ⇒ ноль fetchable-ресурсов, инв. 1),
+  summary (assets · disk · VRAM(loaded) · draw-call floor) + честная disk≠VRAM-заметка (verbatim) +
+  детерминированная (sortFindings, без Date) таблица находок с РАЗДЕЛЬНЫМИ колонками disk/VRAM (пусто, а не
+  выдуманный 0). Severity — СЛОВО + класс (цвет не единственный сигнал). **Injection-safe:** новый
+  экспортируемый `escapeHtml` (& первым, затем `< > " '`, числовой `&#39;`) на КАЖДОЙ интерполяции; +24 теста
+  вкл. адверсариальные имена ассетов (`<script>…`, `"><img onerror=…`) — доказан ноль-breakout в тексте И в
+  атрибуте. `'html'` добавлен в ReportFormat/REPORT_MIME/reportContent; кнопка — code-лейбл HTML (ноль новых
+  i18n-ключей); JSON/MD/CSV и существующие тесты не тронуты (только +). Мой gate зелёный: typecheck ·
+  test (web 1205 · fix 516 · i18n 36 · budget 31 · analysis 203) · lint.
+
 ## Функционал — film-loupe: зум/пан + клик/клавиатура-инспект кадра на атлас-герое — 2026-07-05
 Тема ФУНКЦИОНАЛ: сильнейший runner-up прошлого отбора (судья отметил, срезан 2-pick-капом). Скептик-дизайн
 NARROWED (отложил `frameNames` — требует аддитивного `core`-контракта с согласованием; читаут пока честный
