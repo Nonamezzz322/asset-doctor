@@ -22,3 +22,20 @@ export {
   sortedAssets,
   CAPABILITY_NOTE,
 } from './serialize';
+export {
+  DIFF_METRIC_KEYS,
+  findingKey,
+  diffAudits,
+  hasRegression,
+  diffToJSON,
+  renderDiff,
+  diffToSummaryMarkdown,
+} from './diff';
+export type {
+  AuditSnapshot,
+  MetricDelta,
+  FindingChange,
+  SeverityChange,
+  DiffCounts,
+  AuditDiff,
+} from './diff';
