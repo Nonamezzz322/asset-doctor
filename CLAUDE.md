@@ -40,7 +40,7 @@ TS · React · Vite · PixiJS v8 (render-probe/WebGL) · Web Workers (анали
 клиентский срез (ноль сети): parsers+ingest+analysis, Web Worker, film-viewer; AVIF + whole-folder + Spine;
 пороги откалиброваны на реальном слот-гейме. Render-probe **GO**. Поверх: рантайм-профайлер + MV3-расширение
 (моат замкнут в странице: live-рантайм + загрузка папки → корреляция в оверлее) + слой `correlate`.
-**Phase 3 (CLI + GitHub Action budget-gate) — реализован**: `asset-doctor audit|budget|init` реюзает ядро в
+**Phase 3 (CLI + GitHub Action budget-gate) — реализован**: `asset-doctor audit|budget|diff|init` реюзает ядро в
 Node (assets не покидают машину), VRAM=Σw×h×4, exact-dup через node:crypto; JSON-конфиг fail-closed на
 browser-only метрики; composite `action.yml` с before/after через git worktree. Verified: 88 тестов + live CLI.
 **Phase 2 (платный фикс) — клиентский движок готов**: MaxRects-репак + resize + транскод (WebP/AVIF) + Spine-репак + [aggressive] merge/dedup + **бинарный полигональный упаковщик** (опц. polygon-mode: трассировка альфы→conservative RDP→earcut→bitmap-mask nesting + mesh-clip compose; TexturePacker-совместимый mesh-манифест `vertices/verticesUV/triangles`; honest VRAM-гейт, иначе rect-fallback; спека `docs/polygon-packer-design.md`), всё в браузере. **Slice B (Go thin-биллинг) — реализован** (`apps/api`): Stripe-вебхук→mint, ed25519-entitlement, офлайн-верификация в вебе, гейт OFF по умолчанию. Не задеплоено (нужны Stripe/Fly секреты юзера).
@@ -57,8 +57,10 @@ Severity: crit #E5484D · warn #D98A00 · ok #1F9D63 · info #2B8FC9.
 ## Команды
 `pnpm install` · `pnpm dev` (web) · `pnpm build` · `pnpm test` (vitest) · `pnpm typecheck` · `pnpm lint`
 · `pnpm format`. pnpm 10 через corepack (Node ≥20.19; pnpm 11 требует Node 22+).
-CLI (Phase 3): `pnpm --filter @asset-doctor/cli build` → `node apps/cli/dist/cli.js audit|budget|init <dir>`
-(exit: 0 pass/advisory · 1 over-budget · 2 config/fail-closed · 3 input · 4 internal).
+CLI (Phase 3): `pnpm --filter @asset-doctor/cli build` → `node apps/cli/dist/cli.js audit|budget|diff|init <dir>`
+(exit: 0 pass/advisory · 1 over-budget/регрессия · 2 config/fail-closed · 3 input · 4 internal).
+`diff <before> <after>` — каждый операнд: папка ИЛИ `audit --json`-файл; измеренные дельты метрик +
+находки added/resolved/changed по стабильному `Finding.id`; advisory, гейт опционален (`--fail-on-new crit|warn|any`).
 
 ## Агенты и скиллы проекта (`.claude/`)
 Агенты: `parsers-engineer` · `analysis-engineer` · `probe-engineer` · `film-viewer-engineer`.
