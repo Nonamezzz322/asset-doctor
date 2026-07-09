@@ -18,6 +18,8 @@ export interface Flags {
   severity?: string;
   warnOnly: boolean;
   failOn: 'error' | 'warn' | 'none';
+  /** `diff` only: opt-in regression gate on a NEW/worsened finding. Ignored by audit/budget/init. */
+  failOnNew?: string;
   quiet: boolean;
   force: boolean;
 }

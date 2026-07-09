@@ -8,6 +8,7 @@ import { InputError } from './errors';
 import { realIO } from './io';
 import { auditCmd } from './commands/audit';
 import { budgetCmd } from './commands/budget';
+import { diffCmd } from './commands/diff';
 import { initCmd } from './commands/init';
 import type { Flags } from './commands/common';
 
@@ -19,13 +20,19 @@ Usage:
   asset-doctor budget <dir> [--config file] [--baseline file] [--json] [--out file]
                             [--sarif file] [--summary file] [--annotate]
                             [--fail-on error|warn|none] [--warn-only] [--quiet]
+  asset-doctor diff   <before> <after> [--json] [--out file] [--summary file]
+                            [--fail-on-new crit|warn|any] [--quiet]
   asset-doctor init   <dir> [--out file] [--force]
 
 Reads PNG/WebP/JPEG/AVIF + TexturePacker/Pixi/Spine manifests, never uploads. Measures disk, VRAM
 (w×h×4), occupancy, oversize/NPOT, should-atlas, exact-dupes; transcode-savings / near-dupes / live
 draw calls need the browser build and are disclosed, not silently passed.
 
-Exit: 0 pass/advisory · 1 budget exceeded · 2 config/usage · 3 input · 4 internal`;
+diff compares two audits (each a directory OR an \`audit --json\` file) → per-metric before→after deltas
+(measured, no thresholds) + findings added/resolved/changed by id. Advisory (exit 0) unless
+--fail-on-new flags a NEW/worsened finding. Metric-budget gating stays \`budget --baseline\`.
+
+Exit: 0 pass/advisory · 1 budget exceeded / regression · 2 config/usage · 3 input · 4 internal`;
 
 async function main(): Promise<number> {
   let parsed: ReturnType<typeof parseArgs>;
@@ -43,6 +50,7 @@ async function main(): Promise<number> {
         severity: { type: 'string' },
         'warn-only': { type: 'boolean', default: false },
         'fail-on': { type: 'string', default: 'error' },
+        'fail-on-new': { type: 'string' },
         quiet: { type: 'boolean', default: false },
         'no-color': { type: 'boolean', default: false },
         force: { type: 'boolean', default: false },
@@ -82,6 +90,7 @@ async function main(): Promise<number> {
     severity: str(values.severity),
     warnOnly: Boolean(values['warn-only']),
     failOn,
+    ...(str(values['fail-on-new']) !== undefined ? { failOnNew: str(values['fail-on-new']) } : {}),
     quiet: Boolean(values.quiet),
     force: Boolean(values.force),
   };
@@ -95,10 +104,12 @@ async function main(): Promise<number> {
       return auditCmd(dir, flags, io);
     case 'budget':
       return budgetCmd(dir, flags, io);
+    case 'diff':
+      return diffCmd(positionals[1], positionals[2], flags, io);
     case 'init':
       return initCmd(dir, flags, io);
     default:
-      process.stderr.write(`unknown command "${command}" (expected audit|budget|init)\n`);
+      process.stderr.write(`unknown command "${command}" (expected audit|budget|diff|init)\n`);
       return 2;
   }
 }
