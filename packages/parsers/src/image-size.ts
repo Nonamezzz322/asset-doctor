@@ -2,6 +2,7 @@
 // Pure and worker-safe. Covers PNG, WebP (VP8 / VP8L / VP8X) and JPEG.
 
 import type { ImageMime, Size } from '@asset-doctor/core';
+import { iccProfileInfo } from './icc';
 
 export interface ImageInfo {
   mime: ImageMime;
@@ -145,6 +146,11 @@ const PNG_TYPE = (b: Uint8Array, o: number): string =>
 // PNG allow-set: ancillary chunks safe to strip (carry NO pixel/rendering data). DELIBERATELY EXCLUDES
 // tRNS (functional transparency) and pHYs/gAMA/cHRM/sRGB/bKGD/sBIT (may alter rendering / a re-encoder
 // keeps pHYs). Each counted chunk costs len + 12 on disk (4 length + 4 type + len data + 4 CRC).
+// iCCP (embedded ICC profile) is COLOUR-MANAGEMENT, not dead weight: stripping a NON-sRGB profile (Display
+// P3 / Adobe RGB / …) silently shifts the rendered colours, so it is NOT a free saving. iCCP therefore
+// stays in the walk's raw sum but strippableMetadataBytes SUBTRACTS it back out unless we can PROVE the
+// profile is sRGB (iccProfileInfo — a header-only sRGB-chunk / profile-name / desc-tag proof). Counting a
+// non-provable ICC as a saving would be an invariant-3 lie; keeping it is a conservative TRUE LOWER BOUND.
 const PNG_STRIPPABLE = new Set(['iCCP', 'eXIf', 'tEXt', 'iTXt', 'zTXt', 'tIME']);
 
 function pngStrippable(b: Uint8Array): number {
@@ -222,12 +228,20 @@ function webpStrippable(b: Uint8Array): number {
 /** Sum the EXACT strippable ancillary-metadata bytes in an image header (PNG / JPEG / WebP). AVIF /
  *  unrecognized ⇒ 0 (an ISOBMFF box-tree walk is too risky header-only, and AVIF is already the format
  *  target). Pure & defensive: never throws, never decodes (invariant 1). A conservative TRUE LOWER BOUND
- *  of what the existing canvas-re-encode / oxipng fix removes. */
+ *  of what the existing canvas-re-encode / oxipng fix removes.
+ *
+ *  ICC honesty (invariant 3): an embedded ICC profile is only a FREE strip when it is sRGB (sRGB is the
+ *  web/GPU default ⇒ dropping it changes nothing). When the profile is present but NOT provably sRGB, its
+ *  bytes are EXCLUDED from the count — removing it would shift the rendered colours, so it is not a saving
+ *  and the Pro fix keeps it. iccProfileInfo counts those ICC bytes the SAME way the walkers above do, so the
+ *  subtraction can never drift. A provably-sRGB profile is left in the count (byte-identical to before). */
 export function strippableMetadataBytes(bytes: Uint8Array): number {
-  if (startsWith(bytes, PNG_SIG)) return pngStrippable(bytes);
-  if (startsWith(bytes, [0x52, 0x49, 0x46, 0x46]) && startsWith(bytes, [0x57, 0x45, 0x42, 0x50], 8)) {
-    return webpStrippable(bytes);
-  }
-  if (bytes[0] === 0xff && bytes[1] === 0xd8) return jpegStrippable(bytes);
-  return 0; // AVIF / unrecognized
+  let total: number;
+  if (startsWith(bytes, PNG_SIG)) total = pngStrippable(bytes);
+  else if (startsWith(bytes, [0x52, 0x49, 0x46, 0x46]) && startsWith(bytes, [0x57, 0x45, 0x42, 0x50], 8)) {
+    total = webpStrippable(bytes);
+  } else if (bytes[0] === 0xff && bytes[1] === 0xd8) total = jpegStrippable(bytes);
+  else return 0; // AVIF / unrecognized
+  const icc = iccProfileInfo(bytes);
+  return icc.present && !icc.provableSrgb ? total - icc.bytes : total;
 }

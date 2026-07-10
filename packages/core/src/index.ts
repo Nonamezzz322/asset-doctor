@@ -109,8 +109,18 @@ export interface ImageAsset {
    *  + COM; WebP = Σ (size + 8) over VP8X EXIF/XMP/ICCP. AVIF / headless / no ancillary ⇒ 0 (omitted). DISK-ONLY
    *  (invariant 5): this metadata costs DOWNLOAD bytes only — the GPU decodes to RGBA8888 regardless, so it is
    *  NEVER a VRAM win. Absent ⇒ none measured (byte-identical to before). A conservative TRUE LOWER BOUND of the
-   *  bytes the existing canvas-re-encode / oxipng fix actually removes (it strips ALL ancillary chunks). */
+   *  bytes the existing canvas-re-encode / oxipng fix actually removes (it strips ALL ancillary chunks). An ICC
+   *  profile that is present but NOT provably sRGB is EXCLUDED from this count (see `icc`) — removing it would
+   *  shift the rendered colours, so it is not a free saving. */
   strippableBytes?: number;
+  /** Embedded ICC colour-profile probe (header-only, no decode — invariant 1). Present ONLY when the image
+   *  carries an ICC profile (PNG iCCP / WebP ICCP / JPEG APP2 ICC); absent ⇒ legacy/no-ICC (nothing may
+   *  assume it exists). `bytes` = the on-disk cost of the ICC chunk(s), counted the SAME way `strippableBytes`
+   *  counts them. `provableSrgb` = we could PROVE the profile is sRGB (sRGB chunk / iCCP name / ICC `desc`
+   *  tag) ⇒ its bytes stay a free strip; false ⇒ conservatively KEPT (its bytes are excluded from
+   *  `strippableBytes` and the Pro fix keeps the chunk — stripping a non-sRGB profile changes colours).
+   *  `label` = the profile identity for disclosure copy (iCCP name / parsed desc), or null. */
+  icc?: { bytes: number; provableSrgb: boolean; label: string | null };
 }
 
 export type Asset =
@@ -281,6 +291,8 @@ export type Rule =
   | 'wasted-alpha'
   // per-asset: strippable ancillary metadata (ICC/EXIF/XMP + non-essential chunks) the GPU never uses
   | 'strippable-metadata'
+  // per-asset: an embedded ICC profile we cannot prove is sRGB (disclosure/correctness — NO estimate)
+  | 'icc-non-srgb'
   // whole-folder (scope: 'folder')
   | 'duplicate-exact'
   | 'duplicate-similar'

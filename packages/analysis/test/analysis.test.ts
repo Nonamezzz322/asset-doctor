@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import type { Asset, Atlas, ImageAsset, ImageFeatures, ImageMime, Rect, ThresholdConfig } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseFntText, parseFntPage, type FntPage } from '@asset-doctor/parsers';
 import { groupFiles, type RawFile } from '@asset-doctor/ingest';
-import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, crossAtlasRedundancyFinding, duplicateSimilarFindings, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, iccNonSrgbFinding, crossAtlasRedundancyFinding, duplicateSimilarFindings, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -651,6 +651,66 @@ describe('strippable-metadata (ancillary ICC/EXIF/XMP + non-essential chunks)', 
     expect(sm.estimate?.diskBytesSaved).toBe(8347);
     expect(sm.estimate?.vramBytesSaved).toBeUndefined(); // invariant 5 — never a VRAM win
     expect(report.totals.potentialDiskSaved).toBe(8347);
+  });
+});
+
+// ── icc-non-srgb: a non-provably-sRGB embedded ICC profile. A DISCLOSURE/correctness finding — NO estimate
+// (invariant 3/5 — removing a non-sRGB profile is a colour change, not a saving). Fires purely on image.icc.
+describe('icc-non-srgb (non-provable embedded ICC profile — disclosure, NO estimate)', () => {
+  const iccImg = (name: string, icc?: ImageAsset['icc'], mime: ImageMime = 'image/png'): ImageAsset => ({
+    name, imageRef: name, size: { w: 512, h: 512 }, mime, byteSize: 200000, ...(icc ? { icc } : {}),
+  });
+
+  it('fires info with NO estimate; params pinned', () => {
+    const f = iccNonSrgbFinding('p3.png', iccImg('p3.png', { bytes: 8227, provableSrgb: false, label: 'Display P3' }))!;
+    expect(f.rule).toBe('icc-non-srgb');
+    expect(f.messageKey).toBe('icc-non-srgb');
+    expect(f.severity).toBe('info');
+    expect(f.estimate).toBeUndefined(); // NO diskBytesSaved, NO vramBytesSaved — a colour change is not a saving
+    expect(f.params).toEqual({ label: 'PNG', bytes: 8227, profile: 'Display P3' });
+  });
+
+  it('provably-sRGB ICC ⇒ null (a free strip, never disclosed here)', () => {
+    expect(iccNonSrgbFinding('s.png', iccImg('s.png', { bytes: 8227, provableSrgb: true, label: 'sRGB IEC61966-2.1' }))).toBeNull();
+  });
+
+  it('no ICC ⇒ null', () => {
+    expect(iccNonSrgbFinding('n.png', iccImg('n.png'))).toBeNull();
+  });
+
+  it('null profile label ⇒ neutral "unnamed" fallback in params', () => {
+    const f = iccNonSrgbFinding('u.png', iccImg('u.png', { bytes: 4096, provableSrgb: false, label: null }))!;
+    expect(f.params).toEqual({ label: 'PNG', bytes: 4096, profile: 'unnamed' });
+  });
+
+  it('analyze fires it for a LOOSE image and adds NOTHING to potentialDiskSaved', async () => {
+    const asset: Asset = { kind: 'image', image: iccImg('p3.png', { bytes: 8227, provableSrgb: false, label: 'Display P3' }) };
+    const report = await analyze([asset]);
+    expect(report.findings.find((f) => f.rule === 'icc-non-srgb')?.assetRef).toBe('p3.png');
+    expect(report.totals.potentialDiskSaved).toBe(0); // disclosure only — no saving folded in
+  });
+
+  it('analyze fires it for an ATLAS PAGE image', async () => {
+    const atlasAsset: Asset = {
+      kind: 'atlas',
+      atlas: { name: 'sheet.png', imageRef: 'sheet.png', size: { w: 1024, h: 1024 }, sprites: [{ name: 's0', frame: { x: 0, y: 0, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 32, h: 32 } }], source: { kind: 'pixi' } },
+      image: { name: 'sheet.png', imageRef: 'sheet.png', size: { w: 1024, h: 1024 }, mime: 'image/png', byteSize: 200000, icc: { bytes: 5000, provableSrgb: false, label: 'Adobe RGB (1998)' } },
+    };
+    const report = await analyze([atlasAsset]);
+    expect(report.findings.find((f) => f.rule === 'icc-non-srgb' && f.assetRef === 'sheet.png')).toBeTruthy();
+  });
+
+  it('golden fixture: parse(metadata-p3.png) -> analyze fires icc-non-srgb, NO strippable-metadata', async () => {
+    const r = parseImage('metadata-p3.png', readBytes('strippable-metadata/metadata-p3.png'));
+    if (!r.ok) throw new Error('fixture parse failed');
+    const report = await analyze([r.asset]);
+    const icc = report.findings.find((f) => f.rule === 'icc-non-srgb')!;
+    expect(icc.severity).toBe('info');
+    expect(icc.estimate).toBeUndefined();
+    expect(icc.params).toEqual({ label: 'PNG', bytes: 3024, profile: 'Display P3' });
+    // strippable does NOT fire — only 62 B remain after excluding the non-sRGB iCCP (< minBytes 4096).
+    expect(report.findings.find((f) => f.rule === 'strippable-metadata')).toBeUndefined();
+    expect(report.totals.potentialDiskSaved).toBe(0);
   });
 });
 

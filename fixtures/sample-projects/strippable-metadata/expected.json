@@ -1,6 +1,6 @@
 {
   "kind": "strippable-metadata",
-  "feature": "strippable-metadata-detector",
+  "feature": "strippable-metadata-detector + icc-non-srgb honesty",
   "images": [
     {
       "name": "metadata.png",
@@ -8,6 +8,11 @@
       "h": 4,
       "mime": "image/png",
       "strippableBytes": 8347,
+      "icc": {
+        "bytes": 8227,
+        "provableSrgb": true,
+        "label": "sRGB IEC61966-2.1"
+      },
       "chunks": {
         "counted": {
           "iCCP": 8227,
@@ -26,9 +31,47 @@
         "severity": "info",
         "diskBytesSaved": 8347,
         "vramBytesSaved": null,
-        "why": "iCCP + tEXt + tIME are ancillary metadata the GPU never uses; 8347 >= minBytes 4096 (fires) and < warnBytes 65536 (info). pHYs is NOT counted (a re-encoder keeps it). DISK only — invariant 5."
+        "why": "iCCP + tEXt + tIME are ancillary metadata the GPU never uses; 8347 >= minBytes 4096 (fires) and < warnBytes 65536 (info). The iCCP is PROVABLY sRGB (profile name 'sRGB IEC61966-2.1' matches /srgb/i) so its 8227 bytes stay a free strip — removing an sRGB profile does not change colours. pHYs is NOT counted (a re-encoder keeps it). DISK only — invariant 5."
+      },
+      "iccFinding": null
+    },
+    {
+      "name": "metadata-p3.png",
+      "w": 4,
+      "h": 4,
+      "mime": "image/png",
+      "strippableBytes": 62,
+      "icc": {
+        "bytes": 3024,
+        "provableSrgb": false,
+        "label": "Display P3"
+      },
+      "chunks": {
+        "counted": {
+          "tEXt": 62
+        },
+        "excludedIcc": {
+          "iCCP": 3024
+        },
+        "notCounted": {
+          "IHDR": 25,
+          "IDAT": 30,
+          "IEND": 12
+        }
+      },
+      "finding": {
+        "rule": "strippable-metadata",
+        "fires": false,
+        "why": "The iCCP (Display P3) is NOT provably sRGB, so its 3024 bytes are EXCLUDED from strippableBytes — removing a non-sRGB profile would shift the rendered colours, so it is not a free saving. Only the tEXt (62 B) remains, which is < minBytes 4096, so the strippable-metadata finding does NOT fire."
+      },
+      "iccFinding": {
+        "rule": "icc-non-srgb",
+        "severity": "info",
+        "estimate": null,
+        "params": { "label": "PNG", "bytes": 3024, "profile": "Display P3" },
+        "why": "A DISCLOSURE/correctness finding: this PNG embeds an ICC profile we cannot prove is sRGB. It carries NO estimate (no diskBytesSaved, no vramBytesSaved) — precedent: texture-bleeding, dimension-mismatch. We measure and disclose; the Pro strip fix keeps the chunk (keepIcc)."
       }
     }
   ],
-  "note": "A hand-authored, REAL valid 4x4 RGBA8888 PNG with injected known-length ancillary chunks (iCCP 8227 + tEXt 101 + tIME 19 on-disk bytes = len+12 each, total 8347 strippable) plus a pHYs chunk that is DELIBERATELY NOT counted (a re-encoder keeps physical-pixel-density). strippableMetadataBytes(metadata.png) === 8347. parse -> analyze fires the strippable-metadata finding (info; diskBytesSaved=8347 EXACT; NEVER vramBytesSaved, invariant 5). The counted allow-set is a conservative TRUE LOWER BOUND of what the existing Pro fix removes (see README, Test D)."
+  "note": "TWO hand-authored, REAL valid 4x4 RGBA8888 PNGs for the strippable-metadata detector AND the icc-non-srgb honesty rule. metadata.png embeds a PROVABLY-sRGB iCCP (profile name 'sRGB IEC61966-2.1') + tEXt + tIME (8347 strippable) + a pHYs that is DELIBERATELY NOT counted; the iCCP bytes stay counted because a provably-sRGB profile is a free strip. metadata-p3.png embeds a NON-provable iCCP ('Display P3', no sRGB chunk): its 3024 iCCP bytes are EXCLUDED from strippableBytes (removing a non-sRGB profile shifts colours — invariant 3), leaving only 62 tEXt bytes (below minBytes ⇒ strippable does not fire) and firing the icc-non-srgb disclosure (info; NO estimate). The counted allow-set remains a conservative TRUE LOWER BOUND of what the existing Pro fix removes (README, Test D)."
 }

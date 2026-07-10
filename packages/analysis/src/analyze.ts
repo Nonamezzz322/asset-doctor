@@ -28,6 +28,7 @@ import {
   dimensionMismatchFinding,
   formatFinding,
   frameRedundancyFinding,
+  iccNonSrgbFinding,
   occupancyFinding,
   occupancyValue,
   solidFillFinding,
@@ -188,6 +189,15 @@ export async function analyze(
     }
   };
 
+  // Non-sRGB ICC disclosure — fires whenever the parser kept an ICC profile it could not prove is sRGB
+  // (image.icc && !provableSrgb). A CORRECTNESS/disclosure finding: NO estimate, so it NEVER touches
+  // potentialDiskSaved/bumpBest (invariant 3/5). Absent icc (no profile / legacy) ⇒ never fires ⇒
+  // byte-identical to today. Loose images AND atlas page images both carry image.icc from the parser.
+  const addIcc = (ref: string, image: ImageAsset): void => {
+    const f = iccNonSrgbFinding(ref, image);
+    if (f) findings.push(f);
+  };
+
   for (const asset of assets) {
     if (asset.kind === 'atlas') {
       const { atlas, image } = asset;
@@ -229,6 +239,8 @@ export async function analyze(
       // Strippable ancillary metadata on the atlas PAGE image (the manifest JSON is never scanned). De-overlapped
       // with the page's format saving via bumpBest (one re-encode transcodes AND strips the metadata).
       addStrippable(atlas.name, image);
+      // A non-sRGB ICC profile on the page image (disclosure only; no estimate — see addIcc).
+      addIcc(atlas.name, image);
       // Within-atlas frame redundancy: frames whose pixel REGIONS are byte-identical (host-hashed off the
       // already-decoded page). Only when the host supplied region hashes for THIS atlas (absent ⇒ no
       // finding ⇒ byte-identical). The recoverable disk number is an area-proportional ESTIMATE, so it is
@@ -294,6 +306,8 @@ export async function analyze(
       // Strippable ancillary metadata on the loose image. De-overlapped with format/wasted-alpha via bumpBest
       // (one re-encode transcodes / drops-alpha AND strips this metadata — three-way MAX, never the sum).
       addStrippable(image.name, image);
+      // A non-sRGB ICC profile on the loose image (disclosure only; no estimate — see addIcc).
+      addIcc(image.name, image);
     }
   }
 

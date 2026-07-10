@@ -5,6 +5,8 @@
 export type { ParseResult } from './types';
 export { readImageInfo, strippableMetadataBytes } from './image-size';
 export type { ImageInfo } from './image-size';
+export { iccProfileInfo } from './icc';
+export type { IccInfo } from './icc';
 export { parseAtlasManifest, parseAtlas, parseImage } from './atlas';
 export type { AtlasParseResult, MalformedFrame } from './atlas';
 export { parseSpineAtlasText, parseSpinePage } from './spine-atlas';

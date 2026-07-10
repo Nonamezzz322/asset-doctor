@@ -14,6 +14,7 @@ import {
   wastedAlphaFinding,
   strippableMetadataFinding,
   strippableMetadataAggregateFinding,
+  iccNonSrgbFinding,
   wastedRegions,
   formatFinding,
   duplicateExactFindings,
@@ -100,6 +101,9 @@ async function realFindings(): Promise<Finding[]> {
   const m1 = strippableMetadataFinding('meta1.png', { ...img('meta1.png', 256, 256, 200000).image, strippableBytes: 10000 }, cfg)!;
   const m2 = strippableMetadataFinding('meta2.png', { ...img('meta2.png', 256, 256, 200000).image, strippableBytes: 20000 }, cfg)!;
   out.push(strippableMetadataAggregateFinding([m1, m2])!);
+  // icc-non-srgb: a PNG embedding a non-sRGB ICC profile — a DISCLOSURE finding, NO estimate (invariant 5).
+  const iccImg = { ...img('p3.png', 256, 256, 200000).image, icc: { bytes: 8227, provableSrgb: false, label: 'Display P3' } };
+  out.push(iccNonSrgbFinding('p3.png', iccImg)!);
   out.push((await formatFinding('hero.png', img('hero.png', 256, 256, 10000).image, cfg, async () => 4000))!);
   // flat/alpha-art content class ⇒ messageKey 'format-lossless' (rule still 'format') — drift-check the
   // new key family + its baked EN strings exactly like every other finding.
@@ -154,7 +158,7 @@ describe('renderFinding — English catalog reproduces the baked strings (drift 
     const findings = await realFindings();
     const keys = new Set(findings.map((f) => f.messageKey));
     // sanity: we exercised every messageKey family the rules emit
-    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'frame-redundancy', 'trim-margin', 'bleeding', 'dimension-mismatch-shrunk-offedge', 'dimension-mismatch-shrunk', 'dimension-mismatch-grown', 'cross-atlas-redundancy', 'font-glyph-page', 'wasted-alpha', 'strippable-metadata', 'strippable-metadata-aggregate', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'atlas-merge-batching', 'integrity', 'format-aggregate', 'variants']));
+    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'frame-redundancy', 'trim-margin', 'bleeding', 'dimension-mismatch-shrunk-offedge', 'dimension-mismatch-shrunk', 'dimension-mismatch-grown', 'cross-atlas-redundancy', 'font-glyph-page', 'wasted-alpha', 'strippable-metadata', 'strippable-metadata-aggregate', 'icc-non-srgb', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'atlas-merge-batching', 'integrity', 'format-aggregate', 'variants']));
     for (const f of findings) {
       expect(f.messageKey, `${f.id} must carry a messageKey`).toBeTruthy();
       const r = renderFinding(f, 'en');

@@ -268,8 +268,8 @@ describe('app i18n keys exist in the en catalog', () => {
   });
 
   it('rule.* labels exist in en for EVERY rule (drift guard — mirrors imported ALL_RULES / core Rule union)', () => {
-    // A 22nd core Rule ⇒ RULE_GROUP ⇒ ALL_RULES grows ⇒ this fails until the rule.* label is added to en.
-    expect(RULE_SUFFIXES).toHaveLength(21);
+    // A 23rd core Rule ⇒ RULE_GROUP ⇒ ALL_RULES grows ⇒ this fails until the rule.* label is added to en.
+    expect(RULE_SUFFIXES).toHaveLength(22);
     for (const r of RULE_SUFFIXES) {
       expect(CATALOGS.en[`rule.${r}`], `rule.${r} must exist in en.json (the DiagnosisCard checkbox label)`).toBeDefined();
     }

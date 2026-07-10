@@ -7,8 +7,17 @@
 // the pixel-bearing chunks are asserted byte-identical in the output; the stripped output re-scans to 0.
 
 import { describe, expect, it } from 'vitest';
-import { strippableMetadataBytes, readImageInfo } from '@asset-doctor/parsers';
+import { strippableMetadataBytes, readImageInfo, iccProfileInfo } from '@asset-doctor/parsers';
 import { stripImageMetadata } from '../src/index';
+
+// The worker's exact injected decision: keep an ICC profile we cannot PROVE is sRGB (stripping a non-sRGB
+// profile shifts the rendered colours). With this keepIcc, the fix and the detector stay in perfect lock-step
+// (removed === strippableMetadataBytes for pad-free formats — BOTH exclude a non-sRGB ICC, BOTH include a
+// provable-sRGB one).
+const keepIccFor = (b: Uint8Array): boolean => {
+  const icc = iccProfileInfo(b);
+  return icc.present && !icc.provableSrgb;
+};
 
 const PNG_SIG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const u32be = (n: number): number[] => [(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff];
@@ -47,10 +56,11 @@ describe('stripImageMetadata — PNG', () => {
     const text = pngChunk('tEXt', 100, 0x11); // 112
     const icc = pngChunk('iCCP', 5000, 0x22); // 5012
     const trns = pngChunk('tRNS', 6, 0x33); // kept (functional)
-    const input = png(text, IDAT, icc, trns);
-    const r = assertHonest(input);
+    const srgb = pngChunk('sRGB', 1, 0); // PROVES the iCCP is sRGB ⇒ it stays a counted, strippable chunk
+    const input = png(text, IDAT, icc, trns, srgb);
+    const r = assertHonest(input); // default keepIcc=false: a provably-sRGB ICC is stripped, as before
     expect(r.removed).toBe(112 + 5012);
-    expect(r.removed).toBe(strippableMetadataBytes(input)); // exact — PNG has no pad bytes
+    expect(r.removed).toBe(strippableMetadataBytes(input)); // exact — PNG has no pad bytes (sRGB proves the ICC)
     // pixel-bearing + functional chunks survive byte-for-byte
     expect(contains(r.bytes, IDAT)).toBe(true);
     expect(contains(r.bytes, trns)).toBe(true);
@@ -91,6 +101,27 @@ describe('stripImageMetadata — PNG', () => {
     expect(contains(r.bytes, truncated)).toBe(true); // corrupt tail preserved, never dropped
     expect(contains(r.bytes, IDAT)).toBe(true);
   });
+
+  it('keepIcc: a NON-sRGB iCCP is KEPT, other metadata stripped; removed === count (both exclude the ICC)', () => {
+    const icc = pngChunk('iCCP', 5000, 0x22); // non-provable name (all 0x22, no early NUL, not /srgb/i)
+    const text = pngChunk('tEXt', 100, 0x11); // 112 — the only strippable metadata
+    const input = png(text, IDAT, icc);
+    const keepIcc = keepIccFor(input);
+    expect(keepIcc).toBe(true); // no sRGB chunk, name not sRGB ⇒ we cannot prove it, so we keep it
+    const r = stripImageMetadata(input, { keepIcc });
+    expect(r.removed).toBe(112); // only the tEXt — the colour profile survives
+    expect(r.removed).toBe(strippableMetadataBytes(input)); // lock-step: BOTH exclude the non-sRGB iCCP
+    expect(contains(r.bytes, icc)).toBe(true); // iCCP kept byte-for-byte
+    expect(contains(r.bytes, text)).toBe(false);
+    expect(readImageInfo(r.bytes)?.size).toEqual({ w: 64, h: 64 });
+  });
+
+  it('keepIcc=false (default) still strips a non-sRGB iCCP ⇒ byte-identical to today', () => {
+    const icc = pngChunk('iCCP', 3000, 0x22);
+    const input = png(icc, IDAT);
+    expect([...stripImageMetadata(input).bytes]).toEqual([...stripImageMetadata(input, {}).bytes]);
+    expect(stripImageMetadata(input).removed).toBe(3012); // stripped by default (caller opts into keepIcc)
+  });
 });
 
 describe('stripImageMetadata — JPEG', () => {
@@ -112,6 +143,21 @@ describe('stripImageMetadata — JPEG', () => {
     expect(contains(r.bytes, com)).toBe(false);
     expect(r.bytes[0]).toBe(0xff); // SOI intact
     expect(r.bytes[1]).toBe(0xd8);
+  });
+
+  it('keepIcc: a non-provable APP2 "ICC_PROFILE" segment is KEPT; a sibling APP1 is still stripped', () => {
+    // APP2 ICC: len = 2(self) + 12(id) + 2(seq+count) + 30(icc) = 46. The 30-byte ICC is too short for a desc ⇒
+    // NOT provably sRGB ⇒ keepIcc. A NON-ICC APP2 would still be stripped — only the ICC identifier is spared.
+    const app2 = [0xff, 0xe2, ...u16be(46), ...ascii('ICC_PROFILE'), 0, 1, 1, ...new Array(30).fill(0x99)];
+    const app1 = seg(0xe1, 100, 0x55); // plain APP1 — stripped (102)
+    const input = new Uint8Array([0xff, 0xd8, ...app2, ...app1, 0xff, 0xd9]);
+    const keepIcc = keepIccFor(input);
+    expect(keepIcc).toBe(true);
+    const r = stripImageMetadata(input, { keepIcc });
+    expect(r.removed).toBe(102); // APP1 only; the APP2 ICC segment survives
+    expect(r.removed).toBe(strippableMetadataBytes(input)); // detector also excludes the APP2 ICC
+    expect(contains(r.bytes, app2)).toBe(true); // the colour profile segment is kept byte-for-byte
+    expect(contains(r.bytes, app1)).toBe(false);
   });
 });
 
@@ -145,12 +191,29 @@ describe('stripImageMetadata — WebP (VP8X)', () => {
   });
 
   it('an ODD-sized chunk removes the pad byte too ⇒ removed === count + 1 (still the real delta)', () => {
-    const input = webp([...ascii('VP8X'), ...u32le(10), ...vp8xData(0x08)], chunk('ICCP', 41, 0x99));
+    // EXIF (not ICC) so there is no provable-sRGB question — the pad-byte handling is format-agnostic.
+    const input = webp([...ascii('VP8X'), ...u32le(10), ...vp8xData(0x08)], chunk('EXIF', 41, 0x99));
     const r = assertHonest(input);
     // detector counts size+8 = 49; strip removes the padded chunk 8 + 42 = 50 (one pad byte more)
     expect(strippableMetadataBytes(input)).toBe(49);
     expect(r.removed).toBe(50);
-    expect(r.bytes[20]! & 0x08).toBe(0); // EXIF... here ICC flag path cleared via mask
+    expect(r.bytes[20]! & 0x08).toBe(0); // EXIF flag cleared (its chunk was removed)
+    expect(strippableMetadataBytes(r.bytes)).toBe(0);
+  });
+
+  it('keepIcc: a non-provable ICCP is KEPT and the VP8X ICC flag PRESERVED; a sibling EXIF is still stripped', () => {
+    // VP8X flags ICC|EXIF = 0x28. ICCP payload (40 bytes of 0x99) is too short to hold a parseable ICC desc ⇒
+    // NOT provably sRGB ⇒ keepIcc. The ICC flag (0x20) MUST survive — the chunk is still present (the trap).
+    const input = webp([...ascii('VP8X'), ...u32le(10), ...vp8xData(0x28)], chunk('ICCP', 40, 0x99), chunk('EXIF', 40, 0xee));
+    const keepIcc = keepIccFor(input);
+    expect(keepIcc).toBe(true);
+    const r = stripImageMetadata(input, { keepIcc });
+    expect(r.removed).toBe(48); // only EXIF (40 + 8); the ICCP is kept
+    expect(r.removed).toBe(strippableMetadataBytes(input)); // detector also excludes the non-sRGB ICCP
+    expect(r.bytes[20]! & 0x20).toBe(0x20); // ICC flag PRESERVED (the profile chunk is still there)
+    expect(r.bytes[20]! & 0x08).toBe(0); // EXIF flag cleared (its chunk was removed)
+    // RIFF size fixed, and the kept ICCP re-scans to 0 strippable (it is excluded honestly).
+    expect(r.bytes[4]! | (r.bytes[5]! << 8) | (r.bytes[6]! << 16) | (r.bytes[7]! << 24)).toBe(r.bytes.length - 8);
     expect(strippableMetadataBytes(r.bytes)).toBe(0);
   });
 

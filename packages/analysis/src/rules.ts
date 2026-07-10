@@ -495,6 +495,40 @@ export function strippableMetadataFinding(
   };
 }
 
+/** Embedded ICC colour profile we cannot PROVE is sRGB. The parser probes the header (invariant 1 — no
+ *  decode) and, when it cannot prove the profile is sRGB, sets `image.icc` with the KEPT bytes. This rule
+ *  turns that into an honest DISCLOSURE (not a saving): removing a non-sRGB profile (Display P3 / Adobe RGB /
+ *  …) silently shifts the rendered colours, so its bytes are EXCLUDED from the strippable-metadata saving and
+ *  the Pro fix KEEPS the chunk. OBJECTIVITY (invariant 3): we MEASURE the profile's presence and disclose it;
+ *  we NEVER strip it silently and we NEVER claim a saving we cannot defend. HONESTY (invariant 5): this
+ *  finding carries NO estimate at all — NO diskBytesSaved, NO vramBytesSaved (precedent: texture-bleeding,
+ *  dimension-mismatch). severity: info. Fires ONLY when an ICC profile is present and NOT provably sRGB
+ *  (image.icc && !image.icc.provableSrgb); a provably-sRGB profile is a legitimate free strip and never
+ *  surfaces here. `profile` params-fallback 'unnamed' is a neutral EN string passed verbatim across locales
+ *  (like the profile name itself). */
+export function iccNonSrgbFinding(ref: string, image: ImageAsset): Finding | null {
+  const icc = image.icc;
+  if (!icc || icc.provableSrgb) return null;
+  const label = FORMAT_LABEL[image.mime];
+  const profile = icc.label ?? 'unnamed';
+  return {
+    id: `${ref}:icc-non-srgb`,
+    rule: 'icc-non-srgb',
+    severity: 'info',
+    assetRef: ref,
+    title: `${label} embeds an ICC profile we can't prove is sRGB`,
+    detail:
+      `This ${label} embeds an ICC colour profile (profile: ${profile}, ${fmtBytes(icc.bytes)}) we cannot prove is sRGB. ` +
+      `Removing it would change the rendered colours, so those ${fmtBytes(icc.bytes)} are EXCLUDED from the strippable-metadata ` +
+      `saving and the Pro fix keeps the chunk. We measure and disclose — we never strip a colour profile that might be load-bearing.`,
+    fix: `Convert the asset to sRGB in your art tool if you want the profile gone — we never strip it silently.`,
+    // DISCLOSURE / CORRECTNESS finding — NO estimate at all (no disk, no VRAM). Removing a non-sRGB profile is a
+    // colour change, NOT a free saving; claiming bytes here would be an invariant-3 lie.
+    messageKey: 'icc-non-srgb',
+    params: { label, bytes: icc.bytes, profile },
+  };
+}
+
 /** Texture-bleeding detector. Scans `atlas.sprites[].frame` (integer rects AS PLACED, NO decode) for PAIRS
  *  that (a) share a vertical OR horizontal edge with EXACTLY 0px gap AND (b) overlap on the perpendicular
  *  axis by >0px (strict — a bare corner touch does not bleed). Under linear/trilinear filtering or mipmaps a

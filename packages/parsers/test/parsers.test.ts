@@ -8,6 +8,7 @@ import {
   parseImage,
   readImageInfo,
   strippableMetadataBytes,
+  iccProfileInfo,
   parseSpineAtlasText,
   parseFntText,
   parseFntXml,
@@ -319,8 +320,9 @@ describe('strippableMetadataBytes — strippable ancillary metadata', () => {
     new Uint8Array([...PNG_SIG, ...IHDR, ...chunks.flat(), ...IEND]);
 
   it('counts PNG tEXt + iCCP at len + 12 each, stops at IEND', () => {
-    // tEXt data 100 ⇒ 112; iCCP data 5000 ⇒ 5012. Total 5124.
-    expect(strippableMetadataBytes(png(pngChunk('tEXt', 100), pngChunk('iCCP', 5000)))).toBe(112 + 5012);
+    // tEXt data 100 ⇒ 112; iCCP data 5000 ⇒ 5012. The iCCP is counted because a sibling sRGB chunk PROVES the
+    // profile is sRGB (a free strip); the sRGB chunk itself is not in the allow-set. Total 5124.
+    expect(strippableMetadataBytes(png(pngChunk('tEXt', 100), pngChunk('iCCP', 5000), pngChunk('sRGB', 1)))).toBe(112 + 5012);
   });
 
   it('does NOT count PNG tRNS (functional transparency) or pHYs (rendering)', () => {
@@ -389,7 +391,7 @@ describe('strippableMetadataBytes — strippable ancillary metadata', () => {
   });
 
   it('parseImage plumbs strippableBytes onto the ImageAsset (omit-when-zero)', () => {
-    const withMeta = png(pngChunk('iCCP', 3000)); // 3012 strippable
+    const withMeta = png(pngChunk('iCCP', 3000), pngChunk('sRGB', 1)); // 3012 strippable (iCCP provably sRGB)
     const r = parseImage('meta.png', withMeta);
     if (!r.ok || r.asset.kind !== 'image') throw new Error('expected image');
     expect(r.asset.image.strippableBytes).toBe(3012);
@@ -403,10 +405,155 @@ describe('strippableMetadataBytes — strippable ancillary metadata', () => {
   it('hand-authored on-disk fixture: metadata.png ⇒ strippableBytes === 8347 (matches expected.json)', () => {
     const r = parseImage('metadata.png', bytes('strippable-metadata/metadata.png'));
     if (!r.ok || r.asset.kind !== 'image') throw new Error('expected image');
-    const expected = json('strippable-metadata/expected.json') as { images: { strippableBytes: number }[] };
+    const expected = json('strippable-metadata/expected.json') as { images: { strippableBytes: number; icc: unknown }[] };
     expect(r.asset.image.strippableBytes).toBe(expected.images[0]!.strippableBytes);
     expect(r.asset.image.strippableBytes).toBe(8347);
     expect(r.asset.image.size).toEqual({ w: 4, h: 4 }); // a real, valid PNG (header decodes)
+    // The iCCP is PROVABLY sRGB (name 'sRGB IEC61966-2.1'), so its 8227 bytes stay counted (byte-identical).
+    expect(r.asset.image.icc).toEqual({ bytes: 8227, provableSrgb: true, label: 'sRGB IEC61966-2.1' });
+    expect(r.asset.image.icc).toEqual(expected.images[0]!.icc);
+  });
+
+  it('hand-authored on-disk fixture: metadata-p3.png ⇒ non-sRGB iCCP EXCLUDED, strippableBytes === 62', () => {
+    const r = parseImage('metadata-p3.png', bytes('strippable-metadata/metadata-p3.png'));
+    if (!r.ok || r.asset.kind !== 'image') throw new Error('expected image');
+    const expected = json('strippable-metadata/expected.json') as { images: { strippableBytes: number; icc: unknown }[] };
+    // The Display-P3 iCCP (3024 B) is EXCLUDED — removing a non-sRGB profile shifts colours; only the tEXt (62 B) counts.
+    expect(r.asset.image.strippableBytes).toBe(62);
+    expect(r.asset.image.strippableBytes).toBe(expected.images[1]!.strippableBytes);
+    expect(r.asset.image.icc).toEqual({ bytes: 3024, provableSrgb: false, label: 'Display P3' });
+    expect(r.asset.image.icc).toEqual(expected.images[1]!.icc);
+  });
+});
+
+// ── iccProfileInfo — header-only embedded-ICC probe + sRGB proof (invariant 1: no decode). The `provableSrgb`
+// decision drives strippableMetadataBytes' ICC exclusion and the icc-non-srgb finding. Every path is pure,
+// bounded and NEVER throws (corrupt inputs ⇒ conservatively NOT provable).
+describe('iccProfileInfo — embedded ICC profile + provable-sRGB proof', () => {
+  const u32be = (n: number): number[] => [(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff];
+  const u16be = (n: number): number[] => [(n >>> 8) & 0xff, n & 0xff];
+  const u32le = (n: number): number[] => [n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff];
+  const ascii = (s: string): number[] => [...s].map((c) => c.charCodeAt(0));
+  const PNG_SIG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  const IHDR = [...u32be(13), ...ascii('IHDR'), ...u32be(4), ...u32be(4), 8, 6, 0, 0, 0, 0, 0, 0, 0];
+  const IEND = [...u32be(0), ...ascii('IEND'), 0, 0, 0, 0];
+  const chunk = (type: string, data: number[]): number[] => [...u32be(data.length), ...ascii(type), ...data, 0, 0, 0, 0];
+  const png = (...chunks: number[][]): Uint8Array => new Uint8Array([...PNG_SIG, ...IHDR, ...chunks.flat(), ...IEND]);
+  // PNG iCCP data = profile name + NUL + compression-method(0) + (fake) compressed profile.
+  const iccpData = (name: string, compLen: number): number[] => [...ascii(name), 0, 0, ...new Array(compLen).fill(0x22)];
+
+  // A minimal raw ICC profile (128-byte header + 1-tag table) carrying a `desc` tag. `v2` = textDescriptionType,
+  // `mluc` = ICC v4 multiLocalizedUnicode. tag data starts at 144 (header 128 + tagCount 4 + 1 entry 12).
+  const iccV2 = (desc: string): number[] => {
+    const asciiCount = desc.length + 1; // includes the NUL
+    const tagData = [...ascii('desc'), 0, 0, 0, 0, ...u32be(asciiCount), ...ascii(desc), 0];
+    const entry = [...ascii('desc'), ...u32be(144), ...u32be(tagData.length)];
+    return [...new Array(128).fill(0), ...u32be(1), ...entry, ...tagData];
+  };
+  const iccV4Mluc = (text: string): number[] => {
+    const str: number[] = [];
+    for (const ch of text) str.push(0, ch.charCodeAt(0)); // UTF-16BE
+    const tagData = [
+      ...ascii('mluc'), 0, 0, 0, 0, ...u32be(1), ...u32be(12), // numRecords=1, recordSize=12
+      ...ascii('en'), ...ascii('US'), ...u32be(str.length), ...u32be(28), // record; string at tag-rel 28
+      ...str,
+    ];
+    const entry = [...ascii('desc'), ...u32be(144), ...u32be(tagData.length)];
+    return [...new Array(128).fill(0), ...u32be(1), ...entry, ...tagData];
+  };
+  const jpegWithIcc = (icc: number[]): Uint8Array => {
+    const payload = [...ascii('ICC_PROFILE'), 0, 1, 1, ...icc]; // id(12) + seq(1) + count(1) + profile
+    const len = 2 + payload.length;
+    return new Uint8Array([0xff, 0xd8, 0xff, 0xe2, ...u16be(len), ...payload, 0xff, 0xd9]); // SOI APP2 EOI
+  };
+  const webpWithIccp = (icc: number[]): Uint8Array => {
+    const vp8x = [...ascii('VP8X'), ...u32le(10), ...new Array(10).fill(0)];
+    const iccp = [...ascii('ICCP'), ...u32le(icc.length), ...icc, ...(icc.length & 1 ? [0] : [])];
+    const body = [...vp8x, ...iccp];
+    return new Uint8Array([...ascii('RIFF'), ...u32le(4 + body.length), ...ascii('WEBP'), ...body]);
+  };
+
+  it('PNG sRGB chunk present ⇒ provable (even with an ambiguously-named iCCP)', () => {
+    const r = iccProfileInfo(png(chunk('sRGB', [0]), chunk('iCCP', iccpData('ICC Profile', 40))));
+    expect(r.present).toBe(true);
+    expect(r.provableSrgb).toBe(true); // the sRGB chunk is the proof
+    expect(r.bytes).toBe(40 + 12 + 'ICC Profile'.length + 2); // iCCP span (len+12): name+NUL+method+comp
+    expect(r.label).toBe('ICC Profile');
+  });
+
+  it('PNG iCCP named "sRGB IEC61966-2.1" ⇒ provable by name (no compressed inflate)', () => {
+    const r = iccProfileInfo(png(chunk('iCCP', iccpData('sRGB IEC61966-2.1', 100))));
+    expect(r).toEqual({ present: true, bytes: 100 + 12 + 17 + 2, provableSrgb: true, label: 'sRGB IEC61966-2.1' });
+  });
+
+  it('PNG iCCP named "Display P3" ⇒ present but NOT provable (kept)', () => {
+    const r = iccProfileInfo(png(chunk('iCCP', iccpData('Display P3', 500))));
+    expect(r.present).toBe(true);
+    expect(r.provableSrgb).toBe(false);
+    expect(r.label).toBe('Display P3');
+    expect(r.bytes).toBe(500 + 12 + 10 + 2);
+  });
+
+  it('PNG with no ICC ⇒ absent', () => {
+    expect(iccProfileInfo(png(chunk('tEXt', [1, 2, 3])))).toEqual({ present: false, bytes: 0, provableSrgb: false, label: null });
+  });
+
+  it('JPEG APP2 ICC v2 desc ⇒ provable iff the desc text contains "srgb"', () => {
+    const yes = iccProfileInfo(jpegWithIcc(iccV2('sRGB IEC61966-2.1')));
+    expect(yes.present).toBe(true);
+    expect(yes.provableSrgb).toBe(true);
+    expect(yes.label).toBe('sRGB IEC61966-2.1');
+    const no = iccProfileInfo(jpegWithIcc(iccV2('Adobe RGB (1998)')));
+    expect(no.present).toBe(true);
+    expect(no.provableSrgb).toBe(false);
+    expect(no.label).toBe('Adobe RGB (1998)');
+    // bytes = the APP2 segSize = 2(marker) + 2(len) + 14(id+seq+count) + iccLen
+    expect(no.bytes).toBe(18 + iccV2('Adobe RGB (1998)').length);
+  });
+
+  it('WebP ICCP v4 mluc desc ⇒ provable iff the (UTF-16BE) desc contains "srgb"', () => {
+    const icc = iccV4Mluc('sRGB');
+    const r = iccProfileInfo(webpWithIccp(icc));
+    expect(r.present).toBe(true);
+    expect(r.provableSrgb).toBe(true);
+    expect(r.label).toBe('sRGB');
+    expect(r.bytes).toBe(icc.length + 8); // size + 8 (parity with webpStrippable)
+    const p3 = iccProfileInfo(webpWithIccp(iccV4Mluc('Display P3')));
+    expect(p3.present).toBe(true);
+    expect(p3.provableSrgb).toBe(false);
+    expect(p3.label).toBe('Display P3');
+  });
+
+  it('truncated / corrupt ICC ⇒ never throws, present but NOT provable', () => {
+    // A JPEG APP2 whose ICC data is too short to hold a tag table ⇒ desc unreadable ⇒ not provable.
+    const short = iccProfileInfo(jpegWithIcc([1, 2, 3, 4]));
+    expect(short.present).toBe(true);
+    expect(short.provableSrgb).toBe(false);
+    expect(short.label).toBe(null);
+    // A PNG iCCP whose declared length overruns the buffer ⇒ the walk bails ⇒ absent (matches pngStrippable).
+    const overrun = new Uint8Array([...PNG_SIG, ...IHDR, ...u32be(99999), ...ascii('iCCP'), 0x41, 0x41]);
+    expect(() => iccProfileInfo(overrun)).not.toThrow();
+    expect(iccProfileInfo(overrun).present).toBe(false);
+    // Garbage / empty never throw.
+    expect(iccProfileInfo(new Uint8Array([1, 2, 3, 4]))).toEqual({ present: false, bytes: 0, provableSrgb: false, label: null });
+    expect(iccProfileInfo(new Uint8Array(0)).present).toBe(false);
+  });
+
+  it('AVIF / unrecognized ⇒ absent (no ISOBMFF box walk)', () => {
+    const avif = new Uint8Array([0x00, 0x00, 0x00, 0x0c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66]);
+    expect(iccProfileInfo(avif)).toEqual({ present: false, bytes: 0, provableSrgb: false, label: null });
+  });
+
+  it('strippableMetadataBytes EXCLUDES a non-provable ICC but KEEPS a provable one', () => {
+    // Non-provable: iCCP(Display P3) + tEXt ⇒ only the tEXt counts (iCCP subtracted).
+    const p3 = png(chunk('iCCP', iccpData('Display P3', 500)), chunk('tEXt', new Array(100).fill(0x41)));
+    expect(strippableMetadataBytes(p3)).toBe(112); // tEXt 100+12; iCCP excluded
+    // Provable (name): iCCP(sRGB…) + tEXt ⇒ BOTH count (byte-identical to the legacy behaviour).
+    const srgbName = png(chunk('iCCP', iccpData('sRGB IEC61966-2.1', 500)), chunk('tEXt', new Array(100).fill(0x41)));
+    expect(strippableMetadataBytes(srgbName)).toBe(500 + 12 + 17 + 2 + 112);
+    // Provable (sRGB chunk): iCCP(ambiguous) + sRGB chunk + tEXt ⇒ iCCP counted.
+    const srgbChunk = png(chunk('iCCP', iccpData('ICC Profile', 500)), chunk('sRGB', [0]), chunk('tEXt', new Array(100).fill(0x41)));
+    expect(strippableMetadataBytes(srgbChunk)).toBe(500 + 12 + 11 + 2 + 112);
   });
 });
 

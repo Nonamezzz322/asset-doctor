@@ -20,6 +20,7 @@ export {
   dimensionMismatchFinding,
   wastedAlphaFinding,
   strippableMetadataFinding,
+  iccNonSrgbFinding,
   wastedRegions,
   formatFinding,
   fmtBytes,

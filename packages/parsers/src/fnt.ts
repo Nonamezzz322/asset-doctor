@@ -11,6 +11,7 @@
 import type { Atlas, ImageAsset, Size, Sprite } from '@asset-doctor/core';
 import type { ParseResult } from './types';
 import { readImageInfo, strippableMetadataBytes } from './image-size';
+import { iccAssetField } from './icc';
 
 export interface FntPage {
   /** page `file` (surrounding quotes stripped). */
@@ -412,6 +413,7 @@ export function parseFntPage(
     source: { kind: 'bmfont' },
   };
   const strippable = strippableMetadataBytes(image.bytes);
+  const icc = iccAssetField(image.bytes);
   const imageAsset: ImageAsset = {
     name: atlas.name,
     imageRef: image.ref,
@@ -419,6 +421,7 @@ export function parseFntPage(
     mime: info.mime,
     byteSize: image.bytes.byteLength,
     ...(strippable > 0 ? { strippableBytes: strippable } : {}),
+    ...(icc ? { icc } : {}),
   };
   return { ok: true, asset: { kind: 'atlas', atlas, image: imageAsset } };
 }

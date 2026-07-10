@@ -30,6 +30,7 @@ import {
   type RawFile,
 } from '@asset-doctor/ingest';
 import {
+  iccProfileInfo,
   parseAtlas,
   parseImage,
   parseSpineAtlasText,
@@ -3861,7 +3862,12 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         continue;
       }
       if (replaced.has(path) || dropped.has(path)) continue; // fail-safe — another op already owns this file
-      const res = stripImageMetadata(new Uint8Array(srcBytes));
+      // INJECTED DECISION (invariant 3): keep an embedded ICC profile we cannot PROVE is sRGB — stripping a
+      // non-sRGB profile (Display P3 / Adobe RGB / …) would silently shift the rendered colours, so the honest
+      // fix keeps the chunk. A provably-sRGB profile is stripped as before (byte-identical). Header-only probe.
+      const src = new Uint8Array(srcBytes);
+      const icc = iccProfileInfo(src);
+      const res = stripImageMetadata(src, { keepIcc: icc.present && !icc.provableSrgb });
       if (res.removed <= 0) {
         skipped.push({ assetRef: ref, reason: 'strip skipped: no strippable metadata found' });
         continue;

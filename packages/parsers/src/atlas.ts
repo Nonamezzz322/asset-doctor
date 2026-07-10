@@ -6,6 +6,7 @@
 import type { Atlas, AtlasSourceKind, ImageAsset, Rect, Size, Sprite, SpriteMesh, Vec2 } from '@asset-doctor/core';
 import type { ParseResult } from './types';
 import { readImageInfo, strippableMetadataBytes } from './image-size';
+import { iccAssetField } from './icc';
 
 /** A frame that named a sprite but could not be used (degenerate/negative/OOB rect, missing filename,
  *  non-object body). Per-frame recovery: the sheet keeps its good sprites; only the bad ones are
@@ -290,6 +291,7 @@ export function parseAtlas(
   });
   if (!res.ok) return res;
   const strippable = strippableMetadataBytes(image.bytes);
+  const icc = iccAssetField(image.bytes);
   const imageAsset: ImageAsset = {
     name: res.atlas.imageRef,
     imageRef: image.ref,
@@ -297,6 +299,7 @@ export function parseAtlas(
     mime: info.mime,
     byteSize: image.bytes.byteLength,
     ...(strippable > 0 ? { strippableBytes: strippable } : {}),
+    ...(icc ? { icc } : {}),
   };
   // Forward per-frame recovery onto the success result (additive intersection). All other callers
   // destructure {ok, asset} and ignore the extra prop; the worker fans it into unparsed[] (§5).
@@ -310,6 +313,7 @@ export function parseImage(name: string, bytes: Uint8Array): ParseResult {
   const info = readImageInfo(bytes);
   if (!info) return { ok: false, error: `unrecognized image: ${name}` };
   const strippable = strippableMetadataBytes(bytes);
+  const icc = iccAssetField(bytes);
   const image: ImageAsset = {
     name,
     imageRef: name,
@@ -317,6 +321,7 @@ export function parseImage(name: string, bytes: Uint8Array): ParseResult {
     mime: info.mime,
     byteSize: bytes.byteLength,
     ...(strippable > 0 ? { strippableBytes: strippable } : {}),
+    ...(icc ? { icc } : {}),
   };
   return { ok: true, asset: { kind: 'image', image } };
 }
