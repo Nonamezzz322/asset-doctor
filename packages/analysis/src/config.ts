@@ -54,6 +54,9 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   solidFill: { minEdgePx: 256, warnEdgePx: 1024 }, // CALIBRATE — single-color loose image gate.
   // Both edges ≥ minEdgePx before flagging (a tiny swatch is harmless); ≥ warnEdgePx ⇒ warn (a 1024²
   // solid pins 4 MB VRAM for one color), else info. Loose-only; atlases never trip it.
+  effectiveResolution: { minEdgePx: 256, warnEdgePx: 1024 }, // CALIBRATE — provable-upscale (upscaled-source)
+  // report gate. The upscale is a PROOF (blockUpscaleDepth ≥ 1), so these numbers only suppress trivially
+  // small savings: longest edge ≥ minEdgePx before flagging; ≥ warnEdgePx ⇒ warn, else info. Loose-only.
   wastedAlpha: { minEdgePx: 64, minDiskSaving: 0.05 }, // CALIBRATE — fully-opaque-with-alpha-channel gate.
   // A loose PNG/WebP whose alpha is 255 everywhere carries a dead channel. Both edges ≥ minEdgePx before
   // flagging; the measured opaque re-encode (same format) must save ≥ minDiskSaving of disk bytes before

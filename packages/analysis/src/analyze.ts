@@ -32,6 +32,7 @@ import {
   occupancyFinding,
   occupancyValue,
   solidFillFinding,
+  upscaledSourceFinding,
   strippableMetadataFinding,
   trimMarginFinding,
   vramBytes,
@@ -119,6 +120,9 @@ export async function analyze(
   // solid-fill finding ⇒ byte-identical to today (CLI / headless tests unaffected).
   const solidByRef = new Set<string>();
   for (const f of deps.features ?? []) if (f.solid) solidByRef.add(f.assetRef);
+  // ref → proven nearest-2× upscale depth (upscaled-source). Absent ⇒ never fires (byte-identical to today).
+  const upscaleDepthByRef = new Map<string, number>();
+  for (const f of deps.features ?? []) if (f.blockUpscaleDepth) upscaleDepthByRef.set(f.assetRef, f.blockUpscaleDepth);
 
   // Fully-opaque marking from the host's FULL-FRAME alpha scan (a fully-opaque image still carrying an
   // alpha channel wastes DISK bytes). Loose images only (atlases never trip it). Absent ⇒ empty ⇒ no
@@ -288,6 +292,11 @@ export async function analyze(
       if (solidByRef.has(image.name)) {
         const solid = solidFillFinding(image.name, image.size, cfg);
         if (solid) findings.push(solid);
+      } else {
+        // Provable nearest-2× upscale — de-overlapped with solid-fill (a solid image is solid-fill's, and its
+        // blocks are all constant, so it would otherwise trip both). NO estimate is contributed to any total.
+        const up = upscaledSourceFinding(image.name, image.size, cfg, upscaleDepthByRef.get(image.name));
+        if (up) findings.push(up);
       }
       await addFormat(image.name, image, classByRef.get(image.name) ?? 'unknown');
       // Wasted alpha: a fully-opaque loose image still carrying an alpha channel. Loose-only, gated on the

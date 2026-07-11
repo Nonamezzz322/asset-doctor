@@ -158,6 +158,54 @@ export function solidFillFinding(ref: string, size: Size, cfg: ThresholdConfig):
   };
 }
 
+/** PROVABLE upscaled source. `blockUpscaleDepth` (the worker, on the full-res decode) proved the LOOSE image
+ *  is a `depth`-level integer nearest-neighbour 2× upscale: every grid-aligned 2×2 block, at each level, is
+ *  one constant RGBA value. So it carries ZERO detail above (w>>depth)×(h>>depth) and that smaller source is
+ *  LOSSLESSLY recoverable (pick any pixel per block). This is a PROOF, not a heuristic — no threshold decides
+ *  whether it fires (the config only suppresses trivially-small savings by edge size), and there are no false
+ *  positives (a single differing pixel stops the descent). HONESTY: unlike solid-fill's exact 1×1 proof, the
+ *  realized VRAM win is CONDITIONAL on shipping the recovered source — but the condition is user-verifiable
+ *  and the source provably exists, so (like `npot`) we carry a `vramBytesSaved` estimate with the condition
+ *  stated in copy. VRAM ONLY: shipping a smaller source also shrinks its DISK bytes, but we did not re-encode
+ *  it, so we make NO disk claim (invariant 5) — no `diskBytesSaved`, and (like solid-fill) `vramBytesSaved`
+ *  is never summed into any headline total. Smooth (bilinear) upscales are NOT proved here and never fire. */
+export function upscaledSourceFinding(
+  ref: string,
+  size: Size,
+  cfg: ThresholdConfig,
+  depth?: number,
+): Finding | null {
+  if (!cfg.effectiveResolution || !depth || depth < 1) return null;
+  const longest = Math.max(size.w, size.h);
+  if (longest < cfg.effectiveResolution.minEdgePx) return null;
+  const effW = size.w >> depth;
+  const effH = size.h >> depth;
+  if (effW < 1 || effH < 1) return null; // guard (can't happen once blocks proved constant, but be safe)
+  const vramFull = vramBytes(size);
+  const vramEff = effW * effH * BYTES_PER_PX;
+  const vramSaved = vramFull - vramEff;
+  const block = 1 << depth; // the proven constant-block edge = 2^depth (a NxN block is one flat color)
+  const severity: Severity = longest >= cfg.effectiveResolution.warnEdgePx ? 'warn' : 'info';
+  return {
+    id: `${ref}:upscaled-source`,
+    rule: 'upscaled-source',
+    severity,
+    assetRef: ref,
+    title: `Upscaled ${size.w}×${size.h} — no detail above ${effW}×${effH}, ${fmtBytes(vramSaved)} VRAM recoverable`,
+    detail:
+      `Every ${block}×${block} block is one flat color: this is a point-sampled (nearest) upscale of a ` +
+      `${effW}×${effH} source, so it carries no detail above ${effW}×${effH} — yet it pins ${fmtBytes(vramFull)} of VRAM ` +
+      `(${size.w}×${size.h}×4) instead of ${fmtBytes(vramEff)}. The ${effW}×${effH} source is losslessly recoverable; ` +
+      `shipping it saves ${fmtBytes(vramSaved)} of VRAM and renders identically under nearest filtering.`,
+    fix: `Ship the ${effW}×${effH} source and let the GPU scale it — the upscale added no detail. DISK: re-encode to measure the download saving.`,
+    // VRAM only, proof-backed conditional (source provably recoverable): like solid-fill, vramBytesSaved is
+    // never summed into a headline total; NO diskBytesSaved (we never re-encoded the source — invariant 5).
+    estimate: { vramBytesSaved: vramSaved },
+    messageKey: 'upscaled-source',
+    params: { w: size.w, h: size.h, effW, effH, depth, block, vramFull, vramEff, vramSaved },
+  };
+}
+
 /** Within-atlas duplicate-frame detector. The host (worker) hashes each sprite's PIXEL REGION from the
  *  ALREADY-DECODED atlas page (`frameHashes`, index-aligned to `atlas.sprites`; `null` = host-skipped flat
  *  region or read failure, never clustered). We CLUSTER frames whose region hash is byte-identical — these

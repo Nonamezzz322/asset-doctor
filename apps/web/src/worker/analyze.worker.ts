@@ -17,6 +17,7 @@ import {
   FRAME_HASH_MAX_SPRITES,
   isFlat,
   isSolidColor,
+  blockUpscaleDepth,
   isSolidFullRes,
   luma,
   meanColorFromSample,
@@ -134,11 +135,12 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       // and JPEG/AVIF loose images never pay the full-resolution decode (instant-wow: most files skip it).
       const m = looseMime.get(assetRef);
       const scanAlpha = m === 'image/png' || m === 'image/webp';
-      const { dHash, contentClass, solid, opaque, meanColor, scanSkipped, w, h } = await decodeFeatures(bytes, scanAlpha);
+      const { dHash, contentClass, solid, opaque, meanColor, scanSkipped, upscaleDepth, w, h } = await decodeFeatures(bytes, scanAlpha);
       const feat: ImageFeatures = { assetRef, contentHash };
       if (dHash) feat.dHash = dHash;
       if (contentClass !== 'unknown') feat.contentClass = contentClass;
       if (solid) feat.solid = true; // additive: only ever set when true
+      if (upscaleDepth >= 1) feat.blockUpscaleDepth = upscaleDepth; // additive: only ever set for a proven upscale
       if (opaque) feat.opaque = true; // additive: only ever set when true (full-frame alpha === 255)
       // Attach whenever measured (non-null): the duplicate-similar mean-color guard consumes it; features
       // that never enter perceptual matching (dHash-null) are filtered out downstream, so it's inert there.
@@ -238,11 +240,12 @@ async function decodeFeatures(
   opaque: boolean;
   meanColor: { r: number; g: number; b: number } | null;
   scanSkipped: boolean;
+  upscaleDepth: number;
   w: number;
   h: number;
 }> {
   if (typeof OffscreenCanvas === 'undefined')
-    return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, meanColor: null, scanSkipped: false, w: 0, h: 0 };
+    return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, meanColor: null, scanSkipped: false, upscaleDepth: 0, w: 0, h: 0 };
   try {
     const bmp = await createImageBitmap(new Blob([bytes]));
     const { width, height } = bmp; // capture before close() so the caller's skip reason has the dimensions
@@ -250,7 +253,7 @@ async function decodeFeatures(
     const c2d = canvas.getContext('2d');
     if (!c2d) {
       bmp.close();
-      return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, meanColor: null, scanSkipped: false, w: width, h: height };
+      return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, meanColor: null, scanSkipped: false, upscaleDepth: 0, w: width, h: height };
     }
     c2d.drawImage(bmp, 0, 0, 9, 8);
     const data = c2d.getImageData(0, 0, 9, 8).data;
@@ -277,6 +280,7 @@ async function decodeFeatures(
     // UNconfirmed ⇒ solid stays false (a conservative miss within ≤10s, never a guess — invariant 3).
     let opaque = false;
     let solid = false;
+    let upscaleDepth = 0;
     if ((scanAlpha || solidCandidate) && !overBudget) {
       const full = new OffscreenCanvas(width, height);
       const fctx = full.getContext('2d', { willReadFrequently: true });
@@ -285,12 +289,16 @@ async function decodeFeatures(
         const fullData = fctx.getImageData(0, 0, width, height).data;
         opaque = scanAlpha ? alphaFullyOpaque(fullData) : false; // unchanged
         solid = solidCandidate ? isSolidFullRes(fullData) : false; // full-res CONFIRMATION of the 9×8 candidate
+        // PROVABLE nearest-2× upscale depth (upscaled-source finding) — reuses this same full-res buffer, zero
+        // extra decode. Skip on a confirmed solid (solid-fill owns it; a solid descends fully for nothing).
+        // The first pass short-circuits on the first non-constant block, so a real detailed image costs ~O(N).
+        if (!solid) upscaleDepth = blockUpscaleDepth(fullData, width, height);
       }
     }
     bmp.close();
-    return { dHash, contentClass, solid, opaque, meanColor, scanSkipped, w: width, h: height };
+    return { dHash, contentClass, solid, opaque, meanColor, scanSkipped, upscaleDepth, w: width, h: height };
   } catch {
-    return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, meanColor: null, scanSkipped: false, w: 0, h: 0 };
+    return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, meanColor: null, scanSkipped: false, upscaleDepth: 0, w: 0, h: 0 };
   }
 }
 

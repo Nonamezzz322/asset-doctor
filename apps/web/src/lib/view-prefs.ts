@@ -15,7 +15,7 @@
 
 import type { Rule } from '@asset-doctor/core';
 
-/** The humane groups the 22 rules fall into, by WHY a user would hide them (design §3). UI-only. */
+/** The humane groups the 23 rules fall into, by WHY a user would hide them (design §3). UI-only. */
 export type RuleGroupId = 'integrity' | 'savings' | 'packing' | 'vram';
 
 /** Top→bottom display order of the groups on the settings card. Integrity first (rarely hidden, most
@@ -23,7 +23,7 @@ export type RuleGroupId = 'integrity' | 'savings' | 'packing' | 'vram';
 export const GROUP_ORDER: readonly RuleGroupId[] = ['integrity', 'savings', 'packing', 'vram'];
 
 /** EXHAUSTIVE Rule → group map — the drift guard. Because it is `Record<Rule, RuleGroupId>`, TS requires
- *  a key for EVERY member of core's `Rule` union: adding a 23rd rule to core fails `pnpm typecheck` here
+ *  a key for EVERY member of core's `Rule` union: adding a 24th rule to core fails `pnpm typecheck` here
  *  until it is grouped, so this can never silently go stale (no packages/core edit needed). Keys are written
  *  grouped in GROUP_ORDER so the derived per-group order below is clean and stable. */
 export const RULE_GROUP: Record<Rule, RuleGroupId> = {
@@ -38,6 +38,7 @@ export const RULE_GROUP: Record<Rule, RuleGroupId> = {
   format: 'savings',
   'strippable-metadata': 'savings',
   'solid-fill': 'savings',
+  'upscaled-source': 'savings',
   'wasted-alpha': 'savings',
   'duplicate-exact': 'savings',
   'duplicate-similar': 'savings',

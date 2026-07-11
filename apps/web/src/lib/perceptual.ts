@@ -182,6 +182,68 @@ export function isSolidFullRes(rgba: Uint8ClampedArray | Uint8Array | number[], 
   return true;
 }
 
+/** How many times a LOOSE image is a PROVABLE integer nearest-neighbour 2× upscale of a smaller source —
+ *  i.e. the largest k such that, halving k times, EVERY grid-aligned 2×2 block at each level is a single
+ *  constant RGBA value. k ≥ 1 ⇒ the image was point-sampled up from a (w>>k)×(h>>k) source and carries ZERO
+ *  detail above that size: shipping the source (which is losslessly recoverable — pick any pixel per block)
+ *  renders BYTE-IDENTICALLY under nearest filtering. This is a PROOF, not a heuristic: there is no threshold
+ *  and no false positive — a single differing pixel in any block stops the descent immediately. It does NOT
+ *  detect smooth (bilinear/bicubic) upscales — those interpolate, so their blocks are not constant; that
+ *  band-limited case is a separate, disclosure-only concern. Odd dimension / empty / size mismatch ⇒ 0.
+ *
+ *  Cheap: the first (full-resolution) pass short-circuits the instant it sees a non-constant block, so a
+ *  genuinely detailed image bails at block (0,0). Only a real upscale pays the O(4/3·N) full descent.
+ *  Pure integer read, deterministic, resampler-independent (the full-res draw is 1:1). */
+export function blockUpscaleDepth(rgba: Uint8ClampedArray | Uint8Array | number[], w: number, h: number): number {
+  if (!Number.isInteger(w) || !Number.isInteger(h) || w < 2 || h < 2) return 0;
+  if (rgba.length < w * h * 4) return 0; // not enough data — never claim on a short buffer
+  // Level 0 tests the source buffer directly (no copy); deeper levels test a halved copy built from the
+  // proven-constant blocks (one representative pixel per block). Copy only happens once a level PROVES.
+  let cur: Uint8ClampedArray | Uint8Array | number[] = rgba;
+  let cw = w;
+  let ch = h;
+  let depth = 0;
+  while (cw % 2 === 0 && ch % 2 === 0 && cw >= 2 && ch >= 2) {
+    let allConst = true;
+    for (let y = 0; y < ch && allConst; y += 2) {
+      for (let x = 0; x < cw; x += 2) {
+        const i00 = (y * cw + x) * 4;
+        const i01 = (y * cw + x + 1) * 4;
+        const i10 = ((y + 1) * cw + x) * 4;
+        const i11 = ((y + 1) * cw + x + 1) * 4;
+        for (let c = 0; c < 4; c++) {
+          const v = cur[i00 + c];
+          if (cur[i01 + c] !== v || cur[i10 + c] !== v || cur[i11 + c] !== v) {
+            allConst = false;
+            break;
+          }
+        }
+        if (!allConst) break;
+      }
+    }
+    if (!allConst) break;
+    // The level PROVED constant ⇒ halve it: the top-left pixel of each 2×2 block IS the block value.
+    const nw = cw >> 1;
+    const nh = ch >> 1;
+    const next = new Uint8ClampedArray(nw * nh * 4);
+    for (let y = 0; y < nh; y++) {
+      for (let x = 0; x < nw; x++) {
+        const src = (2 * y * cw + 2 * x) * 4;
+        const dst = (y * nw + x) * 4;
+        next[dst] = cur[src] ?? 0;
+        next[dst + 1] = cur[src + 1] ?? 0;
+        next[dst + 2] = cur[src + 2] ?? 0;
+        next[dst + 3] = cur[src + 3] ?? 0;
+      }
+    }
+    cur = next;
+    cw = nw;
+    ch = nh;
+    depth++;
+  }
+  return depth;
+}
+
 /** Axis-aligned packed rect of a sprite AS PLACED in the atlas page (already w/h-swapped when rotated). */
 export interface FrameRect {
   x: number;

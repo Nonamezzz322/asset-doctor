@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import type { Asset, Atlas, ImageAsset, ImageFeatures, ImageMime, Rect, ThresholdConfig } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseFntText, parseFntPage, type FntPage } from '@asset-doctor/parsers';
 import { groupFiles, type RawFile } from '@asset-doctor/ingest';
-import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, iccNonSrgbFinding, crossAtlasRedundancyFinding, duplicateSimilarFindings, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, upscaledSourceFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, iccNonSrgbFinding, crossAtlasRedundancyFinding, duplicateSimilarFindings, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -436,6 +436,85 @@ describe('solid-fill (single-color loose image)', () => {
       features: [{ assetRef: 'plate.png', contentHash: 'h', solid: true }],
     });
     expect(withSolid.totals.potentialDiskSaved).toBe(report.totals.potentialDiskSaved);
+  });
+});
+
+describe('upscaled-source (provable nearest-2× upscale)', () => {
+  const looseImg = (name: string, w: number, h: number): Asset => ({
+    kind: 'image',
+    image: { name, imageRef: name, size: { w, h }, mime: 'image/png', byteSize: 10000 },
+  });
+
+  it('depth 1 on 2048² ⇒ warn, vramBytesSaved = full − quarter, NO diskBytesSaved (Inv 5), params pinned', () => {
+    const f = upscaledSourceFinding('u.png', { w: 2048, h: 2048 }, DEFAULT_THRESHOLDS, 1)!;
+    expect(f).not.toBeNull();
+    expect(f.rule).toBe('upscaled-source');
+    expect(f.messageKey).toBe('upscaled-source');
+    expect(f.severity).toBe('warn'); // longest 2048 ≥ warnEdgePx (1024)
+    expect(f.estimate?.vramBytesSaved).toBe(2048 * 2048 * 4 - 1024 * 1024 * 4);
+    expect(f.estimate?.diskBytesSaved).toBeUndefined(); // VRAM only — never re-encoded the source
+    expect(f.params).toEqual({
+      w: 2048, h: 2048, effW: 1024, effH: 1024, depth: 1, block: 2,
+      vramFull: 2048 * 2048 * 4, vramEff: 1024 * 1024 * 4, vramSaved: 2048 * 2048 * 4 - 1024 * 1024 * 4,
+    });
+  });
+
+  it('depth 2 ⇒ quarter-edge effective resolution + block 4, bigger saving', () => {
+    const f = upscaledSourceFinding('u.png', { w: 2048, h: 2048 }, DEFAULT_THRESHOLDS, 2)!;
+    expect(f.params).toMatchObject({ effW: 512, effH: 512, depth: 2, block: 4 });
+    expect(f.estimate?.vramBytesSaved).toBe(2048 * 2048 * 4 - 512 * 512 * 4);
+  });
+
+  it('below warnEdgePx but ≥ minEdgePx ⇒ info; below minEdgePx ⇒ null; depth 0/undefined ⇒ null', () => {
+    expect(upscaledSourceFinding('s.png', { w: 512, h: 512 }, DEFAULT_THRESHOLDS, 1)!.severity).toBe('info');
+    expect(upscaledSourceFinding('tiny.png', { w: 128, h: 128 }, DEFAULT_THRESHOLDS, 1)).toBeNull();
+    expect(upscaledSourceFinding('n.png', { w: 2048, h: 2048 }, DEFAULT_THRESHOLDS, 0)).toBeNull();
+    expect(upscaledSourceFinding('n.png', { w: 2048, h: 2048 }, DEFAULT_THRESHOLDS, undefined)).toBeNull();
+  });
+
+  it('no effectiveResolution config ⇒ null (CLI / budget — needs a full-res decode)', () => {
+    const cfg = { ...DEFAULT_THRESHOLDS };
+    delete cfg.effectiveResolution;
+    expect(upscaledSourceFinding('u.png', { w: 2048, h: 2048 }, cfg, 2)).toBeNull();
+  });
+
+  it('analyze threads blockUpscaleDepth to a LOOSE image ⇒ finding; absent ⇒ none; no total shift', async () => {
+    const report = await analyze([looseImg('u.png', 2048, 2048)], undefined, {
+      encodeImage: async () => 9999,
+      features: [{ assetRef: 'u.png', contentHash: 'h', blockUpscaleDepth: 1 }],
+    });
+    const up = report.findings.find((f) => f.rule === 'upscaled-source');
+    expect(up?.assetRef).toBe('u.png');
+    expect(up?.severity).toBe('warn');
+    // absent feature ⇒ no finding, and the VRAM estimate never moves potentialDiskSaved (a disk total)
+    const bare = await analyze([looseImg('u.png', 2048, 2048)], undefined, { encodeImage: async () => 9999 });
+    expect(bare.findings.find((f) => f.rule === 'upscaled-source')).toBeUndefined();
+    expect(report.totals.potentialDiskSaved).toBe(bare.totals.potentialDiskSaved);
+  });
+
+  it('de-overlap: a solid image is solid-fill\'s, never upscaled-source (even if both features present)', async () => {
+    const report = await analyze([looseImg('flat.png', 2048, 2048)], undefined, {
+      encodeImage: async () => 9999,
+      features: [{ assetRef: 'flat.png', contentHash: 'h', solid: true, blockUpscaleDepth: 11 }],
+    });
+    expect(report.findings.find((f) => f.rule === 'solid-fill')).toBeDefined();
+    expect(report.findings.find((f) => f.rule === 'upscaled-source')).toBeUndefined();
+  });
+
+  it('analyze NEVER fires upscaled-source for an ATLAS (loose-only)', async () => {
+    const atlasAsset: Asset = {
+      kind: 'atlas',
+      atlas: {
+        name: 'sheet.png', imageRef: 'sheet.png', size: { w: 2048, h: 2048 },
+        sprites: [{ name: 's0', frame: { x: 0, y: 0, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 32, h: 32 } }],
+        source: { kind: 'pixi' },
+      },
+      image: { name: 'sheet.png', imageRef: 'sheet.png', size: { w: 2048, h: 2048 }, mime: 'image/png', byteSize: 10000 },
+    };
+    const report = await analyze([atlasAsset], undefined, {
+      features: [{ assetRef: 'sheet.png', contentHash: 'h', blockUpscaleDepth: 1 }],
+    });
+    expect(report.findings.find((f) => f.rule === 'upscaled-source')).toBeUndefined();
   });
 });
 

@@ -289,6 +289,8 @@ export type Rule =
   | 'dimensions-oversize'
   | 'solid-fill'
   | 'wasted-alpha'
+  // per-asset: a PROVABLE integer nearest-neighbour upscale of a smaller source — no detail above eff-res
+  | 'upscaled-source'
   // per-asset: strippable ancillary metadata (ICC/EXIF/XMP + non-essential chunks) the GPU never uses
   | 'strippable-metadata'
   // per-asset: an embedded ICC profile we cannot prove is sRGB (disclosure/correctness — NO estimate)
@@ -419,6 +421,13 @@ export interface ImageFeatures {
    *  against hue-swapped shape twins (dHash is luma-sign-only ⇒ color-blind). Additive: absent (CLI/headless,
    *  Σalpha=0, decode failure) ⇒ guard self-skips ⇒ today's clustering byte-identical. */
   meanColor?: { r: number; g: number; b: number };
+  /** How many times the LOOSE image is a PROVABLE integer nearest-neighbour 2× upscale (every grid-aligned
+   *  2×2 block, at each of `depth` levels, is one constant RGBA value). depth ≥ 1 ⇒ zero detail lives above
+   *  (w>>depth)×(h>>depth) and the smaller source is losslessly recoverable ⇒ the `upscaled-source` finding.
+   *  A PROOF (no threshold, no false positive); computed on the full-res decode, short-circuiting on the
+   *  first non-constant block. Additive: only ever SET when ≥ 1; absent (not an upscale, decode skipped/
+   *  failed, atlas, headless) ⇒ today's behavior. Smooth (bilinear) upscales are NOT caught here. */
+  blockUpscaleDepth?: number;
 }
 
 /** Per-atlas sprite-region hashes computed by the host (worker) from the ALREADY-DECODED atlas page, fed
@@ -629,6 +638,13 @@ export interface ThresholdConfig {
    *  this edge the finding is `warn` (a 1024² solid pins 4 MB VRAM), else `info`. Optional/additive:
    *  absent ⇒ the solid-fill finding is suppressed (CLI/budget configs that don't opt in). */
   solidFill?: { minEdgePx: number; warnEdgePx: number };
+  /** Effective-resolution / upscaled-source gate. `minEdgePx` — the LONGEST edge must be ≥ this before an
+   *  upscaled loose image is worth flagging (halving a small texture saves little VRAM). `warnEdgePx` — at/
+   *  above this longest edge the finding is `warn`, else `info` (mirrors solidFill). The upscale itself is a
+   *  PROOF (no threshold gates whether it fires — only whether it is big enough to bother reporting).
+   *  Optional/additive: absent ⇒ the upscaled-source finding is suppressed (CLI/budget configs that don't
+   *  opt in — it needs a full-res decode the CLI never performs). */
+  effectiveResolution?: { minEdgePx: number; warnEdgePx: number };
   /** Wasted-alpha (a fully-opaque image still carrying an alpha channel) gate. `minEdgePx` — both edges
    *  must be ≥ this before flagging (a tiny icon's dead channel is negligible). `minDiskSaving` — the
    *  measured fraction of disk bytes that dropping the channel (re-encode opaque to the same format)
