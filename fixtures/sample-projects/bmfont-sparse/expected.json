@@ -14,6 +14,10 @@
   },
   "findings": [
     {
+      "rule": "excessive-gutter",
+      "severity": "info"
+    },
+    {
       "rule": "font-glyph-page",
       "severity": "warn"
     },
@@ -26,5 +30,5 @@
       "severity": "info"
     }
   ],
-  "note": "Single-page BMFont (.fnt) on a 256×256 POT page with 16 small opaque glyphs → a SPARSE glyph sheet (~9.8% packed) pinning w×h×4 VRAM for mostly-empty space. 16 usable glyphs clears minChars (16); occupancy ≤ occupancyWarn (0.5) ⇒ the font-glyph-page readout is WARN. A whitespace glyph (id=32, 0×0) is skipped (not an error); one out-of-page glyph (id=255) is dropped + surfaced via per-glyph recovery. The page IS an atlas, so the generic occupancy/wasted-regions findings fire for free. The font readout estimate carries ONLY occupancyPct — the generic findings own the VRAM on the same page (invariant 5; no double-count). Emitted in all THREE serializations (TEXT/XML/binary) from the SAME glyph data + the SAME font.png + this SAME expected.json; each parser produces a byte-identical FntPage[]. Exercised through the REAL path (groupFiles → parseFntPage → analyze)."
+  "note": "Single-page BMFont (.fnt) on a 256×256 POT page with 16 small opaque glyphs → a SPARSE glyph sheet (~9.8% packed) pinning w×h×4 VRAM for mostly-empty space. 16 usable glyphs clears minChars (16); occupancy ≤ occupancyWarn (0.5) ⇒ the font-glyph-page readout is WARN. A whitespace glyph (id=32, 0×0) is skipped (not an error); one out-of-page glyph (id=255) is dropped + surfaced via per-glyph recovery. The page IS an atlas, so the generic occupancy/wasted-regions findings fire for free. The font readout estimate carries ONLY occupancyPct — the generic findings own the VRAM on the same page (invariant 5; no double-count). Emitted in all THREE serializations (TEXT/XML/binary) from the SAME glyph data + the SAME font.png + this SAME expected.json; each parser produces a byte-identical FntPage[]. Exercised through the REAL path (groupFiles → parseFntPage → analyze). [round 6] excessive-gutter (info) now fires too: the sparse page’s median nearest-neighbour glyph gap clears minMedianPx — systematic over-padding is exactly what this fixture depicts."
 }

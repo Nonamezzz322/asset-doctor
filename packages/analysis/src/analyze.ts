@@ -29,6 +29,7 @@ import {
   dimensionMismatchFinding,
   formatFinding,
   frameRedundancyFinding,
+  gutterFinding,
   iccNonSrgbFinding,
   interiorTransparencyFinding,
   occupancyFinding,
@@ -242,6 +243,11 @@ export async function analyze(
       // no finding ⇒ byte-identical.
       const bleed = bleedingFinding(atlas, cfg);
       if (bleed) findings.push(bleed);
+      // Excessive gutter — the inverse packing disclosure (median nearest-neighbour gap systematically wide).
+      // Pure integer geometry, always info, NO estimate ⇒ nothing flows into totals. Absent cfg.gutter
+      // (CLI/headless resolveThresholds omission) ⇒ no finding ⇒ byte-identical.
+      const gut = gutterFinding(atlas, cfg);
+      if (gut) findings.push(gut);
       // Declared (atlas.size = manifest meta.size / Spine page size:) vs REAL (image.size = decoded pixel
       // header) atlas dimensions. A pure integer compare of two values the parser already holds — the
       // always-on static sibling of the optional render-probe's declared-vs-measured label. A CORRECTNESS

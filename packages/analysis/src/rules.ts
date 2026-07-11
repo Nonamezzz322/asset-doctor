@@ -804,6 +804,83 @@ export function bleedingFinding(atlas: Atlas, cfg: ThresholdConfig): Finding | n
   };
 }
 
+/** Excessive-gutter detector — the INVERSE of bleeding. For each distinct packed frame, measure the gap to
+ *  its nearest right-neighbour (first frame in x-order past its right edge that overlaps it vertically) and
+ *  nearest below-neighbour (same along y); the per-frame gap is the min of the defined ones, and the atlas
+ *  statistic is the MEDIAN over all measured frames (lower median on even counts — integer, deterministic).
+ *  A median of 8–16px means the packer's padding is systematically larger than the ~2px (+ edge-extrude)
+ *  that prevents bleeding — sheet area spent on air. Pure integer geometry over `atlas.sprites[].frame`
+ *  (AS PLACED — rotated frames included, a gap is a gap), NO decode; identical rects de-aliased (one GPU
+ *  region, mirrors bleeding); frames touching at 0px contribute 0 and pull the median DOWN, so a tightly
+ *  packed sheet never fires. HONESTY (invariant 3/5): a DISCLOSURE, not a savings claim — the area a
+ *  tighter repack actually reclaims depends on the resulting layout, so there is NO estimate at all; the
+ *  shipped Pro repack MEASURES the real before→after in its receipt. Severity always `info`. Returns null
+ *  with no config, fewer than `minGaps` measured gaps, or a median below `minMedianPx`. O(n log n + n·k). */
+export function gutterFinding(atlas: Atlas, cfg: ThresholdConfig): Finding | null {
+  const gate = cfg.gutter;
+  if (!gate) return null;
+  // De-alias identical rects (same rect under several names = one region), drop degenerate frames.
+  const seen = new Set<string>();
+  const rects: Rect[] = [];
+  for (const sp of atlas.sprites) {
+    const f = sp.frame;
+    if (f.w <= 0 || f.h <= 0) continue;
+    const key = `${f.x},${f.y},${f.w},${f.h}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      rects.push(f);
+    }
+  }
+  if (rects.length < 2) return null;
+
+  // Nearest gap along +x: sorted by x, the FIRST y-overlapping rect whose left edge is at/past A's right
+  // edge gives A's minimal x-gap (left edges are non-decreasing). Same along +y with the transposed sort.
+  const byX = [...rects].sort((a, b) => a.x - b.x || a.y - b.y);
+  const byY = [...rects].sort((a, b) => a.y - b.y || a.x - b.x);
+  const gapRight = (A: Rect): number | null => {
+    for (const B of byX) {
+      if (B.x < A.x + A.w) continue; // not past A's right edge (includes A itself and overlaps)
+      if (B.y < A.y + A.h && B.y + B.h > A.y) return B.x - (A.x + A.w); // first y-overlapping ⇒ minimal
+    }
+    return null;
+  };
+  const gapBelow = (A: Rect): number | null => {
+    for (const B of byY) {
+      if (B.y < A.y + A.h) continue;
+      if (B.x < A.x + A.w && B.x + B.w > A.x) return B.y - (A.y + A.h);
+    }
+    return null;
+  };
+  const gaps: number[] = [];
+  for (const A of rects) {
+    const gx = gapRight(A);
+    const gy = gapBelow(A);
+    const g = gx === null ? gy : gy === null ? gx : Math.min(gx, gy);
+    if (g !== null) gaps.push(g); // edge frames with no right/below neighbour measure nothing (honest skip)
+  }
+  if (gaps.length < gate.minGaps) return null;
+  gaps.sort((a, b) => a - b);
+  const median = gaps[(gaps.length - 1) >> 1]!; // lower median — integer, deterministic
+  if (median < gate.minMedianPx) return null;
+  return {
+    id: `${atlas.name}:excessive-gutter`,
+    rule: 'excessive-gutter',
+    severity: 'info', // ALWAYS info — a packing disclosure, never a predicted saving
+    assetRef: atlas.name,
+    title: `Median frame gutter ${median}px — over-padded packing`,
+    detail:
+      `Half of the measured frames sit ≥ ${median}px from their nearest packed neighbour (${gaps.length} gaps ` +
+      `measured). ~2px padding plus edge-extrude is typically enough to prevent bleeding — wider systematic ` +
+      `gutters spend sheet area on air. The area a tighter repack actually reclaims depends on the resulting ` +
+      `layout, so we do not estimate it — the Pro repack measures the real before/after.`,
+    fix: 'Repack with a smaller padding (~2px) plus edge-extrude; verify no bleeding at your filter settings.',
+    // NO estimate field AT ALL — the reclaimed area depends on the repacked layout (invariant 3); the
+    // shipped repack receipt MEASURES it instead of us predicting it.
+    messageKey: 'excessive-gutter',
+    params: { median, n: gaps.length },
+  };
+}
+
 /** Declared (atlas.size, from manifest meta.size / Spine page size:) vs REAL (image.size, the decoded
  *  pixel header — zero decode) atlas dimensions. A pure integer compare of two numbers the parser already
  *  holds; generates nothing (invariant 3). CORRECTNESS finding — NO saving (invariant 5); it states the two

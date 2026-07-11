@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import type { Asset, Atlas, ImageAsset, ImageFeatures, ImageMime, Rect, ThresholdConfig } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseFntText, parseFntPage, type FntPage } from '@asset-doctor/parsers';
 import { groupFiles, type RawFile } from '@asset-doctor/ingest';
-import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, upscaledSourceFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, iccNonSrgbFinding, interiorTransparencyFinding, binaryAlphaFinding, crossAtlasRedundancyFinding, premultipliedAlphaFinding, gpuCompressionAlignmentFinding, duplicateSimilarFindings, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, upscaledSourceFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, iccNonSrgbFinding, interiorTransparencyFinding, binaryAlphaFinding, crossAtlasRedundancyFinding, premultipliedAlphaFinding, gpuCompressionAlignmentFinding, gutterFinding, duplicateSimilarFindings, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -2710,5 +2710,69 @@ describe('gpu-compression-alignment (4px block alignment, header-only folder dis
     const clean = await analyze([looseImg('a.png', 128, 64), looseImg('b.png', 64, 64)], undefined, { encodeImage: async () => 9999 });
     expect(clean.findings.find((x) => x.rule === 'gpu-compression-alignment')).toBeUndefined();
     expect(report.totals.potentialDiskSaved).toBe(clean.totals.potentialDiskSaved);
+  });
+});
+
+describe('excessive-gutter (over-padded packing, per-atlas disclosure)', () => {
+  const row = (name: string, n: number, step: number, w = 64): Atlas => ({
+    name, imageRef: name, size: { w: 2048, h: 128 }, source: { kind: 'pixi' },
+    sprites: Array.from({ length: n }, (_, i) => ({
+      name: `s${i}`, frame: { x: i * step, y: 0, w, h: 64 }, rotated: false, trimmed: false, sourceSize: { w, h: 64 },
+    })),
+  });
+
+  it('a 5-frame row with uniform 16px gaps fires — info, NO estimate, median + gap count pinned', () => {
+    const f = gutterFinding(row('padded.png', 5, 80), DEFAULT_THRESHOLDS)!;
+    expect(f).not.toBeNull();
+    expect(f.rule).toBe('excessive-gutter');
+    expect(f.messageKey).toBe('excessive-gutter');
+    expect(f.severity).toBe('info');
+    expect(f.estimate).toBeUndefined(); // packing disclosure — the repack receipt measures reclaim (Inv 3)
+    expect(f.params).toEqual({ median: 16, n: 4 }); // last frame has no right/below neighbour — honest skip
+  });
+
+  it('a tightly packed row (0px gaps) never fires — touching frames pull the median to 0', () => {
+    expect(gutterFinding(row('tight.png', 6, 64), DEFAULT_THRESHOLDS)).toBeNull();
+  });
+
+  it('median below minMedianPx (2px standard padding) never fires', () => {
+    expect(gutterFinding(row('normal.png', 6, 66), DEFAULT_THRESHOLDS)).toBeNull(); // 2px gaps
+  });
+
+  it('fewer than minGaps measured gaps never fires (a 2-frame strip is not a pattern)', () => {
+    expect(gutterFinding(row('two.png', 2, 96), DEFAULT_THRESHOLDS)).toBeNull(); // 1 gap < minGaps 4
+  });
+
+  it('lower median on an even count is deterministic; aliased identical rects collapse to one region', () => {
+    // Gaps 8,8,16,16 -> lower median (index 1) = 8 => fires at exactly the floor.
+    const a: Atlas = {
+      name: 'mixed.png', imageRef: 'mixed.png', size: { w: 1024, h: 256 }, source: { kind: 'pixi' },
+      sprites: [
+        { name: 'a', frame: { x: 0, y: 0, w: 64, h: 64 }, rotated: false, trimmed: false, sourceSize: { w: 64, h: 64 } },
+        { name: 'a-alias', frame: { x: 0, y: 0, w: 64, h: 64 }, rotated: false, trimmed: false, sourceSize: { w: 64, h: 64 } },
+        { name: 'b', frame: { x: 72, y: 0, w: 64, h: 64 }, rotated: false, trimmed: false, sourceSize: { w: 64, h: 64 } }, // 8px after a
+        { name: 'c', frame: { x: 144, y: 0, w: 64, h: 64 }, rotated: false, trimmed: false, sourceSize: { w: 64, h: 64 } }, // 8px after b
+        { name: 'd', frame: { x: 224, y: 0, w: 64, h: 64 }, rotated: false, trimmed: false, sourceSize: { w: 64, h: 64 } }, // 16px after c
+        { name: 'e', frame: { x: 304, y: 0, w: 64, h: 64 }, rotated: false, trimmed: false, sourceSize: { w: 64, h: 64 } }, // 16px after d
+      ],
+    };
+    const f = gutterFinding(a, DEFAULT_THRESHOLDS)!;
+    expect(f.params).toEqual({ median: 8, n: 4 });
+  });
+
+  it('absent config => null (CLI byte-identical); analyze surfaces it per-atlas and totals never shift', async () => {
+    const cfg = { ...DEFAULT_THRESHOLDS };
+    delete cfg.gutter;
+    expect(gutterFinding(row('padded.png', 5, 80), cfg)).toBeNull();
+    const asset: Asset = {
+      kind: 'atlas',
+      atlas: row('padded.png', 5, 80),
+      image: { name: 'padded.png', imageRef: 'padded.png', size: { w: 2048, h: 128 }, mime: 'image/png', byteSize: 10000 },
+    };
+    const withG = await analyze([asset], undefined, { encodeImage: async () => 999999 });
+    expect(withG.findings.find((x) => x.rule === 'excessive-gutter')?.assetRef).toBe('padded.png');
+    const withoutG = await analyze([asset], cfg, { encodeImage: async () => 999999 });
+    expect(withoutG.findings.find((x) => x.rule === 'excessive-gutter')).toBeUndefined();
+    expect(withG.totals.potentialDiskSaved).toBe(withoutG.totals.potentialDiskSaved);
   });
 });

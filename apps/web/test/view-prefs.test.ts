@@ -59,16 +59,16 @@ afterEach(() => {
 
 // ── the exhaustive Rule→group partition (the drift guard) ────────────────────────────────────────────
 describe('RULE_GROUP / RULES_IN_GROUP / ALL_RULES — an exhaustive, disjoint partition of the Rule union', () => {
-  // 27: gpu-compression-alignment (4px-block alignment disclosure) joined vram; earlier interior-transparency + binary-alpha joined the
+  // 28: excessive-gutter (over-padded packing) joined packing; gpu-compression-alignment joined vram; earlier interior-transparency + binary-alpha joined the
   // Rule union (round: shared alphaShape scan). Was 24 (premultiplied-alpha round).
-  it('maps EXACTLY the 27 rules, each to exactly one group (a partition — no gaps, no overlaps)', () => {
+  it('maps EXACTLY the 28 rules, each to exactly one group (a partition — no gaps, no overlaps)', () => {
     const keys = Object.keys(RULE_GROUP) as Rule[];
-    expect(keys).toHaveLength(27);
-    expect(ALL_RULES).toHaveLength(27);
+    expect(keys).toHaveLength(28);
+    expect(ALL_RULES).toHaveLength(28);
     // ALL_RULES is a permutation of the RULE_GROUP keys (no rule dropped or duplicated in the derivation).
     expect([...ALL_RULES].sort()).toEqual([...keys].sort());
     // No duplicates anywhere.
-    expect(new Set(ALL_RULES).size).toBe(27);
+    expect(new Set(ALL_RULES).size).toBe(28);
   });
 
   it('RULES_IN_GROUP is derived from RULE_GROUP with no drift (union == ALL_RULES, groups disjoint)', () => {
@@ -82,7 +82,7 @@ describe('RULE_GROUP / RULES_IN_GROUP / ALL_RULES — an exhaustive, disjoint pa
         total++;
       }
     }
-    expect(total).toBe(27);
+    expect(total).toBe(28);
     expect([...seen].sort()).toEqual([...ALL_RULES].sort());
   });
 
@@ -91,14 +91,14 @@ describe('RULE_GROUP / RULES_IN_GROUP / ALL_RULES — an exhaustive, disjoint pa
     expect(ALL_RULES).toEqual(rebuilt);
   });
 
-  // 7/10/6/4: gpu-compression-alignment (a GPU-format-path disclosure) joined 'vram'; binary-alpha joined 'savings';
+  // 7/10/7/4: excessive-gutter (a packing disclosure) joined 'packing'; gpu-compression-alignment joined 'vram'; binary-alpha joined 'savings';
   // interior-transparency (a packing/fill-rate disclosure, beside trim-margin) joined 'packing'.
   // Was 7/9/5/3 (premultiplied-alpha round).
-  it('the humane grouping is the agreed 7/10/6/4 split (locks accidental re-homing)', () => {
+  it('the humane grouping is the agreed 7/10/7/4 split (locks accidental re-homing)', () => {
     expect(GROUP_ORDER).toEqual(['integrity', 'savings', 'packing', 'vram']);
     expect(RULES_IN_GROUP.integrity).toHaveLength(7);
     expect(RULES_IN_GROUP.savings).toHaveLength(10);
-    expect(RULES_IN_GROUP.packing).toHaveLength(6);
+    expect(RULES_IN_GROUP.packing).toHaveLength(7);
     expect(RULES_IN_GROUP.vram).toHaveLength(4);
     // A few canonical anchors so a silent re-group is caught.
     expect(RULE_GROUP['integrity-missing-image']).toBe('integrity');

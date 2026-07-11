@@ -326,6 +326,9 @@ export type Rule =
   // path (KTX2 → BC/ASTC, 4×4 blocks) needs padding or falls back on some targets (alignment fact only,
   // NO estimate — the on-device KTX2 probe measures real footprints, we never predict them)
   | 'gpu-compression-alignment'
+  // per-atlas: median nearest-neighbour inter-frame gap is systematically wide — over-padded packing
+  // (the inverse of bleeding; a packing disclosure, NO estimate — the repack receipt measures reclaim)
+  | 'excessive-gutter'
   // per-bmfont-page glyph-sheet readout (informational; a parsed .fnt page IS an atlas)
   | 'font-glyph-page';
 
@@ -777,6 +780,14 @@ export interface ThresholdConfig {
    *  predict them. Optional/additive: absent ⇒ suppressed. Browser-only by resolveThresholds omission
    *  (needs no decode, but the CLI output stays byte-identical). */
   gpuCompression?: { minTextures: number };
+  /** Excessive-gutter disclosure gate (per atlas). The rule measures each distinct frame's gap to its
+   *  nearest right/below packed neighbour and takes the MEDIAN (lower median, integer): ≥ `minGaps` gaps
+   *  must be measurable AND the median must be ≥ `minMedianPx` before the ONE per-atlas finding fires.
+   *  PACKING DISCLOSURE (invariant 3): severity is always `info`, NO estimate — the area a tighter repack
+   *  reclaims depends on the resulting layout; the shipped Pro repack measures the real before→after.
+   *  Optional/additive: absent ⇒ suppressed. Browser-only by resolveThresholds omission (pure integer
+   *  geometry, but the CLI output stays byte-identical). */
+  gutter?: { minGaps: number; minMedianPx: number };
   /** Interior-transparency disclosure gate (loose images only). Fires when the host-measured
    *  `ImageFeatures.alphaShape` bbox (of alpha > 0) covers ≥ `minBboxPx` pixels AND the fraction of
    *  fully-transparent pixels INSIDE that bbox is ≥ `minRatio`. FILL-RATE disclosure (invariant 3/5):

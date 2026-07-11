@@ -143,4 +143,11 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   // decode); the gate only decides whether it is worth a folder line. Always `info`, NO estimate (transcode
   // targets vary per device; the on-device KTX2 probe measures real footprints, we never predict them).
   // Loose AND atlas pages both count. Browser-only — NOT in resolveThresholds (CLI stays byte-identical).
+  gutter: { minGaps: 4, minMedianPx: 8 }, // CALIBRATE — excessive-gutter (over-padded packing) disclosure
+  // gate. `minGaps` (4): at least this many nearest-neighbour gaps must be measurable before a median means
+  // anything (a 2-frame strip is not a packing pattern). `minMedianPx` (8): ~2px padding + edge-extrude is
+  // the accepted bleed-safe gutter; a MEDIAN of ≥ 8px means HALF the frames sit that far apart — systematic
+  // over-padding, not a single decorative margin. Touching frames contribute 0 and pull the median DOWN, so
+  // tight sheets never fire. Always `info`, NO estimate (reclaim depends on the repacked layout — the Pro
+  // repack receipt measures it). Browser-only — NOT in resolveThresholds (CLI stays byte-identical).
 };
