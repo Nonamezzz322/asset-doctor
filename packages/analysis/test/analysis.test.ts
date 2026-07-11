@@ -2357,7 +2357,8 @@ describe('exact-dup de-overlap vs format/alpha (potentialDiskSaved cap)', () => 
 });
 
 describe('premultiplied-alpha (premultiplied-shaped edges — folder disclosure, NO estimate)', () => {
-  // DEFAULT gate: { minEdgePixels: 24, fringeFrac: 0.5, minSprites: 2 } (config.ts).
+  // DEFAULT gate: { minEdgePixels: 24, fringeFrac: 0.75, minSprites: 2 } (config.ts — fringeFrac
+  // corpus-recalibrated 0.5→0.75 on 2026-07-11; boundary pins below updated deliberately).
   const looseImg = (name: string): Asset => ({
     kind: 'image',
     image: { name, imageRef: name, size: { w: 64, h: 64 }, mime: 'image/png', byteSize: 1000 },
@@ -2381,11 +2382,11 @@ describe('premultiplied-alpha (premultiplied-shaped edges — folder disclosure,
   });
 
   it('fires at EXACTLY minSprites qualifying loose images: info, folder scope, NO estimate, sorted refs', () => {
-    // Both AT the gate boundaries (edgePixels === 24, fringeFrac === 0.5 qualify — inclusive thresholds);
+    // Both AT the gate boundaries (edgePixels === 24, fringeFrac === 0.75 qualify — inclusive thresholds);
     // features deliberately given out of name order to prove the output sort.
     const f = premultipliedAlphaFinding(
       [looseImg('b.png'), looseImg('a.png')],
-      [feat('b.png', { edgePixels: 24, fringeFrac: 0.5 }), feat('a.png', { edgePixels: 40, fringeFrac: 1 })],
+      [feat('b.png', { edgePixels: 24, fringeFrac: 0.75 }), feat('a.png', { edgePixels: 40, fringeFrac: 1 })],
       DEFAULT_THRESHOLDS,
     );
     expect(f).not.toBeNull();
@@ -2418,11 +2419,11 @@ describe('premultiplied-alpha (premultiplied-shaped edges — folder disclosure,
         DEFAULT_THRESHOLDS,
       ),
     ).toBeNull();
-    // fringeFrac 0.49 (< 0.5) — the edges mostly hold the opaque colour (straight-alpha shape).
+    // fringeFrac 0.74 (< 0.75) — the corpus showed a 0.5–0.7 ambiguity band; below the floor is not counted.
     expect(
       premultipliedAlphaFinding(
         [looseImg('a.png'), looseImg('b.png')],
-        [feat('a.png', { edgePixels: 40, fringeFrac: 0.49 }), feat('b.png', { edgePixels: 40, fringeFrac: 1 })],
+        [feat('a.png', { edgePixels: 40, fringeFrac: 0.74 }), feat('b.png', { edgePixels: 40, fringeFrac: 1 })],
         DEFAULT_THRESHOLDS,
       ),
     ).toBeNull();
@@ -2475,7 +2476,9 @@ describe('premultiplied-alpha (premultiplied-shaped edges — folder disclosure,
 });
 
 describe('interior-transparency (transparent pixels INSIDE the opaque bbox — fill-rate disclosure, NO estimate)', () => {
-  // DEFAULT gate: { minBboxPx: 16384 (a 128×128-equivalent bbox), minRatio: 0.35 } (config.ts).
+  // DEFAULT gate: { minBboxPx: 16384 (a 128×128-equivalent bbox), minRatio: 0.6 } (config.ts — minRatio
+  // corpus-recalibrated 0.35→0.6 on 2026-07-11: the real-corpus MEDIAN sprite measures 0.42, so the old
+  // floor sat below the median and would have flagged 71% of a real folder; pins updated deliberately).
   type Shape = NonNullable<ImageFeatures['alphaShape']>;
   const shape = (over: Partial<Shape> = {}): Shape => ({
     bboxW: 128, bboxH: 128, interiorTransparent: 8192, binaryAlpha: false, opaqueCount: 8192, ...over,
@@ -2485,14 +2488,14 @@ describe('interior-transparency (transparent pixels INSIDE the opaque bbox — f
     image: { name, imageRef: name, size: { w, h }, mime: 'image/png', byteSize: 10000 },
   });
 
-  it('fires at EXACTLY the bbox floor (128×128 = 16384 = minBboxPx, ratio 0.5): info, NO estimate, params pinned', () => {
-    const f = interiorTransparencyFinding('ring.png', { w: 256, h: 256 }, DEFAULT_THRESHOLDS, shape())!;
+  it('fires at EXACTLY the bbox floor (128×128 = 16384 = minBboxPx, ratio 0.75): info, NO estimate, params pinned', () => {
+    const f = interiorTransparencyFinding('ring.png', { w: 256, h: 256 }, DEFAULT_THRESHOLDS, shape({ interiorTransparent: 12288 }))!;
     expect(f).not.toBeNull();
     expect(f.rule).toBe('interior-transparency');
     expect(f.messageKey).toBe('interior-transparency');
     expect(f.severity).toBe('info'); // ALWAYS info — a fill-rate disclosure, never a byte-backed verdict
     expect(f.estimate).toBeUndefined(); // NO estimate AT ALL — fill-rate is not byte-measurable (Inv 3/5)
-    expect(f.params).toEqual({ w: 256, h: 256, bboxW: 128, bboxH: 128, ratioPct: 50, px: 8192 });
+    expect(f.params).toEqual({ w: 256, h: 256, bboxW: 128, bboxH: 128, ratioPct: 75, px: 12288 });
   });
 
   it('bbox ONE px-area short of minBboxPx (127×129 = 16383) ⇒ null even at a huge ratio', () => {
@@ -2502,14 +2505,14 @@ describe('interior-transparency (transparent pixels INSIDE the opaque bbox — f
     ).toBeNull();
   });
 
-  it('ratio boundary is inclusive: exactly minRatio (7168/20480 = 0.35) fires; one px below ⇒ null', () => {
+  it('ratio boundary is inclusive: exactly minRatio (12288/20480 = 0.6) fires; one px below ⇒ null', () => {
     const at = interiorTransparencyFinding('r.png', { w: 256, h: 256 }, DEFAULT_THRESHOLDS,
-      shape({ bboxW: 128, bboxH: 160, interiorTransparent: 7168 }))!;
+      shape({ bboxW: 128, bboxH: 160, interiorTransparent: 12288 }))!;
     expect(at).not.toBeNull();
-    expect(at.params).toMatchObject({ ratioPct: 35, px: 7168 });
+    expect(at.params).toMatchObject({ ratioPct: 60, px: 12288 });
     expect(
       interiorTransparencyFinding('r.png', { w: 256, h: 256 }, DEFAULT_THRESHOLDS,
-        shape({ bboxW: 128, bboxH: 160, interiorTransparent: 7167 })),
+        shape({ bboxW: 128, bboxH: 160, interiorTransparent: 12287 })),
     ).toBeNull();
   });
 
@@ -2521,7 +2524,8 @@ describe('interior-transparency (transparent pixels INSIDE the opaque bbox — f
   });
 
   it('analyze threads alphaShape to a LOOSE image ⇒ finding; solid images are solid-fill\'s (de-overlap)', async () => {
-    const feats: ImageFeatures[] = [{ assetRef: 'ring.png', contentHash: 'h1', alphaShape: shape() }];
+    // ratio 0.75 (12288/16384) — above the corpus-recalibrated 0.6 floor (the old 0.5 default sat below it).
+    const feats: ImageFeatures[] = [{ assetRef: 'ring.png', contentHash: 'h1', alphaShape: shape({ interiorTransparent: 12288 }) }];
     const report = await analyze([looseImg('ring.png', 256, 256)], undefined, { features: feats });
     const it_ = report.findings.find((f) => f.rule === 'interior-transparency');
     expect(it_?.assetRef).toBe('ring.png');
@@ -2529,7 +2533,7 @@ describe('interior-transparency (transparent pixels INSIDE the opaque bbox — f
     expect(it_?.estimate).toBeUndefined();
     // solid:true ⇒ solid-fill owns the image; interior-transparency never fires beside it.
     const solidRep = await analyze([looseImg('ring.png', 1024, 1024)], undefined, {
-      features: [{ assetRef: 'ring.png', contentHash: 'h1', solid: true, alphaShape: shape() }],
+      features: [{ assetRef: 'ring.png', contentHash: 'h1', solid: true, alphaShape: shape({ interiorTransparent: 12288 }) }],
     });
     expect(solidRep.findings.find((f) => f.rule === 'solid-fill')).toBeDefined();
     expect(solidRep.findings.find((f) => f.rule === 'interior-transparency')).toBeUndefined();
@@ -2774,5 +2778,21 @@ describe('excessive-gutter (over-padded packing, per-atlas disclosure)', () => {
     const withoutG = await analyze([asset], cfg, { encodeImage: async () => 999999 });
     expect(withoutG.findings.find((x) => x.rule === 'excessive-gutter')).toBeUndefined();
     expect(withG.totals.potentialDiskSaved).toBe(withoutG.totals.potentialDiskSaved);
+  });
+});
+
+describe('folder-disclosure refs preview cap (corpus-driven: 387/414 misaligned would have joined 387 names)', () => {
+  const looseImg = (name: string): Asset => ({
+    kind: 'image',
+    image: { name, imageRef: name, size: { w: 30, h: 30 }, mime: 'image/png', byteSize: 1000 },
+  });
+  it('gpu-compression-alignment prose lists 10 + a locale-neutral count; relatedRefs stays FULL', () => {
+    const assets = Array.from({ length: 13 }, (_, i) => looseImg(`t${String(i).padStart(2, '0')}.png`));
+    const f = gpuCompressionAlignmentFinding(assets, DEFAULT_THRESHOLDS)!;
+    expect(f.relatedRefs).toHaveLength(13); // the UI source of truth is never truncated
+    expect(f.params!.refs).toBe(
+      't00.png, t01.png, t02.png, t03.png, t04.png, t05.png, t06.png, t07.png, t08.png, t09.png … (+3)',
+    );
+    expect(f.detail).toContain('… (+3)');
   });
 });

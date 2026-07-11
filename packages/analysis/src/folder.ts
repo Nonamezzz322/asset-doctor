@@ -303,6 +303,16 @@ export function strippableMetadataAggregateFinding(metaFindings: Finding[]): Fin
   };
 }
 
+/** Prose preview of a folder-wide ref list. The two disclosures below can legitimately match MOST of a
+ *  folder (corpus: 387/414 misaligned textures), and joining every name into the detail/params string made
+ *  the finding unreadable. The FULL sorted membership always rides `relatedRefs` (the UI's source of truth);
+ *  the prose lists the first few + a locale-neutral `… (+N)` count. Display-only — nothing is dropped. */
+const REFS_PREVIEW_MAX = 10;
+function refsPreview(refs: string[]): string {
+  if (refs.length <= REFS_PREVIEW_MAX) return refs.join(', ');
+  return refs.slice(0, REFS_PREVIEW_MAX).join(', ') + ` … (+${refs.length - REFS_PREVIEW_MAX})`;
+}
+
 /** Folder-scope premultiplied-shaped-edges DISCLOSURE. The host (worker) measured each LOOSE alpha-bearing
  *  image's soft-edge shape off the SAME full-res buffer as the opaque scan (`ImageFeatures.premultipliedEdge`:
  *  edgePixels = true anti-aliasing transition pixels, fringeFrac = the fraction whose IMPLIED MATTE luma
@@ -346,14 +356,14 @@ export function premultipliedAlphaFinding(
     relatedRefs: flagged,
     title: `${flagged.length} sprites with premultiplied-shaped edges — halo risk`,
     detail:
-      `Premultiplied-shaped edges: ${flagged.join(', ')}. At their soft edges the stored RGB collapses ` +
+      `Premultiplied-shaped edges: ${refsPreview(flagged)}. At their soft edges the stored RGB collapses ` +
       `toward black as alpha falls, instead of holding the opaque colour. IF your loader blends these as ` +
       `straight (un-premultiplied) alpha they will show a dark halo; if it treats them as premultiplied ` +
       `they are fine. We measure the pixels, not your blend mode.`,
     fix: 'Verify your texture premultiply/alphaMode setting matches how the art was exported, or re-export with matching alpha association.',
     // NO estimate field AT ALL (no diskBytesSaved, no vramBytesSaved) — precedent: bleeding, icc-non-srgb.
     messageKey: 'premultiplied-alpha',
-    params: { n: flagged.length, refs: flagged.join(', ') },
+    params: { n: flagged.length, refs: refsPreview(flagged) },
   };
 }
 
@@ -391,14 +401,14 @@ export function gpuCompressionAlignmentFinding(assets: Asset[], cfg: ThresholdCo
     relatedRefs: misaligned,
     title: `${misaligned.length} textures not 4px-aligned — GPU block-compression needs padding`,
     detail:
-      `Not 4px-aligned: ${misaligned.join(', ')}. Block-compressed GPU formats (the KTX2 → BC/ASTC ` +
+      `Not 4px-aligned: ${refsPreview(misaligned)}. Block-compressed GPU formats (the KTX2 → BC/ASTC ` +
       `transcode path) work on 4×4 blocks; on these sizes the transcoder must pad or fall back on some ` +
       `targets, losing part of the benefit. We state the alignment fact only — the on-device KTX2 probe ` +
       `measures the real footprint, we never predict it.`,
     fix: 'Export block-compression candidates at multiples of 4 (ideally POT); then the opt-in KTX2 backend can encode them cleanly.',
     // NO estimate field AT ALL — the transcode target varies per device; predicting VRAM would be a lie.
     messageKey: 'gpu-compression-alignment',
-    params: { n: misaligned.length, refs: misaligned.join(', ') },
+    params: { n: misaligned.length, refs: refsPreview(misaligned) },
   };
 }
 

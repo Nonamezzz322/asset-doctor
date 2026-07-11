@@ -111,7 +111,7 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   // (64 KB — a fat embedded ICC profile) the finding is `warn`, else `info`. The estimate carries ONLY
   // diskBytesSaved (EXACT, header-measured) — DISK/DOWNLOAD only (invariant 5: the GPU still allocates
   // RGBA8888). Browser-only — NOT in resolveThresholds (the CLI never opts in; mirrors wastedAlpha).
-  premultipliedAlpha: { minEdgePixels: 24, fringeFrac: 0.5, minSprites: 2 }, // CALIBRATE — premultiplied-
+  premultipliedAlpha: { minEdgePixels: 24, fringeFrac: 0.75, minSprites: 2 }, // CALIBRATE — premultiplied-
   // shaped-edges disclosure gate (SYNTHETIC-calibrated; real-corpus calibration pending — the FOLDER-level
   // surface keeps noise bounded regardless: one info finding per folder, never a per-sprite flood).
   // `minEdgePixels` (24): a sprite must expose ≥ this many TRUE anti-aliasing transition pixels (adjacent to
@@ -119,19 +119,25 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   // handful of edge pixels is statistically meaningless. `fringeFrac` (0.5): ≥ half of those must be
   // dark-fringing (implied matte collapses toward black) before the sprite is flagged — a correct straight-
   // alpha sprite measures ~0, a premultiplied/black-matted one ~1, so 0.5 splits the regimes with margin.
+  // CORPUS-CALIBRATED (2026-07-11, 138 real slot PNGs): fringeFrac p50 = 0.16 (straight-shaped art), but a
+  // 0.5 floor flagged 11% of sprites across a 0.5–0.7 continuum with NO clean trough — real ornate frames/
+  // splashes hover there. 0.75 keeps every synthetic bug (≈1.0) flagged while dropping the ambiguous band;
+  // on the corpus only the near-certain members remain (logo 0.94, splash 0.79).
   // `minSprites` (2): ≥ 2 flagged LOOSE images before the ONE folder disclosure fires (a single odd sprite
   // is often deliberate art; a pipeline-wide export setting marks many). CONDITIONAL DISCLOSURE (invariant
   // 3): always `info`, NO estimate — we measure the pixel shape, never the loader's blend mode. Browser-only
   // — NOT in resolveThresholds (needs the full-res decode the CLI never performs; mirrors wastedAlpha).
-  interiorTransparency: { minBboxPx: 16384, minRatio: 0.35 }, // CALIBRATE — interior-transparency (fill-rate)
+  interiorTransparency: { minBboxPx: 16384, minRatio: 0.6 }, // CALIBRATE — interior-transparency (fill-rate)
   // disclosure gate. `minBboxPx` (16384 = a 128×128-equivalent opaque bbox): below this the sprite is too
-  // small for fill-rate/overdraw to matter regardless of shape. `minRatio` (0.35): ≥ 35% of the bbox must be
-  // fully-transparent INTERIOR pixels before the disclosure fires — the floor keeps normal soft sprites
-  // (rounded corners, small notches, a little concavity) out; rings/sparks/diagonal blades measure well
-  // above it. MARGINS outside the bbox never count (trim-margin territory). Always `info`, NO estimate
+  // small for fill-rate/overdraw to matter regardless of shape. `minRatio` (0.6): CORPUS-CALIBRATED
+  // (2026-07-11, 134 real slot sprites): the MEDIAN sprite measures 0.42 interior transparency and p90 =
+  // 0.58 — real slot art is naturally irregular, so the synthetic 0.35 floor sat BELOW the median and would
+  // have flagged 71% of the folder (noise). 0.6 flags the top decile — genuinely ring-like art only. MARGINS outside the bbox never count (trim-margin territory). Always `info`, NO estimate
   // (fill-rate is not byte-measurable — the win lives in the shipped polygon packer). Loose-only.
   // Browser-only — NOT in resolveThresholds (needs the full-res alphaShape scan the CLI never performs).
   binaryAlpha: { minEdgePx: 128 }, // CALIBRATE — binary-alpha (1-bit alpha in an 8-bit channel) disclosure
+  // CORPUS-VERIFIED (2026-07-11): 6/138 flagged — all *_background exports across tiers, a coherent
+  // pipeline signal, zero noise ⇒ default confirmed.
   // gate: tiny icons' alpha depth is irrelevant, so the longest edge must reach ≥ 128 before the disclosure
   // fires. The FACT itself is exact (every alpha byte is 0 or 255, host-proven); the gate only suppresses
   // trivially-small images. Fully-opaque is wasted-alpha's case (de-overlapped in the rule); fully-transparent
@@ -144,6 +150,8 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   // targets vary per device; the on-device KTX2 probe measures real footprints, we never predict them).
   // Loose AND atlas pages both count. Browser-only — NOT in resolveThresholds (CLI stays byte-identical).
   gutter: { minGaps: 4, minMedianPx: 8 }, // CALIBRATE — excessive-gutter (over-padded packing) disclosure
+  // CORPUS-VERIFIED (2026-07-11): 153 real TP atlases + 369 Spine pages — ZERO flagged (tight real exports
+  // never trip it); the sparse-bmfont fixtures remain the true-positive proof ⇒ default confirmed.
   // gate. `minGaps` (4): at least this many nearest-neighbour gaps must be measurable before a median means
   // anything (a 2-frame strip is not a packing pattern). `minMedianPx` (8): ~2px padding + edge-extrude is
   // the accepted bleed-safe gutter; a MEDIAN of ≥ 8px means HALF the frames sit that far apart — systematic
