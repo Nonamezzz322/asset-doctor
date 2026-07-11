@@ -137,4 +137,10 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   // trivially-small images. Fully-opaque is wasted-alpha's case (de-overlapped in the rule); fully-transparent
   // yields no alphaShape at all. Always `info`, NO estimate (a 1-bit re-encode is not measurable in-browser —
   // canvas emits 8-bit only). Loose-only. Browser-only — NOT in resolveThresholds (mirrors interiorTransparency).
+  gpuCompression: { minTextures: 2 }, // CALIBRATE — GPU block-compression alignment disclosure gate: ONE
+  // odd-sized texture is usually deliberate; ≥ 2 suggests the pipeline never considered 4×4-block alignment
+  // (the KTX2 → BC/ASTC transcode path). The FACT is exact and header-only (width % 4 / height % 4 — zero
+  // decode); the gate only decides whether it is worth a folder line. Always `info`, NO estimate (transcode
+  // targets vary per device; the on-device KTX2 probe measures real footprints, we never predict them).
+  // Loose AND atlas pages both count. Browser-only — NOT in resolveThresholds (CLI stays byte-identical).
 };

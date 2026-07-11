@@ -38,6 +38,7 @@ export {
   integrityFindings,
   formatAggregateFinding,
   strippableMetadataAggregateFinding,
+  gpuCompressionAlignmentFinding,
   premultipliedAlphaFinding,
 } from './folder';
 export { fontGlyphPageFinding } from './font';

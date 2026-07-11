@@ -357,6 +357,51 @@ export function premultipliedAlphaFinding(
   };
 }
 
+/** Folder-scope GPU block-compression ALIGNMENT disclosure. Block-compressed GPU formats (the KTX2 →
+ *  BC/ASTC transcode targets the shipped opt-in KTX2 backend produces) work on 4×4-pixel blocks; a texture
+ *  whose width OR height is not a multiple of 4 cannot map cleanly onto them — on BC-class targets the
+ *  runtime transcoder must pad or fall back, and WebGL compressedTexImage2D for S3TC-class formats requires
+ *  %4 dimensions on full-size levels. HEADER-ONLY: the check reads the parsed pixel size (zero decode, zero
+ *  features) for BOTH loose images and atlas PAGE images (block compression applies to any texture).
+ *  HONESTY (invariant 3): we state the ALIGNMENT FACT only — never "cannot be compressed" (UASTC/KTX2
+ *  containers tolerate arbitrary sizes via internal padding), never a VRAM number (the transcode target
+ *  varies per device; the on-device KTX2 probe MEASURES the real footprint, we never predict it), never a
+ *  disk claim. Severity is ALWAYS `info`; there is NO estimate at all (precedent: bleeding, icc-non-srgb,
+ *  premultiplied-alpha). One finding per folder at ≥ `minTextures` misaligned textures (one odd size is
+ *  usually deliberate; several suggest the pipeline never considered block alignment). Returns null with no
+ *  config or below the gate. Deterministic: refs sorted (codepoint); assetRef = first. Browser-only by
+ *  resolveThresholds omission (the CLI resolves without the key ⇒ byte-identical output there). */
+export function gpuCompressionAlignmentFinding(assets: Asset[], cfg: ThresholdConfig): Finding | null {
+  const gate = cfg.gpuCompression;
+  if (!gate) return null;
+  const misaligned: string[] = [];
+  for (const a of assets) {
+    const image = a.kind === 'image' ? a.image : a.kind === 'atlas' ? a.image : null;
+    if (!image) continue;
+    if (image.size.w % 4 !== 0 || image.size.h % 4 !== 0) misaligned.push(image.name);
+  }
+  if (misaligned.length < gate.minTextures) return null;
+  misaligned.sort();
+  return {
+    id: 'folder:gpu-compression-alignment',
+    rule: 'gpu-compression-alignment',
+    severity: 'info', // ALWAYS info — an alignment disclosure, never a predicted saving (invariant 3)
+    scope: 'folder',
+    assetRef: misaligned[0]!,
+    relatedRefs: misaligned,
+    title: `${misaligned.length} textures not 4px-aligned — GPU block-compression needs padding`,
+    detail:
+      `Not 4px-aligned: ${misaligned.join(', ')}. Block-compressed GPU formats (the KTX2 → BC/ASTC ` +
+      `transcode path) work on 4×4 blocks; on these sizes the transcoder must pad or fall back on some ` +
+      `targets, losing part of the benefit. We state the alignment fact only — the on-device KTX2 probe ` +
+      `measures the real footprint, we never predict it.`,
+    fix: 'Export block-compression candidates at multiples of 4 (ideally POT); then the opt-in KTX2 backend can encode them cleanly.',
+    // NO estimate field AT ALL — the transcode target varies per device; predicting VRAM would be a lie.
+    messageKey: 'gpu-compression-alignment',
+    params: { n: misaligned.length, refs: misaligned.join(', ') },
+  };
+}
+
 /** Aggregate, CONDITIONAL mipmap-cost finding. Sums the per-asset "if mipmapped" overhead
  *  (vramBytesMipmapped − vramBytes) and fires a single `info` folder finding only when that total
  *  exceeds cfg.mipmap.warn. States a CEILING ("if mipmaps are enabled"), never asserts residency —

@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import type { Asset, Atlas, ImageAsset, ImageFeatures, ImageMime, Rect, ThresholdConfig } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseFntText, parseFntPage, type FntPage } from '@asset-doctor/parsers';
 import { groupFiles, type RawFile } from '@asset-doctor/ingest';
-import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, upscaledSourceFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, iccNonSrgbFinding, interiorTransparencyFinding, binaryAlphaFinding, crossAtlasRedundancyFinding, premultipliedAlphaFinding, duplicateSimilarFindings, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, upscaledSourceFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, iccNonSrgbFinding, interiorTransparencyFinding, binaryAlphaFinding, crossAtlasRedundancyFinding, premultipliedAlphaFinding, gpuCompressionAlignmentFinding, duplicateSimilarFindings, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -2641,5 +2641,74 @@ describe('binary-alpha (every alpha byte exactly 0 or 255 — 1-bit channel disc
     const without = await analyze(assets, undefined, { features: [{ assetRef: 'cutout.png', contentHash: 'h' }] });
     expect(withF.totals).toEqual(without.totals);
     expect(withF.findings.filter((f) => f.rule !== 'binary-alpha' && f.rule !== 'interior-transparency')).toEqual(without.findings);
+  });
+});
+
+describe('gpu-compression-alignment (4px block alignment, header-only folder disclosure)', () => {
+  const looseImg = (name: string, w: number, h: number): Asset => ({
+    kind: 'image',
+    image: { name, imageRef: name, size: { w, h }, mime: 'image/png', byteSize: 10000 },
+  });
+  const atlasAsset = (name: string, w: number, h: number): Asset => ({
+    kind: 'atlas',
+    atlas: {
+      name, imageRef: name, size: { w, h }, source: { kind: 'pixi' },
+      sprites: [{ name: 's0', frame: { x: 0, y: 0, w: 16, h: 16 }, rotated: false, trimmed: false, sourceSize: { w: 16, h: 16 } }],
+    },
+    image: { name, imageRef: name, size: { w, h }, mime: 'image/png', byteSize: 10000 },
+  });
+
+  it('fires at exactly minTextures misaligned textures — info, folder, NO estimate, sorted refs', () => {
+    const f = gpuCompressionAlignmentFinding(
+      [looseImg('z_odd.png', 130, 64), looseImg('a_odd.png', 64, 66), looseImg('clean.png', 64, 64)],
+      DEFAULT_THRESHOLDS,
+    )!;
+    expect(f).not.toBeNull();
+    expect(f.rule).toBe('gpu-compression-alignment');
+    expect(f.messageKey).toBe('gpu-compression-alignment');
+    expect(f.scope).toBe('folder');
+    expect(f.severity).toBe('info');
+    expect(f.estimate).toBeUndefined(); // alignment fact only — never a predicted footprint (Inv 3)
+    expect(f.relatedRefs).toEqual(['a_odd.png', 'z_odd.png']); // sorted, deterministic
+    expect(f.assetRef).toBe('a_odd.png');
+    expect(f.params).toEqual({ n: 2, refs: 'a_odd.png, z_odd.png' });
+  });
+
+  it('does NOT fire at minTextures-1; %4-clean sizes (incl. POT) never counted', () => {
+    expect(
+      gpuCompressionAlignmentFinding([looseImg('one.png', 130, 64), looseImg('pot.png', 1024, 1024)], DEFAULT_THRESHOLDS),
+    ).toBeNull();
+    expect(
+      gpuCompressionAlignmentFinding([looseImg('a.png', 512, 256), looseImg('b.png', 4100, 1024)], DEFAULT_THRESHOLDS),
+    ).toBeNull(); // 4100 % 4 === 0 — clean
+  });
+
+  it('counts BOTH loose images and atlas PAGE images (block compression applies to any texture)', () => {
+    const f = gpuCompressionAlignmentFinding(
+      [atlasAsset('sheet.png', 1025, 512), looseImg('odd.png', 30, 30)],
+      DEFAULT_THRESHOLDS,
+    )!;
+    expect(f.relatedRefs).toEqual(['odd.png', 'sheet.png']);
+  });
+
+  it('height misalignment alone counts; absent config => null (CLI byte-identical)', () => {
+    const f = gpuCompressionAlignmentFinding(
+      [looseImg('a.png', 64, 66), looseImg('b.png', 64, 130)],
+      DEFAULT_THRESHOLDS,
+    )!;
+    expect(f.params).toMatchObject({ n: 2 });
+    const cfg = { ...DEFAULT_THRESHOLDS };
+    delete cfg.gpuCompression;
+    expect(gpuCompressionAlignmentFinding([looseImg('a.png', 64, 66), looseImg('b.png', 64, 130)], cfg)).toBeNull();
+  });
+
+  it('analyze surfaces it without features and it never shifts totals', async () => {
+    const assets = [looseImg('a_odd.png', 130, 64), looseImg('b_odd.png', 64, 66)];
+    const report = await analyze(assets, undefined, { encodeImage: async () => 9999 });
+    const f = report.findings.find((x) => x.rule === 'gpu-compression-alignment');
+    expect(f?.relatedRefs).toEqual(['a_odd.png', 'b_odd.png']);
+    const clean = await analyze([looseImg('a.png', 128, 64), looseImg('b.png', 64, 64)], undefined, { encodeImage: async () => 9999 });
+    expect(clean.findings.find((x) => x.rule === 'gpu-compression-alignment')).toBeUndefined();
+    expect(report.totals.potentialDiskSaved).toBe(clean.totals.potentialDiskSaved);
   });
 });

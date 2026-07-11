@@ -52,6 +52,7 @@ import {
   formatAggregateFinding,
   integrityFindings,
   mipmapCostFinding,
+  gpuCompressionAlignmentFinding,
   premultipliedAlphaFinding,
   shouldAtlasFinding,
   strippableMetadataAggregateFinding,
@@ -391,6 +392,11 @@ export async function analyze(
   }
   const sa = shouldAtlasFinding(assets, cfg);
   if (sa) folder.push(sa);
+  // GPU block-compression alignment — HEADER-ONLY (parsed sizes, zero decode, zero features), so it lives
+  // OUTSIDE the features-gated block. Always info, NO estimate ⇒ nothing flows into totals. Browser-only in
+  // practice: the CLI's resolveThresholds never carries cfg.gpuCompression ⇒ null there (byte-identical).
+  const gca = gpuCompressionAlignmentFinding(assets, cfg);
+  if (gca) folder.push(gca);
   const am = atlasMergeFinding(atlases, cfg);
   if (am) folder.push(am);
   // Cross-atlas frame redundancy: frames whose pixel REGIONS are byte-identical ACROSS ≥2 atlases. Clusters

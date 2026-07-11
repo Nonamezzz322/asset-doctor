@@ -25,6 +25,7 @@ import {
   shouldAtlasFinding,
   atlasMergeFinding,
   crossAtlasRedundancyFinding,
+  gpuCompressionAlignmentFinding,
   premultipliedAlphaFinding,
   fontGlyphPageFinding,
   integrityFindings,
@@ -161,6 +162,9 @@ async function realFindings(): Promise<Finding[]> {
     ],
     cfg,
   )!);
+  // gpu-compression-alignment: two textures with a non-%4 edge (header-only fact) → the ONE folder
+  // disclosure (info, NO estimate — alignment fact, never a predicted footprint).
+  out.push(gpuCompressionAlignmentFinding([img('odd_a.png', 130, 64), img('odd_b.png', 64, 66)], cfg)!);
   // font-glyph-page: a sparse bmfont page — 16 glyphs of 32×32 on 256² → occ 0.25 ≤ occupancyWarn (0.5)
   // ⇒ warn; kerning 12 (>1) drives the 'other' plural; face non-empty drives the detail prefix.
   const fontAtlas: Atlas = {
@@ -181,7 +185,7 @@ describe('renderFinding — English catalog reproduces the baked strings (drift 
     const findings = await realFindings();
     const keys = new Set(findings.map((f) => f.messageKey));
     // sanity: we exercised every messageKey family the rules emit
-    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'upscaled-source', 'frame-redundancy', 'trim-margin', 'bleeding', 'dimension-mismatch-shrunk-offedge', 'dimension-mismatch-shrunk', 'dimension-mismatch-grown', 'cross-atlas-redundancy', 'premultiplied-alpha', 'interior-transparency', 'binary-alpha', 'font-glyph-page', 'wasted-alpha', 'strippable-metadata', 'strippable-metadata-aggregate', 'icc-non-srgb', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'atlas-merge-batching', 'integrity', 'format-aggregate', 'variants']));
+    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'upscaled-source', 'frame-redundancy', 'trim-margin', 'bleeding', 'dimension-mismatch-shrunk-offedge', 'dimension-mismatch-shrunk', 'dimension-mismatch-grown', 'cross-atlas-redundancy', 'premultiplied-alpha', 'gpu-compression-alignment', 'interior-transparency', 'binary-alpha', 'font-glyph-page', 'wasted-alpha', 'strippable-metadata', 'strippable-metadata-aggregate', 'icc-non-srgb', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'atlas-merge-batching', 'integrity', 'format-aggregate', 'variants']));
     for (const f of findings) {
       expect(f.messageKey, `${f.id} must carry a messageKey`).toBeTruthy();
       const r = renderFinding(f, 'en');

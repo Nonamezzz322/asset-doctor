@@ -322,6 +322,10 @@ export type Rule =
   // whole-folder (scope: 'folder'): loose images whose soft edges are premultiplied-shaped — a CONDITIONAL
   // disclosure (halo risk depends on the loader's blend mode, which pixels cannot reveal; NO estimate)
   | 'premultiplied-alpha'
+  // whole-folder (scope: 'folder'): textures whose dims aren't multiples of 4 — the block-compressed GPU
+  // path (KTX2 → BC/ASTC, 4×4 blocks) needs padding or falls back on some targets (alignment fact only,
+  // NO estimate — the on-device KTX2 probe measures real footprints, we never predict them)
+  | 'gpu-compression-alignment'
   // per-bmfont-page glyph-sheet readout (informational; a parsed .fnt page IS an atlas)
   | 'font-glyph-page';
 
@@ -764,6 +768,15 @@ export interface ThresholdConfig {
    *  deliberately NOT enumerated by resolveThresholds (the scan needs a full-res decode the CLI never
    *  performs; mirrors wastedAlpha/frameRedundancy). */
   premultipliedAlpha?: { minEdgePixels: number; fringeFrac: number; minSprites: number };
+  /** GPU block-compression alignment gate. A REPORT gate only (the fact is exact, header-only: a texture
+   *  whose width or height is not a multiple of 4 cannot map cleanly onto the 4×4 blocks of the
+   *  block-compressed GPU path — KTX2 → BC/ASTC — so the transcoder must pad or fall back on some
+   *  targets): the ONE folder finding fires when ≥ `minTextures` textures (loose OR atlas pages) are
+   *  misaligned. ALIGNMENT DISCLOSURE (invariant 3): severity is always `info`, NO estimate — the
+   *  transcode target varies per device and the on-device KTX2 probe MEASURES real footprints; we never
+   *  predict them. Optional/additive: absent ⇒ suppressed. Browser-only by resolveThresholds omission
+   *  (needs no decode, but the CLI output stays byte-identical). */
+  gpuCompression?: { minTextures: number };
   /** Interior-transparency disclosure gate (loose images only). Fires when the host-measured
    *  `ImageFeatures.alphaShape` bbox (of alpha > 0) covers ≥ `minBboxPx` pixels AND the fraction of
    *  fully-transparent pixels INSIDE that bbox is ≥ `minRatio`. FILL-RATE disclosure (invariant 3/5):
