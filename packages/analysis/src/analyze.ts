@@ -50,6 +50,7 @@ import {
   formatAggregateFinding,
   integrityFindings,
   mipmapCostFinding,
+  premultipliedAlphaFinding,
   shouldAtlasFinding,
   strippableMetadataAggregateFinding,
 } from './folder';
@@ -358,6 +359,12 @@ export async function analyze(
       }
     }
     folder.push(...duplicateSimilarFindings(deps.features, cfg));
+    // Premultiplied-shaped-edges DISCLOSURE (folder scope, loose-only). Fires only off host-measured
+    // `premultipliedEdge` features (the worker's full-res scan) — CLI/headless features never carry it ⇒
+    // never fires ⇒ byte-identical. Severity info, NO estimate (conditional disclosure — the pixels cannot
+    // reveal the loader's blend mode, invariant 3), so NOTHING flows into potentialDiskSaved/totals.
+    const pma = premultipliedAlphaFinding(assets, deps.features, cfg);
+    if (pma) folder.push(pma);
   }
   const sa = shouldAtlasFinding(assets, cfg);
   if (sa) folder.push(sa);

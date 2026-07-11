@@ -244,6 +244,88 @@ export function blockUpscaleDepth(rgba: Uint8ClampedArray | Uint8Array | number[
   return depth;
 }
 
+// ── Premultiplied-shaped edge scan (the premultiplied-alpha folder disclosure) ────────────────────
+// Named constants, precedent SOLID_STD/FLAT_STD: calibrated on synthetic fixtures (perceptual.test.ts);
+// the folder-level surface (config.ts premultipliedAlpha) keeps noise bounded regardless.
+
+/** Transition band floor: pixels with α below this are effectively clear — no matte to infer. */
+export const PMA_ALPHA_MIN = 12;
+/** Transition band ceiling: pixels with α above this are effectively opaque — (1−α) too small to divide by. */
+export const PMA_ALPHA_MAX = 200;
+/** A neighbour with α ≥ this counts as near-opaque (the sprite's solid body). */
+export const PMA_OPAQUE_MIN = 250;
+/** The near-opaque neighbour's luma must be ≥ this — dark art fringes dark legitimately (no signal). */
+export const PMA_BRIGHT_MIN = 96;
+/** Require luma(Q)·(1−α_P/255) ≥ this: excludes near-opaque transition pixels and dark art, where the
+ *  implied-matte division is numerically meaningless. */
+export const PMA_GAP_MIN = 24;
+/** Implied matte luma at/below this reads as collapsed-to-black (the premultiplied/black-matted shape). */
+export const PMA_MATTE_DARK = 40;
+
+export interface PremultEdgeResult {
+  /** Count of TRUE anti-aliasing transition pixels (semi-transparent, 8-adjacent to a bright near-opaque
+   *  pixel with a real luma·(1−α) gap). 0 ⇒ nothing measurable (fringeFrac is 0, never NaN). */
+  edgePixels: number;
+  /** Fraction of edgePixels whose implied matte collapses toward black (≤ PMA_MATTE_DARK). ~1 for a
+   *  premultiplied/black-matted export, ~0 for correct straight alpha. */
+  fringeFrac: number;
+}
+
+/** MEASURE whether a straight-alpha RGBA buffer's soft edges are premultiplied-SHAPED. For each TRUE
+ *  anti-aliasing transition pixel P (α_P in [PMA_ALPHA_MIN, PMA_ALPHA_MAX], directly 8-adjacent to a
+ *  near-opaque neighbour Q with α_Q ≥ PMA_OPAQUE_MIN, luma(Q) ≥ PMA_BRIGHT_MIN, and
+ *  luma(Q)·(1−α_P/255) ≥ PMA_GAP_MIN — the bright-neighbour + gap conditions kill the dark-art and
+ *  near-opaque false-positive traps), compute the IMPLIED MATTE luma
+ *      m = (luma(P) − luma(Q)·α_P/255) / (1 − α_P/255):
+ *  for correct straight alpha the stored RGB holds the opaque colour, so m recovers ~luma(Q) (bright);
+ *  for a premultiplied/black-matted export the stored RGB collapses with α, so m collapses to ~0. P is
+ *  dark-fringing iff m ≤ PMA_MATTE_DARK. HONESTY (invariant 3): a premultiplied export and straight art
+ *  composited onto black are BYTE-IDENTICAL buffers — the pixels cannot reveal the loader's blend mode,
+ *  so the consumer is a conditional DISCLOSURE, never a defect verdict. Never throws; empty/short buffer
+ *  or degenerate dims ⇒ { edgePixels: 0, fringeFrac: 0 }. O(N) single pass with an 8-neighbour peek that
+ *  short-circuits on the first qualifying bright opaque neighbour. Pure integer/float read, deterministic. */
+export function premultipliedEdgeShape(
+  rgba: Uint8ClampedArray | Uint8Array | number[],
+  w: number,
+  h: number,
+): PremultEdgeResult {
+  if (!Number.isInteger(w) || !Number.isInteger(h) || w <= 0 || h <= 0) return { edgePixels: 0, fringeFrac: 0 };
+  if (rgba.length < w * h * 4) return { edgePixels: 0, fringeFrac: 0 }; // short buffer — never claim on no data
+  let edgePixels = 0;
+  let dark = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      const aP = rgba[i + 3] ?? 0;
+      if (aP < PMA_ALPHA_MIN || aP > PMA_ALPHA_MAX) continue; // not a transition pixel
+      const inv = 1 - aP / 255; // > 0 here (aP ≤ PMA_ALPHA_MAX < 255)
+      // 8-neighbour peek (radius 1): find ONE bright near-opaque neighbour clearing the gap; short-circuit.
+      let lumaQ = -1;
+      for (let dy = -1; dy <= 1 && lumaQ < 0; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= h) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const nx = x + dx;
+          if (nx < 0 || nx >= w) continue;
+          const j = (ny * w + nx) * 4;
+          if ((rgba[j + 3] ?? 0) < PMA_OPAQUE_MIN) continue; // not near-opaque
+          const lq = luma(rgba, j);
+          if (lq < PMA_BRIGHT_MIN) continue; // dark art fringes dark legitimately — no signal
+          if (lq * inv < PMA_GAP_MIN) continue; // gap too small — implied matte numerically meaningless
+          lumaQ = lq;
+          break;
+        }
+      }
+      if (lumaQ < 0) continue; // no qualifying neighbour — not a true anti-aliasing transition pixel
+      edgePixels++;
+      const m = (luma(rgba, i) - lumaQ * (aP / 255)) / inv; // implied matte luma
+      if (m <= PMA_MATTE_DARK) dark++;
+    }
+  }
+  return { edgePixels, fringeFrac: edgePixels === 0 ? 0 : dark / edgePixels };
+}
+
 /** Axis-aligned packed rect of a sprite AS PLACED in the atlas page (already w/h-swapped when rotated). */
 export interface FrameRect {
   x: number;

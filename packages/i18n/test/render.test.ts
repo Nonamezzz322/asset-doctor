@@ -23,6 +23,7 @@ import {
   shouldAtlasFinding,
   atlasMergeFinding,
   crossAtlasRedundancyFinding,
+  premultipliedAlphaFinding,
   fontGlyphPageFinding,
   integrityFindings,
   formatAggregateFinding,
@@ -140,6 +141,16 @@ async function realFindings(): Promise<Finding[]> {
     sprites: [{ name: 'b0', frame: { x: 64, y: 0, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 32, h: 32 } }],
   };
   out.push(crossAtlasRedundancyFinding([caA, caB], new Map([['caA.png', ['sh']], ['caB.png', ['sh']]]), new Map([['caA.png', 8000], ['caB.png', 8000]]), cfg)!);
+  // premultiplied-alpha: two loose sprites whose host-measured edge shape clears the default gate
+  // (edgePixels ≥ 24, fringeFrac ≥ 0.5, minSprites 2) → the ONE folder disclosure (info, NO estimate).
+  out.push(premultipliedAlphaFinding(
+    [img('pm_a.png', 64, 64), img('pm_b.png', 64, 64)],
+    [
+      { assetRef: 'pm_a.png', contentHash: 'p1', premultipliedEdge: { edgePixels: 40, fringeFrac: 0.9 } },
+      { assetRef: 'pm_b.png', contentHash: 'p2', premultipliedEdge: { edgePixels: 32, fringeFrac: 1 } },
+    ],
+    cfg,
+  )!);
   // font-glyph-page: a sparse bmfont page — 16 glyphs of 32×32 on 256² → occ 0.25 ≤ occupancyWarn (0.5)
   // ⇒ warn; kerning 12 (>1) drives the 'other' plural; face non-empty drives the detail prefix.
   const fontAtlas: Atlas = {
@@ -160,7 +171,7 @@ describe('renderFinding — English catalog reproduces the baked strings (drift 
     const findings = await realFindings();
     const keys = new Set(findings.map((f) => f.messageKey));
     // sanity: we exercised every messageKey family the rules emit
-    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'upscaled-source', 'frame-redundancy', 'trim-margin', 'bleeding', 'dimension-mismatch-shrunk-offedge', 'dimension-mismatch-shrunk', 'dimension-mismatch-grown', 'cross-atlas-redundancy', 'font-glyph-page', 'wasted-alpha', 'strippable-metadata', 'strippable-metadata-aggregate', 'icc-non-srgb', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'atlas-merge-batching', 'integrity', 'format-aggregate', 'variants']));
+    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'upscaled-source', 'frame-redundancy', 'trim-margin', 'bleeding', 'dimension-mismatch-shrunk-offedge', 'dimension-mismatch-shrunk', 'dimension-mismatch-grown', 'cross-atlas-redundancy', 'premultiplied-alpha', 'font-glyph-page', 'wasted-alpha', 'strippable-metadata', 'strippable-metadata-aggregate', 'icc-non-srgb', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'atlas-merge-batching', 'integrity', 'format-aggregate', 'variants']));
     for (const f of findings) {
       expect(f.messageKey, `${f.id} must carry a messageKey`).toBeTruthy();
       const r = renderFinding(f, 'en');

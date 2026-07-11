@@ -111,4 +111,16 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   // (64 KB — a fat embedded ICC profile) the finding is `warn`, else `info`. The estimate carries ONLY
   // diskBytesSaved (EXACT, header-measured) — DISK/DOWNLOAD only (invariant 5: the GPU still allocates
   // RGBA8888). Browser-only — NOT in resolveThresholds (the CLI never opts in; mirrors wastedAlpha).
+  premultipliedAlpha: { minEdgePixels: 24, fringeFrac: 0.5, minSprites: 2 }, // CALIBRATE — premultiplied-
+  // shaped-edges disclosure gate (SYNTHETIC-calibrated; real-corpus calibration pending — the FOLDER-level
+  // surface keeps noise bounded regardless: one info finding per folder, never a per-sprite flood).
+  // `minEdgePixels` (24): a sprite must expose ≥ this many TRUE anti-aliasing transition pixels (adjacent to
+  // a bright near-opaque pixel with a real luma·(1−α) gap) before its edge shape is even classified — a
+  // handful of edge pixels is statistically meaningless. `fringeFrac` (0.5): ≥ half of those must be
+  // dark-fringing (implied matte collapses toward black) before the sprite is flagged — a correct straight-
+  // alpha sprite measures ~0, a premultiplied/black-matted one ~1, so 0.5 splits the regimes with margin.
+  // `minSprites` (2): ≥ 2 flagged LOOSE images before the ONE folder disclosure fires (a single odd sprite
+  // is often deliberate art; a pipeline-wide export setting marks many). CONDITIONAL DISCLOSURE (invariant
+  // 3): always `info`, NO estimate — we measure the pixel shape, never the loader's blend mode. Browser-only
+  // — NOT in resolveThresholds (needs the full-res decode the CLI never performs; mirrors wastedAlpha).
 };

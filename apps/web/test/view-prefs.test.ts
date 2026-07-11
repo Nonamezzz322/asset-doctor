@@ -59,14 +59,15 @@ afterEach(() => {
 
 // ── the exhaustive Rule→group partition (the drift guard) ────────────────────────────────────────────
 describe('RULE_GROUP / RULES_IN_GROUP / ALL_RULES — an exhaustive, disjoint partition of the Rule union', () => {
-  it('maps EXACTLY the 23 rules, each to exactly one group (a partition — no gaps, no overlaps)', () => {
+  // 24: the premultiplied-alpha folder disclosure joined the Rule union (round: PMA halo disclosure).
+  it('maps EXACTLY the 24 rules, each to exactly one group (a partition — no gaps, no overlaps)', () => {
     const keys = Object.keys(RULE_GROUP) as Rule[];
-    expect(keys).toHaveLength(23);
-    expect(ALL_RULES).toHaveLength(23);
+    expect(keys).toHaveLength(24);
+    expect(ALL_RULES).toHaveLength(24);
     // ALL_RULES is a permutation of the RULE_GROUP keys (no rule dropped or duplicated in the derivation).
     expect([...ALL_RULES].sort()).toEqual([...keys].sort());
     // No duplicates anywhere.
-    expect(new Set(ALL_RULES).size).toBe(23);
+    expect(new Set(ALL_RULES).size).toBe(24);
   });
 
   it('RULES_IN_GROUP is derived from RULE_GROUP with no drift (union == ALL_RULES, groups disjoint)', () => {
@@ -80,7 +81,7 @@ describe('RULE_GROUP / RULES_IN_GROUP / ALL_RULES — an exhaustive, disjoint pa
         total++;
       }
     }
-    expect(total).toBe(23);
+    expect(total).toBe(24);
     expect([...seen].sort()).toEqual([...ALL_RULES].sort());
   });
 
@@ -89,14 +90,16 @@ describe('RULE_GROUP / RULES_IN_GROUP / ALL_RULES — an exhaustive, disjoint pa
     expect(ALL_RULES).toEqual(rebuilt);
   });
 
-  it('the humane grouping is the agreed 6/9/5/3 split (locks accidental re-homing)', () => {
+  // 7/9/5/3: premultiplied-alpha (a correctness disclosure, like bleeding/icc-non-srgb) joined 'integrity'.
+  it('the humane grouping is the agreed 7/9/5/3 split (locks accidental re-homing)', () => {
     expect(GROUP_ORDER).toEqual(['integrity', 'savings', 'packing', 'vram']);
-    expect(RULES_IN_GROUP.integrity).toHaveLength(6);
+    expect(RULES_IN_GROUP.integrity).toHaveLength(7);
     expect(RULES_IN_GROUP.savings).toHaveLength(9);
     expect(RULES_IN_GROUP.packing).toHaveLength(5);
     expect(RULES_IN_GROUP.vram).toHaveLength(3);
     // A few canonical anchors so a silent re-group is caught.
     expect(RULE_GROUP['integrity-missing-image']).toBe('integrity');
+    expect(RULE_GROUP['premultiplied-alpha']).toBe('integrity');
     expect(RULE_GROUP['duplicate-exact']).toBe('savings');
     expect(RULE_GROUP.occupancy).toBe('packing');
     expect(RULE_GROUP['mipmap-cost']).toBe('vram');

@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import type { Asset, Atlas, ImageAsset, ImageFeatures, ImageMime, Rect, ThresholdConfig } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseFntText, parseFntPage, type FntPage } from '@asset-doctor/parsers';
 import { groupFiles, type RawFile } from '@asset-doctor/ingest';
-import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, upscaledSourceFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, iccNonSrgbFinding, crossAtlasRedundancyFinding, duplicateSimilarFindings, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, upscaledSourceFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, iccNonSrgbFinding, crossAtlasRedundancyFinding, premultipliedAlphaFinding, duplicateSimilarFindings, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -2353,5 +2353,123 @@ describe('exact-dup de-overlap vs format/alpha (potentialDiskSaved cap)', () => 
     // dup 100000 + kept page (p1.png === refs[0]) 40000, dropped page (p2.png) 40000 reverted ⇒ 140000.
     expect(report.totals.potentialDiskSaved).toBe(140000);
     expect(report.findings.find((f) => f.rule === 'duplicate-exact')?.estimate?.diskBytesSaved).toBe(100000);
+  });
+});
+
+describe('premultiplied-alpha (premultiplied-shaped edges — folder disclosure, NO estimate)', () => {
+  // DEFAULT gate: { minEdgePixels: 24, fringeFrac: 0.5, minSprites: 2 } (config.ts).
+  const looseImg = (name: string): Asset => ({
+    kind: 'image',
+    image: { name, imageRef: name, size: { w: 64, h: 64 }, mime: 'image/png', byteSize: 1000 },
+  });
+  const atlasAsset = (name: string): Asset => ({
+    kind: 'atlas',
+    atlas: {
+      name,
+      imageRef: name,
+      size: { w: 256, h: 256 },
+      sprites: [{ name: 's0', frame: { x: 0, y: 0, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 32, h: 32 } }],
+      source: { kind: 'pixi' },
+    },
+    image: { name, imageRef: name, size: { w: 256, h: 256 }, mime: 'image/png', byteSize: 8000 },
+  });
+  // Distinct contentHashes everywhere so duplicate-exact never enters the analyze-level assertions.
+  const feat = (ref: string, edge?: { edgePixels: number; fringeFrac: number }): ImageFeatures => ({
+    assetRef: ref,
+    contentHash: `hash-${ref}`,
+    ...(edge ? { premultipliedEdge: edge } : {}),
+  });
+
+  it('fires at EXACTLY minSprites qualifying loose images: info, folder scope, NO estimate, sorted refs', () => {
+    // Both AT the gate boundaries (edgePixels === 24, fringeFrac === 0.5 qualify — inclusive thresholds);
+    // features deliberately given out of name order to prove the output sort.
+    const f = premultipliedAlphaFinding(
+      [looseImg('b.png'), looseImg('a.png')],
+      [feat('b.png', { edgePixels: 24, fringeFrac: 0.5 }), feat('a.png', { edgePixels: 40, fringeFrac: 1 })],
+      DEFAULT_THRESHOLDS,
+    );
+    expect(f).not.toBeNull();
+    expect(f!.rule).toBe('premultiplied-alpha');
+    expect(f!.severity).toBe('info'); // ALWAYS info — a conditional disclosure, never a proven defect
+    expect(f!.scope).toBe('folder');
+    expect(f!.estimate).toBeUndefined(); // NO estimate AT ALL (no disk, no VRAM) — invariant 3/5
+    expect(f!.assetRef).toBe('a.png'); // first flagged ref, sorted
+    expect(f!.relatedRefs).toEqual(['a.png', 'b.png']); // deterministic sorted
+    expect(f!.messageKey).toBe('premultiplied-alpha');
+    expect(f!.params).toEqual({ n: 2, refs: 'a.png, b.png' });
+  });
+
+  it('does NOT fire at minSprites − 1 qualifying images', () => {
+    expect(
+      premultipliedAlphaFinding(
+        [looseImg('a.png'), looseImg('b.png')],
+        [feat('a.png', { edgePixels: 40, fringeFrac: 1 }), feat('b.png')], // only ONE qualifies
+        DEFAULT_THRESHOLDS,
+      ),
+    ).toBeNull();
+  });
+
+  it('below minEdgePixels or below fringeFrac ⇒ that sprite is NOT counted', () => {
+    // 23 edge pixels (< 24) — too few transition pixels to classify, even at fringeFrac 1.
+    expect(
+      premultipliedAlphaFinding(
+        [looseImg('a.png'), looseImg('b.png')],
+        [feat('a.png', { edgePixels: 23, fringeFrac: 1 }), feat('b.png', { edgePixels: 40, fringeFrac: 1 })],
+        DEFAULT_THRESHOLDS,
+      ),
+    ).toBeNull();
+    // fringeFrac 0.49 (< 0.5) — the edges mostly hold the opaque colour (straight-alpha shape).
+    expect(
+      premultipliedAlphaFinding(
+        [looseImg('a.png'), looseImg('b.png')],
+        [feat('a.png', { edgePixels: 40, fringeFrac: 0.49 }), feat('b.png', { edgePixels: 40, fringeFrac: 1 })],
+        DEFAULT_THRESHOLDS,
+      ),
+    ).toBeNull();
+  });
+
+  it('absent config ⇒ null (suppressed — browser-only gate, NOT in resolveThresholds)', () => {
+    const cfgNo = { ...DEFAULT_THRESHOLDS };
+    delete cfgNo.premultipliedAlpha;
+    expect(
+      premultipliedAlphaFinding(
+        [looseImg('a.png'), looseImg('b.png')],
+        [feat('a.png', { edgePixels: 40, fringeFrac: 1 }), feat('b.png', { edgePixels: 40, fringeFrac: 1 })],
+        cfgNo,
+      ),
+    ).toBeNull();
+  });
+
+  it('ATLAS assets are never counted (loose-only) — a qualifying atlas-page feature does not fill the quota', () => {
+    expect(
+      premultipliedAlphaFinding(
+        [atlasAsset('sheet.png'), looseImg('a.png')],
+        [feat('sheet.png', { edgePixels: 400, fringeFrac: 1 }), feat('a.png', { edgePixels: 40, fringeFrac: 1 })],
+        DEFAULT_THRESHOLDS,
+      ),
+    ).toBeNull(); // only 1 LOOSE flagged < minSprites 2
+  });
+
+  it('via analyze: absent premultipliedEdge features ⇒ no finding (CLI byte-identical); totals unmoved by the feature', async () => {
+    const assets = [looseImg('a.png'), looseImg('b.png')];
+    const featsWith = [
+      feat('a.png', { edgePixels: 40, fringeFrac: 1 }),
+      feat('b.png', { edgePixels: 40, fringeFrac: 1 }),
+    ];
+    const featsWithout = [feat('a.png'), feat('b.png')]; // same features minus the edge readout (the CLI shape)
+    const repWith = await analyze(assets, undefined, { features: featsWith });
+    const repWithout = await analyze(assets, undefined, { features: featsWithout });
+    // The finding fires ONLY with the host-measured feature present…
+    const pma = repWith.findings.find((f) => f.rule === 'premultiplied-alpha');
+    expect(pma).toBeDefined();
+    expect(pma!.severity).toBe('info');
+    expect(pma!.estimate).toBeUndefined();
+    expect(repWithout.findings.some((f) => f.rule === 'premultiplied-alpha')).toBe(false);
+    // …and it moves NO total: potentialDiskSaved (and every other total) identical with and without it.
+    expect(repWith.totals.potentialDiskSaved).toBe(repWithout.totals.potentialDiskSaved);
+    expect(repWith.totals).toEqual(repWithout.totals);
+    // The finding is the ONLY report difference (no per-asset finding, no metric shift).
+    expect(repWith.findings.filter((f) => f.rule !== 'premultiplied-alpha')).toEqual(repWithout.findings);
+    expect(repWith.assets).toEqual(repWithout.assets);
   });
 });

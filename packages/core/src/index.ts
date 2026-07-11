@@ -313,6 +313,9 @@ export type Rule =
   | 'dimension-mismatch'
   // whole-folder (scope: 'folder'): frames whose pixel REGIONS are byte-identical ACROSS ≥2 atlases
   | 'cross-atlas-redundancy'
+  // whole-folder (scope: 'folder'): loose images whose soft edges are premultiplied-shaped — a CONDITIONAL
+  // disclosure (halo risk depends on the loader's blend mode, which pixels cannot reveal; NO estimate)
+  | 'premultiplied-alpha'
   // per-bmfont-page glyph-sheet readout (informational; a parsed .fnt page IS an atlas)
   | 'font-glyph-page';
 
@@ -428,6 +431,16 @@ export interface ImageFeatures {
    *  first non-constant block. Additive: only ever SET when ≥ 1; absent (not an upscale, decode skipped/
    *  failed, atlas, headless) ⇒ today's behavior. Smooth (bilinear) upscales are NOT caught here. */
   blockUpscaleDepth?: number;
+  /** Premultiplied-shaped edge readout from the host's FULL-RESOLUTION scan of a LOOSE alpha-bearing image
+   *  (PNG/WebP — the same fullData pass as the opaque scan). `edgePixels` = the count of TRUE anti-aliasing
+   *  TRANSITION pixels (semi-transparent, directly adjacent to a bright near-opaque pixel with a real
+   *  luma·(1−α) gap); `fringeFrac` = the fraction of those whose IMPLIED MATTE luma collapses toward black —
+   *  the premultiplied/black-matted edge shape. A MEASUREMENT of the stored pixels only: it can NEVER say
+   *  whether the loader blends them straight or premultiplied, so the consuming finding is a conditional
+   *  DISCLOSURE (severity info, NO estimate). Set by the worker ONLY when the scan ran AND found ≥1
+   *  qualifying edge pixel; absent (no scan, non-alpha format, decode failed, headless/CLI, zero qualifying
+   *  pixels) ⇒ the finding can never fire ⇒ today's behavior — documented exactly like blockUpscaleDepth. */
+  premultipliedEdge?: { edgePixels: number; fringeFrac: number };
 }
 
 /** Per-atlas sprite-region hashes computed by the host (worker) from the ALREADY-DECODED atlas page, fed
@@ -724,6 +737,16 @@ export interface ThresholdConfig {
    *  suppressed (CLI/budget configs that don't opt in). Browser-only — NOT enumerated by resolveThresholds (the
    *  CLI never opts in), mirroring frameRedundancy/wastedAlpha. */
   strippableMetadata?: { minBytes: number; warnBytes: number };
+  /** Premultiplied-shaped-edges disclosure gate (folder scope, loose images only). A loose image counts as
+   *  flagged when its host-measured `ImageFeatures.premultipliedEdge` has ≥ `minEdgePixels` qualifying
+   *  anti-aliasing transition pixels AND ≥ `fringeFrac` of them are dark-fringing (the implied matte
+   *  collapses toward black); the ONE folder finding fires when ≥ `minSprites` loose images are flagged.
+   *  CONDITIONAL DISCLOSURE (invariant 3): severity is always `info` and there is NO estimate — the pixels
+   *  are premultiplied-SHAPED, but whether that halos depends on the loader's blend mode, which static
+   *  pixels cannot reveal. Optional/additive: absent ⇒ the finding is suppressed. Browser-only —
+   *  deliberately NOT enumerated by resolveThresholds (the scan needs a full-res decode the CLI never
+   *  performs; mirrors wastedAlpha/frameRedundancy). */
+  premultipliedAlpha?: { minEdgePixels: number; fringeFrac: number; minSprites: number };
 }
 
 export interface AnalysisReport {

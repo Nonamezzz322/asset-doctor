@@ -36,6 +36,7 @@ export {
   integrityFindings,
   formatAggregateFinding,
   strippableMetadataAggregateFinding,
+  premultipliedAlphaFinding,
 } from './folder';
 export { fontGlyphPageFinding } from './font';
 export { defaultCell, buildCoverage, mergeEmptyRects, summarizeEmpty } from './grid';

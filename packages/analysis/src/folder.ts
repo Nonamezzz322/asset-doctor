@@ -303,6 +303,60 @@ export function strippableMetadataAggregateFinding(metaFindings: Finding[]): Fin
   };
 }
 
+/** Folder-scope premultiplied-shaped-edges DISCLOSURE. The host (worker) measured each LOOSE alpha-bearing
+ *  image's soft-edge shape off the SAME full-res buffer as the opaque scan (`ImageFeatures.premultipliedEdge`:
+ *  edgePixels = true anti-aliasing transition pixels, fringeFrac = the fraction whose IMPLIED MATTE luma
+ *  collapses toward black instead of holding the opaque colour). A loose image is FLAGGED when it clears BOTH
+ *  `minEdgePixels` and `fringeFrac`; the ONE folder finding fires at ≥ `minSprites` flagged images (precedent:
+ *  format-aggregate / duplicate-exact — one finding per folder, relatedRefs list the members).
+ *  HONESTY (invariant 3) — a CONDITIONAL disclosure, never a defect verdict: a premultiplied export and
+ *  straight art composited onto black are BYTE-IDENTICAL buffers, so the pixels can NEVER reveal the loader's
+ *  blend mode. Severity is ALWAYS `info`; there is NO estimate at all (no disk, no VRAM — precedent: bleeding,
+ *  icc-non-srgb); the copy asserts only the MEASURED shape and CONDITIONS the halo on the loader's setting.
+ *  LOOSE-only: an atlas page's packed collage mixes many sprites' edges, so a page-level fraction would be
+ *  meaningless (mirrors the solid/opaque loose-only gating); features keyed to atlas refs are skipped.
+ *  Returns null with no config, no qualifying features, or below `minSprites`. Deterministic: refs sorted
+ *  (codepoint, mirrors duplicateExactFindings); assetRef = first flagged ref. */
+export function premultipliedAlphaFinding(
+  assets: Asset[],
+  features: ImageFeatures[],
+  cfg: ThresholdConfig,
+): Finding | null {
+  const gate = cfg.premultipliedAlpha;
+  if (!gate) return null;
+  const loose = new Set<string>();
+  for (const a of assets) if (a.kind === 'image') loose.add(a.image.name);
+  const flagged: string[] = [];
+  for (const f of features) {
+    const pe = f.premultipliedEdge;
+    if (!pe) continue; // absent (no host scan / CLI-headless / zero qualifying pixels) ⇒ never counted
+    if (!loose.has(f.assetRef)) continue; // ATLAS pages never count (loose-only)
+    if (pe.edgePixels < gate.minEdgePixels) continue; // too few transition pixels to classify honestly
+    if (pe.fringeFrac < gate.fringeFrac) continue; // edges hold the opaque colour — straight-alpha shape
+    flagged.push(f.assetRef);
+  }
+  if (flagged.length < gate.minSprites) return null;
+  flagged.sort();
+  return {
+    id: 'folder:premultiplied-alpha',
+    rule: 'premultiplied-alpha',
+    severity: 'info', // ALWAYS info — a conditional disclosure, not a proven defect (invariant 3)
+    scope: 'folder',
+    assetRef: flagged[0]!,
+    relatedRefs: flagged,
+    title: `${flagged.length} sprites with premultiplied-shaped edges — halo risk`,
+    detail:
+      `Premultiplied-shaped edges: ${flagged.join(', ')}. At their soft edges the stored RGB collapses ` +
+      `toward black as alpha falls, instead of holding the opaque colour. IF your loader blends these as ` +
+      `straight (un-premultiplied) alpha they will show a dark halo; if it treats them as premultiplied ` +
+      `they are fine. We measure the pixels, not your blend mode.`,
+    fix: 'Verify your texture premultiply/alphaMode setting matches how the art was exported, or re-export with matching alpha association.',
+    // NO estimate field AT ALL (no diskBytesSaved, no vramBytesSaved) — precedent: bleeding, icc-non-srgb.
+    messageKey: 'premultiplied-alpha',
+    params: { n: flagged.length, refs: flagged.join(', ') },
+  };
+}
+
 /** Aggregate, CONDITIONAL mipmap-cost finding. Sums the per-asset "if mipmapped" overhead
  *  (vramBytesMipmapped − vramBytes) and fires a single `info` folder finding only when that total
  *  exceeds cfg.mipmap.warn. States a CEILING ("if mipmaps are enabled"), never asserts residency —
