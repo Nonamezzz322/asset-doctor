@@ -11,6 +11,7 @@ import { pageExceedsScanBudget, scanSkipReason } from '../lib/bitmap-budget';
 import { groupFiles, keyOf, type RawFile } from '../lib/group';
 import {
   alphaFullyOpaque,
+  alphaShape,
   classifyContent,
   dHashFromGray,
   extractFrameRegions,
@@ -22,6 +23,7 @@ import {
   luma,
   meanColorFromSample,
   premultipliedEdgeShape,
+  type AlphaShapeResult,
   type PremultEdgeResult,
 } from '../lib/perceptual';
 import type { ContentClass } from '@asset-doctor/core';
@@ -137,7 +139,7 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       // and JPEG/AVIF loose images never pay the full-resolution decode (instant-wow: most files skip it).
       const m = looseMime.get(assetRef);
       const scanAlpha = m === 'image/png' || m === 'image/webp';
-      const { dHash, contentClass, solid, opaque, meanColor, scanSkipped, upscaleDepth, premult, w, h } = await decodeFeatures(bytes, scanAlpha);
+      const { dHash, contentClass, solid, opaque, meanColor, scanSkipped, upscaleDepth, premult, shape, w, h } = await decodeFeatures(bytes, scanAlpha);
       const feat: ImageFeatures = { assetRef, contentHash };
       if (dHash) feat.dHash = dHash;
       if (contentClass !== 'unknown') feat.contentClass = contentClass;
@@ -147,6 +149,10 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       // Additive, omit-when-absent: attached ONLY when the scan ran AND found ≥1 qualifying edge pixel —
       // absent ⇒ the premultiplied-alpha folder disclosure can never fire (byte-identical to today).
       if (premult && premult.edgePixels > 0) feat.premultipliedEdge = premult;
+      // Additive, omit-when-absent: attached ONLY when the alpha-shape scan ran and found ≥1 pixel with
+      // alpha > 0 (alphaShape returns null for a fully-transparent image / short buffer) — absent ⇒ the
+      // interior-transparency + binary-alpha disclosures can never fire (byte-identical to today).
+      if (shape) feat.alphaShape = shape;
       // Attach whenever measured (non-null): the duplicate-similar mean-color guard consumes it; features
       // that never enter perceptual matching (dHash-null) are filtered out downstream, so it's inert there.
       if (meanColor) feat.meanColor = meanColor;
@@ -247,11 +253,12 @@ async function decodeFeatures(
   scanSkipped: boolean;
   upscaleDepth: number;
   premult: PremultEdgeResult | null;
+  shape: AlphaShapeResult | null;
   w: number;
   h: number;
 }> {
   if (typeof OffscreenCanvas === 'undefined')
-    return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, meanColor: null, scanSkipped: false, upscaleDepth: 0, premult: null, w: 0, h: 0 };
+    return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, meanColor: null, scanSkipped: false, upscaleDepth: 0, premult: null, shape: null, w: 0, h: 0 };
   try {
     const bmp = await createImageBitmap(new Blob([bytes]));
     const { width, height } = bmp; // capture before close() so the caller's skip reason has the dimensions
@@ -259,7 +266,7 @@ async function decodeFeatures(
     const c2d = canvas.getContext('2d');
     if (!c2d) {
       bmp.close();
-      return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, meanColor: null, scanSkipped: false, upscaleDepth: 0, premult: null, w: width, h: height };
+      return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, meanColor: null, scanSkipped: false, upscaleDepth: 0, premult: null, shape: null, w: width, h: height };
     }
     c2d.drawImage(bmp, 0, 0, 9, 8);
     const data = c2d.getImageData(0, 0, 9, 8).data;
@@ -288,6 +295,7 @@ async function decodeFeatures(
     let solid = false;
     let upscaleDepth = 0;
     let premult: PremultEdgeResult | null = null;
+    let shape: AlphaShapeResult | null = null;
     if ((scanAlpha || solidCandidate) && !overBudget) {
       const full = new OffscreenCanvas(width, height);
       const fctx = full.getContext('2d', { willReadFrequently: true });
@@ -303,12 +311,16 @@ async function decodeFeatures(
         // Premultiplied-shaped edge scan (premultiplied-alpha folder disclosure) — reuses this SAME fullData
         // buffer (zero extra decode), gated to the alpha-bearing formats the opaque scan already targets.
         if (scanAlpha) premult = premultipliedEdgeShape(fullData, width, height);
+        // Alpha-shape scan (interior-transparency + binary-alpha disclosures) — ONE call off this SAME
+        // fullData buffer (zero extra decode), same alpha-format gate. null (fully transparent / degenerate)
+        // ⇒ the caller omits the feature and neither disclosure can ever fire.
+        if (scanAlpha) shape = alphaShape(fullData, width, height);
       }
     }
     bmp.close();
-    return { dHash, contentClass, solid, opaque, meanColor, scanSkipped, upscaleDepth, premult, w: width, h: height };
+    return { dHash, contentClass, solid, opaque, meanColor, scanSkipped, upscaleDepth, premult, shape, w: width, h: height };
   } catch {
-    return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, meanColor: null, scanSkipped: false, upscaleDepth: 0, premult: null, w: 0, h: 0 };
+    return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, meanColor: null, scanSkipped: false, upscaleDepth: 0, premult: null, shape: null, w: 0, h: 0 };
   }
 }
 

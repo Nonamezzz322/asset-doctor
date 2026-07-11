@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { dHashFromGray, grayStdDev, isFlat, blockUpscaleDepth, premultipliedEdgeShape } from '../src/lib/perceptual';
+import { alphaShape, dHashFromGray, grayStdDev, isFlat, blockUpscaleDepth, premultipliedEdgeShape } from '../src/lib/perceptual';
 
 /** Build a w×h RGBA buffer from a per-pixel color fn. */
 function rgba(w: number, h: number, fn: (x: number, y: number) => [number, number, number, number]): Uint8ClampedArray {
@@ -123,6 +123,69 @@ describe('premultipliedEdgeShape — implied-matte edge classification (measure,
     expect(premultipliedEdgeShape(new Uint8ClampedArray(4), 8, 8)).toEqual({ edgePixels: 0, fringeFrac: 0 });
     expect(premultipliedEdgeShape([], 8, 8)).toEqual({ edgePixels: 0, fringeFrac: 0 });
     expect(premultipliedEdgeShape([], 0, 0)).toEqual({ edgePixels: 0, fringeFrac: 0 });
+  });
+});
+
+// ── alphaShape — the shared scan behind interior-transparency + binary-alpha ────────────────────────
+// EXACT-count semantics on hand-built RGBA: the bbox is of alpha>0 pixels; interiorTransparent counts
+// alpha===0 INSIDE it (margins outside the bbox are trim territory, deliberately excluded).
+describe('alphaShape — bbox of alpha>0 + interior transparency + binary alpha (one scan, exact counts)', () => {
+  it('a hard-edged RING ⇒ high interior ratio, binaryAlpha true, exact counts', () => {
+    // 16×16; opaque 1px square ring on x,y ∈ [2,13] (border only), hole + outside fully transparent.
+    const onRing = (x: number, y: number): boolean =>
+      x >= 2 && x <= 13 && y >= 2 && y <= 13 && (x === 2 || x === 13 || y === 2 || y === 13);
+    const ring = rgba(16, 16, (x, y) => (onRing(x, y) ? [200, 50, 50, 255] : [0, 0, 0, 0]));
+    const r = alphaShape(ring, 16, 16)!;
+    expect(r).not.toBeNull();
+    expect(r.bboxW).toBe(12);
+    expect(r.bboxH).toBe(12);
+    expect(r.opaqueCount).toBe(44); // ring perimeter: 12·4 − 4 corners
+    expect(r.interiorTransparent).toBe(144 - 44); // the 10×10 hole = every bbox px not on the ring
+    expect(r.binaryAlpha).toBe(true); // hard-edged: every alpha byte is 0 or 255
+    expect(r.interiorTransparent / (r.bboxW * r.bboxH)).toBeGreaterThan(0.6); // ring ⇒ high interior ratio
+  });
+
+  it('a soft-edged glow ⇒ binaryAlpha false (mid-band alpha bytes use the 8-bit depth)', () => {
+    // Same ring, but the hole carries a soft alpha=128 glow — the channel genuinely uses its depth.
+    const soft = rgba(8, 8, (x, y) => {
+      if (x === 0 || x === 7 || y === 0 || y === 7) return [200, 200, 200, 255];
+      return [200, 200, 200, 128];
+    });
+    const r = alphaShape(soft, 8, 8)!;
+    expect(r.binaryAlpha).toBe(false);
+    expect(r.interiorTransparent).toBe(0); // alpha 128 > 0 — soft pixels are NOT interior transparency
+    expect(r.opaqueCount).toBe(28); // the opaque border only
+  });
+
+  it('a solid opaque rect ⇒ ratio 0, opaqueCount = w·h, binaryAlpha true (255-only is binary)', () => {
+    const r = alphaShape(rgba(8, 8, () => [10, 20, 30, 255]), 8, 8)!;
+    expect(r.bboxW).toBe(8);
+    expect(r.bboxH).toBe(8);
+    expect(r.interiorTransparent).toBe(0);
+    expect(r.opaqueCount).toBe(64);
+    expect(r.binaryAlpha).toBe(true);
+  });
+
+  it('transparent MARGINS around a solid core ⇒ interiorTransparent 0, bbox SMALLER than the image (trim territory, not holes)', () => {
+    // 16×16 with an opaque 8×8 core at [4,11]² — all transparency is OUTSIDE the bbox.
+    const core = rgba(16, 16, (x, y) => (x >= 4 && x <= 11 && y >= 4 && y <= 11 ? [90, 90, 90, 255] : [0, 0, 0, 0]));
+    const r = alphaShape(core, 16, 16)!;
+    expect(r.bboxW).toBe(8);
+    expect(r.bboxH).toBe(8);
+    expect(r.interiorTransparent).toBe(0); // margins never count — deliberate separation from trim-margin
+    expect(r.opaqueCount).toBe(64);
+    expect(r.binaryAlpha).toBe(true);
+  });
+
+  it('a fully-transparent image ⇒ null (no bbox — nothing to measure, never a fabricated shape)', () => {
+    expect(alphaShape(rgba(8, 8, () => [0, 0, 0, 0]), 8, 8)).toBeNull();
+  });
+
+  it('short buffer / empty / degenerate dims ⇒ null (never throws, never claims on no data)', () => {
+    expect(alphaShape(new Uint8ClampedArray(4), 8, 8)).toBeNull();
+    expect(alphaShape([], 8, 8)).toBeNull();
+    expect(alphaShape([], 0, 0)).toBeNull();
+    expect(alphaShape(rgba(8, 8, () => [0, 0, 0, 255]), 8.5 as unknown as number, 8)).toBeNull();
   });
 });
 

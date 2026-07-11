@@ -23,12 +23,14 @@ import type {
 import { MIP_OVERHEAD } from '@asset-doctor/core';
 import { DEFAULT_THRESHOLDS } from './config';
 import {
+  binaryAlphaFinding,
   bleedingFinding,
   dimensionFindings,
   dimensionMismatchFinding,
   formatFinding,
   frameRedundancyFinding,
   iccNonSrgbFinding,
+  interiorTransparencyFinding,
   occupancyFinding,
   occupancyValue,
   solidFillFinding,
@@ -130,6 +132,13 @@ export async function analyze(
   // wasted-alpha finding ⇒ byte-identical to today (CLI / headless tests unaffected).
   const opaqueByRef = new Set<string>();
   for (const f of deps.features ?? []) if (f.opaque) opaqueByRef.add(f.assetRef);
+
+  // Alpha-shape readout (bbox of alpha>0 + interior-transparent count + binary-alpha flag) from the host's
+  // ONE full-res scan — the same fullData pass as the opaque scan. Drives the loose-only
+  // interior-transparency + binary-alpha disclosures (both info, NO estimate — nothing here ever touches
+  // potentialDiskSaved/totals). Absent ⇒ empty ⇒ neither fires ⇒ byte-identical to today (CLI / headless).
+  const shapeByRef = new Map<string, NonNullable<ImageFeatures['alphaShape']>>();
+  for (const f of deps.features ?? []) if (f.alphaShape) shapeByRef.set(f.assetRef, f.alphaShape);
 
   // Per-atlas sprite-region hashes (within-atlas frame-redundancy), keyed by post-merge atlas.name. The
   // host hashes regions off the already-decoded page; absent ⇒ empty ⇒ no frame-redundancy finding ⇒
@@ -298,6 +307,20 @@ export async function analyze(
         // blocks are all constant, so it would otherwise trip both). NO estimate is contributed to any total.
         const up = upscaledSourceFinding(image.name, image.size, cfg, upscaleDepthByRef.get(image.name));
         if (up) findings.push(up);
+      }
+      // Interior-transparency + binary-alpha — TWO disclosures off the host's ONE alphaShape scan (both
+      // info, NO estimate ⇒ nothing flows into potentialDiskSaved/totals). De-overlap mirrors the block
+      // above: a solid image is solid-fill's (skip both); a fully-opaque image is wasted-alpha's (skip
+      // binary-alpha — interior-transparency cannot fire there anyway: zero transparent pixels). Absent
+      // shape/config ⇒ the rules return null ⇒ byte-identical to today.
+      if (!solidByRef.has(image.name)) {
+        const shape = shapeByRef.get(image.name);
+        const interior = interiorTransparencyFinding(image.name, image.size, cfg, shape);
+        if (interior) findings.push(interior);
+        if (!opaqueByRef.has(image.name)) {
+          const binary = binaryAlphaFinding(image.name, image.size, cfg, shape);
+          if (binary) findings.push(binary);
+        }
       }
       await addFormat(image.name, image, classByRef.get(image.name) ?? 'unknown');
       // Wasted alpha: a fully-opaque loose image still carrying an alpha channel. Loose-only, gated on the

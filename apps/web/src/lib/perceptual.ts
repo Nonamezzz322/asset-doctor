@@ -326,6 +326,69 @@ export function premultipliedEdgeShape(
   return { edgePixels, fringeFrac: edgePixels === 0 ? 0 : dark / edgePixels };
 }
 
+// ── Alpha-shape scan (the interior-transparency + binary-alpha disclosures) ──────────────────────────
+
+export interface AlphaShapeResult {
+  /** Width of the tight bounding box of pixels with alpha > 0. */
+  bboxW: number;
+  /** Height of the tight bounding box of pixels with alpha > 0. */
+  bboxH: number;
+  /** Fully-transparent (alpha === 0) pixels INSIDE that bbox — interior holes (rings, sparks, diagonals).
+   *  Transparent MARGINS outside the bbox are deliberately NOT counted (that is trim territory, a separate
+   *  finding), so a solid-core sprite with big margins measures 0 here. */
+  interiorTransparent: number;
+  /** True iff EVERY pixel's alpha byte is exactly 0 or 255 — the 8-bit channel stores 1 bit. */
+  binaryAlpha: boolean;
+  /** Pixels at alpha === 255 (fully opaque). opaqueCount === w·h ⇒ the image is fully opaque (wasted-alpha's
+   *  case — the binary-alpha rule de-overlaps on this). */
+  opaqueCount: number;
+}
+
+/** MEASURE the alpha SHAPE of a straight-alpha RGBA buffer for the interior-transparency + binary-alpha
+ *  disclosures — ONE O(N) pass computes everything both rules need (bbox of alpha > 0, binaryAlpha,
+ *  opaqueCount), then a second BOUNDED pass over the bbox counts the alpha === 0 pixels inside it. EXACT
+ *  counts, not heuristics: interiorTransparent/(bboxW·bboxH) is high for rings/sparks/diagonal blades, 0
+ *  for a solid rect, and LOW for a sprite whose transparency is all MARGIN (outside the bbox — deliberate:
+ *  margins are trim-margin territory, not interior holes). Returns null for an empty/short buffer,
+ *  degenerate dims, OR a fully-transparent image (no bbox exists — nothing to measure, never a fabricated
+ *  shape). Never throws. Pure integer-byte read, deterministic — runs on the SAME full-res buffer the
+ *  opaque/premult scans already read (zero extra decode). */
+export function alphaShape(
+  rgba: Uint8ClampedArray | Uint8Array | number[],
+  w: number,
+  h: number,
+): AlphaShapeResult | null {
+  if (!Number.isInteger(w) || !Number.isInteger(h) || w <= 0 || h <= 0) return null;
+  if (rgba.length < w * h * 4) return null; // short buffer — never claim on no data
+  let minX = w;
+  let minY = h;
+  let maxX = -1;
+  let maxY = -1;
+  let binaryAlpha = true;
+  let opaqueCount = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const a = rgba[(y * w + x) * 4 + 3] ?? 0;
+      if (a === 255) opaqueCount++;
+      else if (a !== 0) binaryAlpha = false; // a mid-band alpha byte ⇒ the channel really uses its depth
+      if (a > 0) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return null; // fully transparent — no bbox, nothing to measure
+  let interiorTransparent = 0;
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      if ((rgba[(y * w + x) * 4 + 3] ?? 0) === 0) interiorTransparent++;
+    }
+  }
+  return { bboxW: maxX - minX + 1, bboxH: maxY - minY + 1, interiorTransparent, binaryAlpha, opaqueCount };
+}
+
 /** Axis-aligned packed rect of a sprite AS PLACED in the atlas page (already w/h-swapped when rotated). */
 export interface FrameRect {
   x: number;

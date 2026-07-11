@@ -2,7 +2,7 @@
 // Finding(s) with a verdict, the proof (numbers), a fix, and — where visual — overlay zones.
 // We measure; we never fabricate. Thresholds come from config, never inline magic numbers.
 
-import { MIP_OVERHEAD, type Atlas, type ContentClass, type Finding, type ImageAsset, type ImageMime, type OverlayZone, type Rect, type Severity, type Size, type ThresholdConfig, type TrimRect } from '@asset-doctor/core';
+import { MIP_OVERHEAD, type Atlas, type ContentClass, type Finding, type ImageAsset, type ImageFeatures, type ImageMime, type OverlayZone, type Rect, type Severity, type Size, type ThresholdConfig, type TrimRect } from '@asset-doctor/core';
 import { buildCoverage, defaultCell, mergeEmptyRects, summarizeEmpty } from './grid';
 
 const BYTES_PER_PX = 4; // RGBA8888
@@ -574,6 +574,93 @@ export function iccNonSrgbFinding(ref: string, image: ImageAsset): Finding | nul
     // colour change, NOT a free saving; claiming bytes here would be an invariant-3 lie.
     messageKey: 'icc-non-srgb',
     params: { label, bytes: icc.bytes, profile },
+  };
+}
+
+/** The host-measured alpha-shape readout (ImageFeatures.alphaShape) both disclosures below consume —
+ *  aliased off core so the rule params can never drift from the feature the worker attaches. */
+type AlphaShapeFeature = NonNullable<ImageFeatures['alphaShape']>;
+
+/** Interior transparency: fully-transparent pixels INSIDE a LOOSE image's opaque bounding box. The host
+ *  (worker) measured the tight bbox of alpha > 0 and counted the alpha === 0 pixels inside it (EXACT
+ *  counts, `alphaShape` — the same full-res pass as the opaque scan). A high ratio (rings, sparks,
+ *  diagonal blades) means the GPU rasterizes those empty pixels on EVERY draw of the sprite's quad —
+ *  wasted fill-rate/overdraw. Transparent MARGINS outside the bbox are deliberately OUT (that is trim
+ *  territory — trim-margin/the pack-time trim own it; a solid-core sprite with big margins measures a LOW
+ *  ratio here). HONESTY (invariant 3/5): a DISCLOSURE, never a savings claim — severity always `info`,
+ *  NO estimate at all (fill-rate/overdraw is NOT byte-measurable; claiming disk or VRAM bytes would be a
+ *  lie). The realizable win lives in the shipped polygon packer (mesh mode skips transparent interior
+ *  pixels entirely — rectangles cannot), which is exactly where the fix copy points. Loose-only; returns
+ *  null with no config, no host shape (CLI/headless — the scan needs a full-res decode), a bbox below
+ *  `minBboxPx`, or a ratio below `minRatio`. */
+export function interiorTransparencyFinding(
+  ref: string,
+  size: Size,
+  cfg: ThresholdConfig,
+  shape?: AlphaShapeFeature,
+): Finding | null {
+  if (!cfg.interiorTransparency || !shape) return null;
+  const bboxArea = shape.bboxW * shape.bboxH;
+  if (bboxArea < cfg.interiorTransparency.minBboxPx) return null; // too small for fill-rate to matter
+  const ratio = shape.interiorTransparent / bboxArea;
+  if (ratio < cfg.interiorTransparency.minRatio) return null; // normal soft sprites stay quiet
+  const ratioPct = Math.round(ratio * 100); // 0–100 integer for the copy (an exact-count-derived readout)
+  const px = shape.interiorTransparent;
+  return {
+    id: `${ref}:interior-transparency`,
+    rule: 'interior-transparency',
+    severity: 'info', // ALWAYS info — a fill-rate disclosure, never a byte-backed savings verdict
+    assetRef: ref,
+    title: `Interior transparency ${ratioPct}% — fill-rate wasted on empty pixels`,
+    detail:
+      `${px} fully-transparent pixels sit INSIDE the sprite's opaque bounds (${shape.bboxW}×${shape.bboxH} ` +
+      `of a ${size.w}×${size.h} image). The GPU still rasterizes them every draw — wasted fill-rate/overdraw ` +
+      `on rings, glows and diagonals. A polygon mesh skips them; rectangles cannot.`,
+    fix: 'Pack with the polygon packer (mesh mode) so transparent interior pixels are never rasterized.',
+    // NO estimate field AT ALL (no diskBytesSaved, no vramBytesSaved) — fill-rate/overdraw is not
+    // byte-measurable, so any byte claim would be fabricated (precedent: bleeding, icc-non-srgb).
+    messageKey: 'interior-transparency',
+    params: { w: size.w, h: size.h, bboxW: shape.bboxW, bboxH: shape.bboxH, ratioPct, px },
+  };
+}
+
+/** Binary alpha: EVERY pixel's alpha byte is exactly 0 or 255 (host-proven, `alphaShape.binaryAlpha`) on
+ *  a LOOSE image that is neither fully opaque nor fully transparent — the 8-bit alpha channel stores 1
+ *  bit of information. Palette (PNG8) or punch-through GPU formats (BC1 1-bit alpha / KTX2 alpha-mask)
+ *  encode this in 1 bit; soft-alpha formats spend 8 bits per pixel on it. DE-OVERLAP: fully-opaque
+ *  (opaqueCount === w·h) is wasted-alpha's case — that rule measures a real opaque re-encode, so this one
+ *  never fires there; fully-transparent yields no alphaShape at all (nothing to measure). HONESTY
+ *  (invariant 3/5): a DISCLOSURE — severity always `info`, NO estimate: a 1-bit-alpha re-encode is NOT
+ *  measurable in-browser (canvas emits 8-bit alpha only), so we never claim bytes; we state the exact
+ *  measured fact and leave the re-encode to tools that can do it. Loose-only; returns null with no
+ *  config, no host shape (CLI/headless), a non-binary alpha, a fully-opaque image, or a longest edge
+ *  below `minEdgePx` (tiny icons' alpha depth is irrelevant). */
+export function binaryAlphaFinding(
+  ref: string,
+  size: Size,
+  cfg: ThresholdConfig,
+  shape?: AlphaShapeFeature,
+): Finding | null {
+  if (!cfg.binaryAlpha || !shape) return null;
+  if (!shape.binaryAlpha) return null; // the channel genuinely uses its 8-bit depth
+  if (shape.opaqueCount >= size.w * size.h) return null; // fully opaque — wasted-alpha owns that case
+  const longest = Math.max(size.w, size.h);
+  if (longest < cfg.binaryAlpha.minEdgePx) return null; // a tiny icon's alpha depth is irrelevant
+  return {
+    id: `${ref}:binary-alpha`,
+    rule: 'binary-alpha',
+    severity: 'info', // ALWAYS info — an exact measured fact, disclosed without a byte claim
+    assetRef: ref,
+    title: `Alpha is binary (0/255) — 8-bit channel stores 1 bit`,
+    detail:
+      `Every pixel is either fully transparent or fully opaque — no soft edges use the 8-bit alpha depth. ` +
+      `Palette (PNG8) or BC1 punch-through / KTX2 alpha-mask formats encode this in 1 bit; soft-alpha ` +
+      `formats spend 8 bits per pixel on it.`,
+    fix: `Consider a palette export or a punch-through-alpha GPU format; verify edges stay crisp (no anti-aliasing exists to lose).`,
+    // NO estimate field AT ALL — a 1-bit-alpha re-encode is not measurable in-browser (canvas emits 8-bit
+    // only), so any diskBytesSaved would be a fabricated number (precedent: bleeding, icc-non-srgb).
+    messageKey: 'binary-alpha',
+    params: { w: size.w, h: size.h },
   };
 }
 

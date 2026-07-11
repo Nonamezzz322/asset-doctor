@@ -59,15 +59,16 @@ afterEach(() => {
 
 // ── the exhaustive Rule→group partition (the drift guard) ────────────────────────────────────────────
 describe('RULE_GROUP / RULES_IN_GROUP / ALL_RULES — an exhaustive, disjoint partition of the Rule union', () => {
-  // 24: the premultiplied-alpha folder disclosure joined the Rule union (round: PMA halo disclosure).
-  it('maps EXACTLY the 24 rules, each to exactly one group (a partition — no gaps, no overlaps)', () => {
+  // 26: interior-transparency (fill-rate disclosure) + binary-alpha (1-bit alpha disclosure) joined the
+  // Rule union (round: shared alphaShape scan). Was 24 (premultiplied-alpha round).
+  it('maps EXACTLY the 26 rules, each to exactly one group (a partition — no gaps, no overlaps)', () => {
     const keys = Object.keys(RULE_GROUP) as Rule[];
-    expect(keys).toHaveLength(24);
-    expect(ALL_RULES).toHaveLength(24);
+    expect(keys).toHaveLength(26);
+    expect(ALL_RULES).toHaveLength(26);
     // ALL_RULES is a permutation of the RULE_GROUP keys (no rule dropped or duplicated in the derivation).
     expect([...ALL_RULES].sort()).toEqual([...keys].sort());
     // No duplicates anywhere.
-    expect(new Set(ALL_RULES).size).toBe(24);
+    expect(new Set(ALL_RULES).size).toBe(26);
   });
 
   it('RULES_IN_GROUP is derived from RULE_GROUP with no drift (union == ALL_RULES, groups disjoint)', () => {
@@ -81,7 +82,7 @@ describe('RULE_GROUP / RULES_IN_GROUP / ALL_RULES — an exhaustive, disjoint pa
         total++;
       }
     }
-    expect(total).toBe(24);
+    expect(total).toBe(26);
     expect([...seen].sort()).toEqual([...ALL_RULES].sort());
   });
 
@@ -90,18 +91,22 @@ describe('RULE_GROUP / RULES_IN_GROUP / ALL_RULES — an exhaustive, disjoint pa
     expect(ALL_RULES).toEqual(rebuilt);
   });
 
-  // 7/9/5/3: premultiplied-alpha (a correctness disclosure, like bleeding/icc-non-srgb) joined 'integrity'.
-  it('the humane grouping is the agreed 7/9/5/3 split (locks accidental re-homing)', () => {
+  // 7/10/6/3: binary-alpha (an encoding-savings disclosure, beside wasted-alpha) joined 'savings';
+  // interior-transparency (a packing/fill-rate disclosure, beside trim-margin) joined 'packing'.
+  // Was 7/9/5/3 (premultiplied-alpha round).
+  it('the humane grouping is the agreed 7/10/6/3 split (locks accidental re-homing)', () => {
     expect(GROUP_ORDER).toEqual(['integrity', 'savings', 'packing', 'vram']);
     expect(RULES_IN_GROUP.integrity).toHaveLength(7);
-    expect(RULES_IN_GROUP.savings).toHaveLength(9);
-    expect(RULES_IN_GROUP.packing).toHaveLength(5);
+    expect(RULES_IN_GROUP.savings).toHaveLength(10);
+    expect(RULES_IN_GROUP.packing).toHaveLength(6);
     expect(RULES_IN_GROUP.vram).toHaveLength(3);
     // A few canonical anchors so a silent re-group is caught.
     expect(RULE_GROUP['integrity-missing-image']).toBe('integrity');
     expect(RULE_GROUP['premultiplied-alpha']).toBe('integrity');
     expect(RULE_GROUP['duplicate-exact']).toBe('savings');
+    expect(RULE_GROUP['binary-alpha']).toBe('savings');
     expect(RULE_GROUP.occupancy).toBe('packing');
+    expect(RULE_GROUP['interior-transparency']).toBe('packing');
     expect(RULE_GROUP['mipmap-cost']).toBe('vram');
   });
 });

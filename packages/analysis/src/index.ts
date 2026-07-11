@@ -22,6 +22,8 @@ export {
   wastedAlphaFinding,
   strippableMetadataFinding,
   iccNonSrgbFinding,
+  interiorTransparencyFinding,
+  binaryAlphaFinding,
   wastedRegions,
   formatFinding,
   fmtBytes,

@@ -123,4 +123,18 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   // is often deliberate art; a pipeline-wide export setting marks many). CONDITIONAL DISCLOSURE (invariant
   // 3): always `info`, NO estimate — we measure the pixel shape, never the loader's blend mode. Browser-only
   // — NOT in resolveThresholds (needs the full-res decode the CLI never performs; mirrors wastedAlpha).
+  interiorTransparency: { minBboxPx: 16384, minRatio: 0.35 }, // CALIBRATE — interior-transparency (fill-rate)
+  // disclosure gate. `minBboxPx` (16384 = a 128×128-equivalent opaque bbox): below this the sprite is too
+  // small for fill-rate/overdraw to matter regardless of shape. `minRatio` (0.35): ≥ 35% of the bbox must be
+  // fully-transparent INTERIOR pixels before the disclosure fires — the floor keeps normal soft sprites
+  // (rounded corners, small notches, a little concavity) out; rings/sparks/diagonal blades measure well
+  // above it. MARGINS outside the bbox never count (trim-margin territory). Always `info`, NO estimate
+  // (fill-rate is not byte-measurable — the win lives in the shipped polygon packer). Loose-only.
+  // Browser-only — NOT in resolveThresholds (needs the full-res alphaShape scan the CLI never performs).
+  binaryAlpha: { minEdgePx: 128 }, // CALIBRATE — binary-alpha (1-bit alpha in an 8-bit channel) disclosure
+  // gate: tiny icons' alpha depth is irrelevant, so the longest edge must reach ≥ 128 before the disclosure
+  // fires. The FACT itself is exact (every alpha byte is 0 or 255, host-proven); the gate only suppresses
+  // trivially-small images. Fully-opaque is wasted-alpha's case (de-overlapped in the rule); fully-transparent
+  // yields no alphaShape at all. Always `info`, NO estimate (a 1-bit re-encode is not measurable in-browser —
+  // canvas emits 8-bit only). Loose-only. Browser-only — NOT in resolveThresholds (mirrors interiorTransparency).
 };

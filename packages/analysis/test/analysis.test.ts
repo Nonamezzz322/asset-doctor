@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import type { Asset, Atlas, ImageAsset, ImageFeatures, ImageMime, Rect, ThresholdConfig } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseFntText, parseFntPage, type FntPage } from '@asset-doctor/parsers';
 import { groupFiles, type RawFile } from '@asset-doctor/ingest';
-import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, upscaledSourceFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, iccNonSrgbFinding, crossAtlasRedundancyFinding, premultipliedAlphaFinding, duplicateSimilarFindings, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, upscaledSourceFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, iccNonSrgbFinding, interiorTransparencyFinding, binaryAlphaFinding, crossAtlasRedundancyFinding, premultipliedAlphaFinding, duplicateSimilarFindings, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -2471,5 +2471,175 @@ describe('premultiplied-alpha (premultiplied-shaped edges — folder disclosure,
     // The finding is the ONLY report difference (no per-asset finding, no metric shift).
     expect(repWith.findings.filter((f) => f.rule !== 'premultiplied-alpha')).toEqual(repWithout.findings);
     expect(repWith.assets).toEqual(repWithout.assets);
+  });
+});
+
+describe('interior-transparency (transparent pixels INSIDE the opaque bbox — fill-rate disclosure, NO estimate)', () => {
+  // DEFAULT gate: { minBboxPx: 16384 (a 128×128-equivalent bbox), minRatio: 0.35 } (config.ts).
+  type Shape = NonNullable<ImageFeatures['alphaShape']>;
+  const shape = (over: Partial<Shape> = {}): Shape => ({
+    bboxW: 128, bboxH: 128, interiorTransparent: 8192, binaryAlpha: false, opaqueCount: 8192, ...over,
+  });
+  const looseImg = (name: string, w: number, h: number): Asset => ({
+    kind: 'image',
+    image: { name, imageRef: name, size: { w, h }, mime: 'image/png', byteSize: 10000 },
+  });
+
+  it('fires at EXACTLY the bbox floor (128×128 = 16384 = minBboxPx, ratio 0.5): info, NO estimate, params pinned', () => {
+    const f = interiorTransparencyFinding('ring.png', { w: 256, h: 256 }, DEFAULT_THRESHOLDS, shape())!;
+    expect(f).not.toBeNull();
+    expect(f.rule).toBe('interior-transparency');
+    expect(f.messageKey).toBe('interior-transparency');
+    expect(f.severity).toBe('info'); // ALWAYS info — a fill-rate disclosure, never a byte-backed verdict
+    expect(f.estimate).toBeUndefined(); // NO estimate AT ALL — fill-rate is not byte-measurable (Inv 3/5)
+    expect(f.params).toEqual({ w: 256, h: 256, bboxW: 128, bboxH: 128, ratioPct: 50, px: 8192 });
+  });
+
+  it('bbox ONE px-area short of minBboxPx (127×129 = 16383) ⇒ null even at a huge ratio', () => {
+    expect(
+      interiorTransparencyFinding('r.png', { w: 256, h: 256 }, DEFAULT_THRESHOLDS,
+        shape({ bboxW: 127, bboxH: 129, interiorTransparent: 16000 })),
+    ).toBeNull();
+  });
+
+  it('ratio boundary is inclusive: exactly minRatio (7168/20480 = 0.35) fires; one px below ⇒ null', () => {
+    const at = interiorTransparencyFinding('r.png', { w: 256, h: 256 }, DEFAULT_THRESHOLDS,
+      shape({ bboxW: 128, bboxH: 160, interiorTransparent: 7168 }))!;
+    expect(at).not.toBeNull();
+    expect(at.params).toMatchObject({ ratioPct: 35, px: 7168 });
+    expect(
+      interiorTransparencyFinding('r.png', { w: 256, h: 256 }, DEFAULT_THRESHOLDS,
+        shape({ bboxW: 128, bboxH: 160, interiorTransparent: 7167 })),
+    ).toBeNull();
+  });
+
+  it('absent config ⇒ null (browser-only gate, NOT in resolveThresholds); absent shape ⇒ null (CLI/headless)', () => {
+    const cfgNo = { ...DEFAULT_THRESHOLDS };
+    delete cfgNo.interiorTransparency;
+    expect(interiorTransparencyFinding('r.png', { w: 256, h: 256 }, cfgNo, shape())).toBeNull();
+    expect(interiorTransparencyFinding('r.png', { w: 256, h: 256 }, DEFAULT_THRESHOLDS, undefined)).toBeNull();
+  });
+
+  it('analyze threads alphaShape to a LOOSE image ⇒ finding; solid images are solid-fill\'s (de-overlap)', async () => {
+    const feats: ImageFeatures[] = [{ assetRef: 'ring.png', contentHash: 'h1', alphaShape: shape() }];
+    const report = await analyze([looseImg('ring.png', 256, 256)], undefined, { features: feats });
+    const it_ = report.findings.find((f) => f.rule === 'interior-transparency');
+    expect(it_?.assetRef).toBe('ring.png');
+    expect(it_?.severity).toBe('info');
+    expect(it_?.estimate).toBeUndefined();
+    // solid:true ⇒ solid-fill owns the image; interior-transparency never fires beside it.
+    const solidRep = await analyze([looseImg('ring.png', 1024, 1024)], undefined, {
+      features: [{ assetRef: 'ring.png', contentHash: 'h1', solid: true, alphaShape: shape() }],
+    });
+    expect(solidRep.findings.find((f) => f.rule === 'solid-fill')).toBeDefined();
+    expect(solidRep.findings.find((f) => f.rule === 'interior-transparency')).toBeUndefined();
+  });
+
+  it('analyze NEVER fires interior-transparency for an ATLAS (loose-only), and no total ever moves', async () => {
+    const atlasAsset: Asset = {
+      kind: 'atlas',
+      atlas: {
+        name: 'sheet.png', imageRef: 'sheet.png', size: { w: 256, h: 256 },
+        sprites: [{ name: 's0', frame: { x: 0, y: 0, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 32, h: 32 } }],
+        source: { kind: 'pixi' },
+      },
+      image: { name: 'sheet.png', imageRef: 'sheet.png', size: { w: 256, h: 256 }, mime: 'image/png', byteSize: 10000 },
+    };
+    const rep = await analyze([atlasAsset], undefined, {
+      features: [{ assetRef: 'sheet.png', contentHash: 'h', alphaShape: shape() }],
+    });
+    expect(rep.findings.find((f) => f.rule === 'interior-transparency')).toBeUndefined();
+    // potentialDiskSaved (and every total) identical with and without the feature — NO estimate exists.
+    const assets = [looseImg('ring.png', 256, 256)];
+    const withF = await analyze(assets, undefined, { features: [{ assetRef: 'ring.png', contentHash: 'h', alphaShape: shape() }] });
+    const without = await analyze(assets, undefined, { features: [{ assetRef: 'ring.png', contentHash: 'h' }] });
+    expect(withF.totals).toEqual(without.totals);
+    expect(withF.totals.potentialDiskSaved).toBe(without.totals.potentialDiskSaved);
+  });
+});
+
+describe('binary-alpha (every alpha byte exactly 0 or 255 — 1-bit channel disclosure, NO estimate)', () => {
+  // DEFAULT gate: { minEdgePx: 128 } (config.ts). Fully-opaque is wasted-alpha's case (de-overlap);
+  // fully-transparent yields no alphaShape at all (the scan returns null there).
+  type Shape = NonNullable<ImageFeatures['alphaShape']>;
+  const shape = (over: Partial<Shape> = {}): Shape => ({
+    bboxW: 100, bboxH: 100, interiorTransparent: 0, binaryAlpha: true, opaqueCount: 10000, ...over,
+  });
+  const looseImg = (name: string, w: number, h: number): Asset => ({
+    kind: 'image',
+    image: { name, imageRef: name, size: { w, h }, mime: 'image/png', byteSize: 10000 },
+  });
+
+  it('a binary-alpha cutout at EXACTLY minEdgePx (longest edge 128) ⇒ info, NO estimate, params pinned', () => {
+    // opaqueCount 4000 < 128·64 = 8192 so the fully-opaque de-overlap gate stays out of this boundary test.
+    const f = binaryAlphaFinding('cutout.png', { w: 128, h: 64 }, DEFAULT_THRESHOLDS, shape({ opaqueCount: 4000 }))!;
+    expect(f).not.toBeNull();
+    expect(f.rule).toBe('binary-alpha');
+    expect(f.messageKey).toBe('binary-alpha');
+    expect(f.severity).toBe('info'); // ALWAYS info — an exact fact disclosed without a byte claim
+    expect(f.estimate).toBeUndefined(); // NO estimate — a 1-bit re-encode is not measurable in-browser (Inv 3/5)
+    expect(f.params).toEqual({ w: 128, h: 64 });
+  });
+
+  it('longest edge one px below minEdgePx (127) ⇒ null (tiny icons\' alpha depth is irrelevant)', () => {
+    expect(binaryAlphaFinding('i.png', { w: 127, h: 64 }, DEFAULT_THRESHOLDS, shape())).toBeNull();
+  });
+
+  it('non-binary alpha ⇒ null; fully-opaque (opaqueCount = w·h) ⇒ null (wasted-alpha owns that case)', () => {
+    expect(binaryAlphaFinding('s.png', { w: 256, h: 256 }, DEFAULT_THRESHOLDS, shape({ binaryAlpha: false }))).toBeNull();
+    expect(
+      binaryAlphaFinding('o.png', { w: 100, h: 100 }, DEFAULT_THRESHOLDS, shape({ opaqueCount: 100 * 100 })),
+    ).toBeNull();
+  });
+
+  it('absent config ⇒ null (browser-only gate, NOT in resolveThresholds); absent shape ⇒ null (CLI/headless)', () => {
+    const cfgNo = { ...DEFAULT_THRESHOLDS };
+    delete cfgNo.binaryAlpha;
+    expect(binaryAlphaFinding('c.png', { w: 256, h: 256 }, cfgNo, shape())).toBeNull();
+    expect(binaryAlphaFinding('c.png', { w: 256, h: 256 }, DEFAULT_THRESHOLDS, undefined)).toBeNull();
+  });
+
+  it('analyze threads alphaShape to a LOOSE image ⇒ finding; solid/opaque refs are de-overlapped away', async () => {
+    const rep = await analyze([looseImg('cutout.png', 256, 256)], undefined, {
+      features: [{ assetRef: 'cutout.png', contentHash: 'h', alphaShape: shape() }],
+    });
+    const ba = rep.findings.find((f) => f.rule === 'binary-alpha');
+    expect(ba?.assetRef).toBe('cutout.png');
+    expect(ba?.severity).toBe('info');
+    expect(ba?.estimate).toBeUndefined();
+    // solid:true ⇒ solid-fill owns the ref ⇒ binary-alpha suppressed at the analyze gate.
+    const solidRep = await analyze([looseImg('cutout.png', 1024, 1024)], undefined, {
+      features: [{ assetRef: 'cutout.png', contentHash: 'h', solid: true, alphaShape: shape() }],
+    });
+    expect(solidRep.findings.find((f) => f.rule === 'binary-alpha')).toBeUndefined();
+    // opaque:true ⇒ wasted-alpha owns the ref ⇒ binary-alpha suppressed at the analyze gate. (The shape is
+    // deliberately contradictory — opaqueCount < w·h beside opaque:true — to isolate the ANALYZE-level gate
+    // from the rule's own opaqueCount de-overlap, which the unit test above already pins.)
+    const opaqueRep = await analyze([looseImg('cutout.png', 256, 256)], undefined, {
+      features: [{ assetRef: 'cutout.png', contentHash: 'h', opaque: true, alphaShape: shape() }],
+    });
+    expect(opaqueRep.findings.find((f) => f.rule === 'binary-alpha')).toBeUndefined();
+  });
+
+  it('analyze NEVER fires binary-alpha for an ATLAS (loose-only), and potentialDiskSaved never moves', async () => {
+    const atlasAsset: Asset = {
+      kind: 'atlas',
+      atlas: {
+        name: 'sheet.png', imageRef: 'sheet.png', size: { w: 256, h: 256 },
+        sprites: [{ name: 's0', frame: { x: 0, y: 0, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 32, h: 32 } }],
+        source: { kind: 'pixi' },
+      },
+      image: { name: 'sheet.png', imageRef: 'sheet.png', size: { w: 256, h: 256 }, mime: 'image/png', byteSize: 10000 },
+    };
+    const rep = await analyze([atlasAsset], undefined, {
+      features: [{ assetRef: 'sheet.png', contentHash: 'h', alphaShape: shape() }],
+    });
+    expect(rep.findings.find((f) => f.rule === 'binary-alpha')).toBeUndefined();
+    // With and without the feature the totals are IDENTICAL — neither disclosure carries any estimate.
+    const assets = [looseImg('cutout.png', 256, 256)];
+    const withF = await analyze(assets, undefined, { features: [{ assetRef: 'cutout.png', contentHash: 'h', alphaShape: shape() }] });
+    const without = await analyze(assets, undefined, { features: [{ assetRef: 'cutout.png', contentHash: 'h' }] });
+    expect(withF.totals).toEqual(without.totals);
+    expect(withF.findings.filter((f) => f.rule !== 'binary-alpha' && f.rule !== 'interior-transparency')).toEqual(without.findings);
   });
 });

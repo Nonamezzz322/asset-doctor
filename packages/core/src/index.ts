@@ -295,6 +295,12 @@ export type Rule =
   | 'strippable-metadata'
   // per-asset: an embedded ICC profile we cannot prove is sRGB (disclosure/correctness — NO estimate)
   | 'icc-non-srgb'
+  // per-asset: fully-transparent pixels INSIDE a loose image's opaque bounding box — fill-rate/overdraw
+  // disclosure (the win lives in the polygon packer; NO byte estimate — fill-rate isn't byte-measurable)
+  | 'interior-transparency'
+  // per-asset: every alpha byte is exactly 0 or 255 — the 8-bit channel stores 1 bit (disclosure — NO
+  // estimate: a 1-bit-alpha re-encode is not measurable in-browser, canvas emits 8-bit only)
+  | 'binary-alpha'
   // whole-folder (scope: 'folder')
   | 'duplicate-exact'
   | 'duplicate-similar'
@@ -441,6 +447,17 @@ export interface ImageFeatures {
    *  qualifying edge pixel; absent (no scan, non-alpha format, decode failed, headless/CLI, zero qualifying
    *  pixels) ⇒ the finding can never fire ⇒ today's behavior — documented exactly like blockUpscaleDepth. */
   premultipliedEdge?: { edgePixels: number; fringeFrac: number };
+  /** Alpha-shape readout from the host's FULL-RESOLUTION scan of a LOOSE alpha-bearing image (PNG/WebP —
+   *  the same fullData pass as the opaque scan). `bboxW`/`bboxH` = the tight bounding box of pixels with
+   *  alpha > 0; `interiorTransparent` = fully-transparent (alpha === 0) pixels INSIDE that bbox (rings,
+   *  sparks, diagonals — transparent MARGINS outside the bbox are trim territory, deliberately NOT counted
+   *  here); `binaryAlpha` = every alpha byte is exactly 0 or 255; `opaqueCount` = pixels at alpha === 255.
+   *  EXACT counts, one O(N) pass + one bbox-bounded pass — a MEASUREMENT of the stored pixels only. Drives
+   *  the loose-only `interior-transparency` and `binary-alpha` disclosures (both info, NO estimate). Set by
+   *  the worker ONLY when the scan ran AND found ≥1 pixel with alpha > 0; absent (no scan, non-alpha format,
+   *  fully-transparent image, decode failed, headless/CLI) ⇒ neither finding can ever fire ⇒ today's
+   *  behavior — documented exactly like premultipliedEdge. */
+  alphaShape?: { bboxW: number; bboxH: number; interiorTransparent: number; binaryAlpha: boolean; opaqueCount: number };
 }
 
 /** Per-atlas sprite-region hashes computed by the host (worker) from the ALREADY-DECODED atlas page, fed
@@ -747,6 +764,25 @@ export interface ThresholdConfig {
    *  deliberately NOT enumerated by resolveThresholds (the scan needs a full-res decode the CLI never
    *  performs; mirrors wastedAlpha/frameRedundancy). */
   premultipliedAlpha?: { minEdgePixels: number; fringeFrac: number; minSprites: number };
+  /** Interior-transparency disclosure gate (loose images only). Fires when the host-measured
+   *  `ImageFeatures.alphaShape` bbox (of alpha > 0) covers ≥ `minBboxPx` pixels AND the fraction of
+   *  fully-transparent pixels INSIDE that bbox is ≥ `minRatio`. FILL-RATE disclosure (invariant 3/5):
+   *  severity is always `info` and there is NO estimate — the GPU still rasterizes those pixels every
+   *  draw, but fill-rate/overdraw is NOT byte-measurable, so claiming disk or VRAM bytes would be a lie;
+   *  the realizable win lives in the shipped polygon packer (the fix copy points there). Transparent
+   *  MARGINS outside the bbox are trim-margin territory, never counted here. Optional/additive: absent ⇒
+   *  the finding is suppressed. Browser-only — deliberately NOT enumerated by resolveThresholds (the scan
+   *  needs a full-res decode the CLI never performs; mirrors premultipliedAlpha/wastedAlpha). */
+  interiorTransparency?: { minBboxPx: number; minRatio: number };
+  /** Binary-alpha disclosure gate (loose images only). Fires when the host-measured
+   *  `ImageFeatures.alphaShape` proves EVERY alpha byte is exactly 0 or 255 (and the image is neither
+   *  fully opaque — that is wasted-alpha's case — nor fully transparent, which yields no alphaShape at
+   *  all) AND the longest edge is ≥ `minEdgePx`. DISCLOSURE (invariant 3/5): severity always `info`, NO
+   *  estimate — a 1-bit-alpha re-encode (PNG8 palette / punch-through GPU formats) is NOT measurable
+   *  in-browser (canvas emits 8-bit only), so we never claim bytes. Optional/additive: absent ⇒ the
+   *  finding is suppressed. Browser-only — NOT enumerated by resolveThresholds (mirrors
+   *  interiorTransparency: the same full-res alphaShape scan the CLI never performs). */
+  binaryAlpha?: { minEdgePx: number };
 }
 
 export interface AnalysisReport {
