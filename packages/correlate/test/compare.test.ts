@@ -2,7 +2,7 @@
 // gates (too-short / duration-skew / device attestation), pct omission at before===0, fail-closed parse.
 import { describe, it, expect } from 'vitest';
 import type { RuntimeReport } from '@asset-doctor/probe/runtime';
-import { compareRuntimeReports, parseRuntimeReport, COMPARE_DEFAULTS } from '../src/index';
+import { compareRuntimeReports, parseRuntimeReport, parseSessionRuntime, COMPARE_DEFAULTS } from '../src/index';
 
 const report = (over: Partial<RuntimeReport> = {}): RuntimeReport => ({
   frames: 600,
@@ -86,5 +86,15 @@ describe('parseRuntimeReport — fail-closed import of an exported session JSON'
     const noTiming = JSON.parse(JSON.stringify(report()));
     delete noTiming.timing;
     expect(parseRuntimeReport(noTiming)).toBeNull();
+  });
+});
+
+describe('parseSessionRuntime — accepts a bare report OR the shipped extension session envelope', () => {
+  it('unwraps the envelope runtime field; rejects an envelope with a garbled runtime', () => {
+    const envelope = { url: 'https://game.example', locale: 'en', runtime: JSON.parse(JSON.stringify(report())), correlation: null, staticFindings: [] };
+    expect(parseSessionRuntime(envelope)).not.toBeNull();
+    expect(parseSessionRuntime(JSON.parse(JSON.stringify(report())))).not.toBeNull(); // bare still works
+    expect(parseSessionRuntime({ url: 'x', runtime: { frames: 'no' } })).toBeNull();
+    expect(parseSessionRuntime('nonsense')).toBeNull();
   });
 });

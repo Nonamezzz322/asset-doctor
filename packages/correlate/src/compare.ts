@@ -139,3 +139,15 @@ export function parseRuntimeReport(raw: unknown): RuntimeReport | null {
   }
   return raw as RuntimeReport;
 }
+
+/** Accept EITHER a bare RuntimeReport JSON or the extension's session envelope
+ *  ({ url, locale, runtime, correlation, staticFindings } — the shipped exportBtn/sessionJson shape):
+ *  the envelope's `runtime` field is validated with the same fail-closed check. Anything else ⇒ null. */
+export function parseSessionRuntime(raw: unknown): RuntimeReport | null {
+  const direct = parseRuntimeReport(raw);
+  if (direct) return direct;
+  if (typeof raw === 'object' && raw !== null && 'runtime' in (raw as Record<string, unknown>)) {
+    return parseRuntimeReport((raw as Record<string, unknown>).runtime);
+  }
+  return null;
+}
