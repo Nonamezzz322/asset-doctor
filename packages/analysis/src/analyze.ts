@@ -244,8 +244,10 @@ export async function analyze(
       const bleed = bleedingFinding(atlas, cfg);
       if (bleed) findings.push(bleed);
       // Excessive gutter — the inverse packing disclosure (median nearest-neighbour gap systematically wide).
-      // Pure integer geometry, always info, NO estimate ⇒ nothing flows into totals. Absent cfg.gutter
-      // (CLI/headless resolveThresholds omission) ⇒ no finding ⇒ byte-identical.
+      // Pure integer geometry, always info, NO estimate ⇒ nothing flows into totals. CLI note (verified):
+      // the BUDGET path resolves thresholds from a partial (resolveThresholds enumerates 7 groups ⇒ no
+      // cfg.gutter ⇒ null there), but plain `audit`/`init` run FULL DEFAULT_THRESHOLDS, so this finding CAN
+      // fire in CLI audit JSON — additive only, the same shape bleeding/wasted-regions already emit there.
       const gut = gutterFinding(atlas, cfg);
       if (gut) findings.push(gut);
       // Declared (atlas.size = manifest meta.size / Spine page size:) vs REAL (image.size = decoded pixel

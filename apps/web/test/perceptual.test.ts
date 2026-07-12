@@ -206,3 +206,48 @@ describe('perceptual hashing', () => {
     expect(dHashFromGray(gradient)).toHaveLength(16);
   });
 });
+
+describe('alphaShape holeRects — coarse under-claiming interior-hole map (V1 overlay)', () => {
+  // 32×32 ⇒ defaultCell = 8 ⇒ a 4×4 grid; coords below are cell-aligned on purpose.
+  const ring32 = rgba(32, 32, (x, y) => {
+    const hole = x >= 8 && x < 24 && y >= 8 && y < 24;
+    return hole ? [0, 0, 0, 0] : [200, 80, 40, 255];
+  });
+
+  it('a cell-aligned ring hole merges to ONE absolute-coords rect', () => {
+    const s = alphaShape(ring32, 32, 32)!;
+    expect(s.holeRects).toEqual([{ x: 8, y: 8, w: 16, h: 16 }]);
+  });
+
+  it('margins-only sprite (opaque core, transparent border) ⇒ NO holeRects (margins are trim territory)', () => {
+    const margins = rgba(32, 32, (x, y) => {
+      const core = x >= 8 && x < 24 && y >= 8 && y < 24;
+      return core ? [200, 80, 40, 255] : [0, 0, 0, 0];
+    });
+    const s = alphaShape(margins, 32, 32)!;
+    expect(s.holeRects).toBeUndefined();
+    expect(s.interiorTransparent).toBe(0);
+  });
+
+  it('a hole that straddles every cell boundary under-claims to NO rects (never marks a real pixel)', () => {
+    const straddle = rgba(32, 32, (x, y) => {
+      const hole = x >= 10 && x < 22 && y >= 10 && y < 22; // 12×12, no whole 8px cell fits fully clear
+      return hole ? [0, 0, 0, 0] : [200, 80, 40, 255];
+    });
+    const s = alphaShape(straddle, 32, 32)!;
+    expect(s.holeRects).toBeUndefined();
+    expect(s.interiorTransparent).toBe(144); // the exact count is untouched — only the coarse map is absent
+  });
+
+  it('all-or-nothing cap: a shredded checkerboard of isolated holes emits NO map at all', () => {
+    // 256² ⇒ cell 8 ⇒ 32×32 grid; alternating fully-clear cells (odd parity keeps corners opaque ⇒ full
+    // bbox) merge into ~512 single-cell rects — far past MAX_HOLE_RECTS ⇒ the field must be ABSENT.
+    const board = rgba(256, 256, (x, y) => {
+      const c = (x >> 3) + (y >> 3);
+      return c % 2 === 1 ? [0, 0, 0, 0] : [200, 80, 40, 255];
+    });
+    const s = alphaShape(board, 256, 256)!;
+    expect(s.holeRects).toBeUndefined();
+    expect(s.interiorTransparent).toBeGreaterThan(0);
+  });
+});

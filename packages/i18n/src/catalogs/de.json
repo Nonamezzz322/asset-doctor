@@ -679,6 +679,8 @@
   "legend.transparent": "transparenter Rand",
   "legend.bleeding": "Bleeding",
   "legend.duplicateFrame": "doppelter Frame",
+  "legend.gutter": "Gutter-Abstand",
+  "legend.interiorHole": "transparentes Inneres",
   "film.alt": {
     "$count": "regions",
     "one": "Atlas {name}, {w}×{h} Pixel, {regions} hervorgehobener Bereich",

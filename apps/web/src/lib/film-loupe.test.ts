@@ -422,3 +422,20 @@ describe('inspectFrame — inspect a specific frame by index (real facts, honest
     expect(inspectFrame(-1, frames, [])).toEqual({ frame: null, kinds: [] });
   });
 });
+
+describe('loupe × V1 overlay kinds — gutter / interior-hole join the inspect vocabulary automatically', () => {
+  const t = (key: string, params?: Record<string, string | number>): string =>
+    params ? `${key}|${Object.entries(params).map(([k, v]) => `${k}=${v}`).join(',')}` : key;
+  it('kindsAtPoint reports the new kinds in canonical legend order', () => {
+    const findings = [
+      { overlay: [{ kind: 'interior-hole', rects: [{ x: 0, y: 0, w: 10, h: 10 }] }] },
+      { overlay: [{ kind: 'gutter', rects: [{ x: 0, y: 0, w: 10, h: 10 }] }] },
+    ] as unknown as Parameters<typeof kindsAtPoint>[1];
+    expect(kindsAtPoint({ x: 5, y: 5 }, findings)).toEqual(['gutter', 'interior-hole']);
+  });
+  it('a loose-image interior-hole hit reads "No sprite here · <legend label>" (honest, no fake frame)', () => {
+    expect(formatInspect({ frame: null, kinds: ['interior-hole'] }, null, undefined, t)).toBe(
+      'loupe.noSpriteHere · legend.interiorHole',
+    );
+  });
+});

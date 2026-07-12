@@ -665,6 +665,8 @@
   "legend.transparent": "透明边距",
   "legend.bleeding": "渗色",
   "legend.duplicateFrame": "重复帧",
+  "legend.gutter": "间距空隙",
+  "legend.interiorHole": "透明内部",
   "film.alt": {
     "$count": "regions",
     "one": "图集 {name}，{w}×{h} 像素，{regions} 个高亮区域",

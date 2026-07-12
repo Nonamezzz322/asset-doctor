@@ -148,10 +148,13 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   // (the KTX2 → BC/ASTC transcode path). The FACT is exact and header-only (width % 4 / height % 4 — zero
   // decode); the gate only decides whether it is worth a folder line. Always `info`, NO estimate (transcode
   // targets vary per device; the on-device KTX2 probe measures real footprints, we never predict them).
-  // Loose AND atlas pages both count. Browser-only — NOT in resolveThresholds (CLI stays byte-identical).
+  // Loose AND atlas pages both count. CLI note: the budget path drops this key (resolveThresholds
+  // partial-merge), but plain audit/init run FULL defaults ⇒ the finding CAN fire in CLI audit JSON too.
   gutter: { minGaps: 4, minMedianPx: 8 }, // CALIBRATE — excessive-gutter (over-padded packing) disclosure
   // CORPUS-VERIFIED (2026-07-11): 153 real TP atlases + 369 Spine pages — ZERO flagged (tight real exports
   // never trip it); the sparse-bmfont fixtures remain the true-positive proof ⇒ default confirmed.
+  // CLI note: the budget path drops this key (resolveThresholds partial-merge), but plain audit/init run
+  // FULL defaults ⇒ the finding CAN fire in CLI audit JSON (additive, like bleeding/wasted-regions).
   // gate. `minGaps` (4): at least this many nearest-neighbour gaps must be measurable before a median means
   // anything (a 2-frame strip is not a packing pattern). `minMedianPx` (8): ~2px padding + edge-extrude is
   // the accepted bleed-safe gutter; a MEDIAN of ≥ 8px means HALF the frames sit that far apart — systematic

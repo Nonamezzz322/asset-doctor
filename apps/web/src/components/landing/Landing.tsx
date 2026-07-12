@@ -123,6 +123,8 @@ export function Landing({ phaseT }: { phaseT: 'idle' | 'analyzing' | 'error' }) 
     { kind: 'transparent' as const, label: t('legend.transparent') },
     { kind: 'bleeding' as const, label: t('legend.bleeding') },
     { kind: 'duplicate-frame' as const, label: t('legend.duplicateFrame') },
+    { kind: 'gutter' as const, label: t('legend.gutter') },
+    { kind: 'interior-hole' as const, label: t('legend.interiorHole') },
   ];
 
   const h2Class = 'ad-focus-anchor font-display text-2xl font-semibold tracking-tight sm:text-3xl';

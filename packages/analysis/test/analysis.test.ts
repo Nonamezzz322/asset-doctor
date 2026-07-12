@@ -2796,3 +2796,57 @@ describe('folder-disclosure refs preview cap (corpus-driven: 387/414 misaligned 
     expect(f.detail).toContain('… (+3)');
   });
 });
+
+describe('excessive-gutter OVERLAY strips (V1 visualization — the measured gaps themselves)', () => {
+  const row = (name: string, n: number, step: number, w = 64): Atlas => ({
+    name, imageRef: name, size: { w: 2048, h: 128 }, source: { kind: 'pixi' },
+    sprites: Array.from({ length: n }, (_, i) => ({
+      name: `s${i}`, frame: { x: i * step, y: 0, w, h: 64 }, rotated: false, trimmed: false, sourceSize: { w, h: 64 },
+    })),
+  });
+
+  it('5-frame row: 4 measured gaps ⇒ 4 gutter strips at the exact inter-frame air, sig-stable', () => {
+    const f = gutterFinding(row('padded.png', 5, 80), DEFAULT_THRESHOLDS)!;
+    expect(f.overlay).toEqual([{
+      kind: 'gutter',
+      rects: [
+        { x: 64, y: 0, w: 16, h: 64 },
+        { x: 144, y: 0, w: 16, h: 64 },
+        { x: 224, y: 0, w: 16, h: 64 },
+        { x: 304, y: 0, w: 16, h: 64 },
+      ],
+    }]);
+    // sig-stability proof: the overlay is ADDITIVE — id/severity/messageKey/params byte-identical to before.
+    expect(f.id).toBe('padded.png:excessive-gutter');
+    expect(f.severity).toBe('info');
+    expect(f.messageKey).toBe('excessive-gutter');
+    expect(f.params).toEqual({ median: 16, n: 4 });
+    expect(f.estimate).toBeUndefined();
+  });
+
+  it('tie (gx === gy === g) emits BOTH strips — both are genuinely measured equal minima', () => {
+    // 2x3 grid of 64px frames with 16px gaps both ways (5 measurable gaps ≥ minGaps 4); the top-row
+    // interior frames measure gx = gy = 16 — a genuine tie, BOTH strips are honest measurements.
+    const fr = (x: number, y: number) =>
+      ({ name: `f${x}_${y}`, frame: { x, y, w: 64, h: 64 }, rotated: false, trimmed: false, sourceSize: { w: 64, h: 64 } });
+    const a: Atlas = {
+      name: 'grid.png', imageRef: 'grid.png', size: { w: 256, h: 256 }, source: { kind: 'pixi' },
+      sprites: [fr(0, 0), fr(80, 0), fr(160, 0), fr(0, 80), fr(80, 80), fr(160, 80)],
+    };
+    const f = gutterFinding(a, DEFAULT_THRESHOLDS)!;
+    expect(f.params).toEqual({ median: 16, n: 5 }); // bottom-right frame has no right/below neighbour
+    expect(f.overlay![0]!.rects).toEqual([
+      { x: 64, y: 0, w: 16, h: 64 },
+      { x: 144, y: 0, w: 16, h: 64 },
+      { x: 0, y: 64, w: 64, h: 16 },
+      { x: 80, y: 64, w: 64, h: 16 },
+      { x: 160, y: 64, w: 64, h: 16 },
+      { x: 64, y: 80, w: 16, h: 64 },
+      { x: 144, y: 80, w: 16, h: 64 },
+    ]);
+  });
+
+  it('no fire ⇒ no overlay anywhere; a tight row never carries a gutter overlay', () => {
+    expect(gutterFinding(row('tight.png', 6, 64), DEFAULT_THRESHOLDS)).toBeNull();
+  });
+});

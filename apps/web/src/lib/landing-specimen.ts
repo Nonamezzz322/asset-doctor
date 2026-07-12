@@ -31,7 +31,8 @@ export const SPECIMEN_FRAMES: ReadonlyArray<SpecimenRect> = [
 ];
 
 /** Overlay zones — one of each decoded meaning (empty = red+dashed, transparent margin = yellow,
- *  bleeding = teal, duplicate-frame = teal, two matching rects). Pairwise DISJOINT (mirrors the real
+ *  bleeding = teal, duplicate-frame = teal two matching rects, gutter = info-blue inter-frame strip,
+ *  interior-hole = warn-yellow hole INSIDE a frame). Pairwise DISJOINT (mirrors the real
  *  non-double-counting: no byte is claimed by two overlays). */
 export const SPECIMEN_ZONES: ReadonlyArray<SpecimenZone> = [
   { kind: 'empty', x: 200, y: 180, w: 108, h: 124 },
@@ -39,4 +40,6 @@ export const SPECIMEN_ZONES: ReadonlyArray<SpecimenZone> = [
   { kind: 'bleeding', x: 150, y: 90, w: 4, h: 60 },
   { kind: 'duplicate-frame', x: 24, y: 232, w: 48, h: 48 },
   { kind: 'duplicate-frame', x: 88, y: 232, w: 48, h: 48 },
+  { kind: 'gutter', x: 240, y: 12, w: 8, h: 60 },
+  { kind: 'interior-hole', x: 32, y: 156, w: 36, h: 30 },
 ];

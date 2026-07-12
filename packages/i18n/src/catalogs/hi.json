@@ -679,6 +679,8 @@
   "legend.transparent": "पारदर्शी हाशिया",
   "legend.bleeding": "ब्लीडिंग",
   "legend.duplicateFrame": "डुप्लिकेट फ़्रेम",
+  "legend.gutter": "गटर अंतराल",
+  "legend.interiorHole": "पारदर्शी आंतरिक भाग",
   "film.alt": {
     "$count": "regions",
     "one": "एटलस {name}, {w}×{h} पिक्सेल, {regions} हाइलाइट किया गया क्षेत्र",

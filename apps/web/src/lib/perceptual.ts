@@ -1,7 +1,8 @@
 // Pure perceptual-hash helpers (testable headless). The worker decodes an image to a 9×8
 // grayscale and calls these; keeping the math here means it can be unit-tested without a canvas.
 
-import type { ContentClass } from '@asset-doctor/core';
+import type { ContentClass, Rect } from '@asset-doctor/core';
+import { defaultCell, mergeEmptyRects, type Coverage } from '@asset-doctor/analysis';
 import { ANALYZE_PAGE_MAX_PX } from './bitmap-budget';
 
 const DW = 9; // sample width
@@ -342,7 +343,20 @@ export interface AlphaShapeResult {
   /** Pixels at alpha === 255 (fully opaque). opaqueCount === w·h ⇒ the image is fully opaque (wasted-alpha's
    *  case — the binary-alpha rule de-overlaps on this). */
   opaqueCount: number;
+  /** COARSE, strictly under-claiming map of the interior holes, in IMAGE pixel coords — merged rects of
+   *  grid cells (defaultCell, ~64/long edge) that lie WHOLLY inside the bbox with EVERY pixel at
+   *  alpha === 0. Cells straddling the bbox edge or containing any alpha > 0 pixel count as covered (the
+   *  wasted-regions grid philosophy inverted — the overlay never marks a real pixel). Absent when no whole
+   *  cell qualifies OR the merged map exceeds MAX_HOLE_RECTS (all-or-nothing: a partial hole map would lie
+   *  by omission). Drives ONLY the interior-transparency overlay, never its gate (the gate reads the exact
+   *  `interiorTransparent` count). */
+  holeRects?: Rect[];
 }
+
+/** All-or-nothing cap on the merged hole-rect map: ring/glow art (the calibrated ≥0.6-ratio targets) merges
+ *  to a handful of rects; only shredded-noise sprites exceed this, and for them a truncated map would lie
+ *  by omission — so past the cap the field is omitted entirely and the finding renders numbers-only. */
+export const MAX_HOLE_RECTS = 64;
 
 /** MEASURE the alpha SHAPE of a straight-alpha RGBA buffer for the interior-transparency + binary-alpha
  *  disclosures — ONE O(N) pass computes everything both rules need (bbox of alpha > 0, binaryAlpha,
@@ -386,7 +400,46 @@ export function alphaShape(
       if ((rgba[(y * w + x) * 4 + 3] ?? 0) === 0) interiorTransparent++;
     }
   }
-  return { bboxW: maxX - minX + 1, bboxH: maxY - minY + 1, interiorTransparent, binaryAlpha, opaqueCount };
+  // Coarse hole map for the interior-transparency overlay. A whole-image Coverage grid (the wasted-regions
+  // machinery, philosophy INVERTED): a cell is left UNcovered — i.e. becomes part of a merged hole rect —
+  // ONLY when it lies WHOLLY inside the bbox and EVERY one of its pixels is alpha === 0. Everything else
+  // (bbox-straddling cells, cells with any visible pixel, margins) is marked covered, so mergeEmptyRects can
+  // never emit a rect over a real pixel (strict under-claim, invariant 3). Rects come out clamped in
+  // absolute image pixel coords — exactly what the FilmViewer paint loop draws.
+  const cell = defaultCell({ w, h });
+  const cols = Math.ceil(w / cell);
+  const rows = Math.ceil(h / cell);
+  const covered = new Array<boolean>(cols * rows).fill(true);
+  let anyHole = false;
+  for (let r = 0; r < rows; r++) {
+    const y0 = r * cell;
+    const y1 = Math.min(y0 + cell, h);
+    if (y0 < minY || y1 - 1 > maxY) continue; // row band straddles/exits the bbox ⇒ stays covered
+    for (let c = 0; c < cols; c++) {
+      const x0 = c * cell;
+      const x1 = Math.min(x0 + cell, w);
+      if (x0 < minX || x1 - 1 > maxX) continue; // column band straddles/exits the bbox ⇒ stays covered
+      let allClear = true;
+      for (let y = y0; y < y1 && allClear; y++) {
+        for (let x = x0; x < x1; x++) {
+          if ((rgba[(y * w + x) * 4 + 3] ?? 0) !== 0) {
+            allClear = false;
+            break;
+          }
+        }
+      }
+      if (allClear) {
+        covered[r * cols + c] = false;
+        anyHole = true;
+      }
+    }
+  }
+  const base = { bboxW: maxX - minX + 1, bboxH: maxY - minY + 1, interiorTransparent, binaryAlpha, opaqueCount };
+  if (!anyHole) return base; // no whole-cell hole — the overlay field stays absent (numbers-only finding)
+  const holeRects = mergeEmptyRects({ cols, rows, cell, covered } as Coverage, { w, h });
+  // All-or-nothing cap: a truncated map would lie by omission — past the cap ship NO map at all.
+  if (holeRects.length === 0 || holeRects.length > MAX_HOLE_RECTS) return base;
+  return { ...base, holeRects };
 }
 
 /** Axis-aligned packed rect of a sprite AS PLACED in the atlas page (already w/h-swapped when rotated). */

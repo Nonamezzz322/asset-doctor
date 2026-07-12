@@ -683,6 +683,8 @@
   "legend.transparent": "margem transparente",
   "legend.bleeding": "sangramento",
   "legend.duplicateFrame": "moldura duplicada",
+  "legend.gutter": "espaçamento de margem",
+  "legend.interiorHole": "interior transparente",
   "film.alt": {
     "$count": "regions",
     "one": "Atlas {name}, {w}×{h} pixels, {regions} região destacada",

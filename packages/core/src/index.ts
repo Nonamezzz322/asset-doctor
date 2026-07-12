@@ -365,9 +365,9 @@ export const COMPRESSED_BYTES_PER_PX_CEILING: Record<CompressedTextureFormat, nu
  *  model ('raster' ⇒ w·h·4) OR a compressed-block ceiling (CompressedTextureFormat ⇒ ≤ bpp·w·h). */
 export type TextureFootprintFormat = 'raster' | CompressedTextureFormat;
 
-/** Highlight zones drawn on the film-viewer snapshot, in atlas pixel coords. */
+/** Highlight zones drawn on the film-viewer snapshot, in asset (atlas page / loose image) pixel coords. */
 export interface OverlayZone {
-  kind: 'empty' | 'transparent' | 'bleeding' | 'duplicate-frame';
+  kind: 'empty' | 'transparent' | 'bleeding' | 'duplicate-frame' | 'gutter' | 'interior-hole';
   rects: Rect[];
 }
 
@@ -463,8 +463,13 @@ export interface ImageFeatures {
    *  the loose-only `interior-transparency` and `binary-alpha` disclosures (both info, NO estimate). Set by
    *  the worker ONLY when the scan ran AND found ≥1 pixel with alpha > 0; absent (no scan, non-alpha format,
    *  fully-transparent image, decode failed, headless/CLI) ⇒ neither finding can ever fire ⇒ today's
-   *  behavior — documented exactly like premultipliedEdge. */
-  alphaShape?: { bboxW: number; bboxH: number; interiorTransparent: number; binaryAlpha: boolean; opaqueCount: number };
+   *  behavior — documented exactly like premultipliedEdge. `holeRects` (optional, additive): a COARSE,
+   *  strictly under-claiming map of the interior holes in IMAGE pixel coords — merged rects of grid cells
+   *  that lie WHOLLY inside the bbox with EVERY pixel at alpha === 0 (cells straddling the bbox edge or
+   *  containing any alpha > 0 pixel count as covered, the wasted-regions grid philosophy inverted). Absent
+   *  when no whole cell qualifies OR the merged map exceeds the host's all-or-nothing cap (a partial map
+   *  would lie by omission); only ever drives the interior-transparency finding's overlay, never its gate. */
+  alphaShape?: { bboxW: number; bboxH: number; interiorTransparent: number; binaryAlpha: boolean; opaqueCount: number; holeRects?: Rect[] };
 }
 
 /** Per-atlas sprite-region hashes computed by the host (worker) from the ALREADY-DECODED atlas page, fed

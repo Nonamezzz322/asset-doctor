@@ -683,6 +683,8 @@
   "legend.transparent": "marge transparente",
   "legend.bleeding": "débordement",
   "legend.duplicateFrame": "image en double",
+  "legend.gutter": "écart de gouttière",
+  "legend.interiorHole": "intérieur transparent",
   "film.alt": {
     "$count": "regions",
     "one": "Atlas {name}, {w}×{h} pixels, {regions} région mise en évidence",

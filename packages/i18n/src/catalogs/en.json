@@ -44,6 +44,8 @@
   "legend.transparent": "transparent margin",
   "legend.bleeding": "bleeding",
   "legend.duplicateFrame": "duplicate frame",
+  "legend.gutter": "gutter gap",
+  "legend.interiorHole": "transparent interior",
   "film.alt": {
     "$count": "regions",
     "one": "Atlas {name}, {w}×{h} pixels, {regions} highlighted region",

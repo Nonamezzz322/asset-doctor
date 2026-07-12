@@ -619,6 +619,13 @@ export function interiorTransparencyFinding(
     fix: 'Pack with the polygon packer (mesh mode) so transparent interior pixels are never rasterized.',
     // NO estimate field AT ALL (no diskBytesSaved, no vramBytesSaved) — fill-rate/overdraw is not
     // byte-measurable, so any byte claim would be fabricated (precedent: bleeding, icc-non-srgb).
+    // Overlay: the host's COARSE under-claiming hole map (whole grid cells at alpha === 0 strictly inside
+    // the bbox, image pixel coords) — drawn verbatim when present. Absent holeRects (headless host, no
+    // whole-cell hole, or the host's all-or-nothing cap) ⇒ no overlay; the finding itself is UNCHANGED
+    // (the gate reads only the exact interiorTransparent count, never the coarse map).
+    ...(shape.holeRects && shape.holeRects.length > 0
+      ? { overlay: [{ kind: 'interior-hole' as const, rects: shape.holeRects }] }
+      : {}),
     messageKey: 'interior-transparency',
     params: { w: size.w, h: size.h, bboxW: shape.bboxW, bboxH: shape.bboxH, ratioPct, px },
   };
@@ -835,33 +842,63 @@ export function gutterFinding(atlas: Atlas, cfg: ThresholdConfig): Finding | nul
 
   // Nearest gap along +x: sorted by x, the FIRST y-overlapping rect whose left edge is at/past A's right
   // edge gives A's minimal x-gap (left edges are non-decreasing). Same along +y with the transposed sort.
+  // Each probe also returns the measured gap STRIP — the air between A's edge and that first (= minimal-gap)
+  // neighbour B, spanning exactly their perpendicular overlap interval. The strip is the MEASUREMENT the
+  // median consumed, drawn where it was taken (invariant 3: we visualize the measured gap, nothing else).
   const byX = [...rects].sort((a, b) => a.x - b.x || a.y - b.y);
   const byY = [...rects].sort((a, b) => a.y - b.y || a.x - b.x);
-  const gapRight = (A: Rect): number | null => {
+  const gapRight = (A: Rect): { gap: number; strip: Rect } | null => {
     for (const B of byX) {
       if (B.x < A.x + A.w) continue; // not past A's right edge (includes A itself and overlaps)
-      if (B.y < A.y + A.h && B.y + B.h > A.y) return B.x - (A.x + A.w); // first y-overlapping ⇒ minimal
+      if (B.y < A.y + A.h && B.y + B.h > A.y) {
+        // first y-overlapping ⇒ minimal gap; strip = the gap × the y-overlap interval with THAT neighbour
+        const top = Math.max(A.y, B.y);
+        const bottom = Math.min(A.y + A.h, B.y + B.h);
+        return { gap: B.x - (A.x + A.w), strip: { x: A.x + A.w, y: top, w: B.x - (A.x + A.w), h: bottom - top } };
+      }
     }
     return null;
   };
-  const gapBelow = (A: Rect): number | null => {
+  const gapBelow = (A: Rect): { gap: number; strip: Rect } | null => {
     for (const B of byY) {
       if (B.y < A.y + A.h) continue;
-      if (B.x < A.x + A.w && B.x + B.w > A.x) return B.y - (A.y + A.h);
+      if (B.x < A.x + A.w && B.x + B.w > A.x) {
+        const left = Math.max(A.x, B.x);
+        const right = Math.min(A.x + A.w, B.x + B.w);
+        return { gap: B.y - (A.y + A.h), strip: { x: left, y: A.y + A.h, w: right - left, h: B.y - (A.y + A.h) } };
+      }
     }
     return null;
+  };
+  // Strips dedupe via the seen-key pattern (bleeding precedent): two frames can measure the SAME air
+  // (A's right gap is B's left gap in a transposed layout) — one region, one strip.
+  const strips: Rect[] = [];
+  const stripSeen = new Set<string>();
+  const pushStrip = (s: Rect): void => {
+    const k = `${s.x},${s.y},${s.w},${s.h}`;
+    if (!stripSeen.has(k)) {
+      stripSeen.add(k);
+      strips.push(s);
+    }
   };
   const gaps: number[] = [];
   for (const A of rects) {
     const gx = gapRight(A);
     const gy = gapBelow(A);
-    const g = gx === null ? gy : gy === null ? gx : Math.min(gx, gy);
-    if (g !== null) gaps.push(g); // edge frames with no right/below neighbour measure nothing (honest skip)
+    const g = gx === null ? (gy?.gap ?? null) : gy === null ? gx.gap : Math.min(gx.gap, gy.gap);
+    if (g === null) continue; // edge frames with no right/below neighbour measure nothing (honest skip)
+    gaps.push(g);
+    if (g === 0) continue; // touching frames: a zero-width strip is undrawable — bleeding's territory
+    // Emit ONLY the strip(s) whose gap === g — the value the median actually consumed. On a tie BOTH are
+    // genuinely measured equal minima, so both are honest (never the larger, unconsumed gap).
+    if (gx !== null && gx.gap === g) pushStrip(gx.strip);
+    if (gy !== null && gy.gap === g) pushStrip(gy.strip);
   }
   if (gaps.length < gate.minGaps) return null;
   gaps.sort((a, b) => a - b);
   const median = gaps[(gaps.length - 1) >> 1]!; // lower median — integer, deterministic
   if (median < gate.minMedianPx) return null;
+  strips.sort((a, b) => a.y - b.y || a.x - b.x || a.h - b.h || a.w - b.w); // deterministic (bleeding precedent)
   return {
     id: `${atlas.name}:excessive-gutter`,
     rule: 'excessive-gutter',
@@ -876,6 +913,10 @@ export function gutterFinding(atlas: Atlas, cfg: ThresholdConfig): Finding | nul
     fix: 'Repack with a smaller padding (~2px) plus edge-extrude; verify no bleeding at your filter settings.',
     // NO estimate field AT ALL — the reclaimed area depends on the repacked layout (invariant 3); the
     // shipped repack receipt MEASURES it instead of us predicting it.
+    // Overlay: the MEASURED minimal-gap strips themselves (≤2 per distinct frame, deduped, zero-gaps
+    // skipped) — the exact air the median consumed, never a predicted reclaim region. Omitted when every
+    // measured gap was 0 (all strips skipped) so the finding stays overlay-free rather than carrying [].
+    ...(strips.length > 0 ? { overlay: [{ kind: 'gutter' as const, rects: strips }] } : {}),
     messageKey: 'excessive-gutter',
     params: { median, n: gaps.length },
   };

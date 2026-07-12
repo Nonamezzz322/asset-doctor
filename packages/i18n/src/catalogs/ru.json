@@ -705,6 +705,8 @@
   "legend.transparent": "прозрачные поля",
   "legend.bleeding": "затекание",
   "legend.duplicateFrame": "дубликат кадра",
+  "legend.gutter": "зазор gutter",
+  "legend.interiorHole": "прозрачная внутренность",
   "film.alt": {
     "$count": "regions",
     "one": "Атлас {name}, {w}×{h} пикселей, выделена {regions} область",

@@ -48,6 +48,8 @@
   "legend.transparent": "прозорі поля",
   "legend.bleeding": "затікання",
   "legend.duplicateFrame": "дублікат кадру",
+  "legend.gutter": "зазор gutter",
+  "legend.interiorHole": "прозора внутрішність",
   "film.alt": {
     "$count": "regions",
     "one": "Атлас {name}, {w}×{h} пікселів, виділена {regions} область",
