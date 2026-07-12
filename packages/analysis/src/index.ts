@@ -19,6 +19,7 @@ export {
   trimMarginFinding,
   bleedingFinding,
   gutterFinding,
+  spineUnreferencedRegionsFindings,
   dimensionMismatchFinding,
   wastedAlphaFinding,
   strippableMetadataFinding,

@@ -14,7 +14,7 @@ import { ZONE_STYLE } from './film-legend-style';
 
 /** Canonical, fixed reading order (matches §5 / ZONE_STYLE declaration order). We map over THIS array
  *  filtered by a presence Set — never iterate the Set — so the output order is deterministic. */
-export const ZONE_KIND_ORDER: OverlayZone['kind'][] = ['empty', 'transparent', 'bleeding', 'duplicate-frame', 'gutter', 'interior-hole'];
+export const ZONE_KIND_ORDER: OverlayZone['kind'][] = ['empty', 'transparent', 'bleeding', 'duplicate-frame', 'gutter', 'interior-hole', 'dead-region'];
 
 const LABEL_KEY: Record<OverlayZone['kind'], string> = {
   empty: 'legend.empty',
@@ -23,6 +23,7 @@ const LABEL_KEY: Record<OverlayZone['kind'], string> = {
   'duplicate-frame': 'legend.duplicateFrame',
   gutter: 'legend.gutter',
   'interior-hole': 'legend.interiorHole',
+  'dead-region': 'legend.deadRegion',
 };
 
 /** The i18n label key for an overlay kind — the SAME key the legend swatch prints. Exported so the loupe's

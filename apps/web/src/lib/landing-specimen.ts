@@ -42,4 +42,5 @@ export const SPECIMEN_ZONES: ReadonlyArray<SpecimenZone> = [
   { kind: 'duplicate-frame', x: 88, y: 232, w: 48, h: 48 },
   { kind: 'gutter', x: 240, y: 12, w: 8, h: 60 },
   { kind: 'interior-hole', x: 32, y: 156, w: 36, h: 30 },
+  { kind: 'dead-region', x: 156, y: 96, w: 40, h: 28 },
 ];

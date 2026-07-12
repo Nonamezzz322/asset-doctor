@@ -125,6 +125,7 @@ export function Landing({ phaseT }: { phaseT: 'idle' | 'analyzing' | 'error' }) 
     { kind: 'duplicate-frame' as const, label: t('legend.duplicateFrame') },
     { kind: 'gutter' as const, label: t('legend.gutter') },
     { kind: 'interior-hole' as const, label: t('legend.interiorHole') },
+    { kind: 'dead-region' as const, label: t('legend.deadRegion') },
   ];
 
   const h2Class = 'ad-focus-anchor font-display text-2xl font-semibold tracking-tight sm:text-3xl';

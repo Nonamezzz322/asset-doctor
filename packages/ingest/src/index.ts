@@ -28,6 +28,10 @@ export interface GroupedAtlas {
   manifest: unknown;
   image: RawFile;
   name: string;
+  /** Dir-aware key (keyOf) of the SOURCE manifest file (.json/.atlas/.fnt). Needed because a page can
+   *  reference its image across dirs via `../`, so dir(image) ≠ dir(manifest) — the Spine skeleton
+   *  pairing (spine-unreferenced-regions) pairs by the MANIFEST's directory. Additive/optional. */
+  manifestRef?: string;
 }
 
 export interface Grouped {
@@ -41,6 +45,11 @@ export interface Grouped {
    *  meta.image, or a `.fnt` (TEXT/XML/binary) that THREW or parsed empty (no usable page/char). `ref` =
    *  basename. Sorted by ref; additive (absent/empty ⇒ byte-identical). */
   unparsed: { ref: string; reason: string }[];
+  /** Spine skeleton .json files found in the folder (dir-aware ref + parsed json), collected at the
+   *  existing silent non-manifest skip-point (their JSON.parse is already paid — zero extra cost). Feeds
+   *  the host's same-dir skeleton↔atlas pairing for spine-unreferenced-regions. Sorted by ref.
+   *  Additive/optional: absent/empty ⇒ byte-identical to today. */
+  skeletons?: { ref: string; json: unknown }[];
 }
 
 const IMAGE_RE = /\.(png|webp|jpe?g|avif)$/i;
@@ -92,6 +101,7 @@ export function groupFiles(files: RawFile[]): Grouped {
 
   const referenced = new Set<string>();
   const atlases: GroupedAtlas[] = [];
+  const skeletons: { ref: string; json: unknown }[] = [];
   const missing: { manifest: string; image: string }[] = [];
   // Honest "looks like a manifest but unusable" surface (NOT benign non-asset files — see :111/:118).
   const unparsed: { ref: string; reason: string }[] = [];
@@ -120,7 +130,7 @@ export function groupFiles(files: RawFile[]): Grouped {
           continue;
         }
         referenced.add(keyOf(image));
-        atlases.push({ kind: 'spine', manifest: page, image, name: atlasName(image) });
+        atlases.push({ kind: 'spine', manifest: page, image, name: atlasName(image), manifestRef: keyOf(f) });
       }
       continue;
     }
@@ -157,7 +167,7 @@ export function groupFiles(files: RawFile[]): Grouped {
           continue;
         }
         referenced.add(keyOf(image));
-        atlases.push({ kind: 'bmfont', manifest: page, image, name: atlasName(image) });
+        atlases.push({ kind: 'bmfont', manifest: page, image, name: atlasName(image), manifestRef: keyOf(f) });
       }
       continue;
     }
@@ -171,7 +181,12 @@ export function groupFiles(files: RawFile[]): Grouped {
       unparsed.push({ ref: baseName(f.name), reason: `manifest JSON parse failed: ${msg(e)}` });
       continue;
     }
-    if (!looksLikeManifest(json)) continue; // a .json config / non-manifest is legitimately not an asset — stay silent
+    if (!looksLikeManifest(json)) {
+      // A .json config / non-manifest is legitimately not an asset — stay silent EXCEPT for Spine
+      // skeletons, which the spine-unreferenced-regions pairing needs (their parse is already paid).
+      if (looksLikeSkeleton(json)) skeletons.push({ ref: keyOf(f), json });
+      continue;
+    }
     const imageName = manifestImage(json);
     if (!imageName) {
       unparsed.push({ ref: baseName(f.name), reason: 'manifest has frames but no meta.image' });
@@ -183,12 +198,13 @@ export function groupFiles(files: RawFile[]): Grouped {
       continue;
     }
     referenced.add(keyOf(image));
-    atlases.push({ kind: 'manifest', manifest: json, image, name: atlasName(image) });
+    atlases.push({ kind: 'manifest', manifest: json, image, name: atlasName(image), manifestRef: keyOf(f) });
   }
 
   const images = files.filter((f) => IMAGE_RE.test(f.name) && !referenced.has(keyOf(f)));
   unparsed.sort((a, b) => a.ref.localeCompare(b.ref));
-  return { atlases, images, missing, unparsed };
+  skeletons.sort((a, b) => a.ref.localeCompare(b.ref));
+  return { atlases, images, missing, unparsed, ...(skeletons.length > 0 ? { skeletons } : {}) };
 }
 
 /* ── Feature 4: group loose images into pack groups (design §4) ─────────────────────────────────

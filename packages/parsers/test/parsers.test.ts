@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
+  readSkeletonAttachmentRefs,
   parseAtlas,
   parseAtlasManifest,
   parseImage,
@@ -1231,5 +1232,47 @@ describe('per-frame recovery — one bad frame no longer nukes the sheet (R21 #1
     expect(res.ok).toBe(true);
     if (!res.ok) throw new Error('expected atlas');
     expect(res.malformedFrames).toBeUndefined();
+  });
+});
+
+describe('readSkeletonAttachmentRefs — conservative skins-only skeleton reader (spine-unreferenced-regions)', () => {
+  it('4.x array skins: path ?? name ?? placeholderKey chain, non-visual types skipped, unknown types collected', () => {
+    const refs = readSkeletonAttachmentRefs({
+      skins: [
+        { name: 'default' }, // attachment-less skin is valid
+        {
+          name: 'red',
+          attachments: {
+            slotA: {
+              body: {}, // placeholderKey fallback
+              headPh: { name: 'head-n', path: 'head-p' }, // path wins
+              armPh: { name: 'arm-n' }, // name wins over placeholder
+              bbox: { type: 'boundingbox' }, // non-visual — collects nothing
+              weird: { type: 'futuretype' }, // unknown type — conservatively collected
+            },
+          },
+        },
+      ],
+    })!;
+    expect(refs.names).toEqual(['arm-n', 'body', 'head-p', 'weird']);
+    expect(refs.prefixes).toEqual([]);
+  });
+  it('legacy object skins (≤3.7) parse too', () => {
+    const refs = readSkeletonAttachmentRefs({ skins: { default: { slot: { hat: {} } } } })!;
+    expect(refs.names).toEqual(['hat']);
+  });
+  it('sequence attachments emit the base path into prefixes, not names', () => {
+    const refs = readSkeletonAttachmentRefs({
+      skins: [{ name: 'd', attachments: { s: { fire: { path: 'fx/fire_', sequence: { count: 8 } } } } }],
+    })!;
+    expect(refs.prefixes).toEqual(['fx/fire_']);
+    expect(refs.names).toEqual([]);
+  });
+  it('any unrecognized shape ⇒ null (a wrong parse must never fabricate references)', () => {
+    expect(readSkeletonAttachmentRefs(null)).toBeNull();
+    expect(readSkeletonAttachmentRefs({})).toBeNull(); // skins absent
+    expect(readSkeletonAttachmentRefs({ skins: 42 })).toBeNull();
+    expect(readSkeletonAttachmentRefs({ skins: [{ name: 'x', attachments: { slot: { ph: 'not-an-object' } } }] })).toBeNull();
+    expect(readSkeletonAttachmentRefs({ skins: [null] })).toBeNull();
   });
 });

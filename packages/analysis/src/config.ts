@@ -161,4 +161,11 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   // over-padding, not a single decorative margin. Touching frames contribute 0 and pull the median DOWN, so
   // tight sheets never fire. Always `info`, NO estimate (reclaim depends on the repacked layout — the Pro
   // repack receipt measures it). Browser-only — NOT in resolveThresholds (CLI stays byte-identical).
+  spineUnreferencedRegions: { minMatchedFraction: 0.5, minDeadRegions: 1 }, // CALIBRATE — Spine
+  // unreferenced-regions disclosure gate. `minMatchedFraction` (0.5) is the PAIRING-TRUST gate: at least
+  // half the .atlas file's distinct region names must be matched by the paired skeleton union before ANY
+  // verdict — a mispaired/foreign skeleton matches ~0 and must never yield an "all dead" claim (the gate
+  // structurally forbids it). `minDeadRegions` (1): even one genuinely unreferenced region is worth a
+  // per-page info line (the finding is a hedged disclosure, not a savings verdict). Browser-only in v1:
+  // the CLI passes no spineBindings dep, so it can never fire there regardless of thresholds.
 };

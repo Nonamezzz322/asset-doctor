@@ -14,5 +14,8 @@ export const ZONE_STYLE: Record<OverlayZone['kind'], { stroke: string; fill: str
   bleeding: { stroke: '#0e8c8c', fill: 'rgba(14,140,140,0.14)' },
   'duplicate-frame': { stroke: '#0e8c8c', fill: 'rgba(14,140,140,0.18)' },
   gutter: { stroke: '#2b8fc9', fill: 'rgba(43,143,201,0.14)' },
+  // dead-region shares the info-blue hue with gutter at a heavier fill (0.18) — the bleeding/duplicate-
+  // frame shared-hue/distinct-label precedent; both CAN co-occur, the legend + loupe text disambiguate.
+  'dead-region': { stroke: '#2b8fc9', fill: 'rgba(43,143,201,0.18)' },
   'interior-hole': { stroke: '#d98a00', fill: 'rgba(217,138,0,0.18)' },
 };

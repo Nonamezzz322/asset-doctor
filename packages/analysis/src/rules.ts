@@ -2,7 +2,7 @@
 // Finding(s) with a verdict, the proof (numbers), a fix, and — where visual — overlay zones.
 // We measure; we never fabricate. Thresholds come from config, never inline magic numbers.
 
-import { MIP_OVERHEAD, type Atlas, type ContentClass, type Finding, type ImageAsset, type ImageFeatures, type ImageMime, type OverlayZone, type Rect, type Severity, type Size, type ThresholdConfig, type TrimRect } from '@asset-doctor/core';
+import { MIP_OVERHEAD, type Atlas, type ContentClass, type Finding, type ImageAsset, type ImageFeatures, type ImageMime, type OverlayZone, type Rect, type Severity, type Size, type SpineSkeletonBinding, type ThresholdConfig, type TrimRect } from '@asset-doctor/core';
 import { buildCoverage, defaultCell, mergeEmptyRects, summarizeEmpty } from './grid';
 
 const BYTES_PER_PX = 4; // RGBA8888
@@ -920,6 +920,97 @@ export function gutterFinding(atlas: Atlas, cfg: ThresholdConfig): Finding | nul
     messageKey: 'excessive-gutter',
     params: { median, n: gaps.length },
   };
+}
+
+/** Spine unreferenced-regions DISCLOSURE. The host paired each Spine .atlas file with the same-dir
+ *  skeleton .json set (SpineSkeletonBinding: the union of `path ?? name ?? placeholderKey` over ALL skins
+ *  of ALL parseable skeletons + sequence base-path prefixes; a same-dir binary .skel suppresses the whole
+ *  binding). A region no attachment references is STATICALLY unreachable through the parsed skeletons —
+ *  but another skeleton or runtime setAttachment(regionName) may still use it, so this is a CONDITIONAL
+ *  disclosure (invariant 3): severity ALWAYS `info`, NO estimate at all; the measured numbers (dead
+ *  count/area) ride params only and never touch potentialDiskSaved/totals.
+ *  PAIRING-TRUST GATE: below cfg.minMatchedFraction of the .atlas file's DISTINCT region names matched,
+ *  NO verdict at all — a mispaired skeleton matches ~0 and must never yield an "all dead" claim (the gate
+ *  structurally forbids it). Per PAGE with ≥ minDeadRegions distinct dead regions: ONE finding whose
+ *  overlay is the dead sprites' REAL frame rects AS PLACED (de-aliased by distinct rect — bleeding
+ *  precedent; rotated frames are already w/h-swapped by the parser). Deterministic: names sorted, rects
+ *  sorted (y,x,h,w). Returns [] with no config or no binding (CLI/headless — unwired in v1). */
+export function spineUnreferencedRegionsFindings(
+  atlases: Atlas[],
+  bindings: SpineSkeletonBinding[],
+  cfg: ThresholdConfig,
+): Finding[] {
+  const gate = cfg.spineUnreferencedRegions;
+  if (!gate || bindings.length === 0) return [];
+  const byName = new Map<string, Atlas>();
+  for (const a of atlases) byName.set(a.name, a);
+  const out: Finding[] = [];
+  for (const b of bindings) {
+    const names = new Set(b.refNames);
+    const prefixes = b.refPrefixes;
+    const referenced = (n: string): boolean => {
+      if (names.has(n)) return true;
+      for (const p of prefixes) {
+        if (n.length > p.length && n.startsWith(p) && /^\d+$/.test(n.slice(p.length))) return true;
+      }
+      return false;
+    };
+    // Pairing-trust: measured over the WHOLE .atlas file's distinct region names (all pages).
+    const allNames = new Set<string>();
+    for (const ref of b.atlasRefs) {
+      const a = byName.get(ref);
+      if (a) for (const sp of a.sprites) allNames.add(sp.name);
+    }
+    if (allNames.size === 0) continue;
+    let matched = 0;
+    for (const n of allNames) if (referenced(n)) matched++;
+    if (matched / allNames.size < gate.minMatchedFraction) continue; // mispaired — never verdict
+    for (const ref of b.atlasRefs) {
+      const a = byName.get(ref);
+      if (!a) continue;
+      const deadNames = new Set<string>();
+      const rects: Rect[] = [];
+      const rectSeen = new Set<string>();
+      for (const sp of a.sprites) {
+        if (referenced(sp.name)) continue;
+        deadNames.add(sp.name);
+        const f = sp.frame;
+        if (f.w <= 0 || f.h <= 0) continue;
+        const k = `${f.x},${f.y},${f.w},${f.h}`;
+        if (!rectSeen.has(k)) {
+          rectSeen.add(k);
+          rects.push(f);
+        }
+      }
+      if (deadNames.size < gate.minDeadRegions) continue;
+      rects.sort((x, y) => x.y - y.y || x.x - y.x || x.h - y.h || x.w - y.w);
+      const areaPx = rects.reduce((s2, r) => s2 + r.w * r.h, 0);
+      const pageArea = a.size.w * a.size.h;
+      const areaPct = pageArea > 0 ? Math.round((areaPx / pageArea) * 100) : 0;
+      const sorted = [...deadNames].sort();
+      const preview = sorted.length <= 8 ? sorted.join(', ') : `${sorted.slice(0, 8).join(', ')} … (+${sorted.length - 8})`;
+      const skeletons = b.skeletonRefs.join(', ');
+      out.push({
+        id: `${a.name}:spine-unreferenced-regions`,
+        rule: 'spine-unreferenced-regions',
+        severity: 'info', // ALWAYS info — a conditional disclosure, never a proven-dead verdict
+        assetRef: a.name,
+        title: `${deadNames.size} atlas regions unreferenced by the parsed skeleton — ${areaPct}% of the page`,
+        detail:
+          `No attachment in any skin of ${skeletons} references: ${preview}. These regions are statically ` +
+          `unreachable through the parsed skeleton(s) yet still ship and upload with the page. Another ` +
+          `skeleton (including a binary .skel we cannot read) or runtime setAttachment may still use them — ` +
+          `we measure the parsed references, not your runtime.`,
+        fix: `If nothing else uses these regions, re-export the atlas without them; the repack measures the real before/after.`,
+        // NO estimate field AT ALL — conditional on runtime facts we cannot read (invariant 3); the
+        // measured numbers ride params only, never totals.
+        ...(rects.length > 0 ? { overlay: [{ kind: 'dead-region' as const, rects }] } : {}),
+        messageKey: 'spine-unreferenced-regions',
+        params: { dead: deadNames.size, total: a.sprites.length, areaPx, areaPct, skeletons, names: preview },
+      });
+    }
+  }
+  return out;
 }
 
 /** Declared (atlas.size, from manifest meta.size / Spine page size:) vs REAL (image.size, the decoded

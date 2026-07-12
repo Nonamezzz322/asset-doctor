@@ -13,3 +13,5 @@ export { parseSpineAtlasText, parseSpinePage } from './spine-atlas';
 export type { SpinePage } from './spine-atlas';
 export { parseFntText, parseFntXml, parseFntBinary, parseFntPage } from './fnt';
 export type { FntPage } from './fnt';
+export { readSkeletonAttachmentRefs } from './spine-skeleton';
+export type { SkeletonAttachmentRefs } from './spine-skeleton';

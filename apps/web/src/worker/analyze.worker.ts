@@ -3,8 +3,8 @@
 // pure analysis core): per-image features (SHA-256 content hash + perceptual dHash) for
 // folder-level duplicate detection, and format sizing (OffscreenCanvas → WebP/AVIF).
 
-import type { Asset, AtlasFrameHashes, AtlasFrameTrims, ImageFeatures, ImageMime, Sprite, TrimRect } from '@asset-doctor/core';
-import { parseAtlas, parseImage, parseSpinePage, parseFntPage, type FntPage, type MalformedFrame, type ParseResult, type SpinePage } from '@asset-doctor/parsers';
+import type { Asset, AtlasFrameHashes, AtlasFrameTrims, ImageFeatures, ImageMime, SpineSkeletonBinding, Sprite, TrimRect } from '@asset-doctor/core';
+import { parseAtlas, parseImage, parseSpinePage, parseFntPage, readSkeletonAttachmentRefs, type FntPage, type MalformedFrame, type ParseResult, type SpinePage } from '@asset-doctor/parsers';
 import { analyze, mergeSharedAtlases, type EncodeSizer, type OpaqueEncodeSizer } from '@asset-doctor/analysis';
 import { alphaBBox } from '@asset-doctor/fix';
 import { pageExceedsScanBudget, scanSkipReason } from '../lib/bitmap-budget';
@@ -60,6 +60,8 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
     // own parse failures (atlas/spine threw or image header unrecognized) + per-region Spine recovery.
     // Sorted by ref before handing to analyze (which passes it through verbatim).
     const unparsed = [...grouped.unparsed];
+    // spine .atlas manifestRef → parsed page atlas names (for the skeleton pairing below).
+    const spinePagesByManifest = new Map<string, string[]>();
     // Per-bmfont-page font metadata (face + kerning count) read off the parsed FntPage, keyed by atlas.name
     // — drives the font-glyph-page readout. Absent ⇒ never fires (additive, gated like frameHashes).
     const fontPages: { atlasRef: string; faceName?: string; kerningCount: number }[] = [];
@@ -81,6 +83,13 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       if (res.ok && res.asset.kind === 'atlas') {
         assets.push(res.asset);
         imageBytes.set(res.asset.atlas.name, a.image.bytes);
+        // Collect this spine PAGE's parsed atlas name under its source .atlas file — the skeleton pairing
+        // (spine-unreferenced-regions) binds per .atlas FILE, in the MANIFEST's directory.
+        if (a.kind === 'spine' && a.manifestRef !== undefined) {
+          const pages = spinePagesByManifest.get(a.manifestRef);
+          if (pages) pages.push(res.asset.atlas.name);
+          else spinePagesByManifest.set(a.manifestRef, [res.asset.atlas.name]);
+        }
         // Per-frame TexturePacker/Pixi recovery (round21 #1): the sheet kept its good sprites; surface each
         // dropped frame individually via the same `<atlas>#<frame>` ref the Spine recovery uses. Only the
         // non-spine parseAtlas result carries malformedFrames; parseSpinePage's result never does (?? []).
@@ -200,6 +209,41 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
     // order is deterministic regardless of WHICH pages busted the cap (analyze passes it through verbatim).
     unparsed.sort((a, b) => a.ref.localeCompare(b.ref));
 
+    // ── Spine skeleton pairing (spine-unreferenced-regions) ─────────────────────────────────────────
+    // Same-dir only: a skeleton .json pairs with a .atlas whose MANIFEST sits in the same directory. The
+    // union over every parseable same-dir skeleton only SHRINKS the dead set; any same-dir binary .skel
+    // SUPPRESSES the whole dir (an unreadable skeleton may reference anything — invariant 3). Absent
+    // pairs ⇒ no bindings ⇒ the rule never fires (deps-gated, byte-identical).
+    const dirOfRef = (r: string): string => {
+      const i = r.lastIndexOf('/');
+      return i < 0 ? '' : r.slice(0, i);
+    };
+    const skelDirs = new Set<string>();
+    for (const f of files) if (/\.skel$/i.test(f.name)) skelDirs.add(dirOfRef(keyOf(f)));
+    const spineBindings: SpineSkeletonBinding[] = [];
+    for (const [manifestRef, atlasRefs] of spinePagesByManifest) {
+      const dir = dirOfRef(manifestRef);
+      if (skelDirs.has(dir)) continue; // a binary skeleton lives here — suppress, never guess
+      const names = new Set<string>();
+      const prefixes = new Set<string>();
+      const skeletonRefs: string[] = [];
+      for (const sk of grouped.skeletons ?? []) {
+        if (dirOfRef(sk.ref) !== dir) continue;
+        const refs = readSkeletonAttachmentRefs(sk.json);
+        if (!refs) continue; // unrecognized shape — conservative skip (never fabricate references)
+        for (const n of refs.names) names.add(n);
+        for (const pfx of refs.prefixes) prefixes.add(pfx);
+        skeletonRefs.push(sk.ref);
+      }
+      if (skeletonRefs.length === 0) continue; // no parseable same-dir skeleton — no binding
+      spineBindings.push({
+        atlasRefs: [...atlasRefs].sort(),
+        refNames: [...names].sort(),
+        refPrefixes: [...prefixes].sort(),
+        skeletonRefs: skeletonRefs.sort(),
+      });
+    }
+
     const report = await analyze(merged, undefined, {
       encodeImage: makeEncoder(imageBytes),
       encodeOpaque: makeOpaqueEncoder(imageBytes),
@@ -209,6 +253,7 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       ...(frameTrims.length ? { frameTrims } : {}),
       ...(unparsed.length ? { unparsed } : {}),
       ...(fontPages.length ? { fontPages } : {}),
+      ...(spineBindings.length ? { spineBindings } : {}),
     });
     if (cancelled) return; // superseded — suppress a `done` that would race the terminate
     post({ type: 'done', report });

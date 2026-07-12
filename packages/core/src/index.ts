@@ -329,6 +329,10 @@ export type Rule =
   // per-atlas: median nearest-neighbour inter-frame gap is systematically wide — over-padded packing
   // (the inverse of bleeding; a packing disclosure, NO estimate — the repack receipt measures reclaim)
   | 'excessive-gutter'
+  // per-atlas-page: regions no attachment in any PAIRED skeleton's skins references — a CONDITIONAL
+  // disclosure (another skeleton — incl. an unreadable binary .skel — or runtime setAttachment may use
+  // them; NO estimate, measured numbers ride params only)
+  | 'spine-unreferenced-regions'
   // per-bmfont-page glyph-sheet readout (informational; a parsed .fnt page IS an atlas)
   | 'font-glyph-page';
 
@@ -367,7 +371,7 @@ export type TextureFootprintFormat = 'raster' | CompressedTextureFormat;
 
 /** Highlight zones drawn on the film-viewer snapshot, in asset (atlas page / loose image) pixel coords. */
 export interface OverlayZone {
-  kind: 'empty' | 'transparent' | 'bleeding' | 'duplicate-frame' | 'gutter' | 'interior-hole';
+  kind: 'empty' | 'transparent' | 'bleeding' | 'duplicate-frame' | 'gutter' | 'interior-hole' | 'dead-region';
   rects: Rect[];
 }
 
@@ -482,6 +486,22 @@ export interface ImageFeatures {
 export interface AtlasFrameHashes {
   atlasRef: string;
   frameHashes: (string | null)[];
+}
+
+/** One paired (.atlas file ↔ same-dir skeleton .json set) binding, HOST-built (the worker pairs by
+ *  directory and unions every parseable skeleton; a same-dir binary .skel SUPPRESSES the whole binding —
+ *  an unreadable skeleton may reference anything). Feeds the `spine-unreferenced-regions` disclosure.
+ *  Additive: absent (CLI/headless — unwired in v1, or no paired skeleton) ⇒ the rule never fires ⇒
+ *  byte-identical, gated exactly like AtlasFrameHashes. */
+export interface SpineSkeletonBinding {
+  /** Post-merge Atlas.name of every PAGE of this .atlas file. */
+  atlasRefs: string[];
+  /** Exact region names referenced: path ?? name ?? placeholderKey over ALL skins of ALL paired skeletons. */
+  refNames: string[];
+  /** Sequence attachments' base paths — a region matches when its name is prefix + digits (Spine 4.1+). */
+  refPrefixes: string[];
+  /** Dir-aware refs of the paired skeleton .json files (for the finding copy). */
+  skeletonRefs: string[];
 }
 
 /** Per-atlas sprite OPAQUE bounding boxes computed by the host (worker) from the ALREADY-DECODED atlas page
@@ -793,6 +813,15 @@ export interface ThresholdConfig {
    *  Optional/additive: absent ⇒ suppressed. Browser-only by resolveThresholds omission (pure integer
    *  geometry, but the CLI output stays byte-identical). */
   gutter?: { minGaps: number; minMedianPx: number };
+  /** Spine unreferenced-regions disclosure gate (per .atlas file, host-paired skeletons required).
+   *  `minMatchedFraction` — the PAIRING-TRUST gate: the fraction of the atlas file's distinct region names
+   *  matched by the skeleton union must reach this before ANY verdict (a mispaired skeleton matches ~0 and
+   *  must never yield an "all dead" claim — the gate structurally forbids it). `minDeadRegions` — at least
+   *  this many distinct unreferenced regions per PAGE before the one per-page finding fires. CONDITIONAL
+   *  DISCLOSURE (invariant 3): always `info`, NO estimate — another skeleton (incl. an unreadable binary
+   *  .skel) or runtime setAttachment may use the regions; measured numbers ride params only.
+   *  Optional/additive: absent ⇒ suppressed. Browser-only in v1 (CLI passes no bindings). */
+  spineUnreferencedRegions?: { minMatchedFraction: number; minDeadRegions: number };
   /** Interior-transparency disclosure gate (loose images only). Fires when the host-measured
    *  `ImageFeatures.alphaShape` bbox (of alpha > 0) covers ≥ `minBboxPx` pixels AND the fraction of
    *  fully-transparent pixels INSIDE that bbox is ≥ `minRatio`. FILL-RATE disclosure (invariant 3/5):

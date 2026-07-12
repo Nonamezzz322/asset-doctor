@@ -51,10 +51,11 @@ describe('legendItemsFor — decode the x-ray colors into honest, deterministic 
     expect(items.map((i) => i.kind)).toEqual(['empty']);
   });
 
-  it('7. all six kinds ⇒ 6 items in canonical order; bleeding & duplicate-frame are SEPARATE items sharing the teal fill', () => {
+  it('7. all seven kinds ⇒ 7 items in canonical order; bleeding & duplicate-frame are SEPARATE items sharing the teal fill', () => {
     // Deliberately updated (V1 round): 'gutter' + 'interior-hole' joined the overlay vocabulary.
     const items = legendItemsFor([
       finding([
+        { kind: 'dead-region', rects: [R] },
         { kind: 'interior-hole', rects: [R] },
         { kind: 'gutter', rects: [R] },
         { kind: 'duplicate-frame', rects: [R] },
@@ -64,7 +65,7 @@ describe('legendItemsFor — decode the x-ray colors into honest, deterministic 
       ]),
     ]);
     expect(items.map((i) => i.kind)).toEqual(ZONE_KIND_ORDER);
-    expect(items.map((i) => i.labelKey)).toEqual(['legend.empty', 'legend.transparent', 'legend.bleeding', 'legend.duplicateFrame', 'legend.gutter', 'legend.interiorHole']);
+    expect(items.map((i) => i.labelKey)).toEqual(['legend.empty', 'legend.transparent', 'legend.bleeding', 'legend.duplicateFrame', 'legend.gutter', 'legend.interiorHole', 'legend.deadRegion']);
     // bleeding and duplicate-frame are honestly DISTINCT items (distinct labels) — the legend never lumps
     // them. Both paint the SAME teal hue (rgb 14,140,140); they differ only in fill ALPHA in ZONE_STYLE
     // (0.14 vs 0.18), and each item's fill is read verbatim from ZONE_STYLE so the swatch matches paint.
@@ -126,7 +127,7 @@ describe('i18n drift guard — dynamic legend label keys + alt/heading exist in 
   it('every legend.* label key the legend can emit exists in CATALOGS.en', () => {
     // Mirror LABEL_KEY (one per ZONE_KIND_ORDER kind) without exporting the private const.
     // Deliberately extended (V1 round): gutter + interiorHole joined the overlay vocabulary.
-    const labelKeys = ['legend.empty', 'legend.transparent', 'legend.bleeding', 'legend.duplicateFrame', 'legend.gutter', 'legend.interiorHole'];
+    const labelKeys = ['legend.empty', 'legend.transparent', 'legend.bleeding', 'legend.duplicateFrame', 'legend.gutter', 'legend.interiorHole', 'legend.deadRegion'];
     expect(labelKeys.length).toBe(ZONE_KIND_ORDER.length);
     for (const k of labelKeys) expect(CATALOGS.en[k], `${k} must exist in en.json`).toBeDefined();
   });

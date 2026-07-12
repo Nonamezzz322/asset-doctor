@@ -2,10 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import type { Asset, Atlas, ImageAsset, ImageFeatures, ImageMime, Rect, ThresholdConfig } from '@asset-doctor/core';
+import type { SpineSkeletonBinding, Asset, Atlas, ImageAsset, ImageFeatures, ImageMime, Rect, ThresholdConfig } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseFntText, parseFntPage, type FntPage } from '@asset-doctor/parsers';
 import { groupFiles, type RawFile } from '@asset-doctor/ingest';
-import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, upscaledSourceFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, iccNonSrgbFinding, interiorTransparencyFinding, binaryAlphaFinding, crossAtlasRedundancyFinding, premultipliedAlphaFinding, gpuCompressionAlignmentFinding, gutterFinding, duplicateSimilarFindings, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, upscaledSourceFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, iccNonSrgbFinding, interiorTransparencyFinding, binaryAlphaFinding, crossAtlasRedundancyFinding, premultipliedAlphaFinding, gpuCompressionAlignmentFinding, gutterFinding, spineUnreferencedRegionsFindings, duplicateSimilarFindings, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -2848,5 +2848,70 @@ describe('excessive-gutter OVERLAY strips (V1 visualization — the measured gap
 
   it('no fire ⇒ no overlay anywhere; a tight row never carries a gutter overlay', () => {
     expect(gutterFinding(row('tight.png', 6, 64), DEFAULT_THRESHOLDS)).toBeNull();
+  });
+});
+
+describe('spine-unreferenced-regions (paired-skeleton disclosure — trust-gated, NO estimate)', () => {
+  const page = (name: string, sprites: [string, number][]): Atlas => ({
+    name, imageRef: name, size: { w: 256, h: 256 }, source: { kind: 'spine' },
+    sprites: sprites.map(([n, x]) => ({
+      name: n, frame: { x, y: 0, w: 64, h: 64 }, rotated: false, trimmed: false, sourceSize: { w: 64, h: 64 },
+    })),
+  });
+  const bind = (over: Partial<SpineSkeletonBinding> = {}): SpineSkeletonBinding => ({
+    atlasRefs: ['a.png'], refNames: [], refPrefixes: [], skeletonRefs: ['a.json'], ...over,
+  });
+
+  it('discloses the unreferenced regions: info, NO estimate, real rects overlay, params pinned', () => {
+    const a = page('a.png', [['head', 0], ['body', 80], ['fx_unused', 160]]);
+    const fs = spineUnreferencedRegionsFindings([a], [bind({ refNames: ['head', 'body'] })], DEFAULT_THRESHOLDS);
+    expect(fs).toHaveLength(1);
+    const f = fs[0]!;
+    expect(f.rule).toBe('spine-unreferenced-regions');
+    expect(f.severity).toBe('info');
+    expect(f.estimate).toBeUndefined(); // conditional disclosure — numbers ride params only (Inv 3)
+    expect(f.overlay).toEqual([{ kind: 'dead-region', rects: [{ x: 160, y: 0, w: 64, h: 64 }] }]);
+    expect(f.params).toEqual({
+      dead: 1, total: 3, areaPx: 64 * 64, areaPct: Math.round(((64 * 64) / (256 * 256)) * 100),
+      skeletons: 'a.json', names: 'fx_unused',
+    });
+  });
+
+  it('PAIRING-TRUST gate: a mispaired skeleton (matched fraction below the floor) yields NO verdict at all', () => {
+    const a = page('a.png', [['head', 0], ['body', 80], ['arm', 160]]);
+    // Foreign skeleton references none of the three names ⇒ matched 0/3 < 0.5 ⇒ silence (never "all dead").
+    expect(spineUnreferencedRegionsFindings([a], [bind({ refNames: ['other'] })], DEFAULT_THRESHOLDS)).toHaveLength(0);
+  });
+
+  it('sequence prefixes match name = prefix + digits (and ONLY digits)', () => {
+    const a = page('a.png', [['fx_01', 0], ['fx_02', 80], ['fx_final', 160]]);
+    const fs = spineUnreferencedRegionsFindings([a], [bind({ refPrefixes: ['fx_'] })], DEFAULT_THRESHOLDS);
+    expect(fs).toHaveLength(1);
+    expect(fs[0]!.params!.names).toBe('fx_final'); // digits matched; a non-digit suffix did not
+  });
+
+  it('fully-referenced page ⇒ no finding; absent config / no bindings ⇒ no findings (CLI byte-identical)', () => {
+    const a = page('a.png', [['head', 0]]);
+    expect(spineUnreferencedRegionsFindings([a], [bind({ refNames: ['head'] })], DEFAULT_THRESHOLDS)).toHaveLength(0);
+    const cfg = { ...DEFAULT_THRESHOLDS };
+    delete cfg.spineUnreferencedRegions;
+    expect(spineUnreferencedRegionsFindings([a], [bind()], cfg)).toHaveLength(0);
+    expect(spineUnreferencedRegionsFindings([a], [], DEFAULT_THRESHOLDS)).toHaveLength(0);
+  });
+
+  it('analyze threads deps.spineBindings and totals never shift', async () => {
+    const a = page('spine/hero.png', [['head', 0], ['fx_unused', 80]]);
+    const asset: Asset = {
+      kind: 'atlas', atlas: a,
+      image: { name: 'spine/hero.png', imageRef: 'spine/hero.png', size: { w: 256, h: 256 }, mime: 'image/png', byteSize: 9000 },
+    };
+    const binding: SpineSkeletonBinding = {
+      atlasRefs: ['spine/hero.png'], refNames: ['head'], refPrefixes: [], skeletonRefs: ['spine/hero.json'],
+    };
+    const withB = await analyze([asset], undefined, { spineBindings: [binding] });
+    expect(withB.findings.find((x) => x.rule === 'spine-unreferenced-regions')?.assetRef).toBe('spine/hero.png');
+    const withoutB = await analyze([asset], undefined, {});
+    expect(withoutB.findings.find((x) => x.rule === 'spine-unreferenced-regions')).toBeUndefined();
+    expect(withB.totals).toEqual(withoutB.totals);
   });
 });

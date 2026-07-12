@@ -17,6 +17,7 @@ import type {
   ImageFeatures,
   Rect,
   Severity,
+  SpineSkeletonBinding,
   ThresholdConfig,
   TrimRect,
 } from '@asset-doctor/core';
@@ -30,6 +31,7 @@ import {
   formatFinding,
   frameRedundancyFinding,
   gutterFinding,
+  spineUnreferencedRegionsFindings,
   iccNonSrgbFinding,
   interiorTransparencyFinding,
   occupancyFinding,
@@ -93,6 +95,10 @@ export interface AnalyzeDeps {
    *  Absent ⇒ the readout falls back to kerning 0 / no face (still fires if the page clears minChars);
    *  additive — a folder with no bmfont page is byte-identical to today (gated like frameHashes). */
   fontPages?: { atlasRef: string; faceName?: string; kerningCount: number }[];
+  /** Host-paired Spine skeleton bindings (same-dir .atlas ↔ skeleton .json union; .skel suppresses) for
+   *  the spine-unreferenced-regions disclosure. Absent (CLI/headless — unwired in v1, or no paired
+   *  skeleton) ⇒ the rule never fires ⇒ byte-identical (gated exactly like frameHashes). */
+  spineBindings?: SpineSkeletonBinding[];
 }
 
 const RANK: Record<Severity, number> = { crit: 0, warn: 1, info: 2, ok: 3 };
@@ -405,6 +411,9 @@ export async function analyze(
   // practice: the CLI's resolveThresholds never carries cfg.gpuCompression ⇒ null there (byte-identical).
   const gca = gpuCompressionAlignmentFinding(assets, cfg);
   if (gca) folder.push(gca);
+  // Spine unreferenced-regions — per-PAGE disclosures off the host's skeleton pairing (deps-gated: absent
+  // bindings ⇒ nothing, CLI/headless byte-identical). Always info, NO estimate ⇒ totals untouched.
+  findings.push(...spineUnreferencedRegionsFindings(atlases, deps.spineBindings ?? [], cfg));
   const am = atlasMergeFinding(atlases, cfg);
   if (am) folder.push(am);
   // Cross-atlas frame redundancy: frames whose pixel REGIONS are byte-identical ACROSS ≥2 atlases. Clusters

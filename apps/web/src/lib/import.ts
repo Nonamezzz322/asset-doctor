@@ -16,7 +16,7 @@ export interface PickedFile {
   file?: File;
 }
 
-const RELEVANT_RE = /\.(json|atlas|png|webp|jpe?g|avif)$/i;
+const RELEVANT_RE = /\.(json|atlas|skel|png|webp|jpe?g|avif)$/i;
 
 /* ── File System Access API ─────────────────────────────────────────────── */
 

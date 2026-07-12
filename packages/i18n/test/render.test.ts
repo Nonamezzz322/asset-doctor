@@ -27,6 +27,7 @@ import {
   crossAtlasRedundancyFinding,
   gpuCompressionAlignmentFinding,
   gutterFinding,
+  spineUnreferencedRegionsFindings,
   premultipliedAlphaFinding,
   fontGlyphPageFinding,
   integrityFindings,
@@ -173,6 +174,18 @@ async function realFindings(): Promise<Finding[]> {
     sprites: [0, 1, 2, 3, 4].map((i) => ({ name: `g${i}`, frame: { x: i * 80, y: 0, w: 64, h: 64 }, rotated: false, trimmed: false, sourceSize: { w: 64, h: 64 } })),
   };
   out.push(gutterFinding(gutAtlas, cfg)!);
+  // spine-unreferenced-regions: a 2-region page where the paired skeleton references only one — the
+  // pairing-trust gate passes (matched 1/2 = 0.5 ≥ minMatchedFraction) and fx_unused is disclosed.
+  const spineAtlas: Atlas = {
+    name: 'spine/hero.png', imageRef: 'spine/hero.png', size: { w: 256, h: 256 }, source: { kind: 'spine' },
+    sprites: [
+      { name: 'head', frame: { x: 0, y: 0, w: 64, h: 64 }, rotated: false, trimmed: false, sourceSize: { w: 64, h: 64 } },
+      { name: 'fx_unused', frame: { x: 80, y: 0, w: 64, h: 64 }, rotated: false, trimmed: false, sourceSize: { w: 64, h: 64 } },
+    ],
+  };
+  out.push(...spineUnreferencedRegionsFindings([spineAtlas], [{
+    atlasRefs: ['spine/hero.png'], refNames: ['head'], refPrefixes: [], skeletonRefs: ['spine/hero.json'],
+  }], cfg));
   // font-glyph-page: a sparse bmfont page — 16 glyphs of 32×32 on 256² → occ 0.25 ≤ occupancyWarn (0.5)
   // ⇒ warn; kerning 12 (>1) drives the 'other' plural; face non-empty drives the detail prefix.
   const fontAtlas: Atlas = {
@@ -193,7 +206,7 @@ describe('renderFinding — English catalog reproduces the baked strings (drift 
     const findings = await realFindings();
     const keys = new Set(findings.map((f) => f.messageKey));
     // sanity: we exercised every messageKey family the rules emit
-    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'upscaled-source', 'frame-redundancy', 'trim-margin', 'bleeding', 'dimension-mismatch-shrunk-offedge', 'dimension-mismatch-shrunk', 'dimension-mismatch-grown', 'cross-atlas-redundancy', 'premultiplied-alpha', 'gpu-compression-alignment', 'excessive-gutter', 'interior-transparency', 'binary-alpha', 'font-glyph-page', 'wasted-alpha', 'strippable-metadata', 'strippable-metadata-aggregate', 'icc-non-srgb', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'atlas-merge-batching', 'integrity', 'format-aggregate', 'variants']));
+    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'upscaled-source', 'frame-redundancy', 'trim-margin', 'bleeding', 'dimension-mismatch-shrunk-offedge', 'dimension-mismatch-shrunk', 'dimension-mismatch-grown', 'cross-atlas-redundancy', 'premultiplied-alpha', 'gpu-compression-alignment', 'excessive-gutter', 'spine-unreferenced-regions', 'interior-transparency', 'binary-alpha', 'font-glyph-page', 'wasted-alpha', 'strippable-metadata', 'strippable-metadata-aggregate', 'icc-non-srgb', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'atlas-merge-batching', 'integrity', 'format-aggregate', 'variants']));
     for (const f of findings) {
       expect(f.messageKey, `${f.id} must carry a messageKey`).toBeTruthy();
       const r = renderFinding(f, 'en');
