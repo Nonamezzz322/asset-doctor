@@ -259,3 +259,6 @@ export function correlateFix(receipt: FixProbeReceipt): CorrelatedFinding[] {
 
   return out;
 }
+
+export { compareRuntimeReports, parseRuntimeReport, COMPARE_DEFAULTS } from './compare';
+export type { CompareOptions, CompareRow, CompareVerdict, CompareMetricClass, RuntimeComparison } from './compare';
