@@ -98,7 +98,14 @@ const appSrc =
   // SpineViewer.tsx owns every spine.* t() literal (the #spine viewer shell + controls) + reuses
   // dropzone.privacy; App.tsx only references nav.spine, so without scanning it a renamed spine.* key would
   // silently render a raw dotted key. Its dynamic t(`spine.error.${…}`) is expanded via the branch below.
-  comp('SpineViewer.tsx');
+  comp('SpineViewer.tsx') +
+  '\n' +
+  // ComparePage.tsx (V4 #compare runtime A/B) owns every static compare.* t() literal (title/subtitle/load/
+  // attest/col/session/hitches/timingWithheld/empty) + nav.compare; App.tsx only references nav.compare.
+  // Its THREE dynamic keys — t(view.verdictKey) / t(r.labelKey) / t(r.hedgeKey) — are BARE VARIABLES the
+  // literal/template regexes below cannot see; those (compare.verdict.*/compare.metric.*/compare.hedge.*)
+  // are drift-guarded exhaustively in apps/web/src/lib/compare-view.test.ts against the pure model output.
+  comp('ComparePage.tsx');
 
 // Suffix maps mirrored from App.tsx (modeKey / granKey) so dynamic option keys resolve to concrete keys.
 const MODE_SUFFIXES = ['auto', 'static', 'spine'];

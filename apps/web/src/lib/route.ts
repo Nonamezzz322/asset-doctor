@@ -10,22 +10,25 @@
 // survives navigation — that wiring lives in App.tsx; this module only decides the view.
 
 /** The views the app can show. 'main' = Dropzone/results (default); 'settings' = the build-settings page;
- *  'pro' = the honest Pro/License screen (app-screen re-skin Phase 4); 'spine' = the pixi-spine viewer. */
-export type View = 'main' | 'settings' | 'pro' | 'spine';
+ *  'pro' = the honest Pro/License screen (app-screen re-skin Phase 4); 'spine' = the pixi-spine viewer;
+ *  'compare' = the V4 runtime A/B (two live sessions before/after a fix). */
+export type View = 'main' | 'settings' | 'pro' | 'spine' | 'compare';
 
-/** The hashes that route to the Settings, Pro and Spine-viewer pages — shared by the sidebar nav links, the
- *  optimize-entry deep-link anchor and the hashchange listener so source and target can never drift. */
+/** The hashes that route to the Settings, Pro, Spine-viewer and Compare pages — shared by the sidebar nav
+ *  links, the optimize-entry deep-link anchor and the hashchange listener so source and target can't drift. */
 export const SETTINGS_HASH = '#settings';
 export const PRO_HASH = '#pro';
 export const SPINE_HASH = '#spine';
+export const COMPARE_HASH = '#compare';
 
 /** Map a location.hash string to the view to render. Total + deterministic: exactly SETTINGS_HASH ⇒
- *  'settings', exactly PRO_HASH ⇒ 'pro', exactly SPINE_HASH ⇒ 'spine'; ANYTHING else (empty, '#',
- *  case-mismatch, extra segments, unknown) ⇒ 'main' (fail-open to the main view — a bad deep-link never
- *  blanks the app). */
+ *  'settings', exactly PRO_HASH ⇒ 'pro', exactly SPINE_HASH ⇒ 'spine', exactly COMPARE_HASH ⇒ 'compare';
+ *  ANYTHING else (empty, '#', case-mismatch, extra segments, unknown) ⇒ 'main' (fail-open to the main view
+ *  — a bad deep-link never blanks the app). */
 export function viewOfHash(hash: string): View {
   if (hash === SETTINGS_HASH) return 'settings';
   if (hash === PRO_HASH) return 'pro';
   if (hash === SPINE_HASH) return 'spine';
+  if (hash === COMPARE_HASH) return 'compare';
   return 'main';
 }

@@ -59,8 +59,9 @@ export const COMPARE_METRIC_LABEL: Record<string, string> = {
 
 /** Class → hedge key shown when a row renders raw-values-only. per-frame rows are ALWAYS hedged with the
  *  scene wording (even when "comparable" — scene equality is the user's attestation, not our measurement);
- *  see rowView. */
-const CLASS_HEDGE: Record<CompareRow['metricClass'], string> = {
+ *  see rowView. Exported so the i18n drift-guard test can assert every hedge key is catalogued (the JSX
+ *  reads these via `t(r.hedgeKey)` — a bare variable the static app-keys scanner cannot see). */
+export const CLASS_HEDGE: Record<CompareRow['metricClass'], string> = {
   'per-frame': 'compare.hedge.scene',
   state: 'compare.hedge.gate',
   'session-total': 'compare.hedge.duration',

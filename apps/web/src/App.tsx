@@ -17,9 +17,10 @@ import { planFix, runFix, type FixOutcome, type FixProgress } from './lib/fix-cl
 import type { BackendOptions, FixChange, FixPlanSummary, FixReceipt, NativeOpKind, SheetDiff } from './worker/fix-protocol';
 import { buildFixOptions } from './lib/build-settings';
 import { BuildSettingsProvider, useBuildSettings } from './lib/settings-ctx';
-import { viewOfHash, SETTINGS_HASH, PRO_HASH, SPINE_HASH, type View } from './lib/route';
+import { viewOfHash, SETTINGS_HASH, PRO_HASH, SPINE_HASH, COMPARE_HASH, type View } from './lib/route';
 import { SettingsPage } from './components/SettingsPage';
 import { SpineViewer } from './components/SpineViewer';
+import { ComparePage } from './components/ComparePage';
 import { fmtBytes } from './lib/format';
 import { OPTIMIZE_ENTRY, optimizeEntryEnabled } from './lib/optimize-entry';
 import { groupOps, OP_KIND_ORDER, REFERENCE_CHANGING, type OpKind } from './lib/op-manifest';
@@ -732,6 +733,7 @@ export function App() {
         ) : null}
         {view === 'pro' ? <ProPage unlocked={proUnlocked} onUnlockedChange={setProUnlocked} /> : null}
         {view === 'spine' ? <SpineViewer /> : null}
+        {view === 'compare' ? <ComparePage /> : null}
         </div>
         </main>
       </div>
@@ -775,10 +777,15 @@ function LanguageSwitcher() {
 //    full-height STICKY column; below lg it collapses to a top bar that flex-wraps (no drawer/JS/focus-trap)
 //    and is NOT sticky — a wrapped 2-3 row bar would be taller than the landing sections' scroll-mt-20 (80px)
 //    anchor offset and hide headings behind it, so on mobile the bar scrolls away with the page instead. ──
-function NavIcon({ d }: { d: 'scan' | 'settings' | 'pro' | 'spine' }) {
+function NavIcon({ d }: { d: 'scan' | 'settings' | 'pro' | 'spine' | 'compare' }) {
   return (
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      {d === 'spine' ? (
+      {d === 'compare' ? (
+        <>
+          <path d="M8 4v16M16 4v16" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+          <path d="M4 9l4-4 4 4M20 15l-4 4-4-4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+        </>
+      ) : d === 'spine' ? (
         <>
           <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="1.7" />
           <path d="M10 9l5 3-5 3z" fill="currentColor" />
@@ -838,6 +845,7 @@ function Sidebar({ view, plan }: { view: View; plan: ProPanel }) {
         <NavItem href={SETTINGS_HASH} active={view === 'settings'} icon={<NavIcon d="settings" />} label={t('settings.nav')} />
         <NavItem href={PRO_HASH} active={view === 'pro'} icon={<NavIcon d="pro" />} label={t('nav.pro')} />
         <NavItem href={SPINE_HASH} active={view === 'spine'} icon={<NavIcon d="spine" />} label={t('nav.spine')} />
+        <NavItem href={COMPARE_HASH} active={view === 'compare'} icon={<NavIcon d="compare" />} label={t('nav.compare')} />
       </nav>
       {/* Current-plan card (lg only, no heading) — honest per gate/entitlement state via pro-view.ts; the
           action always routes to the Pro screen (#pro), never a checkout. */}
