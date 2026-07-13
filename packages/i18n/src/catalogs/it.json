@@ -1000,6 +1000,7 @@
   "compare.metric.bindsAvg": "Bind di texture / frame (media)",
   "compare.metric.liveTextures": "Texture attive",
   "compare.metric.vram": "VRAM (dichiarata)",
+  "compare.metric.compressed": "VRAM compressa a blocchi (misurata)",
   "compare.metric.redundantBinds": "Bind di texture ridondanti",
   "compare.metric.uploads": "Upload durante il gioco",
   "compare.metric.compiles": "Compilazioni di shader durante il gioco",

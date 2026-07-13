@@ -982,6 +982,7 @@
   "compare.metric.bindsAvg": "每帧纹理绑定（平均）",
   "compare.metric.liveTextures": "活动纹理",
   "compare.metric.vram": "显存（声明）",
+  "compare.metric.compressed": "块压缩显存（实测）",
   "compare.metric.redundantBinds": "冗余纹理绑定",
   "compare.metric.uploads": "游戏中的上传",
   "compare.metric.compiles": "游戏中的着色器编译",

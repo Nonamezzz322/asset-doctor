@@ -72,6 +72,13 @@ export interface RuntimeReport {
   shaderCompilesDuringGameplay: number;
   liveTextures: number;
   vramBytes: number;
+  /** Of `vramBytes`, the portion resident in a BLOCK-COMPRESSED format (BC/ETC/ASTC via KTX2), summed
+   *  from the real compressedTexImage2D data byteLengths (device-MEASURED, incl. baked mips) — NOT a
+   *  w·h·4 model. A subset of vramBytes (a compressed texture contributes THIS, not w·h·4). 0 = the
+   *  instrument observed no compressed uploads (a real measured fact — e.g. a KTX2 build that fell back
+   *  to raster on this device). OPTIONAL: absent when reading an OLDER exported session that predates
+   *  this field (undefined = "not recorded", which the A/B comparer treats differently from a measured 0). */
+  compressedBytes?: number;
   hitches: { frame: number; ms: number; cause: string }[];
   // ── timing (only trustworthy on the real target device) ──
   timing: { fps: number; frameTimeMsAvg: number; frameTimeMsP95: number; deviceDependent: true };
@@ -183,6 +190,7 @@ function buildReport(recs: FrameRec[], warmup: number, probes: InstrumentHandle[
     shaderCompilesDuringGameplay: sum(play.map((r) => r.compiles)),
     liveTextures: stats?.liveTextures ?? 0,
     vramBytes: stats?.vramBytes ?? 0,
+    compressedBytes: stats?.compressedBytes ?? 0, // device-measured; the live path always records it (0 = no compressed uploads seen)
     hitches: hitches.slice(0, 20),
     timing: {
       fps: round1(dts.length ? 1000 / avg(dts) : 0),

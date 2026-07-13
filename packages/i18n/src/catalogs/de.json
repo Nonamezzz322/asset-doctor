@@ -996,6 +996,7 @@
   "compare.metric.bindsAvg": "Textur-Bindings / Frame (Ø)",
   "compare.metric.liveTextures": "Aktive Texturen",
   "compare.metric.vram": "VRAM (deklariert)",
+  "compare.metric.compressed": "VRAM blockkomprimiert (gemessen)",
   "compare.metric.redundantBinds": "Redundante Textur-Bindings",
   "compare.metric.uploads": "Uploads während des Spiels",
   "compare.metric.compiles": "Shader-Kompilierungen während des Spiels",

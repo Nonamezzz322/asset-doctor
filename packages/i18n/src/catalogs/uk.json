@@ -1100,6 +1100,7 @@
   "compare.metric.bindsAvg": "Прив'язки текстур / кадр (сер.)",
   "compare.metric.liveTextures": "Живі текстури",
   "compare.metric.vram": "VRAM (заявлено)",
+  "compare.metric.compressed": "VRAM у стиснутому форматі (виміряно)",
   "compare.metric.redundantBinds": "Надлишкові прив'язки текстур",
   "compare.metric.uploads": "Завантаження під час гри",
   "compare.metric.compiles": "Компіляції шейдерів під час гри",

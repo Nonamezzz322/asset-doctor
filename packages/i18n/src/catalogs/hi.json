@@ -996,6 +996,7 @@
   "compare.metric.bindsAvg": "टेक्सचर बाइंड / फ़्रेम (औसत)",
   "compare.metric.liveTextures": "सक्रिय टेक्सचर",
   "compare.metric.vram": "VRAM (घोषित)",
+  "compare.metric.compressed": "ब्लॉक-संपीड़ित VRAM (मापी गई)",
   "compare.metric.redundantBinds": "अनावश्यक टेक्सचर बाइंड",
   "compare.metric.uploads": "गेमप्ले के दौरान अपलोड",
   "compare.metric.compiles": "गेमप्ले के दौरान शेडर कंपाइल",

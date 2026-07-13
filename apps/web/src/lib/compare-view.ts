@@ -49,6 +49,7 @@ export const COMPARE_METRIC_LABEL: Record<string, string> = {
   'textureBinds.avg': 'compare.metric.bindsAvg',
   liveTextures: 'compare.metric.liveTextures',
   vramBytes: 'compare.metric.vram',
+  compressedBytes: 'compare.metric.compressed',
   redundantBinds: 'compare.metric.redundantBinds',
   uploadsDuringGameplay: 'compare.metric.uploads',
   shaderCompilesDuringGameplay: 'compare.metric.compiles',
@@ -74,7 +75,7 @@ function rowView(r: CompareRow): CompareViewRow {
     labelKey: COMPARE_METRIC_LABEL[r.key] ?? r.key,
     before: r.before,
     after: r.after,
-    bytes: r.key === 'vramBytes',
+    bytes: r.key === 'vramBytes' || r.key === 'compressedBytes',
   };
   if (r.comparable) {
     return { ...base, delta: { value: r.delta, ...(r.pct !== undefined ? { pct: r.pct } : {}) } };

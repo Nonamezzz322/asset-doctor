@@ -48,6 +48,14 @@ describe('compareView — withhold / hedge / verdict', () => {
     expect(v.rows.find((r) => r.key === 'vramBytes')!.bytes).toBe(true);
     for (const r of c.rows) expect(COMPARE_METRIC_LABEL[r.key], `label for ${r.key}`).toBeDefined();
   });
+
+  it('the compressedBytes breakdown row (when both sides recorded it) is bytes-formatted + labelled', () => {
+    const c = compareRuntimeReports(report({ compressedBytes: 0 }), report({ compressedBytes: 16 * 1024 * 1024 }));
+    const row = compareView(c).rows.find((r) => r.key === 'compressedBytes')!;
+    expect(row.bytes).toBe(true);
+    expect(row.labelKey).toBe('compare.metric.compressed');
+    expect(row.delta?.value).toBe(16 * 1024 * 1024);
+  });
 });
 
 // i18n drift guard (film-legend.test.ts precedent). ComparePage renders these three key classes via BARE

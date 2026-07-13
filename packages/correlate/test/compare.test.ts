@@ -62,13 +62,47 @@ describe('compareRuntimeReports — classes, gates, deltas', () => {
     expect(c.hitches).toEqual({ before: 1, after: 1 });
   });
 
-  it('deterministic row order and full row set', () => {
+  it('deterministic row order and full row set (no compressedBytes ⇒ the optional row is absent)', () => {
     const keys = compareRuntimeReports(report(), report()).rows.map((r) => r.key);
     expect(keys).toEqual([
       'drawCalls.avg', 'drawCalls.max', 'textureBinds.avg', 'liveTextures', 'vramBytes',
       'redundantBinds', 'uploadsDuringGameplay', 'shaderCompilesDuringGameplay',
       'timing.fps', 'timing.frameTimeMsAvg', 'timing.frameTimeMsP95',
     ]);
+  });
+});
+
+describe('compressedBytes — measured block-compressed VRAM breakdown (optional, honesty-gated)', () => {
+  it('BOTH sessions recorded it ⇒ a state-class row right after vramBytes with the measured delta', () => {
+    const c = compareRuntimeReports(report({ compressedBytes: 0 }), report({ compressedBytes: 8 * 1024 * 1024 }));
+    const keys = c.rows.map((r) => r.key);
+    expect(keys).toEqual([
+      'drawCalls.avg', 'drawCalls.max', 'textureBinds.avg', 'liveTextures', 'vramBytes', 'compressedBytes',
+      'redundantBinds', 'uploadsDuringGameplay', 'shaderCompilesDuringGameplay',
+      'timing.fps', 'timing.frameTimeMsAvg', 'timing.frameTimeMsP95',
+    ]);
+    const comp = c.rows.find((r) => r.key === 'compressedBytes')!;
+    expect(comp).toMatchObject({ metricClass: 'state', before: 0, after: 8 * 1024 * 1024, delta: 8 * 1024 * 1024, comparable: true });
+    expect(comp.pct).toBeUndefined(); // 0 -> n is a new value, never +Inf%
+  });
+
+  it('EITHER side lacks it (older export) ⇒ row OMITTED (never compares recorded-vs-unrecorded, never fabricates 0)', () => {
+    expect(compareRuntimeReports(report({ compressedBytes: 4096 }), report()).rows.find((r) => r.key === 'compressedBytes')).toBeUndefined();
+    expect(compareRuntimeReports(report(), report({ compressedBytes: 4096 })).rows.find((r) => r.key === 'compressedBytes')).toBeUndefined();
+  });
+
+  it('BOTH measured 0 ⇒ row IS present (0→0 honestly reveals a KTX2 build that fell back to raster)', () => {
+    const comp = compareRuntimeReports(report({ compressedBytes: 0 }), report({ compressedBytes: 0 })).rows.find((r) => r.key === 'compressedBytes')!;
+    expect(comp).toMatchObject({ before: 0, after: 0, delta: 0, comparable: true });
+  });
+
+  it('parse: absent compressedBytes still parses (old export); present-and-garbage fails closed; present-and-valid parses', () => {
+    const old = JSON.parse(JSON.stringify(report())); // factory omits it
+    expect(parseRuntimeReport(old)).not.toBeNull();
+    const bad = JSON.parse(JSON.stringify(report({ compressedBytes: 1 })));
+    bad.compressedBytes = 'lots';
+    expect(parseRuntimeReport(bad)).toBeNull();
+    expect(parseRuntimeReport(JSON.parse(JSON.stringify(report({ compressedBytes: 2048 }))))).not.toBeNull();
   });
 });
 

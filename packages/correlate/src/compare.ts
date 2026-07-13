@@ -103,6 +103,13 @@ export function compareRuntimeReports(
     row('textureBinds.avg', 'per-frame', before.textureBinds.avg, after.textureBinds.avg, base),
     row('liveTextures', 'state', before.liveTextures, after.liveTextures, base),
     row('vramBytes', 'state', before.vramBytes, after.vramBytes, base),
+    // compressedBytes: the MEASURED block-compressed portion of vramBytes. State-class like vramBytes.
+    // Emitted ONLY when BOTH sessions RECORDED it (defined) — an older export lacks the field, and an
+    // unknown-vs-known comparison would be dishonest (and 0 would be a fabricated measurement). When both
+    // recorded, we show it even at 0→0: that honestly reveals a KTX2 build that fell back to raster.
+    ...(before.compressedBytes !== undefined && after.compressedBytes !== undefined
+      ? [row('compressedBytes', 'state', before.compressedBytes, after.compressedBytes, base)]
+      : []),
     row('redundantBinds', 'session-total', before.redundantBinds, after.redundantBinds, totalsOk),
     row('uploadsDuringGameplay', 'session-total', before.uploadsDuringGameplay, after.uploadsDuringGameplay, totalsOk),
     row('shaderCompilesDuringGameplay', 'session-total', before.shaderCompilesDuringGameplay, after.shaderCompilesDuringGameplay, totalsOk),
@@ -137,6 +144,9 @@ export function parseRuntimeReport(raw: unknown): RuntimeReport | null {
   ) {
     return null;
   }
+  // compressedBytes is OPTIONAL (older exports predate it): absent ⇒ fine (undefined), but present-and-
+  // garbage ⇒ fail-closed (never a NaN row). Newer exports always carry a finite number.
+  if ('compressedBytes' in r && !num(r.compressedBytes)) return null;
   return raw as RuntimeReport;
 }
 
