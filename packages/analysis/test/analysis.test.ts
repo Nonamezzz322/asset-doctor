@@ -18,6 +18,9 @@ interface ExpectedFinding {
 interface ExpectedAtlas {
   occupancy: number;
   atlas: { w: number; h: number };
+  /** The REAL decoded page size, present only when it differs from the declared `atlas` (a broken
+   *  manifest). VRAM is charged on this — the texture the GPU actually uploads. Defaults to `atlas`. */
+  real?: { w: number; h: number };
   findings: ExpectedFinding[];
 }
 interface ExpectedImages {
@@ -51,7 +54,10 @@ describe('analyze — atlas goldens', () => {
 
       expect(Math.round((m?.occupancy ?? 0) * 10000) / 10000).toBe(expected.occupancy);
       expect(sig(report.findings)).toEqual(sig(expected.findings));
-      expect(m?.vramBytes).toBe(expected.atlas.w * expected.atlas.h * 4);
+      // VRAM is charged on the REAL decoded page (the texture the GPU uploads), which equals the declared
+      // atlas size for a healthy atlas and only differs on a broken manifest (dimension-mismatch's `real`).
+      const vramSize = expected.real ?? expected.atlas;
+      expect(m?.vramBytes).toBe(vramSize.w * vramSize.h * 4);
     });
   }
 });
@@ -1195,6 +1201,20 @@ describe('dimension-mismatch (declared meta.size ≠ real decoded image pixels)'
     const a = dmAtlas('match.png', { w: 512, h: 512 }, [{ x: 0, y: 0, w: 100, h: 100 }]);
     const report = await analyze([dmAsset(a, { w: 512, h: 512 })]);
     expect(report.findings.some((f) => f.rule === 'dimension-mismatch')).toBe(false);
+  });
+
+  it('atlas VRAM is charged on the REAL decoded page, not the declared manifest size (invariant 5)', async () => {
+    // Declared 1024² but the real PNG is 512². The GPU uploads the decoded 512² texture, so VRAM must be
+    // 512²×4 = 1 MB — never the declared 1024²×4 = 4 MB (a footprint the GPU never allocates).
+    const a = dmAtlas('vram.png', { w: 1024, h: 1024 }, [{ x: 0, y: 0, w: 100, h: 100 }]);
+    const report = await analyze([dmAsset(a, { w: 512, h: 512 })]);
+    expect(report.assets[0]?.vramBytes).toBe(512 * 512 * 4);
+    expect(report.assets[0]?.vramBytes).not.toBe(1024 * 1024 * 4);
+    expect(report.totals.vramBytes).toBe(512 * 512 * 4);
+    // Consistency: the SAME real 512² as a loose image charges the identical VRAM — the atlas and loose
+    // paths now share one honest basis (the real decoded size).
+    const loose = await analyze([{ kind: 'image', image: realImg('loose.png', { w: 512, h: 512 }) }]);
+    expect(loose.assets[0]?.vramBytes).toBe(report.assets[0]?.vramBytes);
   });
 });
 

@@ -234,8 +234,14 @@ export async function analyze(
       metrics.push({
         assetRef: atlas.name,
         diskBytes: image.byteSize,
-        vramBytes: vramBytes(atlas.size),
-        vramBytesMipmapped: vramBytesMipmapped(atlas.size),
+        // VRAM is charged on the REAL decoded page (image.size), the texture the GPU actually uploads —
+        // NOT the manifest's declared atlas.size. The two are equal for a healthy atlas; they diverge only
+        // on a broken/mismatched manifest (flagged separately by dimension-mismatch), where the declared
+        // size would fabricate a footprint the GPU never allocates (invariant 5: VRAM = real w·h·4). This
+        // also matches the loose-image path below, which already uses image.size. Occupancy/wasted-region
+        // GEOMETRY keeps atlas.size — that is the declared coordinate space the frames are placed in.
+        vramBytes: vramBytes(image.size),
+        vramBytesMipmapped: vramBytesMipmapped(image.size),
         occupancy: occupancyValue(atlas),
         ...(wasteFrag !== undefined ? { fragmentation: wasteFrag } : {}),
       });

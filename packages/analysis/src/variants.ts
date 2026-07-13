@@ -93,7 +93,11 @@ export function groupVariants(assets: Asset[]): VariantGroups {
     // pages: one Atlas === one texture page (multi-page atlases are already one-Atlas-per-page from the
     // parser); a loose image is one texture. Never a fabricated page count — see VItem.pages.
     a.kind === 'atlas'
-      ? { name: a.atlas.name, size: a.atlas.size, pages: 1 }
+      ? // VRAM/loaded-VRAM is charged on the REAL decoded page (image.size), the texture the GPU uploads,
+        // never the manifest's declared atlas.size — the two differ only on a broken atlas (dimension-mismatch),
+        // where declared size fabricates a footprint (invariant 5). Matches the AssetMetrics VRAM in analyze.ts
+        // and the loose branch below, so a single asset never reports two VRAM bases.
+        { name: a.atlas.name, size: a.image.size, pages: 1 }
       : { name: a.image.name, size: a.image.size, pages: 1 },
   );
 

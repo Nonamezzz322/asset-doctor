@@ -25,5 +25,5 @@
       "severity": "info"
     }
   ],
-  "note": "Stale/downscaled manifest: meta.size declares 1024×1024 but the real PNG is 512×512. The frame off_right (x600+w100=700) survives the parser's OOB pass (it tests the DECLARED 1024) yet samples past the REAL 512 edge → dimension-mismatch crit (1 off-edge frame). Occupancy is computed on the declared 1024² (12.4%) so it also reads crit. The static VRAM is charged on the declared 1024² (4 MB), which OVER-states the real 512² footprint — the finding discloses this honestly (two measurements, never a saving)."
+  "note": "Stale/downscaled manifest: meta.size declares 1024×1024 but the real PNG is 512×512. The frame off_right (x600+w100=700) survives the parser's OOB pass (it tests the DECLARED 1024) yet samples past the REAL 512 edge → dimension-mismatch crit (1 off-edge frame). Occupancy is computed on the declared 1024² layout space (12.4%) so it also reads crit. The static VRAM is charged on the REAL decoded 512² (1 MB) — the texture the GPU actually uploads — NOT the declared 1024² (which would fabricate a 4 MB footprint the GPU never allocates, invariant 5); the dimension-mismatch finding still discloses the declared-vs-real gap honestly."
 }
