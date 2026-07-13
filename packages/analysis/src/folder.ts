@@ -96,16 +96,22 @@ export function duplicateSimilarFindings(features: ImageFeatures[], cfg: Thresho
       ) <= maxDelta
     );
   };
+  // Complete-linkage clustering: a candidate joins only when it is within BOTH thresholds of EVERY
+  // member already in the group, not merely the anchor. Anchor-only (single-linkage) would over-claim —
+  // Hamming obeys the triangle inequality, so two members each ≤N bits from the anchor can be up to 2N
+  // bits apart from EACH OTHER (and their mean colors up to 2·maxDelta apart), yet the finding asserts
+  // "near-identical (dHash ≤ N bits)" and suggests reusing one. Requiring pairwise closeness makes the
+  // reported set honestly satisfy the bound it claims (and keeps the recolor color-guard from being
+  // bridged transitively by a neutral anchor). Conservative: it can drop a member that only matches a
+  // later anchor — an honest under-claim, never an over-claim.
+  const compatible = (k: number, fj: ImageFeatures): boolean =>
+    hamming(feats[k]!.dHash!, fj.dHash!) <= cfg.duplicates.similarHammingMax && colorCompatible(feats[k]!, fj);
   for (let i = 0; i < feats.length; i++) {
     if (used.has(i)) continue;
     const group = [i];
     for (let j = i + 1; j < feats.length; j++) {
       if (used.has(j)) continue;
-      if (
-        hamming(feats[i]!.dHash!, feats[j]!.dHash!) <= cfg.duplicates.similarHammingMax &&
-        colorCompatible(feats[i]!, feats[j]!)
-      )
-        group.push(j);
+      if (group.every((k) => compatible(k, feats[j]!))) group.push(j);
     }
     if (group.length < 2) continue;
     group.forEach((k) => used.add(k));

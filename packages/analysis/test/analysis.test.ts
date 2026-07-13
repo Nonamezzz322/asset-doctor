@@ -1733,6 +1733,39 @@ describe('folder-level findings', () => {
       expect(sims).toHaveLength(1); // no singleton finding for the excluded blue twin
       expect(sims[0]!.relatedRefs).toEqual(['r1.png', 'r2.png']);
     });
+
+    // ── Complete-linkage: the reported set must satisfy the claimed "≤ N bits + color-compatible" bound
+    // PAIRWISE, not just anchor-to-member. Anchor-only clustering over-claims via the triangle inequality.
+    it('Hamming triangle-inequality: B,C each ≤6 bits from anchor A but 12 apart ⇒ C excluded (not lumped)', () => {
+      // A=0…0, B has 6 low bits set, C has 6 different bits set. hamming(A,B)=hamming(A,C)=6; hamming(B,C)=12.
+      // No meanColor ⇒ the color guard self-skips, isolating the Hamming triangle inequality.
+      const feats: ImageFeatures[] = [
+        { assetRef: 'a.png', contentHash: 'h1', dHash: '0000000000000000' },
+        { assetRef: 'b.png', contentHash: 'h2', dHash: '000000000000003f' }, // 6 bits vs A
+        { assetRef: 'c.png', contentHash: 'h3', dHash: '0000000000003f00' }, // 6 OTHER bits vs A ⇒ 12 vs B
+      ];
+      const sims = duplicateSimilarFindings(feats, DEFAULT_THRESHOLDS).filter((f) => f.rule === 'duplicate-similar');
+      // Anchor A groups B (6≤6). C is 6 from A but 12 from B ⇒ complete-linkage refuses it; A pairs only with B.
+      expect(sims).toHaveLength(1);
+      expect(sims[0]!.relatedRefs).toEqual(['a.png', 'b.png']);
+    });
+
+    it('color triangle-inequality: a neutral anchor must NOT bridge two 48-apart recolors', () => {
+      // n(eutral) is ≤24 from both red-ish and green-ish, but red vs green differ by 48 on r/g ⇒ splitting
+      // them is the whole point of the recolor guard; an anchor-only check would lump all three.
+      const out = duplicateSimilarFindings(
+        [
+          feat('n.png', 'h1', { r: 128, g: 128, b: 128 }),
+          feat('red.png', 'h2', { r: 152, g: 104, b: 128 }), // Δ(n)=24 ok; Δ(green)=48 on r & g
+          feat('green.png', 'h3', { r: 104, g: 152, b: 128 }), // Δ(n)=24 ok
+        ],
+        DEFAULT_THRESHOLDS,
+      );
+      const sims = out.filter((f) => f.rule === 'duplicate-similar');
+      // n anchors with red (first compatible); green is 48 from red ⇒ excluded. No 3-way over-claim.
+      expect(sims).toHaveLength(1);
+      expect(sims[0]!.relatedRefs).toEqual(['n.png', 'red.png']);
+    });
   });
 
   it('suggests atlasing many loose sprites', async () => {
