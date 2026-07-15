@@ -724,7 +724,7 @@ export function App() {
                   {cabinetFinding ? (
                     <>
                       <h2 className="font-mono text-xs uppercase tracking-[0.06em] text-teal-text">{t('cabinet.heading')}</h2>
-                      <CabinetIssueDetail finding={cabinetFinding} />
+                      <CabinetIssueDetail finding={cabinetFinding} onSelectFile={setSelectedAsset} />
                     </>
                   ) : null}
                   <h2 className="font-mono text-xs uppercase tracking-[0.06em] text-teal-text">{t('findings.title')}</h2>

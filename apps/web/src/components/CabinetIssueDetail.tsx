@@ -12,7 +12,7 @@ import { severityLabelClass } from '../lib/severity-style';
 import { DOT } from './Findings';
 import { affectedFiles } from '../lib/cabinet-detail';
 
-export function CabinetIssueDetail({ finding }: { finding: Finding }) {
+export function CabinetIssueDetail({ finding, onSelectFile }: { finding: Finding; onSelectFile?: (ref: string) => void }) {
   const { t, renderFinding } = useI18n();
   const r = renderFinding(finding);
   const files = affectedFiles(finding);
@@ -30,12 +30,29 @@ export function CabinetIssueDetail({ finding }: { finding: Finding }) {
           <summary className="cursor-pointer select-none font-mono text-xs text-ink-soft hover:text-ink">
             {t('cabinet.affectedFiles', { n: files.length })}
           </summary>
+          {/* Each affected file jumps the film to THAT sprite (setSelectedAsset) so the user can inspect
+              every member in place; the folder-issue card persists (selectedFinding stays this finding).
+              Real <button>s (keyboard-accessible); the folder detail is unaffected. Plain <li> when no
+              handler is wired (e.g. a non-interactive/test context). */}
           <ul className="mt-2 max-h-56 space-y-0.5 overflow-y-auto font-mono text-[11px] text-ink-soft">
-            {files.map((ref) => (
-              <li key={ref} className="truncate" title={ref}>
-                {ref}
-              </li>
-            ))}
+            {files.map((ref) =>
+              onSelectFile ? (
+                <li key={ref}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectFile(ref)}
+                    title={ref}
+                    className="block w-full truncate text-left hover:text-teal-text"
+                  >
+                    {ref}
+                  </button>
+                </li>
+              ) : (
+                <li key={ref} className="truncate" title={ref}>
+                  {ref}
+                </li>
+              ),
+            )}
           </ul>
         </details>
       ) : null}
