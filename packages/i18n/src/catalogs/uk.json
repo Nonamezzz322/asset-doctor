@@ -1110,5 +1110,7 @@
   "compare.hedge.scene": "лише сире — залежить від сцени",
   "compare.hedge.gate": "лише сире",
   "compare.hedge.duration": "лише сире — довжини сесій різні",
-  "compare.hedge.device": "лише сире — інший пристрій"
+  "compare.hedge.device": "лише сире — інший пристрій",
+  "cabinet.heading": "Проблема папки",
+  "cabinet.affectedFiles": "Зачеплені файли ({n})"
 }

@@ -105,7 +105,12 @@ const appSrc =
   // Its THREE dynamic keys — t(view.verdictKey) / t(r.labelKey) / t(r.hedgeKey) — are BARE VARIABLES the
   // literal/template regexes below cannot see; those (compare.verdict.*/compare.metric.*/compare.hedge.*)
   // are drift-guarded exhaustively in apps/web/src/lib/compare-view.test.ts against the pure model output.
-  comp('ComparePage.tsx');
+  comp('ComparePage.tsx') +
+  '\n' +
+  // CabinetIssueDetail.tsx owns cabinet.affectedFiles (the folder-issue per-sprite drill-down disclosure) +
+  // reuses severity.* (covered by the severity. branch below). App.tsx owns cabinet.heading. Without scanning
+  // it, a renamed cabinet.affectedFiles key would silently render a raw dotted key.
+  comp('CabinetIssueDetail.tsx');
 
 // Suffix maps mirrored from App.tsx (modeKey / granKey) so dynamic option keys resolve to concrete keys.
 const MODE_SUFFIXES = ['auto', 'static', 'spine'];

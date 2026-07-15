@@ -1032,5 +1032,7 @@
   "compare.hedge.scene": "только сырое — зависит от сцены",
   "compare.hedge.gate": "только сырое",
   "compare.hedge.duration": "только сырое — длины сессий разные",
-  "compare.hedge.device": "только сырое — другое устройство"
+  "compare.hedge.device": "только сырое — другое устройство",
+  "cabinet.heading": "Проблема папки",
+  "cabinet.affectedFiles": "Затронутые файлы ({n})"
 }

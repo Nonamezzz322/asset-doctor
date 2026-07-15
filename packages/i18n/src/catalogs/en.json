@@ -986,5 +986,7 @@
   "compare.hedge.scene": "raw only — depends on the scene",
   "compare.hedge.gate": "raw only",
   "compare.hedge.duration": "raw only — session lengths differ",
-  "compare.hedge.device": "raw only — different device"
+  "compare.hedge.device": "raw only — different device",
+  "cabinet.heading": "Folder issue",
+  "cabinet.affectedFiles": "Affected files ({n})"
 }

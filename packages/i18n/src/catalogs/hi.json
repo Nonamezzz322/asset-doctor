@@ -1006,5 +1006,7 @@
   "compare.hedge.scene": "केवल कच्चा — दृश्य पर निर्भर",
   "compare.hedge.gate": "केवल कच्चा",
   "compare.hedge.duration": "केवल कच्चा — सत्र अवधि भिन्न",
-  "compare.hedge.device": "केवल कच्चा — भिन्न डिवाइस"
+  "compare.hedge.device": "केवल कच्चा — भिन्न डिवाइस",
+  "cabinet.heading": "फ़ोल्डर समस्या",
+  "cabinet.affectedFiles": "प्रभावित फ़ाइलें ({n})"
 }

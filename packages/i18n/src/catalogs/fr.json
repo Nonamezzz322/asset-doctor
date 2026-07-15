@@ -1010,5 +1010,7 @@
   "compare.hedge.scene": "brut seulement — dépend de la scène",
   "compare.hedge.gate": "brut seulement",
   "compare.hedge.duration": "brut seulement — durées différentes",
-  "compare.hedge.device": "brut seulement — appareil différent"
+  "compare.hedge.device": "brut seulement — appareil différent",
+  "cabinet.heading": "Problème de dossier",
+  "cabinet.affectedFiles": "Fichiers concernés ({n})"
 }

@@ -38,6 +38,8 @@ import { Findings, DOT } from './components/Findings';
 import { VerdictBar } from './components/VerdictBar';
 import { TriageLedger } from './components/TriageLedger';
 import { PrimaryRecommendation } from './components/PrimaryRecommendation';
+import { CabinetIssueDetail } from './components/CabinetIssueDetail';
+import { cabinetDetailFinding } from './lib/cabinet-detail';
 import { useDebounced } from './lib/useDebounced';
 import { buildIndex, countCandidates, defaultSelectOpts, DEFAULT_SEVERITIES, DEFAULT_SORT, foldableFindingIds, isAssetAxis, looseRecommendation, selectRows, typeHiddenCount, type LedgerRow, type SelectOpts, type SortKey } from './lib/triage';
 import { loadHiddenRules, saveHiddenRules } from './lib/view-prefs';
@@ -397,6 +399,21 @@ export function App() {
     () => report?.findings.filter((f) => f.scope !== 'folder' && f.assetRef === debouncedSelected) ?? [],
     [report, debouncedSelected],
   );
+  // The film overlay highlights ONLY an asset-scope finding: a folder finding spans many assets, so there is
+  // no single overlay to highlight — and passing its id straight through would DIM every asset overlay
+  // (FilmViewer treats a highlightId it doesn't own as "match nothing"). Derived from the debounced selection
+  // so it settles in lockstep with the film's decode.
+  const filmHighlightId = useMemo(() => {
+    const f = report?.findings.find((x) => x.id === debouncedHighlight);
+    return f?.scope === 'asset' ? debouncedHighlight : undefined;
+  }, [report, debouncedHighlight]);
+  // The selected FOLDER ("cabinet") finding — its detail + per-sprite (affected-file) drill-down surface.
+  // Folder findings are excluded from the per-asset panel above, so without this they'd show only as a ledger
+  // row title with their measured `relatedRefs` never surfaced. Keyed on the debounced selection (lockstep).
+  const cabinetFinding = useMemo(
+    () => cabinetDetailFinding(debouncedHighlight, report?.findings ?? []),
+    [report, debouncedHighlight],
+  );
   // Round 21 #2: the selected film's bytes are RE-READ from disk on demand (the worker holds the only resident
   // copy now). Async ⇒ resolved into state by the effect below, gated by a cancel flag so a rapid re-selection
   // never lands stale bytes on a newer film. null ⇒ no bytes yet (loading) OR the source is unavailable
@@ -465,8 +482,10 @@ export function App() {
 
   const onRowClick = (row: LedgerRow) => {
     setSelectedAsset(row.assetRef);
-    // A folder finding spans many assets ⇒ no single-asset overlay to highlight.
-    setSelectedFinding(row.scope === 'asset' ? row.id : undefined);
+    // Track the selected finding for BOTH scopes: an asset finding drives the film overlay highlight; a
+    // folder finding opens its cabinet-issue detail (the per-sprite drill-down). The film only highlights
+    // asset-scope findings — filmHighlightId derives that, so a folder id never dims the anchor's overlays.
+    setSelectedFinding(row.id);
   };
   const toggleSeverity = (sev: Severity) =>
     setSeverityFilter((prev) => {
@@ -695,10 +714,19 @@ export function App() {
                     // image ⇒ inspect reports frame:null honestly. `frameNames` is intentionally NOT passed — the
                     // sprite-name field is a flagged additive `core` change awaiting sign-off (design §8); until
                     // then the inspect readout uses the real array ordinal ("Frame N · W×H"), fully honest.
-                    <FilmViewer bytes={selectedBytes} findings={assetFindings} highlightId={debouncedHighlight} name={debouncedSelected} metrics={selectedMetrics} frameCount={selectedFrameCount} interactive frames={report?.atlasFrames?.[debouncedSelected]} />
+                    <FilmViewer bytes={selectedBytes} findings={assetFindings} highlightId={filmHighlightId} name={debouncedSelected} metrics={selectedMetrics} frameCount={selectedFrameCount} interactive frames={report?.atlasFrames?.[debouncedSelected]} />
                   ) : (
                     <p className="rounded-xl border border-line bg-panel p-4 font-mono text-sm text-ink-soft">{t('report.noImage')}</p>
                   )}
+                  {/* Selected FOLDER-issue detail (the per-sprite drill-down): a folder finding is excluded from
+                      the per-asset Findings panel below, so this card is the only place its body + the concrete
+                      affected files (collapsed) surface. Present only while such a row is selected. */}
+                  {cabinetFinding ? (
+                    <>
+                      <h2 className="font-mono text-xs uppercase tracking-[0.06em] text-teal-text">{t('cabinet.heading')}</h2>
+                      <CabinetIssueDetail finding={cabinetFinding} />
+                    </>
+                  ) : null}
                   <h2 className="font-mono text-xs uppercase tracking-[0.06em] text-teal-text">{t('findings.title')}</h2>
                   <Findings findings={assetFindings} selectedId={selectedFinding} onSelect={setSelectedFinding} />
                   <FixCard files={files} buildNonce={buildNonce} unlocked={proUnlocked} onUnlockedChange={setProUnlocked} />

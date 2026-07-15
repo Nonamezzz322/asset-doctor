@@ -1006,5 +1006,7 @@
   "compare.hedge.scene": "nur roh — szenenabhängig",
   "compare.hedge.gate": "nur roh",
   "compare.hedge.duration": "nur roh — Session-Längen unterscheiden sich",
-  "compare.hedge.device": "nur roh — anderes Gerät"
+  "compare.hedge.device": "nur roh — anderes Gerät",
+  "cabinet.heading": "Ordner-Problem",
+  "cabinet.affectedFiles": "Betroffene Dateien ({n})"
 }

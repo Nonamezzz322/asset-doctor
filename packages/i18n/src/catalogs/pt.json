@@ -1010,5 +1010,7 @@
   "compare.hedge.scene": "apenas bruto — depende da cena",
   "compare.hedge.gate": "apenas bruto",
   "compare.hedge.duration": "apenas bruto — durações diferentes",
-  "compare.hedge.device": "apenas bruto — dispositivo diferente"
+  "compare.hedge.device": "apenas bruto — dispositivo diferente",
+  "cabinet.heading": "Problema da pasta",
+  "cabinet.affectedFiles": "Arquivos afetados ({n})"
 }

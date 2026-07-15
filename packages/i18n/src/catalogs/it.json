@@ -1010,5 +1010,7 @@
   "compare.hedge.scene": "solo grezzo — dipende dalla scena",
   "compare.hedge.gate": "solo grezzo",
   "compare.hedge.duration": "solo grezzo — durate diverse",
-  "compare.hedge.device": "solo grezzo — dispositivo diverso"
+  "compare.hedge.device": "solo grezzo — dispositivo diverso",
+  "cabinet.heading": "Problema della cartella",
+  "cabinet.affectedFiles": "File interessati ({n})"
 }

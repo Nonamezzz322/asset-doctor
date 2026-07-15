@@ -1010,5 +1010,7 @@
   "compare.hedge.scene": "solo en bruto — depende de la escena",
   "compare.hedge.gate": "solo en bruto",
   "compare.hedge.duration": "solo en bruto — duraciones distintas",
-  "compare.hedge.device": "solo en bruto — dispositivo distinto"
+  "compare.hedge.device": "solo en bruto — dispositivo distinto",
+  "cabinet.heading": "Problema de carpeta",
+  "cabinet.affectedFiles": "Archivos afectados ({n})"
 }
