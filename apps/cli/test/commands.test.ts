@@ -22,7 +22,7 @@ function fakeIO(): { io: IO; out: string[]; err: string[] } {
   const err: string[] = [];
   return { io: { cwd: REPO, out: (s) => out.push(s), err: (s) => err.push(s), color: false }, out, err };
 }
-const FLAGS: Flags = { json: false, annotate: false, warnOnly: false, failOn: 'error', quiet: true, force: false };
+const FLAGS: Flags = { json: false, html: false, annotate: false, warnOnly: false, failOn: 'error', quiet: true, force: false };
 const cfgFile = (name: string, body: object): string => {
   const p = join(tmp, name);
   writeFileSync(p, JSON.stringify(body));
@@ -33,6 +33,30 @@ describe('command exit codes', () => {
   it('audit never fails on findings (exit 0)', async () => {
     const { io } = fakeIO();
     expect(await auditCmd(`${FIX}/tp-array-oversize`, FLAGS, io)).toBe(0);
+  });
+
+  it('audit --html emits the self-contained page to stdout; --out writes it as the artifact (P10)', async () => {
+    const { io, out } = fakeIO();
+    expect(await auditCmd(`${FIX}/tp-array-oversize`, { ...FLAGS, html: true }, io)).toBe(0);
+    const html = out.join('');
+    // The SAME serializer the web export button uses (@asset-doctor/budget reportToHTML): self-contained
+    // (inline <style>, zero external refs, no <script>) with the honest disk≠VRAM note.
+    expect(html).toContain('<style>');
+    expect(html).not.toContain('<script');
+    expect(html).toContain('Asset Doctor');
+    // --out writes the HTML file (the CI-artifact use), nothing printed
+    const file = join(tmp, 'report.html');
+    const { io: io2, out: out2 } = fakeIO();
+    expect(await auditCmd(`${FIX}/tp-array-oversize`, { ...FLAGS, html: true, out: file }, io2)).toBe(0);
+    expect(out2.join('')).toBe('');
+    expect(readFileSync(file, 'utf8')).toContain('<style>');
+  });
+
+  it('audit --json --html is a fail-closed config conflict (exit 2 via ConfigError)', async () => {
+    const { io } = fakeIO();
+    await expect(auditCmd(`${FIX}/tp-array-oversize`, { ...FLAGS, json: true, html: true }, io)).rejects.toThrow(
+      /mutually exclusive/,
+    );
   });
 
   it('budget returns 1 when an error budget is breached', async () => {

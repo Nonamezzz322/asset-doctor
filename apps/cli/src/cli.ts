@@ -16,7 +16,7 @@ const VERSION = '0.1.0';
 const HELP = `asset-doctor — static asset budget gate for HTML5 games (PixiJS/Phaser)
 
 Usage:
-  asset-doctor audit  <dir> [--json] [--out file] [--severity crit|warn|info] [--quiet]
+  asset-doctor audit  <dir> [--json|--html] [--out file] [--severity crit|warn|info] [--quiet]
   asset-doctor budget <dir> [--config file] [--baseline file] [--json] [--out file]
                             [--sarif file] [--summary file] [--annotate]
                             [--fail-on error|warn|none] [--warn-only] [--quiet]
@@ -43,6 +43,7 @@ async function main(): Promise<number> {
         config: { type: 'string' },
         baseline: { type: 'string' },
         json: { type: 'boolean', default: false },
+        html: { type: 'boolean', default: false },
         sarif: { type: 'string' },
         out: { type: 'string' },
         summary: { type: 'string' },
@@ -83,6 +84,7 @@ async function main(): Promise<number> {
     config: str(values.config),
     baseline: str(values.baseline),
     json: Boolean(values.json),
+    html: Boolean(values.html),
     sarif: str(values.sarif),
     out: str(values.out),
     summary: str(values.summary),

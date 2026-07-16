@@ -11,6 +11,8 @@ export interface Flags {
   config?: string;
   baseline?: string;
   json: boolean;
+  /** `audit` only: emit the self-contained HTML report (mutually exclusive with --json; --out writes it). */
+  html: boolean;
   sarif?: string;
   out?: string;
   summary?: string;

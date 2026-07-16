@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AnalysisReport, Finding } from '@asset-doctor/core';
 import { fmtBytes } from '@asset-doctor/analysis';
-import { toJSON } from '@asset-doctor/budget';
+import { toJSON } from '../src/index';
 import {
   reportToJSON,
   reportToMarkdown,
@@ -12,7 +12,7 @@ import {
   sortFindings,
   escapeHtml,
   REPORT_MIME,
-} from './report-export';
+} from '../src/index';
 
 // Minimal AnalysisReport literal — ONLY the fields the serializers read (cast to the real type). Totals
 // use values chosen so no field collides with a would-be SUMMED savings figure (1000+2000=3000), so the

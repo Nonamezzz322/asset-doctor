@@ -39,3 +39,15 @@ export type {
   DiffCounts,
   AuditDiff,
 } from './diff';
+export {
+  reportToJSON,
+  reportToMarkdown,
+  reportToCSV,
+  reportToHTML,
+  reportContent,
+  reportFilename,
+  sortFindings,
+  escapeHtml,
+  REPORT_MIME,
+} from './report-export';
+export type { ReportFormat } from './report-export';
