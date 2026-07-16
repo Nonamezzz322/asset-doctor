@@ -1043,5 +1043,14 @@
   "cabinet.value.atlas-merge": "Число: заполненность каждого листа (occupancy, измерено)",
   "cabinet.value.format": "Число: измеренная экономия загрузки на изображение",
   "cabinet.value.strippable-metadata": "Число: точные байты срезаемых метаданных на изображение",
-  "dropzone.demo": "Посмотреть на примере"
+  "dropzone.demo": "Посмотреть на примере",
+  "history.title": "С прошлого аудита",
+  "history.vs": "Сравнение с предыдущим аудитом папки с этим именем ({date})",
+  "history.counts": "{added} новых · {resolved} решено · {changed} сменили severity",
+  "history.noChange": "Измеренных изменений с прошлого аудита нет.",
+  "history.metric.disk": "Вес на диске",
+  "history.metric.vram": "VRAM (заявлено)",
+  "history.metric.loadedVram": "Загружаемый VRAM (худший tier)",
+  "history.metric.recoverable": "Возвращаемый диск",
+  "history.metric.drawFloor": "Флор draw-calls"
 }

@@ -111,7 +111,12 @@ const appSrc =
   // CabinetIssueDetail.tsx owns cabinet.affectedFiles (the folder-issue per-sprite drill-down disclosure) +
   // reuses severity.* (covered by the severity. branch below). App.tsx owns cabinet.heading. Without scanning
   // it, a renamed cabinet.affectedFiles key would silently render a raw dotted key.
-  comp('CabinetIssueDetail.tsx');
+  comp('CabinetIssueDetail.tsx') +
+  '\n' +
+  // HistoryStrip.tsx (P6 local audit history) owns the history.* static keys (title/vs/counts/noChange);
+  // its dynamic t(r.labelKey) rows are BARE VARIABLES — those (history.metric.*) are drift-guarded against
+  // the live HISTORY_METRIC_LABEL map in audit-history.test.ts.
+  comp('HistoryStrip.tsx');
 
 // Suffix maps mirrored from App.tsx (modeKey / granKey) so dynamic option keys resolve to concrete keys.
 const MODE_SUFFIXES = ['auto', 'static', 'spine'];

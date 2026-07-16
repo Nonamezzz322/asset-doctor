@@ -1003,5 +1003,14 @@
   "cabinet.value.atlas-merge": "数值：每张图集的填充率（实测）",
   "cabinet.value.format": "数值：每张图片的实测下载节省",
   "cabinet.value.strippable-metadata": "数值：每张图片可剥离元数据的精确字节数",
-  "dropzone.demo": "试试示例项目"
+  "dropzone.demo": "试试示例项目",
+  "history.title": "自上次审计以来",
+  "history.vs": "与此文件夹名称的上一次审计对比（{date}）",
+  "history.counts": "{added} 个新增 · {resolved} 个已解决 · {changed} 个严重度变化",
+  "history.noChange": "与上一次审计相比无实测变化。",
+  "history.metric.disk": "磁盘大小",
+  "history.metric.vram": "显存（声明）",
+  "history.metric.loadedVram": "加载显存（最差档位）",
+  "history.metric.recoverable": "可回收磁盘",
+  "history.metric.drawFloor": "绘制调用下限"
 }

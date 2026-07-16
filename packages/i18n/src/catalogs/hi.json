@@ -1017,5 +1017,14 @@
   "cabinet.value.atlas-merge": "मान: प्रत्येक शीट की भराई (मापा गया)",
   "cabinet.value.format": "मान: प्रति छवि मापी गई डाउनलोड बचत",
   "cabinet.value.strippable-metadata": "मान: प्रति छवि हटाने योग्य मेटाडेटा के सटीक बाइट",
-  "dropzone.demo": "नमूना प्रोजेक्ट आज़माएँ"
+  "dropzone.demo": "नमूना प्रोजेक्ट आज़माएँ",
+  "history.title": "पिछले ऑडिट के बाद से",
+  "history.vs": "इस फ़ोल्डर नाम के पिछले ऑडिट से तुलना ({date})",
+  "history.counts": "{added} नए · {resolved} हल हुए · {changed} की गंभीरता बदली",
+  "history.noChange": "पिछले ऑडिट की तुलना में कोई मापा गया बदलाव नहीं।",
+  "history.metric.disk": "डिस्क आकार",
+  "history.metric.vram": "VRAM (घोषित)",
+  "history.metric.loadedVram": "लोडेड VRAM (सबसे खराब स्तर)",
+  "history.metric.recoverable": "पुनर्प्राप्त करने योग्य डिस्क",
+  "history.metric.drawFloor": "ड्रॉ-कॉल न्यूनतम"
 }

@@ -1121,5 +1121,14 @@
   "cabinet.value.atlas-merge": "Число: заповненість кожного аркуша (occupancy, виміряно)",
   "cabinet.value.format": "Число: виміряна економія завантаження на зображення",
   "cabinet.value.strippable-metadata": "Число: точні байти зрізуваних метаданих на зображення",
-  "dropzone.demo": "Подивитися на прикладі"
+  "dropzone.demo": "Подивитися на прикладі",
+  "history.title": "З минулого аудиту",
+  "history.vs": "Порівняння з попереднім аудитом папки з цим імʼям ({date})",
+  "history.counts": "{added} нових · {resolved} вирішено · {changed} змінили severity",
+  "history.noChange": "Виміряних змін із минулого аудиту немає.",
+  "history.metric.disk": "Вага на диску",
+  "history.metric.vram": "VRAM (заявлено)",
+  "history.metric.loadedVram": "Завантажуваний VRAM (найгірший tier)",
+  "history.metric.recoverable": "Повернений диск",
+  "history.metric.drawFloor": "Флор draw-calls"
 }

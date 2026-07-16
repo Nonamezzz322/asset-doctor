@@ -9,6 +9,9 @@ import {
   type PickedFile,
 } from './lib/import';
 import { loadDemoProject } from './lib/demo';
+import { diffAudits, type AuditDiff } from '@asset-doctor/budget';
+import { buildStored, loadHistory, saveHistory, toSnapshot } from './lib/audit-history';
+import { HistoryStrip } from './components/HistoryStrip';
 import { keyOf } from './lib/group';
 import { filmSelectionAction } from './lib/film-selection';
 import { readSourceBytes, sourceReaders } from './lib/source-bytes';
@@ -142,6 +145,9 @@ export function App() {
   // and reused for BOTH the FilmViewer selection AND the render-probe. State (not useMemo) so `run()` writes
   // the same object the probe closes over.
   const [readers, setReaders] = useState<Map<string, () => Promise<ArrayBuffer | null>>>(new Map());
+  // P6 local audit history: the measured diff vs the STORED previous snapshot of this folder NAME (+ its
+  // timestamp), computed once per successful run below. null ⇒ no previous audit under this name ⇒ no strip.
+  const [history, setHistory] = useState<{ diff: AuditDiff; at: number } | null>(null);
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [selectedAsset, setSelectedAsset] = useState<string | undefined>();
   const [selectedFinding, setSelectedFinding] = useState<string | undefined>();
@@ -241,6 +247,19 @@ export function App() {
       const rep = await runAnalysis(picked, (p) => setPhase({ t: 'analyzing', progress: p }), ctrl.signal);
       // The static result lands FIRST (invariant 4: ≤10s instant-wow is never blocked by the probe).
       setReport(rep);
+      // P6 history: diff vs the stored previous snapshot of this folder NAME (the only cross-session
+      // identity the browser gives us — the strip copy hedges accordingly), then overwrite the slot with
+      // the fresh snapshot. Same-name-required: an unnamed drop (no common root) stores nothing.
+      {
+        const label = folderLabel(picked.map((f) => f.path));
+        if (label) {
+          const prev = loadHistory(label);
+          setHistory(prev ? { diff: diffAudits(toSnapshot(prev), rep), at: prev.at } : null);
+          saveHistory(buildStored(label, Date.now(), rep));
+        } else {
+          setHistory(null);
+        }
+      }
       // Auto-select the WORST offender (not array-order-first) so the ≤10s payoff lands on a glowing
       // overlay. Computed from the SAME defaultSelectOpts() the ledger opens with (round11 #3 — ONE source
       // of truth, can't drift); falls back to the first asset when there are no problems. Runs ONCE per
@@ -656,6 +675,8 @@ export function App() {
             {/* Budget strip — 4 REAL-metric cards (no user budgets / no over-budget bars this phase). Gated on
                 having assets (like the header CTA) so an empty folder shows the empty-state below, not a zero strip. */}
             {bm && report.assets.length > 0 ? <BudgetStrip bm={bm} budgets={budgets} /> : null}
+            {/* P6: measured delta vs the previous audit of this folder name (local snapshot, zero network). */}
+            {history && report.assets.length > 0 ? <HistoryStrip diff={history.diff} at={history.at} /> : null}
             {/* The PRIMARY "Build a spritesheet" recommendation (design §4.1) — rendered ONLY when the folder
                 is loose-dominated (`rec`). Sits between the results h1 and the VerdictBar so the heading
                 outline stays monotonic (h1 → this h2 → VerdictBar's h2). Absent when not dominated ⇒ the

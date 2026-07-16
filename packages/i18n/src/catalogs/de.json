@@ -1017,5 +1017,14 @@
   "cabinet.value.atlas-merge": "Wert: Belegung jedes Sheets (gemessen)",
   "cabinet.value.format": "Wert: gemessene Download-Ersparnis pro Bild",
   "cabinet.value.strippable-metadata": "Wert: exakte entfernbare Metadaten-Bytes pro Bild",
-  "dropzone.demo": "Beispielprojekt ansehen"
+  "dropzone.demo": "Beispielprojekt ansehen",
+  "history.title": "Seit dem letzten Audit",
+  "history.vs": "Verglichen mit dem vorherigen Audit dieses Ordnernamens ({date})",
+  "history.counts": "{added} neu · {resolved} gelöst · {changed} Severity geändert",
+  "history.noChange": "Keine gemessene Änderung gegenüber dem vorherigen Audit.",
+  "history.metric.disk": "Datenträgergröße",
+  "history.metric.vram": "VRAM (deklariert)",
+  "history.metric.loadedVram": "Geladenes VRAM (schlechtester Tier)",
+  "history.metric.recoverable": "Rückgewinnbarer Speicher",
+  "history.metric.drawFloor": "Draw-Call-Untergrenze"
 }

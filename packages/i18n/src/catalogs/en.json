@@ -997,5 +997,14 @@
   "cabinet.value.atlas-merge": "Value: each sheet's occupancy (measured)",
   "cabinet.value.format": "Value: measured download saving per image",
   "cabinet.value.strippable-metadata": "Value: exact strippable metadata bytes per image",
-  "dropzone.demo": "Try a sample project"
+  "dropzone.demo": "Try a sample project",
+  "history.title": "Since the last audit",
+  "history.vs": "Compared with the previous audit of this folder name ({date})",
+  "history.counts": "{added} new · {resolved} resolved · {changed} changed severity",
+  "history.noChange": "No measured change vs the previous audit.",
+  "history.metric.disk": "Disk size",
+  "history.metric.vram": "VRAM (declared)",
+  "history.metric.loadedVram": "Loaded VRAM (worst tier)",
+  "history.metric.recoverable": "Recoverable disk",
+  "history.metric.drawFloor": "Draw-call floor"
 }
