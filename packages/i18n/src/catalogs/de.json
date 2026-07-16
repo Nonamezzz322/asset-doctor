@@ -1012,5 +1012,9 @@
   "rule.repack-opportunity": "Repack-Simulation",
   "find.repack-opportunity.title": "Repack passt in {w}×{h} — gibt {saved:bytes} VRAM frei (gemessen)",
   "find.repack-opportunity.detail": "Das Neupacken der {n} Frames mit demselben MaxRects-Packer, den der Fix ausliefert (Padding {padding}px, ohne Rotation), passt in ein {w}×{h}-Sheet statt des aktuellen {cw}×{ch} — gemessen durch echtes Packen der Frames, kein Flächenmodell. Das Geometrie-Repack gibt {saved:bytes} VRAM frei ({before:bytes} → {after:bytes}); Trim und Dedup können es weiter verkleinern.",
-  "find.repack-opportunity.fix": "Führe das Repack aus — dieser Probelauf ist exakt die Packung, die es ausführt."
+  "find.repack-opportunity.fix": "Führe das Repack aus — dieser Probelauf ist exakt die Packung, die es ausführt.",
+  "cabinet.value.premultiplied-alpha": "Wert: Anteil premultiplied-geformter Weichkanten-Pixel (gemessen)",
+  "cabinet.value.atlas-merge": "Wert: Belegung jedes Sheets (gemessen)",
+  "cabinet.value.format": "Wert: gemessene Download-Ersparnis pro Bild",
+  "cabinet.value.strippable-metadata": "Wert: exakte entfernbare Metadaten-Bytes pro Bild"
 }

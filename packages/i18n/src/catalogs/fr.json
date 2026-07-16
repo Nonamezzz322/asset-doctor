@@ -1016,5 +1016,9 @@
   "rule.repack-opportunity": "Simulation de réempaquetage",
   "find.repack-opportunity.title": "Le réempaquetage tient dans {w}×{h} — libère {saved:bytes} de VRAM (mesuré)",
   "find.repack-opportunity.detail": "Réempaqueter les {n} images avec le même empaqueteur MaxRects fourni par le correctif (padding {padding}px, sans rotation) tient dans une feuille de {w}×{h} au lieu de l'actuelle {cw}×{ch} — mesuré en empaquetant réellement les images, pas par un modèle de surface. Appliquer le réempaquetage géométrique libère {saved:bytes} de VRAM ({before:bytes} → {after:bytes}) ; le rognage et la déduplication peuvent encore réduire.",
-  "find.repack-opportunity.fix": "Lancez le réempaquetage — cette simulation est exactement l'empaquetage qu'il effectuera."
+  "find.repack-opportunity.fix": "Lancez le réempaquetage — cette simulation est exactement l'empaquetage qu'il effectuera.",
+  "cabinet.value.premultiplied-alpha": "Valeur : part des pixels de bord doux de forme prémultipliée (mesuré)",
+  "cabinet.value.atlas-merge": "Valeur : occupation de chaque feuille (mesuré)",
+  "cabinet.value.format": "Valeur : économie de téléchargement mesurée par image",
+  "cabinet.value.strippable-metadata": "Valeur : octets exacts de métadonnées supprimables par image"
 }

@@ -23,6 +23,7 @@ import { describe, expect, it } from 'vitest';
 import { CATALOGS } from '@asset-doctor/i18n';
 import { OP_KIND_ORDER } from '../src/lib/op-manifest';
 import { ALL_RULES, GROUP_ORDER } from '../src/lib/view-prefs';
+import { CABINET_VALUE_RULES } from '../src/lib/cabinet-detail';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const comp = (name: string): string => readFileSync(join(here, '..', 'src', 'components', name), 'utf8');
@@ -149,6 +150,9 @@ const LAZY_SUFFIXES = ['eager', 'lazy', 'isolated'];
 // so a new rule added to core (⇒ RULE_GROUP ⇒ ALL_RULES) automatically demands a `rule.*` catalog key here.
 // Cannot drift: the mirror IS the live constant, not a copied list.
 const RULE_SUFFIXES = [...ALL_RULES];
+// cabinet.value.${finding.rule} (CabinetIssueDetail.tsx P2 value-meaning line) — IMPORTED from the live
+// CABINET_VALUE_RULES registry (cabinet-detail.ts), so a new formatted rule automatically demands its key.
+const CABINET_VALUE_SUFFIXES = [...CABINET_VALUE_RULES];
 const DIAGNOSIS_GROUP_SUFFIXES = [...GROUP_ORDER];
 
 /** Static literal keys: t('a.b.c') or t(`a.b.c`) with NO interpolation. */
@@ -187,6 +191,7 @@ function expandedDynamicKeys(src: string): Set<string> {
     // settings.diagnosis.group. must be branched BEFORE rule. is irrelevant (no prefix overlap), but the
     // group prefix is longer than nothing else here — kept adjacent to its sibling for clarity.
     else if (tmpl.startsWith('settings.diagnosis.group.')) DIAGNOSIS_GROUP_SUFFIXES.forEach((s) => keys.add(`settings.diagnosis.group.${s}`));
+    else if (tmpl.startsWith('cabinet.value.')) CABINET_VALUE_SUFFIXES.forEach((s) => keys.add(`cabinet.value.${s}`));
     else if (tmpl.startsWith('rule.')) RULE_SUFFIXES.forEach((s) => keys.add(`rule.${s}`));
   }
   return keys;

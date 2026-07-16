@@ -1116,5 +1116,9 @@
   "rule.repack-opportunity": "Симуляція перепакування",
   "find.repack-opportunity.title": "Перепакування вміщується в {w}×{h} — звільняє {saved:bytes} VRAM (виміряно)",
   "find.repack-opportunity.detail": "Перепакування {n} фреймів тим самим MaxRects-пакувальником, що постачається у фіксі (padding {padding}px, без повороту), вміщується в аркуш {w}×{h} замість поточного {cw}×{ch} — виміряно реальним пакуванням фреймів, а не моделлю площі. Застосування геометричного перепакування звільняє {saved:bytes} VRAM ({before:bytes} → {after:bytes}); trim і дедуплікація можуть ужати ще сильніше.",
-  "find.repack-opportunity.fix": "Запустіть перепакування — цей прогін і є те саме пакування, яке воно виконає."
+  "find.repack-opportunity.fix": "Запустіть перепакування — цей прогін і є те саме пакування, яке воно виконає.",
+  "cabinet.value.premultiplied-alpha": "Число: частка м'яких крайових пікселів premultiplied-форми (виміряно)",
+  "cabinet.value.atlas-merge": "Число: заповненість кожного аркуша (occupancy, виміряно)",
+  "cabinet.value.format": "Число: виміряна економія завантаження на зображення",
+  "cabinet.value.strippable-metadata": "Число: точні байти зрізуваних метаданих на зображення"
 }

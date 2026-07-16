@@ -992,5 +992,9 @@
   "rule.repack-opportunity": "Repack dry-run",
   "find.repack-opportunity.title": "Repack fits {w}×{h} — frees {saved:bytes} of VRAM (measured)",
   "find.repack-opportunity.detail": "Re-packing the {n} frames with the same MaxRects packer the fix ships (padding {padding}px, no rotation) fits a {w}×{h} sheet instead of the current {cw}×{ch} — measured by actually packing the frames, not an area model. Applying the geometry repack frees {saved:bytes} of VRAM ({before:bytes} → {after:bytes}); trim and dedup can shrink it further.",
-  "find.repack-opportunity.fix": "Run the repack — this dry-run is the exact packing it performs."
+  "find.repack-opportunity.fix": "Run the repack — this dry-run is the exact packing it performs.",
+  "cabinet.value.premultiplied-alpha": "Value: share of soft-edge pixels shaped premultiplied (measured)",
+  "cabinet.value.atlas-merge": "Value: each sheet's occupancy (measured)",
+  "cabinet.value.format": "Value: measured download saving per image",
+  "cabinet.value.strippable-metadata": "Value: exact strippable metadata bytes per image"
 }

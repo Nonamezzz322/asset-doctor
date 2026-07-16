@@ -415,6 +415,21 @@ export interface Finding {
   /** Quantified effect — only defensible numbers; leave sparse when uncertain. */
   estimate?: FindingEstimate;
   overlay?: OverlayZone[];
+  /** Folder findings only (P2 per-sprite drill-down): the per-ref MEASURED breakdown, WORST-FIRST as the
+   *  emitting rule ranks it — for each affected ref the ONE number the rule ALREADY measured for it
+   *  (premultiplied: the fringe fraction; atlas-merge: each sheet's occupancy; the two aggregates: each
+   *  image's measured saved bytes). PRESENTATION-ONLY (invariant 3): these are the same numbers the rule
+   *  computed anyway — never a new estimate, never summed, never folded into totals; the value's MEANING
+   *  is rule-specific and the UI formats/labels it per rule. Additive: absent ⇒ the drill-down falls back
+   *  to the name-only relatedRefs list (byte-identical pre-P2 behavior). */
+  perRef?: PerRefValue[];
+}
+
+/** One row of a folder finding's per-ref measured breakdown (Finding.perRef). */
+export interface PerRefValue {
+  ref: string;
+  /** The rule-specific measured number for this ref (fraction 0..1 or bytes — see Finding.perRef). */
+  value: number;
 }
 
 /** Per-image features computed by the host (worker) and fed to analysis for folder-level checks. */

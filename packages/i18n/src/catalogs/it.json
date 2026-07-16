@@ -1016,5 +1016,9 @@
   "rule.repack-opportunity": "Simulazione di reimpacchettamento",
   "find.repack-opportunity.title": "Il reimpacchettamento sta in {w}×{h} — libera {saved:bytes} di VRAM (misurato)",
   "find.repack-opportunity.detail": "Reimpacchettare i {n} frame con lo stesso packer MaxRects incluso nel fix (padding {padding}px, senza rotazione) sta in un foglio {w}×{h} invece dell'attuale {cw}×{ch} — misurato impacchettando davvero i frame, non con un modello di area. Applicare il reimpacchettamento geometrico libera {saved:bytes} di VRAM ({before:bytes} → {after:bytes}); trim e deduplica possono ridurlo ulteriormente.",
-  "find.repack-opportunity.fix": "Esegui il reimpacchettamento — questa simulazione è esattamente l'impacchettamento che eseguirà."
+  "find.repack-opportunity.fix": "Esegui il reimpacchettamento — questa simulazione è esattamente l'impacchettamento che eseguirà.",
+  "cabinet.value.premultiplied-alpha": "Valore: quota di pixel di bordo morbido a forma premoltiplicata (misurato)",
+  "cabinet.value.atlas-merge": "Valore: occupazione di ogni foglio (misurato)",
+  "cabinet.value.format": "Valore: risparmio di download misurato per immagine",
+  "cabinet.value.strippable-metadata": "Valore: byte esatti di metadati rimovibili per immagine"
 }

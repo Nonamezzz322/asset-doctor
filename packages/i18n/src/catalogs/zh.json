@@ -998,5 +998,9 @@
   "rule.repack-opportunity": "重新打包模拟",
   "find.repack-opportunity.title": "重新打包可容纳于 {w}×{h} — 释放 {saved:bytes} 显存（实测）",
   "find.repack-opportunity.detail": "用修复所附带的同一 MaxRects 打包器重新打包这 {n} 个帧（padding {padding}px，不旋转），可容纳于 {w}×{h} 的图集，而当前为 {cw}×{ch} — 通过实际打包帧测得，并非面积模型。应用几何重新打包可释放 {saved:bytes} 显存（{before:bytes} → {after:bytes}）；裁剪与去重还能进一步缩小。",
-  "find.repack-opportunity.fix": "运行重新打包 — 此预演正是它将执行的打包。"
+  "find.repack-opportunity.fix": "运行重新打包 — 此预演正是它将执行的打包。",
+  "cabinet.value.premultiplied-alpha": "数值：软边缘像素中呈预乘形态的占比（实测）",
+  "cabinet.value.atlas-merge": "数值：每张图集的填充率（实测）",
+  "cabinet.value.format": "数值：每张图片的实测下载节省",
+  "cabinet.value.strippable-metadata": "数值：每张图片可剥离元数据的精确字节数"
 }

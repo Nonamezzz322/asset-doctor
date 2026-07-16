@@ -1012,5 +1012,9 @@
   "rule.repack-opportunity": "रीपैक सिमुलेशन",
   "find.repack-opportunity.title": "रीपैक {w}×{h} में समा जाता है — {saved:bytes} VRAM मुक्त (मापा गया)",
   "find.repack-opportunity.detail": "फिक्स के साथ आने वाले उसी MaxRects पैकर से {n} फ़्रेमों को दोबारा पैक करना (padding {padding}px, बिना घुमाव) मौजूदा {cw}×{ch} की जगह {w}×{h} शीट में समा जाता है — फ़्रेमों को वास्तव में पैक करके मापा गया, क्षेत्रफल मॉडल से नहीं। ज्यामितीय रीपैक लागू करने से {saved:bytes} VRAM मुक्त होती है ({before:bytes} → {after:bytes}); ट्रिम और डीडुप इसे और घटा सकते हैं।",
-  "find.repack-opportunity.fix": "रीपैक चलाएँ — यह ड्राई-रन ठीक वही पैकिंग है जो वह करेगा।"
+  "find.repack-opportunity.fix": "रीपैक चलाएँ — यह ड्राई-रन ठीक वही पैकिंग है जो वह करेगा।",
+  "cabinet.value.premultiplied-alpha": "मान: premultiplied-आकार वाले नरम-किनारे पिक्सेल का हिस्सा (मापा गया)",
+  "cabinet.value.atlas-merge": "मान: प्रत्येक शीट की भराई (मापा गया)",
+  "cabinet.value.format": "मान: प्रति छवि मापी गई डाउनलोड बचत",
+  "cabinet.value.strippable-metadata": "मान: प्रति छवि हटाने योग्य मेटाडेटा के सटीक बाइट"
 }

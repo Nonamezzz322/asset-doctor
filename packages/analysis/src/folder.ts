@@ -240,6 +240,11 @@ export function atlasMergeFinding(atlases: Atlas[], cfg: ThresholdConfig): Findi
     title: `${under.length} under-filled atlases → merge into ~${minAtlases}`,
     detail,
     fix: 'Re-pack these atlases together.',
+    // Per-ref breakdown (P2): each under-filled sheet's MEASURED occupancy, emptiest first (the same
+    // occupancyValue the gate above filtered on). Presentation-only.
+    perRef: under
+      .map((a) => ({ ref: a.name, value: occupancyValue(a) }))
+      .sort((a, b) => a.value - b.value || a.ref.localeCompare(b.ref)),
     ...(savesVram ? { estimate: { vramBytesSaved: vramSaved } } : {}),
     messageKey: savesVram ? 'atlas-merge' : 'atlas-merge-batching',
     params: { n: under.length, merged: minAtlases, refs: refs.join(', '), pct: Math.round(cfg.atlasMerge.occupancyBelow * 100), frag: disp.frag, largestPct: disp.largestPct },
@@ -280,6 +285,11 @@ export function formatAggregateFinding(formatFindings: Finding[]): Finding | nul
     estimate: { diskBytesSaved: totalSaved },
     messageKey: 'format-aggregate',
     params: { n: formatFindings.length, saved: totalSaved },
+    // Per-ref breakdown (P2): each image's MEASURED saved bytes (the per-image finding's own estimate),
+    // worst-first. Presentation-only — the total above is already the sum; nothing is re-summed.
+    perRef: formatFindings
+      .map((f) => ({ ref: f.assetRef, value: f.estimate?.diskBytesSaved ?? 0 }))
+      .sort((a, b) => b.value - a.value || a.ref.localeCompare(b.ref)),
   };
 }
 
@@ -306,6 +316,11 @@ export function strippableMetadataAggregateFinding(metaFindings: Finding[]): Fin
     estimate: { diskBytesSaved: totalSaved },
     messageKey: 'strippable-metadata-aggregate',
     params: { n: metaFindings.length, saved: totalSaved },
+    // Per-ref breakdown (P2): each image's EXACT strippable bytes (the per-image finding's own estimate),
+    // worst-first. Presentation-only.
+    perRef: metaFindings
+      .map((f) => ({ ref: f.assetRef, value: f.estimate?.diskBytesSaved ?? 0 }))
+      .sort((a, b) => b.value - a.value || a.ref.localeCompare(b.ref)),
   };
 }
 
@@ -342,17 +357,20 @@ export function premultipliedAlphaFinding(
   if (!gate) return null;
   const loose = new Set<string>();
   for (const a of assets) if (a.kind === 'image') loose.add(a.image.name);
-  const flagged: string[] = [];
+  const flaggedRows: { ref: string; value: number }[] = [];
   for (const f of features) {
     const pe = f.premultipliedEdge;
     if (!pe) continue; // absent (no host scan / CLI-headless / zero qualifying pixels) ⇒ never counted
     if (!loose.has(f.assetRef)) continue; // ATLAS pages never count (loose-only)
     if (pe.edgePixels < gate.minEdgePixels) continue; // too few transition pixels to classify honestly
     if (pe.fringeFrac < gate.fringeFrac) continue; // edges hold the opaque colour — straight-alpha shape
-    flagged.push(f.assetRef);
+    flaggedRows.push({ ref: f.assetRef, value: pe.fringeFrac });
   }
-  if (flagged.length < gate.minSprites) return null;
-  flagged.sort();
+  if (flaggedRows.length < gate.minSprites) return null;
+  const flagged = flaggedRows.map((r) => r.ref).sort();
+  // Per-ref breakdown (P2): each flagged sprite's MEASURED fringe fraction, worst-first (highest = most
+  // certainly premultiplied-shaped). The same number the gate above already read — presentation-only.
+  const perRef = [...flaggedRows].sort((a, b) => b.value - a.value || a.ref.localeCompare(b.ref));
   return {
     id: 'folder:premultiplied-alpha',
     rule: 'premultiplied-alpha',
@@ -370,6 +388,7 @@ export function premultipliedAlphaFinding(
     // NO estimate field AT ALL (no diskBytesSaved, no vramBytesSaved) — precedent: bleeding, icc-non-srgb.
     messageKey: 'premultiplied-alpha',
     params: { n: flagged.length, refs: refsPreview(flagged) },
+    perRef,
   };
 }
 

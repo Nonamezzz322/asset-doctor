@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import type { SpineSkeletonBinding, Asset, Atlas, ImageAsset, ImageFeatures, ImageMime, Rect, ThresholdConfig } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseFntText, parseFntPage, type FntPage } from '@asset-doctor/parsers';
 import { groupFiles, type RawFile } from '@asset-doctor/ingest';
-import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, upscaledSourceFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, iccNonSrgbFinding, interiorTransparencyFinding, binaryAlphaFinding, crossAtlasRedundancyFinding, premultipliedAlphaFinding, gpuCompressionAlignmentFinding, gutterFinding, spineUnreferencedRegionsFindings, repackOpportunityFinding, duplicateSimilarFindings, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, upscaledSourceFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, atlasMergeFinding, formatAggregateFinding, iccNonSrgbFinding, interiorTransparencyFinding, binaryAlphaFinding, crossAtlasRedundancyFinding, premultipliedAlphaFinding, gpuCompressionAlignmentFinding, gutterFinding, spineUnreferencedRegionsFindings, repackOpportunityFinding, duplicateSimilarFindings, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -3026,5 +3026,61 @@ describe('repack-opportunity (dry-run repack — MEASURED achievable sheet, host
     expect(without.findings.find((f) => f.rule === 'repack-opportunity')).toBeUndefined();
     // VRAM-only estimate: the disk headline is untouched either way (invariant 5)
     expect(withSim.totals.potentialDiskSaved).toBe(without.totals.potentialDiskSaved);
+  });
+});
+
+
+describe('perRef (P2 per-sprite drill-down) — the WORST-FIRST measured breakdown on folder findings', () => {
+  const looseImg = (name: string): Asset => ({
+    kind: 'image',
+    image: { name, imageRef: name, size: { w: 64, h: 64 }, mime: 'image/png', byteSize: 1000 },
+  });
+  const feat = (ref: string, fringeFrac: number): ImageFeatures => ({
+    assetRef: ref, contentHash: `h-${ref}`, premultipliedEdge: { edgePixels: 40, fringeFrac },
+  });
+
+  it('premultiplied-alpha: perRef = flagged sprites sorted by fringeFrac DESC (worst first)', () => {
+    const f = premultipliedAlphaFinding(
+      [looseImg('a.png'), looseImg('b.png'), looseImg('c.png')],
+      [feat('a.png', 0.79), feat('b.png', 0.94), feat('c.png', 0.85)],
+      DEFAULT_THRESHOLDS,
+    )!;
+    expect(f.perRef).toEqual([
+      { ref: 'b.png', value: 0.94 },
+      { ref: 'c.png', value: 0.85 },
+      { ref: 'a.png', value: 0.79 },
+    ]);
+    expect(f.relatedRefs).toEqual(['a.png', 'b.png', 'c.png']); // membership stays alphabetical
+  });
+
+  it('atlas-merge: perRef = under-filled sheets sorted by occupancy ASC (emptiest first)', () => {
+    const mkAtlas = (name: string, frames: number): Atlas => ({
+      name, imageRef: name, size: { w: 512, h: 512 }, source: { kind: 'pixi' },
+      sprites: Array.from({ length: frames }, (_, i) => ({ name: `${name}-${i}`, frame: { x: i * 64, y: 0, w: 64, h: 64 }, rotated: false, trimmed: false, sourceSize: { w: 64, h: 64 } })),
+    });
+    const f = atlasMergeFinding([mkAtlas('half.png', 8), mkAtlas('sparse.png', 2)], DEFAULT_THRESHOLDS)!;
+    expect(f).not.toBeNull();
+    expect(f.perRef!.map((p) => p.ref)).toEqual(['sparse.png', 'half.png']); // emptiest first
+    expect(f.perRef![0]!.value).toBeCloseTo(occupancyValue(mkAtlas('sparse.png', 2)), 10);
+  });
+
+  it('the two aggregates: perRef = per-image MEASURED saved bytes DESC; totals untouched by construction', async () => {
+    const mkImg = (name: string, byteSize: number): Asset => ({
+      kind: 'image', image: { name, imageRef: name, size: { w: 256, h: 256 }, mime: 'image/png', byteSize },
+    });
+    const f1 = (await formatFinding('big.png', mkImg('big.png', 100000).image, DEFAULT_THRESHOLDS, async () => 20000))!;
+    const f2 = (await formatFinding('small.png', mkImg('small.png', 50000).image, DEFAULT_THRESHOLDS, async () => 30000))!;
+    const agg = formatAggregateFinding([f2, f1])!;
+    expect(agg.perRef).toEqual([
+      { ref: 'big.png', value: 80000 },
+      { ref: 'small.png', value: 20000 },
+    ]);
+    const m1 = strippableMetadataFinding('m1.png', { ...mkImg('m1.png', 200000).image, strippableBytes: 5000 }, DEFAULT_THRESHOLDS)!;
+    const m2 = strippableMetadataFinding('m2.png', { ...mkImg('m2.png', 200000).image, strippableBytes: 9000 }, DEFAULT_THRESHOLDS)!;
+    const magg = strippableMetadataAggregateFinding([m1, m2])!;
+    expect(magg.perRef).toEqual([
+      { ref: 'm2.png', value: 9000 },
+      { ref: 'm1.png', value: 5000 },
+    ]);
   });
 });
