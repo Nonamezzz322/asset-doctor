@@ -922,6 +922,71 @@ export function gutterFinding(atlas: Atlas, cfg: ThresholdConfig): Finding | nul
   };
 }
 
+/** One atlas's DRY-RUN repack result, computed by the HOST (worker) running the REAL fix packer
+ *  (pack.ts MaxRects) over the sheet's frames at frame extents — the EXACT item derivation
+ *  repackAtlases uses with no trim/alias inputs, so the result is BY CONSTRUCTION what the plain fix
+ *  repack produces (and a conservative FLOOR: trim-on-repack/dedup/polygon can only shrink it further).
+ *  Injected via AnalyzeDeps.repackSims; absent (CLI/headless, or the host's maxSprites cap skipped the
+ *  sheet) ⇒ the finding never fires (deps-gated like frameHashes — byte-identical). */
+export interface RepackSim {
+  /** Post-merge atlas.name (the AssetMetrics.assetRef keying invariant). */
+  assetRef: string;
+  /** POT bin(s) the dry-run produced; Σ w·h·4 is the achievable VRAM. */
+  pages: Size[];
+  /** The padding the sim packed with (fix default) — surfaced so the claim states its condition. */
+  padding: number;
+}
+
+/** Dry-run repack finding: the MEASURED achievable sheet size for this atlas, from actually running
+ *  the fix's packer — never an area model (that is atlas-merge's crude counterpart across sheets).
+ *  HONESTY (invariant 3/5): the estimate carries ONLY vramBytesSaved (before = the REAL decoded page
+ *  w·h·4, after = Σ bin w·h·4 — like-for-like), under the explicit condition "apply the geometry
+ *  repack"; disk is NOT claimed (a re-encoded page's bytes are unknowable without pixels). Gates:
+ *  config + sim present; declared == real page size (a mismatched manifest means the frame rects are
+ *  not reliable placements on the REAL texture — dimension-mismatch owns that case; arithmetic over
+ *  broken geometry would be honest math on dishonest inputs); ≥ 2 sprites (one sprite is not a packing
+ *  problem); SINGLE-bin results only (a multi-bin spill on one source sheet is a giant-page edge case
+ *  the simple copy cannot state honestly); saved ≥ minVramBytesSaved (strict `<` suppresses, == fires —
+ *  occupancy-floor convention). Severity: `warn` iff the result halves VRAM or better (after·2 ≤ before
+ *  — a structural POT-tier drop, no new magic ratio), else `info`. */
+export function repackOpportunityFinding(
+  atlas: Atlas,
+  image: ImageAsset,
+  cfg: ThresholdConfig,
+  sim?: RepackSim,
+): Finding | null {
+  if (!cfg.repackSim || !sim || sim.pages.length !== 1) return null;
+  if (atlas.size.w !== image.size.w || atlas.size.h !== image.size.h) return null;
+  if (atlas.sprites.length < 2) return null;
+  // BMFont glyph pages are OUT: the fix pipeline never ingests .fnt (its ingest parses spine/TP only), so
+  // the "this dry-run is the exact packing the fix performs" promise would be FALSE there — and a repacked
+  // TP manifest is useless to a .fnt consumer. The font-glyph-page readout owns sparse glyph sheets.
+  if (atlas.source.kind === 'bmfont') return null;
+  const before = vramBytes(image.size);
+  const after = sim.pages.reduce((s, p) => s + vramBytes(p), 0);
+  const saved = before - after;
+  if (saved < cfg.repackSim.minVramBytesSaved) return null;
+  const severity: Severity = after * 2 <= before ? 'warn' : 'info';
+  const page = sim.pages[0]!;
+  const n = atlas.sprites.length;
+  return {
+    id: `${atlas.name}:repack-opportunity`,
+    rule: 'repack-opportunity',
+    severity,
+    assetRef: atlas.name,
+    title: `Repack fits ${page.w}×${page.h} — frees ${fmtBytes(saved)} of VRAM (measured)`,
+    detail:
+      `Re-packing the ${n} frames with the same MaxRects packer the fix ships (padding ${sim.padding}px, ` +
+      `no rotation) fits a ${page.w}×${page.h} sheet instead of the current ${atlas.size.w}×${atlas.size.h} ` +
+      `— measured by actually packing the frames, not an area model. Applying the geometry repack frees ` +
+      `${fmtBytes(saved)} of VRAM (${fmtBytes(before)} → ${fmtBytes(after)}); trim and dedup can shrink it further.`,
+    fix: 'Run the repack — this dry-run is the exact packing it performs.',
+    estimate: { vramBytesSaved: saved },
+    messageKey: 'repack-opportunity',
+    params: { w: page.w, h: page.h, cw: atlas.size.w, ch: atlas.size.h, n, padding: sim.padding, saved, before, after },
+  };
+}
+
 /** Spine unreferenced-regions DISCLOSURE. The host paired each Spine .atlas file with the same-dir
  *  skeleton .json set (SpineSkeletonBinding: the union of `path ?? name ?? placeholderKey` over ALL skins
  *  of ALL parseable skeletons + sequence base-path prefixes; a same-dir binary .skel suppresses the whole

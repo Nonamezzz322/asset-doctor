@@ -333,6 +333,11 @@ export type Rule =
   // disclosure (another skeleton — incl. an unreadable binary .skel — or runtime setAttachment may use
   // them; NO estimate, measured numbers ride params only)
   | 'spine-unreferenced-regions'
+  // per-atlas: the DRY-RUN repack result — the host ran the REAL fix packer (MaxRects, fix-default
+  // options) over this sheet's frames and the resulting POT bin(s) are measurably smaller than the
+  // current page. Carries a vramBytesSaved MEASURED by actually packing (never an area model), under
+  // the explicit condition "apply the geometry repack" (npot/upscaled-source estimate precedent)
+  | 'repack-opportunity'
   // per-bmfont-page glyph-sheet readout (informational; a parsed .fnt page IS an atlas)
   | 'font-glyph-page';
 
@@ -813,6 +818,16 @@ export interface ThresholdConfig {
    *  Optional/additive: absent ⇒ suppressed. Browser-only by resolveThresholds omission (pure integer
    *  geometry, but the CLI output stays byte-identical). */
   gutter?: { minGaps: number; minMedianPx: number };
+  /** Dry-run repack gate (per atlas, host-computed sim required). The host runs the REAL fix packer
+   *  (MaxRects, fix-default options: padding 2, maxSize 4096, rotation off) over the sheet's frames and
+   *  injects the resulting bin set (AnalyzeDeps.repackSims); the finding fires when the measured VRAM
+   *  delta (real decoded page − Σ bin w·h·4) is ≥ `minVramBytesSaved` (absolute floor, mirrors
+   *  occupancy.minWastedBytes — sub-floor wins are noise, not a headline). `maxSprites` caps the sim on
+   *  the HOST side (an O(n²) pack over thousands of frames is skipped, no finding — bounded work).
+   *  MEASURED estimate (invariant 3): vramBytesSaved comes from actually packing, never an area model,
+   *  under the explicit "apply the geometry repack" condition. Optional/additive: absent (or no sim
+   *  injected — CLI/headless) ⇒ suppressed, byte-identical. */
+  repackSim?: { minVramBytesSaved: number; maxSprites: number };
   /** Spine unreferenced-regions disclosure gate (per .atlas file, host-paired skeletons required).
    *  `minMatchedFraction` — the PAIRING-TRUST gate: the fraction of the atlas file's distinct region names
    *  matched by the skeleton union must reach this before ANY verdict (a mispaired skeleton matches ~0 and

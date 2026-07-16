@@ -1012,5 +1012,9 @@
   "compare.hedge.duration": "apenas bruto — durações diferentes",
   "compare.hedge.device": "apenas bruto — dispositivo diferente",
   "cabinet.heading": "Problema da pasta",
-  "cabinet.affectedFiles": "Arquivos afetados ({n})"
+  "cabinet.affectedFiles": "Arquivos afetados ({n})",
+  "rule.repack-opportunity": "Simulação de reempacotamento",
+  "find.repack-opportunity.title": "O reempacotamento cabe em {w}×{h} — libera {saved:bytes} de VRAM (medido)",
+  "find.repack-opportunity.detail": "Reempacotar os {n} quadros com o mesmo empacotador MaxRects que o fix inclui (padding {padding}px, sem rotação) cabe numa folha de {w}×{h} em vez da atual {cw}×{ch} — medido empacotando os quadros de verdade, não por um modelo de área. Aplicar o reempacotamento geométrico libera {saved:bytes} de VRAM ({before:bytes} → {after:bytes}); trim e deduplicação podem reduzir ainda mais.",
+  "find.repack-opportunity.fix": "Execute o reempacotamento — esta simulação é exatamente o empacotamento que ele realizará."
 }

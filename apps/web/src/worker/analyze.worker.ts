@@ -5,8 +5,9 @@
 
 import type { Asset, AtlasFrameHashes, AtlasFrameTrims, ImageFeatures, ImageMime, SpineSkeletonBinding, Sprite, TrimRect } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseSpinePage, parseFntPage, readSkeletonAttachmentRefs, type FntPage, type MalformedFrame, type ParseResult, type SpinePage } from '@asset-doctor/parsers';
-import { analyze, mergeSharedAtlases, type EncodeSizer, type OpaqueEncodeSizer } from '@asset-doctor/analysis';
-import { alphaBBox } from '@asset-doctor/fix';
+import { analyze, mergeSharedAtlases, DEFAULT_THRESHOLDS, type EncodeSizer, type OpaqueEncodeSizer, type RepackSim } from '@asset-doctor/analysis';
+import { alphaBBox, pack } from '@asset-doctor/fix';
+import { settingsDefaults } from '../lib/build-settings';
 import { pageExceedsScanBudget, scanSkipReason } from '../lib/bitmap-budget';
 import { groupFiles, keyOf, type RawFile } from '../lib/group';
 import {
@@ -209,6 +210,32 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
     // order is deterministic regardless of WHICH pages busted the cap (analyze passes it through verbatim).
     unparsed.sort((a, b) => a.ref.localeCompare(b.ref));
 
+    // ── Dry-run repack sims (repack-opportunity) ─────────────────────────────────────────────────────
+    // Run the REAL fix packer (pack.ts MaxRects) over each post-merge atlas's frames at frame extents —
+    // the EXACT item derivation repackAtlases uses with no trim/alias inputs, with the FIX-DEFAULT options
+    // (settingsDefaults padding/maxSize; rotation false — the fix always packs unrotated, repack.ts v1),
+    // so the reported number is BY CONSTRUCTION what the plain fix repack produces. Pure synchronous rect
+    // math (no decode, no pixels); the maxSprites cap keeps the O(n²) pack bounded (skipped sheet ⇒ no
+    // sim ⇒ no finding — deps-gated like frameHashes).
+    const fixDefaults = settingsDefaults();
+    const simCap = DEFAULT_THRESHOLDS.repackSim?.maxSprites ?? 2000;
+    const repackSims: RepackSim[] = [];
+    for (const a of merged) {
+      if (a.kind !== 'atlas' || a.atlas.sprites.length < 2 || a.atlas.sprites.length > simCap) continue;
+      // bmfont pages never enter the fix pipeline (its ingest parses spine/TP only) — the rule gates them
+      // too; skipping here just saves the pack work.
+      if (a.atlas.source.kind === 'bmfont') continue;
+      const bins = pack(
+        a.atlas.sprites.map((s, i) => ({ id: String(i), w: s.frame.w, h: s.frame.h })),
+        { padding: fixDefaults.padding, maxSize: fixDefaults.maxSize, allowRotation: false },
+      );
+      repackSims.push({
+        assetRef: a.atlas.name,
+        pages: bins.map((b) => ({ w: b.w, h: b.h })),
+        padding: fixDefaults.padding,
+      });
+    }
+
     // ── Spine skeleton pairing (spine-unreferenced-regions) ─────────────────────────────────────────
     // Same-dir only: a skeleton .json pairs with a .atlas whose MANIFEST sits in the same directory. The
     // union over every parseable same-dir skeleton only SHRINKS the dead set; any same-dir binary .skel
@@ -254,6 +281,7 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       ...(unparsed.length ? { unparsed } : {}),
       ...(fontPages.length ? { fontPages } : {}),
       ...(spineBindings.length ? { spineBindings } : {}),
+      ...(repackSims.length ? { repackSims } : {}),
     });
     if (cancelled) return; // superseded — suppress a `done` that would race the terminate
     post({ type: 'done', report });

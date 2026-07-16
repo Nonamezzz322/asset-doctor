@@ -1012,5 +1012,9 @@
   "compare.hedge.duration": "solo grezzo — durate diverse",
   "compare.hedge.device": "solo grezzo — dispositivo diverso",
   "cabinet.heading": "Problema della cartella",
-  "cabinet.affectedFiles": "File interessati ({n})"
+  "cabinet.affectedFiles": "File interessati ({n})",
+  "rule.repack-opportunity": "Simulazione di reimpacchettamento",
+  "find.repack-opportunity.title": "Il reimpacchettamento sta in {w}×{h} — libera {saved:bytes} di VRAM (misurato)",
+  "find.repack-opportunity.detail": "Reimpacchettare i {n} frame con lo stesso packer MaxRects incluso nel fix (padding {padding}px, senza rotazione) sta in un foglio {w}×{h} invece dell'attuale {cw}×{ch} — misurato impacchettando davvero i frame, non con un modello di area. Applicare il reimpacchettamento geometrico libera {saved:bytes} di VRAM ({before:bytes} → {after:bytes}); trim e deduplica possono ridurlo ulteriormente.",
+  "find.repack-opportunity.fix": "Esegui il reimpacchettamento — questa simulazione è esattamente l'impacchettamento che eseguirà."
 }

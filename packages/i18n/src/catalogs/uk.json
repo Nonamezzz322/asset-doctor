@@ -1112,5 +1112,9 @@
   "compare.hedge.duration": "лише сире — довжини сесій різні",
   "compare.hedge.device": "лише сире — інший пристрій",
   "cabinet.heading": "Проблема папки",
-  "cabinet.affectedFiles": "Зачеплені файли ({n})"
+  "cabinet.affectedFiles": "Зачеплені файли ({n})",
+  "rule.repack-opportunity": "Симуляція перепакування",
+  "find.repack-opportunity.title": "Перепакування вміщується в {w}×{h} — звільняє {saved:bytes} VRAM (виміряно)",
+  "find.repack-opportunity.detail": "Перепакування {n} фреймів тим самим MaxRects-пакувальником, що постачається у фіксі (padding {padding}px, без повороту), вміщується в аркуш {w}×{h} замість поточного {cw}×{ch} — виміряно реальним пакуванням фреймів, а не моделлю площі. Застосування геометричного перепакування звільняє {saved:bytes} VRAM ({before:bytes} → {after:bytes}); trim і дедуплікація можуть ужати ще сильніше.",
+  "find.repack-opportunity.fix": "Запустіть перепакування — цей прогін і є те саме пакування, яке воно виконає."
 }

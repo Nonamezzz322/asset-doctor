@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import type { SpineSkeletonBinding, Asset, Atlas, ImageAsset, ImageFeatures, ImageMime, Rect, ThresholdConfig } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseFntText, parseFntPage, type FntPage } from '@asset-doctor/parsers';
 import { groupFiles, type RawFile } from '@asset-doctor/ingest';
-import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, upscaledSourceFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, iccNonSrgbFinding, interiorTransparencyFinding, binaryAlphaFinding, crossAtlasRedundancyFinding, premultipliedAlphaFinding, gpuCompressionAlignmentFinding, gutterFinding, spineUnreferencedRegionsFindings, duplicateSimilarFindings, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, upscaledSourceFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, iccNonSrgbFinding, interiorTransparencyFinding, binaryAlphaFinding, crossAtlasRedundancyFinding, premultipliedAlphaFinding, gpuCompressionAlignmentFinding, gutterFinding, spineUnreferencedRegionsFindings, repackOpportunityFinding, duplicateSimilarFindings, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -2966,5 +2966,65 @@ describe('spine-unreferenced-regions (paired-skeleton disclosure — trust-gated
     const withoutB = await analyze([asset], undefined, {});
     expect(withoutB.findings.find((x) => x.rule === 'spine-unreferenced-regions')).toBeUndefined();
     expect(withB.totals).toEqual(withoutB.totals);
+  });
+});
+
+
+describe('repack-opportunity (dry-run repack — MEASURED achievable sheet, host-injected sim)', () => {
+  const rpAtlas = (name: string, size: { w: number; h: number }, n = 3): Atlas => ({
+    name, imageRef: name, size, source: { kind: 'pixi' },
+    sprites: Array.from({ length: n }, (_, i) => ({ name: `s${i}`, frame: { x: i * 260, y: 0, w: 250, h: 250 }, rotated: false, trimmed: false, sourceSize: { w: 250, h: 250 } })),
+  });
+  const rpImg = (name: string, size: { w: number; h: number }): ImageAsset => ({
+    name, imageRef: name, size, mime: 'image/png', byteSize: 90000,
+  });
+  const sim = (pages: { w: number; h: number }[]) => ({ assetRef: 'a.png', pages, padding: 2 });
+
+  it('halving result ⇒ warn with the MEASURED vramBytesSaved (VRAM-only estimate), params pinned', () => {
+    const f = repackOpportunityFinding(rpAtlas('a.png', { w: 1024, h: 1024 }), rpImg('a.png', { w: 1024, h: 1024 }), DEFAULT_THRESHOLDS, sim([{ w: 512, h: 512 }]))!;
+    expect(f).not.toBeNull();
+    expect(f.rule).toBe('repack-opportunity');
+    expect(f.severity).toBe('warn'); // after 1 MB, before 4 MB — a structural tier drop (after*2 <= before)
+    expect(f.estimate).toEqual({ vramBytesSaved: 3 * 1024 * 1024 }); // NO diskBytesSaved (invariant 5)
+    expect(f.params).toEqual({ w: 512, h: 512, cw: 1024, ch: 1024, n: 3, padding: 2, saved: 3145728, before: 4194304, after: 1048576 });
+  });
+
+  it('sub-half saving ⇒ info (still measured); floor: saved == minVramBytesSaved fires, below ⇒ null', () => {
+    const cfg = DEFAULT_THRESHOLDS;
+    const info = repackOpportunityFinding(rpAtlas('a.png', { w: 1024, h: 1024 }), rpImg('a.png', { w: 1024, h: 1024 }), cfg, sim([{ w: 1024, h: 640 }]))!;
+    expect(info.severity).toBe('info'); // after 2.5 MB > before/2
+    // == floor (512² before 1 MB → after {512,384} 768 KB: saved 262144 == minVramBytesSaved) ⇒ fires
+    const atFloor = repackOpportunityFinding(rpAtlas('a.png', { w: 512, h: 512 }), rpImg('a.png', { w: 512, h: 512 }), cfg, sim([{ w: 512, h: 384 }]));
+    expect(atFloor).not.toBeNull();
+    // just under the floor ({512,448}: saved 131072) ⇒ null (a real but sub-headline win stays quiet)
+    expect(repackOpportunityFinding(rpAtlas('a.png', { w: 512, h: 512 }), rpImg('a.png', { w: 512, h: 512 }), cfg, sim([{ w: 512, h: 448 }]))).toBeNull();
+  });
+
+  it('declared != real page ⇒ null (never arithmetic over a mismatched manifest); other gates ⇒ null', () => {
+    const good = sim([{ w: 512, h: 512 }]);
+    expect(repackOpportunityFinding(rpAtlas('a.png', { w: 1024, h: 1024 }), rpImg('a.png', { w: 512, h: 512 }), DEFAULT_THRESHOLDS, good)).toBeNull();
+    // no sim / multi-bin sim / single sprite / no config
+    expect(repackOpportunityFinding(rpAtlas('a.png', { w: 1024, h: 1024 }), rpImg('a.png', { w: 1024, h: 1024 }), DEFAULT_THRESHOLDS, undefined)).toBeNull();
+    expect(repackOpportunityFinding(rpAtlas('a.png', { w: 1024, h: 1024 }), rpImg('a.png', { w: 1024, h: 1024 }), DEFAULT_THRESHOLDS, sim([{ w: 512, h: 512 }, { w: 512, h: 512 }]))).toBeNull();
+    expect(repackOpportunityFinding(rpAtlas('a.png', { w: 1024, h: 1024 }, 1), rpImg('a.png', { w: 1024, h: 1024 }), DEFAULT_THRESHOLDS, good)).toBeNull();
+    const noCfg = { ...DEFAULT_THRESHOLDS };
+    delete noCfg.repackSim;
+    expect(repackOpportunityFinding(rpAtlas('a.png', { w: 1024, h: 1024 }), rpImg('a.png', { w: 1024, h: 1024 }), noCfg, good)).toBeNull();
+    // bmfont glyph pages: the fix never ingests .fnt, so the "exact packing the fix performs" promise
+    // would be false — gated out (font-glyph-page owns sparse glyph sheets).
+    const bm = { ...rpAtlas('a.png', { w: 1024, h: 1024 }), source: { kind: 'bmfont' } as Atlas['source'] };
+    expect(repackOpportunityFinding(bm, rpImg('a.png', { w: 1024, h: 1024 }), DEFAULT_THRESHOLDS, good)).toBeNull();
+  });
+
+  it('analyze() threads deps.repackSims; absent deps ⇒ no finding AND identical totals (deps-gated)', async () => {
+    const asset: Asset = { kind: 'atlas', atlas: rpAtlas('a.png', { w: 1024, h: 1024 }), image: rpImg('a.png', { w: 1024, h: 1024 }) };
+    const withSim = await analyze([asset], undefined, { repackSims: [sim([{ w: 512, h: 512 }])] });
+    const rp = withSim.findings.find((f) => f.rule === 'repack-opportunity');
+    expect(rp).toBeDefined();
+    expect(rp?.estimate?.vramBytesSaved).toBe(3145728);
+    const without = await analyze([asset], undefined, {});
+    expect(without.findings.find((f) => f.rule === 'repack-opportunity')).toBeUndefined();
+    // VRAM-only estimate: the disk headline is untouched either way (invariant 5)
+    expect(withSim.totals.potentialDiskSaved).toBe(without.totals.potentialDiskSaved);
   });
 });

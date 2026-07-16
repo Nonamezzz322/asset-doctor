@@ -59,16 +59,17 @@ afterEach(() => {
 
 // ── the exhaustive Rule→group partition (the drift guard) ────────────────────────────────────────────
 describe('RULE_GROUP / RULES_IN_GROUP / ALL_RULES — an exhaustive, disjoint partition of the Rule union', () => {
+  // 30: repack-opportunity (the dry-run repack verdict) joined packing.
   // 28: excessive-gutter (over-padded packing) joined packing; gpu-compression-alignment joined vram; earlier interior-transparency + binary-alpha joined the
   // Rule union (round: shared alphaShape scan). Was 24 (premultiplied-alpha round).
-  it('maps EXACTLY the 29 rules, each to exactly one group (a partition — no gaps, no overlaps)', () => {
+  it('maps EXACTLY the 30 rules, each to exactly one group (a partition — no gaps, no overlaps)', () => {
     const keys = Object.keys(RULE_GROUP) as Rule[];
-    expect(keys).toHaveLength(29);
-    expect(ALL_RULES).toHaveLength(29);
+    expect(keys).toHaveLength(30);
+    expect(ALL_RULES).toHaveLength(30);
     // ALL_RULES is a permutation of the RULE_GROUP keys (no rule dropped or duplicated in the derivation).
     expect([...ALL_RULES].sort()).toEqual([...keys].sort());
     // No duplicates anywhere.
-    expect(new Set(ALL_RULES).size).toBe(29);
+    expect(new Set(ALL_RULES).size).toBe(30);
   });
 
   it('RULES_IN_GROUP is derived from RULE_GROUP with no drift (union == ALL_RULES, groups disjoint)', () => {
@@ -82,7 +83,7 @@ describe('RULE_GROUP / RULES_IN_GROUP / ALL_RULES — an exhaustive, disjoint pa
         total++;
       }
     }
-    expect(total).toBe(29);
+    expect(total).toBe(30);
     expect([...seen].sort()).toEqual([...ALL_RULES].sort());
   });
 
@@ -94,11 +95,11 @@ describe('RULE_GROUP / RULES_IN_GROUP / ALL_RULES — an exhaustive, disjoint pa
   // 7/10/7/4: excessive-gutter (a packing disclosure) joined 'packing'; gpu-compression-alignment joined 'vram'; binary-alpha joined 'savings';
   // interior-transparency (a packing/fill-rate disclosure, beside trim-margin) joined 'packing'.
   // Was 7/9/5/3 (premultiplied-alpha round).
-  it('the humane grouping is the agreed 7/10/8/4 split (locks accidental re-homing)', () => {
+  it('the humane grouping is the agreed 7/10/9/4 split (locks accidental re-homing)', () => {
     expect(GROUP_ORDER).toEqual(['integrity', 'savings', 'packing', 'vram']);
     expect(RULES_IN_GROUP.integrity).toHaveLength(7);
     expect(RULES_IN_GROUP.savings).toHaveLength(10);
-    expect(RULES_IN_GROUP.packing).toHaveLength(8);
+    expect(RULES_IN_GROUP.packing).toHaveLength(9);
     expect(RULES_IN_GROUP.vram).toHaveLength(4);
     // A few canonical anchors so a silent re-group is caught.
     expect(RULE_GROUP['integrity-missing-image']).toBe('integrity');

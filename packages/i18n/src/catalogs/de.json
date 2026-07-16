@@ -1008,5 +1008,9 @@
   "compare.hedge.duration": "nur roh — Session-Längen unterscheiden sich",
   "compare.hedge.device": "nur roh — anderes Gerät",
   "cabinet.heading": "Ordner-Problem",
-  "cabinet.affectedFiles": "Betroffene Dateien ({n})"
+  "cabinet.affectedFiles": "Betroffene Dateien ({n})",
+  "rule.repack-opportunity": "Repack-Simulation",
+  "find.repack-opportunity.title": "Repack passt in {w}×{h} — gibt {saved:bytes} VRAM frei (gemessen)",
+  "find.repack-opportunity.detail": "Das Neupacken der {n} Frames mit demselben MaxRects-Packer, den der Fix ausliefert (Padding {padding}px, ohne Rotation), passt in ein {w}×{h}-Sheet statt des aktuellen {cw}×{ch} — gemessen durch echtes Packen der Frames, kein Flächenmodell. Das Geometrie-Repack gibt {saved:bytes} VRAM frei ({before:bytes} → {after:bytes}); Trim und Dedup können es weiter verkleinern.",
+  "find.repack-opportunity.fix": "Führe das Repack aus — dieser Probelauf ist exakt die Packung, die es ausführt."
 }

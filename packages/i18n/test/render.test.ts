@@ -30,6 +30,7 @@ import {
   spineUnreferencedRegionsFindings,
   premultipliedAlphaFinding,
   fontGlyphPageFinding,
+  repackOpportunityFinding,
   integrityFindings,
   formatAggregateFinding,
   groupVariants,
@@ -193,6 +194,14 @@ async function realFindings(): Promise<Finding[]> {
     sprites: Array.from({ length: 16 }, (_, i) => ({ name: `glyph_${i}`, frame: { x: (i % 8) * 32, y: Math.floor(i / 8) * 32, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 32, h: 32 } })),
   };
   out.push(fontGlyphPageFinding(fontAtlas, cfg, { faceName: 'Arial', kerningCount: 12 })!);
+  // repack-opportunity: a 1024² sheet whose 3 frames dry-run-pack into 512² (host-injected sim) —
+  // before 4 MB, after 1 MB, saved 3 MB ≥ floor; after·2 ≤ before ⇒ warn. image.size === atlas.size.
+  const rpAtlas: Atlas = {
+    name: 'sheet.png', imageRef: 'sheet.png', size: { w: 1024, h: 1024 }, source: { kind: 'pixi' },
+    sprites: [0, 1, 2].map((i) => ({ name: `r${i}`, frame: { x: i * 260, y: 0, w: 250, h: 250 }, rotated: false, trimmed: false, sourceSize: { w: 250, h: 250 } })),
+  };
+  const rpImage: ImageAsset = { name: 'sheet.png', imageRef: 'sheet.png', size: { w: 1024, h: 1024 }, mime: 'image/png', byteSize: 90000 };
+  out.push(repackOpportunityFinding(rpAtlas, rpImage, cfg, { assetRef: 'sheet.png', pages: [{ w: 512, h: 512 }], padding: 2 })!);
   out.push(integrityFindings([{ manifest: 'm.json', image: 'x.png' }])[0]!);
   const ff1 = (await formatFinding('hero.png', img('hero.png', 256, 256, 10000).image, cfg, async () => 4000))!;
   const ff2 = (await formatFinding('logo.png', img('logo.png', 256, 256, 20000).image, cfg, async () => 8000))!;
@@ -206,7 +215,7 @@ describe('renderFinding — English catalog reproduces the baked strings (drift 
     const findings = await realFindings();
     const keys = new Set(findings.map((f) => f.messageKey));
     // sanity: we exercised every messageKey family the rules emit
-    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'upscaled-source', 'frame-redundancy', 'trim-margin', 'bleeding', 'dimension-mismatch-shrunk-offedge', 'dimension-mismatch-shrunk', 'dimension-mismatch-grown', 'cross-atlas-redundancy', 'premultiplied-alpha', 'gpu-compression-alignment', 'excessive-gutter', 'spine-unreferenced-regions', 'interior-transparency', 'binary-alpha', 'font-glyph-page', 'wasted-alpha', 'strippable-metadata', 'strippable-metadata-aggregate', 'icc-non-srgb', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'atlas-merge-batching', 'integrity', 'format-aggregate', 'variants']));
+    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'upscaled-source', 'frame-redundancy', 'trim-margin', 'bleeding', 'dimension-mismatch-shrunk-offedge', 'dimension-mismatch-shrunk', 'dimension-mismatch-grown', 'cross-atlas-redundancy', 'premultiplied-alpha', 'gpu-compression-alignment', 'excessive-gutter', 'spine-unreferenced-regions', 'interior-transparency', 'binary-alpha', 'font-glyph-page', 'repack-opportunity', 'wasted-alpha', 'strippable-metadata', 'strippable-metadata-aggregate', 'icc-non-srgb', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'atlas-merge-batching', 'integrity', 'format-aggregate', 'variants']));
     for (const f of findings) {
       expect(f.messageKey, `${f.id} must carry a messageKey`).toBeTruthy();
       const r = renderFinding(f, 'en');

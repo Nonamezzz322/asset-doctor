@@ -168,4 +168,15 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   // structurally forbids it). `minDeadRegions` (1): even one genuinely unreferenced region is worth a
   // per-page info line (the finding is a hedged disclosure, not a savings verdict). Browser-only in v1:
   // the CLI passes no spineBindings dep, so it can never fire there regardless of thresholds.
+  repackSim: { minVramBytesSaved: 262_144, maxSprites: 2000 }, // CALIBRATE — dry-run repack gate. The host
+  // runs the REAL fix packer (pack.ts MaxRects, fix-default options: padding 2, maxSize 4096, rotation off —
+  // the exact item derivation repackAtlases uses at frame extents, no trim/alias inputs ⇒ a conservative
+  // FLOOR on what the full fix achieves) and injects the bin set via AnalyzeDeps.repackSims.
+  // `minVramBytesSaved` (256 KB — the SAME floor as occupancy.minWastedBytes, one full 256² RGBA page):
+  // the MEASURED delta (real decoded page VRAM − Σ bin w·h·4) must reach this before the finding fires —
+  // a sub-floor win is real but not headline-grade (strict `<` suppresses; == fires, mirroring occupancy).
+  // `maxSprites` (2000): HOST-side cap — MaxRects is O(n²)-ish, a multi-thousand-frame page is skipped
+  // (no sim ⇒ no finding, bounded work; mirrors the worker's FRAME_HASH_MAX_SPRITES discipline).
+  // Browser-only in v1: the CLI passes no repackSims dep, so it can never fire there regardless of
+  // thresholds (deps-gated like frameHashes — CLI/budget output stays byte-identical).
 };

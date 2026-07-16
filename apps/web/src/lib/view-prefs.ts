@@ -55,6 +55,7 @@ export const RULE_GROUP: Record<Rule, RuleGroupId> = {
   'interior-transparency': 'packing',
   'should-atlas': 'packing',
   'atlas-merge': 'packing',
+  'repack-opportunity': 'packing',
   // 4. VRAM & info.
   variants: 'vram',
   'gpu-compression-alignment': 'vram',

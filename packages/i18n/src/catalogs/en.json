@@ -988,5 +988,9 @@
   "compare.hedge.duration": "raw only — session lengths differ",
   "compare.hedge.device": "raw only — different device",
   "cabinet.heading": "Folder issue",
-  "cabinet.affectedFiles": "Affected files ({n})"
+  "cabinet.affectedFiles": "Affected files ({n})",
+  "rule.repack-opportunity": "Repack dry-run",
+  "find.repack-opportunity.title": "Repack fits {w}×{h} — frees {saved:bytes} of VRAM (measured)",
+  "find.repack-opportunity.detail": "Re-packing the {n} frames with the same MaxRects packer the fix ships (padding {padding}px, no rotation) fits a {w}×{h} sheet instead of the current {cw}×{ch} — measured by actually packing the frames, not an area model. Applying the geometry repack frees {saved:bytes} of VRAM ({before:bytes} → {after:bytes}); trim and dedup can shrink it further.",
+  "find.repack-opportunity.fix": "Run the repack — this dry-run is the exact packing it performs."
 }

@@ -29,8 +29,9 @@ export {
   wastedRegions,
   formatFinding,
   fmtBytes,
+  repackOpportunityFinding,
 } from './rules';
-export type { EncodeSizer, OpaqueEncodeSizer } from './rules';
+export type { EncodeSizer, OpaqueEncodeSizer, RepackSim } from './rules';
 export {
   duplicateExactFindings,
   duplicateSimilarFindings,

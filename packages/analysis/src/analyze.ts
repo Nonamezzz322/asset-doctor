@@ -36,6 +36,7 @@ import {
   interiorTransparencyFinding,
   occupancyFinding,
   occupancyValue,
+  repackOpportunityFinding,
   solidFillFinding,
   upscaledSourceFinding,
   strippableMetadataFinding,
@@ -46,6 +47,7 @@ import {
   wastedRegions,
   type EncodeSizer,
   type OpaqueEncodeSizer,
+  type RepackSim,
 } from './rules';
 import {
   atlasMergeFinding,
@@ -99,6 +101,11 @@ export interface AnalyzeDeps {
    *  the spine-unreferenced-regions disclosure. Absent (CLI/headless — unwired in v1, or no paired
    *  skeleton) ⇒ the rule never fires ⇒ byte-identical (gated exactly like frameHashes). */
   spineBindings?: SpineSkeletonBinding[];
+  /** Per-atlas DRY-RUN repack results (keyed by post-merge atlas.name) — the host ran the REAL fix
+   *  packer over each sheet's frames (see RepackSim). Drives the repack-opportunity finding. Absent
+   *  (CLI/headless — unwired in v1, or the host's sprite cap skipped the sheet) ⇒ the finding never
+   *  fires ⇒ byte-identical (gated exactly like frameHashes). */
+  repackSims?: RepackSim[];
 }
 
 const RANK: Record<Severity, number> = { crit: 0, warn: 1, info: 2, ok: 3 };
@@ -125,6 +132,10 @@ export async function analyze(
   // byte-identical to today (CLI / headless tests unaffected).
   const classByRef = new Map<string, ContentClass>();
   for (const f of deps.features ?? []) if (f.contentClass) classByRef.set(f.assetRef, f.contentClass);
+
+  // Per-atlas dry-run repack sims (repack-opportunity). Absent ⇒ empty ⇒ never fires (byte-identical).
+  const simByRef = new Map<string, RepackSim>();
+  for (const s of deps.repackSims ?? []) simByRef.set(s.assetRef, s);
 
   // Single-color (solid) marking from the SAME 9×8 sample the worker already decodes for dHash. Loose
   // images only (atlases never trip it — a collage average is meaningless). Absent ⇒ empty ⇒ no
@@ -270,6 +281,11 @@ export async function analyze(
       // ⇒ byte-identical; DEFAULT_THRESHOLDS keeps it on for browser + CLI audit/init.
       const dm = dimensionMismatchFinding(atlas, image, cfg);
       if (dm) findings.push(dm);
+      // Dry-run repack (host-injected sim, deps-gated): the MEASURED achievable sheet for THIS page from
+      // actually running the fix packer. The rule itself re-gates on declared==real (never arithmetic
+      // over a mismatched manifest) and the minVramBytesSaved floor.
+      const rp = repackOpportunityFinding(atlas, image, cfg, simByRef.get(atlas.name));
+      if (rp) findings.push(rp);
       await addFormat(atlas.name, image, 'unknown'); // M1: atlases keep today's lossy verdict
       // Strippable ancillary metadata on the atlas PAGE image (the manifest JSON is never scanned). De-overlapped
       // with the page's format saving via bumpBest (one re-encode transcodes AND strips the metadata).
