@@ -67,6 +67,7 @@ export function scaleAtlas(atlas: Atlas, scale: number): Atlas {
     };
     if (s.spriteSourceSize) out.spriteSourceSize = { x: Math.round(s.spriteSourceSize.x * scale), y: Math.round(s.spriteSourceSize.y * scale), w: px(s.spriteSourceSize.w), h: px(s.spriteSourceSize.h) };
     if (s.pivot) out.pivot = s.pivot;
+    if (s.index !== undefined) out.index = s.index;
     return out;
   });
   return { ...atlas, size: { w: W, h: H }, sprites };
@@ -189,6 +190,42 @@ export function repackAtlases(
   // aliasedFrames is the map's already-honest Σ(distinctRects−1); counted ONCE here (never per-sprite).
   let flatCursor = 0;
   if (mergeAliasMap) aliasedFrames += mergeAliasMap.aliasedFrames;
+
+  // ── Cluster trim-safety gate (P3 ingest/fix audit #1) ────────────────────────────────────────────
+  // An aliased duplicate inherits its representative's trim WHOLESALE in the emit branch — correct ONLY
+  // when the alias's own source geometry matches the rep's untrimmed assumption. Byte-identical FRAME
+  // pixels do NOT imply identical SOURCE geometry: a trimmed sprite from a 100×100 canvas (offset 30,40)
+  // legitimately clusters with an untrimmed 20×20 copy (the hash covers the frame region only), and
+  // inheriting the rep's trim collapsed its canvas to 20×20 and shifted its in-game anchor. The honest,
+  // conservative fix mirrors the rotated-guard precedent above: if ANY alias in a rep's cluster is
+  // already trimmed / carries spriteSourceSize / is rotated, the WHOLE cluster packs verbatim (no trim)
+  // — we forgo that cluster's trim win, we never rewrite an alias's source geometry. Pre-pass resolves
+  // repIds exactly like the main loop (same flat/per-atlas logic) so the two cannot drift.
+  const trimBlockedReps = new Set<string>();
+  {
+    let fc = 0;
+    for (const a of atlases) {
+      const am2 = mergeAliasMap ? undefined : aliasMaps?.get(a.name);
+      a.sprites.forEach((s, idx) => {
+        const fi = fc++;
+        let isSelf: boolean;
+        let repId: string;
+        if (mergeAliasMap) {
+          const repFlat = mergeAliasMap.repOf[fi]!;
+          isSelf = repFlat === fi;
+          const repEntry = mergeAliasMap.flat[repFlat]!;
+          repId = `${repEntry.atlasName} ${repEntry.sprite.name}`;
+        } else {
+          const rep = am2 ? am2.repOf[idx]! : idx;
+          isSelf = rep === idx;
+          repId = `${a.name} ${a.sprites[rep]!.name}`;
+        }
+        if (!isSelf && (s.trimmed !== false || s.spriteSourceSize !== undefined || s.rotated)) {
+          trimBlockedReps.add(repId);
+        }
+      });
+    }
+  }
   for (let ai = 0; ai < atlases.length; ai++) {
     const a = atlases[ai]!;
     const atlasTrim = opts.trim?.[ai];
@@ -229,7 +266,8 @@ export function repackAtlases(
         // Representative (or no aliasing for this atlas): pack a real item, count its area as packed. When this
         // sprite carries reclaimable padding (resolveTrim ⇒ non-null), pack the TIGHTER bbox extent + record
         // the resolved trim so the emit branch can tighten this rep AND every alias sharing its rect (B2).
-        const tr = atlasTrim ? resolveTrim(s, atlasTrim[idx] ?? null, !!opts.trimAsSpineOffset) : null;
+        // trimBlockedReps (audit #1): a cluster with a geometry-divergent alias packs VERBATIM instead.
+        const tr = atlasTrim && !trimBlockedReps.has(id) ? resolveTrim(s, atlasTrim[idx] ?? null, !!opts.trimAsSpineOffset) : null;
         if (tr) {
           trimOf.set(id, tr);
           trimmedSprites++;
@@ -283,6 +321,7 @@ export function repackAtlases(
       if (tr) out.spriteSourceSize = { ...tr.spriteSourceSize };
       else if (s.spriteSourceSize) out.spriteSourceSize = s.spriteSourceSize;
       if (s.pivot) out.pivot = s.pivot;
+    if (s.index !== undefined) out.index = s.index;
       sprites.push(out);
       // Alias sprites: every byte-identical duplicate name lands at the representative's FINAL rect. When the
       // rep was TRIMMED, each alias MUST INHERIT the rep's trim (B2): the pixels are byte-identical, so the
@@ -295,6 +334,7 @@ export function repackAtlases(
         if (tr) aout.spriteSourceSize = { ...tr.spriteSourceSize };
         else if (alias.spriteSourceSize) aout.spriteSourceSize = alias.spriteSourceSize;
         if (alias.pivot) aout.pivot = alias.pivot;
+        if (alias.index !== undefined) aout.index = alias.index;
         sprites.push(aout);
       }
     });
@@ -318,22 +358,20 @@ export function repackAtlases(
     let fc = 0;
     for (let ai = 0; ai < atlases.length; ai++) {
       const a = atlases[ai]!;
-      const atlasTrim = opts.trim?.[ai];
-      a.sprites.forEach((s, idx) => {
+      a.sprites.forEach((s) => {
         const fi = fc++;
-        // The extent this sprite occupies in the ALIASED pass: a representative uses its own resolveTrim; an
-        // alias inherits the REP's resolved trim (its pixels are byte-identical ⇒ same bbox). Recompute the same.
+        // The extent this sprite occupies in the ALIASED pass: the tight bbox IFF its representative was
+        // actually trimmed there (trimOf), else its frame extent. See the LOCKSTEP note below.
         const repFlat = mergeAliasMap.repOf[fi]!;
         const repEntry = mergeAliasMap.flat[repFlat]!;
         const repId = `${repEntry.atlasName} ${repEntry.sprite.name}`;
+        // LOCKSTEP with the aliased pass (audit #1): a sprite's counterfactual extent is the tight bbox
+        // IFF its representative was actually trimmed there (trimOf), else its frame extent — including
+        // clusters the trim-safety gate packed verbatim. The old own-resolveTrim fallback could tighten a
+        // member the aliased pass did NOT tighten, overstating the baseline and thus vramReclaimedBytes.
         const repTr = trimOf.get(repId);
-        if (repTr) {
-          baseItems.push({ id: `b${fi}`, w: repTr.packW, h: repTr.packH });
-        } else {
-          const ownTr = atlasTrim ? resolveTrim(s, atlasTrim[idx] ?? null, !!opts.trimAsSpineOffset) : null;
-          if (ownTr) baseItems.push({ id: `b${fi}`, w: ownTr.packW, h: ownTr.packH });
-          else baseItems.push({ id: `b${fi}`, w: s.frame.w, h: s.frame.h });
-        }
+        if (repTr) baseItems.push({ id: `b${fi}`, w: repTr.packW, h: repTr.packH });
+        else baseItems.push({ id: `b${fi}`, w: s.frame.w, h: s.frame.h });
       });
     }
     const baseBins = pack(baseItems, { allowRotation: opts.allowRotation, padding: opts.padding, maxSize: opts.maxSize, ...(opts.gutter ? { gutter: opts.gutter } : {}) });
@@ -408,6 +446,7 @@ export function repackAtlasesPolygon(
       const out: Sprite = { name: s.name, frame: { x: p.x, y: p.y, w: p.w, h: p.h }, rotated: s.rotated, trimmed: s.trimmed, sourceSize: s.sourceSize };
       if (s.spriteSourceSize) out.spriteSourceSize = s.spriteSourceSize;
       if (s.pivot) out.pivot = s.pivot;
+    if (s.index !== undefined) out.index = s.index;
       // Attach the mesh + clip ONLY when asked AND a mesh exists for this dir-aware id. verticesUV
       // (and Blit.clip) are recomputed from the FINAL per-bin frame.xy so they stay correct under
       // spill/merge — never carried from the source.

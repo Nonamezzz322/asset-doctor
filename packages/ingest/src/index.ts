@@ -108,6 +108,14 @@ export function groupFiles(files: RawFile[]): Grouped {
   const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
   const resolve = (manifestPath: string | undefined, imageName: string): RawFile | undefined => {
+    // Dir-aware manifests resolve ONLY within their directory tree (relative refs incl. ../ via
+    // normalizePath). The global-basename fallback is for FLAT (path-less) uploads per this file's
+    // contract — un-gated it let a dir-aware manifest whose folder lacks the image silently CLAIM a
+    // same-basename image from ANOTHER directory (last-wins, input-order-dependent) instead of an
+    // honest missing-image finding — P3 ingest/fix audit #5.
+    if (manifestPath && manifestPath.includes('/')) {
+      return byPath.get(normalizePath(`${dirOf(manifestPath)}/${imageName}`));
+    }
     const dirHit = manifestPath ? byPath.get(normalizePath(`${dirOf(manifestPath)}/${imageName}`)) : undefined;
     return dirHit ?? byBase.get(baseName(imageName));
   };
@@ -380,9 +388,22 @@ export function groupLooseForPacking(
   );
 
   // skeletonRef per spine root: the lexicographically-first skeleton marker under that root (deterministic).
+  // A .json marker must PASS the same looksLikeSkeleton check the root-detection loop applies (P3 audit #4):
+  // picking the lexicographically-first .json regardless (e.g. an animations config.json beside hero.json)
+  // handed the verifier a non-skeleton — it failed shape recognition, the group read "not verified", and
+  // genuinely missing attachments went undetected. .skel is a skeleton by extension (binary, uncheckable).
   const skeletonByRoot = new Map<string, string>();
   for (const m of markers) {
     if (!/\.(skel|json)$/i.test(m.name)) continue;
+    if (/\.json$/i.test(m.name)) {
+      let json: unknown;
+      try {
+        json = JSON.parse(new TextDecoder().decode(m.bytes));
+      } catch {
+        continue;
+      }
+      if (!looksLikeSkeleton(json)) continue;
+    }
     const key = keyOf(m);
     const r = rootOf(key);
     if (r === null) continue;
@@ -443,7 +464,11 @@ export function groupLooseForPacking(
 /** The bucket key a static candidate falls into, by granularity (§4c). */
 function staticBucketKey(ref: string, g: StaticGranularity): string {
   if (g === 'one-sheet-for-all') return '';
-  if (g === 'per-top-level-bundle') return ref.split('/')[0] ?? '';
+  // Root-level refs (no '/') bucket to '' — the root IS their bundle. `split('/')[0]` returned the
+  // FILENAME for them, so every root image sat alone in a single-image bucket (below minLooseImages ⇒
+  // silently excluded from packing; forced ⇒ a sheet emitted into a directory named after the image) —
+  // P3 ingest/fix audit #3.
+  if (g === 'per-top-level-bundle') return ref.includes('/') ? ref.split('/')[0]! : '';
   return dirOf(ref); // per-leaf-folder
 }
 

@@ -39,6 +39,8 @@ interface RegionAcc {
   offsets?: { x: number; y: number; w: number; h: number };
   /** legacy `offset: x, y` — the trimmed region's offset within the original. */
   offset?: { x: number; y: number };
+  /** `index:` frame-sequence ordinal (only carried when a finite value ≥ 0 — -1 means none). */
+  index?: number;
   /** Set when a REQUIRED field had a non-finite OR non-positive value — the region is dropped + surfaced
    *  (not silently coerced to 0 or kept degenerate, which would fabricate a placement). First failure wins (??=). */
   malformed?: string;
@@ -53,12 +55,19 @@ const numsRaw = (v: string): number[] => v.split(',').map((s) => parseInt(s.trim
 const PAGE_KEYS = new Set(['size', 'format', 'filter', 'repeat', 'pma', 'scale']);
 const REGION_KEYS = new Set(['rotate', 'xy', 'size', 'orig', 'offset', 'offsets', 'index', 'bounds', 'split', 'pad']);
 
-function rotatedFrom(v: string): boolean {
+/** rotate value → representable rotation. The core model carries a BOOLEAN `rotated` (90° CW); values it
+ *  CANNOT represent (180 / 270 / other degrees — legal in the 4.x format, emitted by third-party packers
+ *  only) are 'unsupported': the region is dropped + surfaced instead of parsed lossily — parsing 270 as
+ *  a plain 90 made every re-emit path (repack/dedup/scale) render it 180° off in-engine (P3 audit #2).
+ *  Spine's own packer emits only 90, so real-world exports are unaffected. */
+function rotatedFrom(v: string): boolean | 'unsupported' {
   const s = v.trim().toLowerCase();
   if (s === 'true') return true;
   if (s === 'false' || s === '0') return false;
   const n = parseInt(s, 10);
-  return n === 90 || n === 270;
+  if (n === 90) return true;
+  if (Number.isFinite(n) && n !== 0) return 'unsupported';
+  return false;
 }
 
 function applyPageKey(page: SpinePage, key: string, val: string): void {
@@ -81,7 +90,11 @@ const fin = (n: number | undefined): boolean => n !== undefined && Number.isFini
 
 function applyRegionKey(r: RegionAcc, key: string, val: string): void {
   const n = numsRaw(val);
-  if (key === 'rotate') r.rotated = rotatedFrom(val);
+  if (key === 'rotate') {
+    const rot = rotatedFrom(val);
+    if (rot === 'unsupported') r.malformed ??= `region "${r.name}": unsupported rotate "${val.trim()}" (only 0/90 are representable)`;
+    else r.rotated = rot;
+  }
   else if (key === 'xy') {
     if (!fin(n[0]) || !fin(n[1])) r.malformed ??= `region "${r.name}": non-finite xy "${val.trim()}"`;
     else r.xy = { x: n[0]!, y: n[1]! };
@@ -116,6 +129,9 @@ function applyRegionKey(r: RegionAcc, key: string, val: string): void {
     else r.offsets = { x: n[0]!, y: n[1]!, w: n[2]!, h: n[3]! };
   } else if (key === 'offset') {
     r.offset = { x: Number.isFinite(n[0]) ? n[0]! : 0, y: Number.isFinite(n[1]) ? n[1]! : 0 };
+  } else if (key === 'index') {
+    // carried so a repack re-emit keeps libGDX indexed frame sequences intact (P3 audit #7); -1 = none.
+    if (Number.isFinite(n[0]) && n[0]! >= 0) r.index = n[0]!;
   }
 }
 
@@ -138,6 +154,7 @@ function toSprite(r: RegionAcc): Sprite {
   const sourceSize: Size = r.orig ?? (r.offsets ? { w: r.offsets.w, h: r.offsets.h } : { w, h });
   const trimmed = sourceSize.w !== w || sourceSize.h !== h;
   const sprite: Sprite = { name: r.name, frame, rotated: r.rotated, trimmed, sourceSize };
+  if (r.index !== undefined) sprite.index = r.index;
   // a trimmed region carries its offset within the original (so a repack can re-emit it). The MODERN
   // format puts that offset in `offsets[0..1]` (offsetX, offsetY — spine-ts reads them exactly so);
   // the legacy format in `offset:`. Discarding the modern pair zeroed every 4.x trimmed region's

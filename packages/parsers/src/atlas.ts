@@ -199,6 +199,10 @@ export function parseAtlasManifest(
   const malformedFrames: MalformedFrame[] = [];
   if (layout === 'array') {
     let i = -1;
+    // Duplicate-filename guard (P3 ingest/fix audit #6): a hash-layout re-emit collapses same-named frames
+    // to ONE key and the repack's id map resolves both placements to the LAST sprite — one region's pixels
+    // silently lost downstream. Keep the FIRST, surface the duplicate (never two sprites with one name).
+    const seenNames = new Set<string>();
     for (const entry of rawFrames as unknown[]) {
       i++;
       if (typeof entry !== 'object' || entry === null) {
@@ -211,6 +215,11 @@ export function parseAtlasManifest(
         malformedFrames.push({ name: `#${i}`, reason: 'array frame missing filename' });
         continue;
       }
+      if (seenNames.has(name)) {
+        malformedFrames.push({ name, reason: `duplicate frame name "${name}"` });
+        continue;
+      }
+      seenNames.add(name);
       const sp = bodyToSprite(name, e);
       if (!sp) {
         malformedFrames.push({ name, reason: `invalid frame "${name}"` });

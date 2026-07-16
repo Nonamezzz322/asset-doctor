@@ -63,7 +63,7 @@ export function emitSpineAtlasText(atlas: Atlas): string {
     // the page-space `size:` is the UN-rotated region extent (parser swaps w/h when rotate=90)
     const w = s.rotated ? s.frame.h : s.frame.w;
     const h = s.rotated ? s.frame.w : s.frame.h;
-    lines.push(s.name, `  rotate: ${s.rotated ? 90 : 0}`, `  xy: ${s.frame.x}, ${s.frame.y}`, `  size: ${w}, ${h}`, `  orig: ${s.sourceSize.w}, ${s.sourceSize.h}`, `  offset: ${s.spriteSourceSize?.x ?? 0}, ${s.spriteSourceSize?.y ?? 0}`, '  index: -1');
+    lines.push(s.name, `  rotate: ${s.rotated ? 90 : 0}`, `  xy: ${s.frame.x}, ${s.frame.y}`, `  size: ${w}, ${h}`, `  orig: ${s.sourceSize.w}, ${s.sourceSize.h}`, `  offset: ${s.spriteSourceSize?.x ?? 0}, ${s.spriteSourceSize?.y ?? 0}`, `  index: ${s.index ?? -1}`);
   }
   return lines.join('\n') + '\n';
 }

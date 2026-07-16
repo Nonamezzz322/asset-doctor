@@ -57,6 +57,10 @@ export interface Sprite {
   trimmed: boolean;
   /** Original, untrimmed sprite size. */
   sourceSize: Size;
+  /** Spine/libGDX `index:` (frame-sequence ordinal, -1 = none). Carried parse→re-emit so a repack does
+   *  not break indexed sequences (it was unconditionally re-emitted as -1 — P3 ingest/fix audit #7).
+   *  Absent = the source carried none (TP/Pixi never do). */
+  index?: number;
   /** Trimmed-region offset/size within the source (present when trimmed). */
   spriteSourceSize?: Rect;
   pivot?: Vec2;
