@@ -33,6 +33,14 @@ inputs:
     description: 'true to write the budget table to the job summary.'
     required: false
     default: 'true'
+  pr-comment:
+    description: 'true to post/update ONE sticky PR comment with the measured before→after diff (metric deltas + added/resolved/changed findings). Advisory and best-effort: it never fails the build and never gates.'
+    required: false
+    default: 'true'
+  github-token:
+    description: 'Token used to post the PR comment (needs pull-requests: write). Defaults to the workflow token.'
+    required: false
+    default: ${{ github.token }}
 
 runs:
   using: composite
@@ -72,6 +80,38 @@ runs:
         else
           echo "no base ref — gating absolute budgets only"
         fi
+
+    # P9 — the sticky PR comment. ADVISORY by design and placed BEFORE the Gate so a failing budget never
+    # skips it (the comment is exactly when a red build most needs the measured story). Every path is
+    # best-effort (exit 0): a missing baseline, a diff failure, no gh binary (self-hosted), or a token
+    # without pull-requests:write must never break the build. Reuses the CLI diff core verbatim — the
+    # comment IS `asset-doctor diff --summary` (measured deltas + added/resolved/changed by stable id),
+    # nothing recomputed here. Sticky: ONE comment per PR, matched by the HTML marker and updated in place.
+    - name: PR comment — measured before→after diff (advisory, best effort)
+      if: ${{ inputs.pr-comment == 'true' && github.event.pull_request.number }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        BIN="node ${{ github.action_path }}/apps/cli/dist/cli.js"
+        command -v gh >/dev/null 2>&1 || { echo "gh not available — skipping PR comment"; exit 0; }
+        [ -f "$RUNNER_TEMP/ad-base.json" ] || { echo "no baseline — skipping PR comment"; exit 0; }
+        $BIN diff "$RUNNER_TEMP/ad-base.json" "${{ inputs.dir }}" --summary "$RUNNER_TEMP/ad-diff.md" --quiet \
+          || { echo "diff failed — skipping PR comment"; exit 0; }
+        MARKER="<!-- asset-doctor-diff -->"
+        { echo "$MARKER"; cat "$RUNNER_TEMP/ad-diff.md"; } > "$RUNNER_TEMP/ad-comment.md"
+        PR="${{ github.event.pull_request.number }}"
+        REPO="${{ github.repository }}"
+        EXISTING=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+          --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" 2>/dev/null | head -n1)
+        if [ -n "$EXISTING" ]; then
+          gh api -X PATCH "repos/$REPO/issues/comments/$EXISTING" -F body=@"$RUNNER_TEMP/ad-comment.md" >/dev/null \
+            && echo "PR comment updated (#$EXISTING)" || echo "PR comment update failed (token perms?) — skipped"
+        else
+          gh api -X POST "repos/$REPO/issues/$PR/comments" -F body=@"$RUNNER_TEMP/ad-comment.md" >/dev/null \
+            && echo "PR comment posted" || echo "PR comment failed (token perms?) — skipped"
+        fi
+        exit 0
 
     - name: Gate
       shell: bash
