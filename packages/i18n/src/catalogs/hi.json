@@ -1016,5 +1016,6 @@
   "cabinet.value.premultiplied-alpha": "मान: premultiplied-आकार वाले नरम-किनारे पिक्सेल का हिस्सा (मापा गया)",
   "cabinet.value.atlas-merge": "मान: प्रत्येक शीट की भराई (मापा गया)",
   "cabinet.value.format": "मान: प्रति छवि मापी गई डाउनलोड बचत",
-  "cabinet.value.strippable-metadata": "मान: प्रति छवि हटाने योग्य मेटाडेटा के सटीक बाइट"
+  "cabinet.value.strippable-metadata": "मान: प्रति छवि हटाने योग्य मेटाडेटा के सटीक बाइट",
+  "dropzone.demo": "नमूना प्रोजेक्ट आज़माएँ"
 }

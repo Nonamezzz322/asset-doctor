@@ -1002,5 +1002,6 @@
   "cabinet.value.premultiplied-alpha": "数值：软边缘像素中呈预乘形态的占比（实测）",
   "cabinet.value.atlas-merge": "数值：每张图集的填充率（实测）",
   "cabinet.value.format": "数值：每张图片的实测下载节省",
-  "cabinet.value.strippable-metadata": "数值：每张图片可剥离元数据的精确字节数"
+  "cabinet.value.strippable-metadata": "数值：每张图片可剥离元数据的精确字节数",
+  "dropzone.demo": "试试示例项目"
 }

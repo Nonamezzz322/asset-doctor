@@ -1020,5 +1020,6 @@
   "cabinet.value.premultiplied-alpha": "Valore: quota di pixel di bordo morbido a forma premoltiplicata (misurato)",
   "cabinet.value.atlas-merge": "Valore: occupazione di ogni foglio (misurato)",
   "cabinet.value.format": "Valore: risparmio di download misurato per immagine",
-  "cabinet.value.strippable-metadata": "Valore: byte esatti di metadati rimovibili per immagine"
+  "cabinet.value.strippable-metadata": "Valore: byte esatti di metadati rimovibili per immagine",
+  "dropzone.demo": "Prova un progetto di esempio"
 }

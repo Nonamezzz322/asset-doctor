@@ -1016,5 +1016,6 @@
   "cabinet.value.premultiplied-alpha": "Wert: Anteil premultiplied-geformter Weichkanten-Pixel (gemessen)",
   "cabinet.value.atlas-merge": "Wert: Belegung jedes Sheets (gemessen)",
   "cabinet.value.format": "Wert: gemessene Download-Ersparnis pro Bild",
-  "cabinet.value.strippable-metadata": "Wert: exakte entfernbare Metadaten-Bytes pro Bild"
+  "cabinet.value.strippable-metadata": "Wert: exakte entfernbare Metadaten-Bytes pro Bild",
+  "dropzone.demo": "Beispielprojekt ansehen"
 }

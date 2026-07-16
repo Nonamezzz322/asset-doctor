@@ -1020,5 +1020,6 @@
   "cabinet.value.premultiplied-alpha": "Valor: fracción de píxeles de borde suave con forma premultiplicada (medido)",
   "cabinet.value.atlas-merge": "Valor: ocupación de cada hoja (medido)",
   "cabinet.value.format": "Valor: ahorro de descarga medido por imagen",
-  "cabinet.value.strippable-metadata": "Valor: bytes exactos de metadatos eliminables por imagen"
+  "cabinet.value.strippable-metadata": "Valor: bytes exactos de metadatos eliminables por imagen",
+  "dropzone.demo": "Probar con un proyecto de ejemplo"
 }

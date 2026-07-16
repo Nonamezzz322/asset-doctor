@@ -1042,5 +1042,6 @@
   "cabinet.value.premultiplied-alpha": "Число: доля мягких краевых пикселей premultiplied-формы (измерено)",
   "cabinet.value.atlas-merge": "Число: заполненность каждого листа (occupancy, измерено)",
   "cabinet.value.format": "Число: измеренная экономия загрузки на изображение",
-  "cabinet.value.strippable-metadata": "Число: точные байты срезаемых метаданных на изображение"
+  "cabinet.value.strippable-metadata": "Число: точные байты срезаемых метаданных на изображение",
+  "dropzone.demo": "Посмотреть на примере"
 }

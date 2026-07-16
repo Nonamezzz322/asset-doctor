@@ -996,5 +996,6 @@
   "cabinet.value.premultiplied-alpha": "Value: share of soft-edge pixels shaped premultiplied (measured)",
   "cabinet.value.atlas-merge": "Value: each sheet's occupancy (measured)",
   "cabinet.value.format": "Value: measured download saving per image",
-  "cabinet.value.strippable-metadata": "Value: exact strippable metadata bytes per image"
+  "cabinet.value.strippable-metadata": "Value: exact strippable metadata bytes per image",
+  "dropzone.demo": "Try a sample project"
 }

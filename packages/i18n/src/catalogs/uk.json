@@ -1120,5 +1120,6 @@
   "cabinet.value.premultiplied-alpha": "Число: частка м'яких крайових пікселів premultiplied-форми (виміряно)",
   "cabinet.value.atlas-merge": "Число: заповненість кожного аркуша (occupancy, виміряно)",
   "cabinet.value.format": "Число: виміряна економія завантаження на зображення",
-  "cabinet.value.strippable-metadata": "Число: точні байти зрізуваних метаданих на зображення"
+  "cabinet.value.strippable-metadata": "Число: точні байти зрізуваних метаданих на зображення",
+  "dropzone.demo": "Подивитися на прикладі"
 }

@@ -8,6 +8,7 @@ import {
   supportsDirectoryPicker,
   type PickedFile,
 } from './lib/import';
+import { loadDemoProject } from './lib/demo';
 import { keyOf } from './lib/group';
 import { filmSelectionAction } from './lib/film-selection';
 import { readSourceBytes, sourceReaders } from './lib/source-bytes';
@@ -594,6 +595,7 @@ export function App() {
               phase={phase}
               onOpen={openFolder}
               onDrop={(dt) => void filesFromDataTransfer(dt).then(run)}
+              onDemo={() => void loadDemoProject().then(run)}
             />
             {/* The landing sections (nav + how-it-works + disk≠VRAM + capabilities + privacy + pricing +
                 FAQ) render BELOW the Dropzone on the idle/analyzing/error screen, inside this same
@@ -1176,10 +1178,12 @@ function Dropzone({
   phase,
   onOpen,
   onDrop,
+  onDemo,
 }: {
   phase: Phase;
   onOpen: () => void;
   onDrop: (dt: DataTransferItemList) => void;
+  onDemo: () => void;
 }) {
   const { t } = useI18n();
   const [dragging, setDragging] = useState(false);
@@ -1229,6 +1233,16 @@ function Dropzone({
           >
             {t('landing.scrollHint')}
           </a>
+          {/* P4 demo entry: one click runs the REAL pipeline on a bundled synthetic sample (lazy chunk,
+              no fetch of user data). Disabled while a run is in flight — it shares the same run() path. */}
+          <button
+            type="button"
+            onClick={onDemo}
+            disabled={analyzing}
+            className="rounded-lg border border-line bg-panel px-5 py-2.5 font-sans text-sm font-semibold text-teal-text transition hover:border-teal disabled:opacity-50"
+          >
+            {t('dropzone.demo')}
+          </button>
         </div>
         {phase.t === 'error' && <ErrorNotice state={phase.error} mt="mt-6" />}
         {/* Mobile honesty line (visible only < sm). Never promises mobile analysis (WebGL probe / FS Access
