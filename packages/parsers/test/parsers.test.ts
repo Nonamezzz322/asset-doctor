@@ -285,11 +285,15 @@ describe('readImageInfo — header readers', () => {
     expect(readImageInfo(b)).toEqual({ mime: 'image/webp', size: { w: 300, h: 200 } });
   });
 
-  it('reads an AVIF canvas size from the ispe box', () => {
-    // ftyp 'avif', then an ispe box with width 320 / height 240.
+  it('reads an AVIF canvas size from the ispe box (proper meta→iprp→ipco walk)', () => {
+    // DELIBERATELY updated with the P3 #5 fix: ispe must live where the spec puts it (meta→iprp→ipco);
+    // the old bare-ispe synthetic only satisfied the naive first-fourcc scan, which real files broke.
     const avif = new Uint8Array([
-      0x00, 0x00, 0x00, 0x0c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66, // ftyp 'avif'
-      0x00, 0x00, 0x00, 0x14, 0x69, 0x73, 0x70, 0x65, 0x00, 0x00, 0x00, 0x00, // ispe + version/flags
+      0x00, 0x00, 0x00, 0x0c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66, // ftyp 'avif' (12)
+      0x00, 0x00, 0x00, 0x30, 0x6d, 0x65, 0x74, 0x61, 0x00, 0x00, 0x00, 0x00, // meta (48) + ver/flags
+      0x00, 0x00, 0x00, 0x24, 0x69, 0x70, 0x72, 0x70, // iprp (36)
+      0x00, 0x00, 0x00, 0x1c, 0x69, 0x70, 0x63, 0x6f, // ipco (28)
+      0x00, 0x00, 0x00, 0x14, 0x69, 0x73, 0x70, 0x65, 0x00, 0x00, 0x00, 0x00, // ispe (20) + ver/flags
       0x00, 0x00, 0x01, 0x40, 0x00, 0x00, 0x00, 0xf0, // width 320, height 240
     ]);
     expect(readImageInfo(avif)).toEqual({ mime: 'image/avif', size: { w: 320, h: 240 } });
@@ -1113,10 +1117,11 @@ rgn
   });
 
   it('spine modern multi-page: an INDENTED page size: header on page 2+ is NOT swallowed (no lost page)', () => {
-    // Bug (R27): the page-boundary lookahead tested the RAW un-trimmed next line against /^size\s*:/,
-    // while every other classification used the trimmed line. So on page 2+ a modern Spine 4.x INDENTED
-    // page header ("\tsize:" / "  size:") was unrecognized → page 2 was silently dropped, its image line
-    // became a phantom full-page sprite on page 1, and regionB was misattributed to page 1.
+    // Bug (R27) history: the old size:-lookahead mis-handled indented page-2 headers. P3 audit #2/#6
+    // then showed the lookahead ITSELF mis-splits real files, so the parser now follows the CANONICAL
+    // libGDX/spine-ts contract: pages are separated by a BLANK line (real Spine/TP exporters emit one;
+    // spine-ts reads a non-blank-separated page name as a REGION, exactly like we now do). These inputs
+    // therefore carry the canonical blank separator — DELIBERATELY updated with the P3 parser fixes.
     // Two variants below — tab-indented AND space-indented page headers — both must yield 2 clean pages.
     for (const [label, indent] of [['tab', '\t'], ['space', '  ']] as const) {
       const atlas = `page1.png
@@ -1127,6 +1132,7 @@ ${indent}rotate: 0
 ${indent}xy: 0, 0
 ${indent}size: 32, 32
 ${indent}orig: 32, 32
+
 page2.png
 ${indent}size: 64, 64
 ${indent}format: RGBA8888
@@ -1154,7 +1160,7 @@ ${indent}orig: 16, 16
   });
 
   it('spine legacy column-0 multi-page regression guard: still 2 pages with correct attribution', () => {
-    // Locks the legacy (non-indented) path so the lookahead-trim fix is a no-op for column-0 headers.
+    // Locks the legacy (non-indented) path under the CANONICAL blank-line page separator (P3 fixes).
     const atlas = `page1.png
 size: 64, 64
 format: RGBA8888
@@ -1163,6 +1169,7 @@ rotate: 0
 xy: 0, 0
 size: 32, 32
 orig: 32, 32
+
 page2.png
 size: 64, 64
 format: RGBA8888
@@ -1274,5 +1281,75 @@ describe('readSkeletonAttachmentRefs — conservative skins-only skeleton reader
     expect(readSkeletonAttachmentRefs({ skins: 42 })).toBeNull();
     expect(readSkeletonAttachmentRefs({ skins: [{ name: 'x', attachments: { slot: { ph: 'not-an-object' } } }] })).toBeNull();
     expect(readSkeletonAttachmentRefs({ skins: [null] })).toBeNull();
+  });
+});
+
+
+describe('P3 parsers-audit regressions — spine-atlas defects, each with the audit failure input', () => {
+  it('#1 HIGH: modern offsets carries the trim OFFSET (x,y) into spriteSourceSize, not just origW/H', () => {
+    const pages = parseSpineAtlasText(
+      'page.png\nsize: 512, 512\nregion\n  bounds: 10, 10, 100, 50\n  offsets: 7, 3, 120, 60\n',
+    );
+    const s0 = pages[0]!.sprites[0]!;
+    expect(s0.trimmed).toBe(true);
+    expect(s0.sourceSize).toEqual({ w: 120, h: 60 });
+    // spine-ts reads offsets = offsetX, offsetY, origW, origH — the offset must survive (was zeroed).
+    expect(s0.spriteSourceSize).toEqual({ x: 7, y: 3, w: 100, h: 50 });
+  });
+
+  it('#2 MED-HIGH: a size-less legacy multi-page atlas (canonical blank separators) splits into 2 pages', () => {
+    const pages = parseSpineAtlasText(
+      'page1.png\nregionA\nxy: 0, 0\nsize: 32, 32\norig: 32, 32\n\npage2.png\nregionB\nxy: 0, 0\nsize: 16, 16\norig: 16, 16\n',
+    );
+    expect(pages.map((p) => p.image)).toEqual(['page1.png', 'page2.png']);
+    expect(pages[0]!.sprites.map((x) => x.name)).toEqual(['regionA']);
+    expect(pages[1]!.sprites.map((x) => x.name)).toEqual(['regionB']); // no phantom 0×0 "page2.png" sprite
+  });
+
+  it('#3 MED: a region with NO resolvable geometry is dropped + surfaced, never a phantom 0×0 sprite', () => {
+    const pages = parseSpineAtlasText('page.png\nsize: 64, 64\nghost\nrotate: 0\nxy: 5, 5\n');
+    expect(pages[0]!.sprites).toEqual([]);
+    expect(pages[0]!.malformedRegions).toEqual([{ name: 'ghost', reason: 'region "ghost": missing size/bounds' }]);
+  });
+
+  it('#4 MED: short/garbage offsets is malformed — never a fabricated sourceSize {0,0} + trimmed:true', () => {
+    const pages = parseSpineAtlasText('page.png\nsize: 512, 512\nr\nbounds: 10, 10, 100, 50\noffsets: 1, 2\n');
+    expect(pages[0]!.sprites).toEqual([]);
+    expect(pages[0]!.malformedRegions?.[0]?.reason).toContain('non-finite offsets');
+  });
+
+  it('#6 LOW-MED: a region whose FIRST key is size: stays a region (never misread as a new page)', () => {
+    const pages = parseSpineAtlasText(
+      'page.png\nsize: 64, 64\nsprite_a\nsize: 10, 10\nxy: 0, 0\norig: 10, 10\n',
+    );
+    expect(pages).toHaveLength(1);
+    expect(pages[0]!.sprites.map((x) => x.name)).toEqual(['sprite_a']);
+  });
+
+  it('#7 LOW: orphaned region geometry (name line swallowed as an unknown key) is SURFACED, not vanished', () => {
+    const pages = parseSpineAtlasText('page.png\nsize: 64, 64\nskin: head\nbounds: 0, 0, 8, 8\n');
+    expect(pages[0]!.sprites).toEqual([]);
+    expect(pages[0]!.malformedRegions?.[0]?.reason).toContain('orphaned region key');
+  });
+
+  it('#8 LOW: page scale: is carried onto the Atlas (fractional, parseFloat — a 0.5× page is not 1×)', () => {
+    const pages = parseSpineAtlasText('page.png\nsize: 64, 64\nscale: 0.5\nr\nxy: 0, 0\nsize: 8, 8\n');
+    expect(pages[0]!.scale).toBe(0.5);
+  });
+
+  it('#5 MED: AVIF ispe is found via a REAL box walk — a decoy "ispe" in a free box no longer wins', () => {
+    // ftyp(avif) + a `free` box whose payload contains ASCII "ispe" + garbage dims (7777×8888) +
+    // the real meta→iprp→ipco→ispe (640×480). The old first-fourcc byte-scan returned 7777×8888.
+    const be32 = (n: number): number[] => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+    const cc = (t: string): number[] => [...t].map((c) => c.charCodeAt(0));
+    const ftyp = [...be32(16), ...cc('ftyp'), ...cc('avif'), ...be32(0)];
+    const decoy = [...be32(24), ...cc('free'), ...cc('ispe'), ...be32(0), ...be32(7777), ...be32(8888)];
+    const ispe = [...be32(20), ...cc('ispe'), ...be32(0), ...be32(640), ...be32(480)];
+    const ipco = [...be32(8 + ispe.length), ...cc('ipco'), ...ispe];
+    const iprp = [...be32(8 + ipco.length), ...cc('iprp'), ...ipco];
+    const meta = [...be32(12 + iprp.length), ...cc('meta'), ...be32(0), ...iprp];
+    const info = readImageInfo(new Uint8Array([...ftyp, ...decoy, ...meta]));
+    expect(info?.mime).toBe('image/avif');
+    expect(info?.size).toEqual({ w: 640, h: 480 });
   });
 });

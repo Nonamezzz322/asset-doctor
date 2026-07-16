@@ -10,6 +10,7 @@ reg0
   orig: 30, 30
   offset: 0, 0
   index: -1
+
 spine_multi_1.png
 size: 64,64
 format: RGBA8888

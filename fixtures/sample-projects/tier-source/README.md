@@ -18,3 +18,7 @@ Mixed inputs for the **SCALE-TIER export** slice (`docs/scale-tiers-design.md`).
 
 Pixels are irrelevant to the pure scale tests (geometry only); they exist so the parse/ingest
 round-trip is real.
+
+Note (P3 parser fixes, 2026-07-17): `spine_multi.atlas` pages are separated by the CANONICAL
+blank line (the libGDX/spine-ts page-separator contract real exporters emit; the parser's old
+`size:`-lookahead tolerated its absence but mis-split real files both ways).

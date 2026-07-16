@@ -24,7 +24,9 @@ function pngBytes(): ArrayBuffer {
 }
 const file = (path: string, bytes: ArrayBuffer): RawFile => ({ name: path.split('/').pop()!, path, bytes });
 
-/** Modern Spine 4.x multi-page atlas: page headers are INDENTED (the runtime emits `\tsize:`). */
+/** Modern Spine 4.x multi-page atlas: page headers INDENTED, pages separated by the CANONICAL blank
+ *  line (P3 parser fixes: page detection now follows the libGDX/spine-ts blank-line contract — real
+ *  exporters emit the separator; DELIBERATELY updated with that change). */
 const INDENTED_MULTIPAGE = `skel.png
 \tsize: 64, 64
 \tformat: RGBA8888
@@ -33,6 +35,7 @@ regionA
 \txy: 0, 0
 \tsize: 32, 32
 \torig: 32, 32
+
 skel2.png
 \tsize: 64, 64
 \tformat: RGBA8888

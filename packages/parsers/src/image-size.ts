@@ -88,15 +88,21 @@ function readJpeg(b: Uint8Array): Size | null {
   return null;
 }
 
-function indexOfFourcc(b: Uint8Array, cc: string, from = 0): number {
-  const a = cc.charCodeAt(0);
-  const c = cc.charCodeAt(1);
-  const d = cc.charCodeAt(2);
-  const e = cc.charCodeAt(3);
-  for (let i = from; i + 4 <= b.length; i++) {
-    if (b[i] === a && b[i + 1] === c && b[i + 2] === d && b[i + 3] === e) return i;
+/** Fourcc at box offset o+4 (ISOBMFF: [size:4][type:4]). */
+const boxType = (b: Uint8Array, o: number): string =>
+  String.fromCharCode(b[o + 4]!, b[o + 5]!, b[o + 6]!, b[o + 7]!);
+
+/** Walk the child boxes of [start, end) invoking cb(offset, type, size). Bounds-safe: a zero/short/
+ *  overflowing size ends the walk (bail to what was found — never a throw, never a read past end).
+ *  size===1 (64-bit largesize) is not walked into (rare in AVIF stills; bail keeps us honest). */
+function walkBoxes(b: Uint8Array, start: number, end: number, cb: (o: number, type: string, size: number) => void): void {
+  let o = start;
+  while (o + 8 <= end) {
+    const size = u32be(b, o);
+    if (size < 8 || o + size > end) return; // 0=to-EOF and 1=largesize both bail (never guess)
+    cb(o, boxType(b, o), size);
+    o += size;
   }
-  return -1;
 }
 
 function readAvif(b: Uint8Array): Size | null {
@@ -113,10 +119,31 @@ function readAvif(b: Uint8Array): Size | null {
     }
   }
   if (!isAvif) return null;
-  // Image size lives in the 'ispe' (ImageSpatialExtents) box: ['ispe'][version+flags:4][w:4][h:4].
-  const idx = indexOfFourcc(b, 'ispe');
-  if (idx < 0 || idx + 16 > b.length) return null;
-  return validDims({ w: u32be(b, idx + 8), h: u32be(b, idx + 12) });
+  // Image size lives in the 'ispe' (ImageSpatialExtents) property: ['ispe'][version+flags:4][w:4][h:4],
+  // inside meta → iprp → ipco. A REAL box walk (P3 parsers audit #5): the old naive first-'ispe'
+  // byte-scan matched those 4 ASCII bytes ANYWHERE — Exif/XMP/mdat payloads or a free box before the
+  // real property produced garbage dimensions. Among the ipco entries we take the LARGEST area: the
+  // primary image's extent is the largest in practice (an alpha-aux ispe duplicates it; thumbnails are
+  // smaller). Resolving the primary item via pitm+ipma associations would be exact but is far heavier;
+  // taking the max never under-reports the primary. Malformed structure ⇒ null (honest unknown, never a
+  // scan fallback).
+  let best: Size | null = null;
+  walkBoxes(b, 0, b.length, (o, type, size) => {
+    if (type !== 'meta') return;
+    // meta is a FullBox: 4 bytes version/flags before its children.
+    walkBoxes(b, o + 12, o + size, (o2, t2, s2) => {
+      if (t2 !== 'iprp') return;
+      walkBoxes(b, o2 + 8, o2 + s2, (o3, t3, s3) => {
+        if (t3 !== 'ipco') return;
+        walkBoxes(b, o3 + 8, o3 + s3, (o4, t4, s4) => {
+          if (t4 !== 'ispe' || s4 < 20) return; // 8 header + 4 version/flags + 4 w + 4 h
+          const dims = validDims({ w: u32be(b, o4 + 12), h: u32be(b, o4 + 16) });
+          if (dims && (!best || dims.w * dims.h > best.w * best.h)) best = dims;
+        });
+      });
+    });
+  });
+  return best;
 }
 
 /** Detect format from magic bytes and return its mime + pixel size, or null. */
