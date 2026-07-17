@@ -5,3 +5,4 @@
 
 export * from './perceptual';
 export { ANALYZE_PAGE_MAX_PX, pageExceedsScanBudget, scanSkipReason } from './budget';
+export { decodeImageFeatures, featureFromDecode, type DecodedImageFeatures } from './decode';

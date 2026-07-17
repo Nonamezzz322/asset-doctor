@@ -10,24 +10,7 @@ import { alphaBBox, pack } from '@asset-doctor/fix';
 import { settingsDefaults } from '../lib/build-settings';
 import { pageExceedsScanBudget, scanSkipReason } from '../lib/bitmap-budget';
 import { groupFiles, keyOf, type RawFile } from '../lib/group';
-import {
-  alphaFullyOpaque,
-  alphaShape,
-  classifyContent,
-  dHashFromGray,
-  extractFrameRegions,
-  FRAME_HASH_MAX_SPRITES,
-  isFlat,
-  isSolidColor,
-  blockUpscaleDepth,
-  isSolidFullRes,
-  luma,
-  meanColorFromSample,
-  premultipliedEdgeShape,
-  type AlphaShapeResult,
-  type PremultEdgeResult,
-} from '../lib/perceptual';
-import type { ContentClass } from '@asset-doctor/core';
+import { decodeImageFeatures, extractFrameRegions, featureFromDecode, FRAME_HASH_MAX_SPRITES } from '../lib/perceptual';
 import type { WorkerRequest, WorkerResponse } from './protocol';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
@@ -149,28 +132,14 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       // and JPEG/AVIF loose images never pay the full-resolution decode (instant-wow: most files skip it).
       const m = looseMime.get(assetRef);
       const scanAlpha = m === 'image/png' || m === 'image/webp';
-      const { dHash, contentClass, solid, opaque, meanColor, scanSkipped, upscaleDepth, premult, shape, w, h } = await decodeFeatures(bytes, scanAlpha);
-      const feat: ImageFeatures = { assetRef, contentHash };
-      if (dHash) feat.dHash = dHash;
-      if (contentClass !== 'unknown') feat.contentClass = contentClass;
-      if (solid) feat.solid = true; // additive: only ever set when true
-      if (upscaleDepth >= 1) feat.blockUpscaleDepth = upscaleDepth; // additive: only ever set for a proven upscale
-      if (opaque) feat.opaque = true; // additive: only ever set when true (full-frame alpha === 255)
-      // Additive, omit-when-absent: attached ONLY when the scan ran AND found ≥1 qualifying edge pixel —
-      // absent ⇒ the premultiplied-alpha folder disclosure can never fire (byte-identical to today).
-      if (premult && premult.edgePixels > 0) feat.premultipliedEdge = premult;
-      // Additive, omit-when-absent: attached ONLY when the alpha-shape scan ran and found ≥1 pixel with
-      // alpha > 0 (alphaShape returns null for a fully-transparent image / short buffer) — absent ⇒ the
-      // interior-transparency + binary-alpha disclosures can never fire (byte-identical to today).
-      if (shape) feat.alphaShape = shape;
-      // Attach whenever measured (non-null): the duplicate-similar mean-color guard consumes it; features
-      // that never enter perceptual matching (dHash-null) are filtered out downstream, so it's inert there.
-      if (meanColor) feat.meanColor = meanColor;
-      features.push(feat);
+      // Shared with the extension overlay (@asset-doctor/pixel): decode → measurements → additive assembly,
+      // so both hosts compute byte-identical ImageFeatures (no drift in which findings can fire).
+      const decoded = await decodeImageFeatures(bytes, scanAlpha);
+      features.push(featureFromDecode(assetRef, contentHash, decoded));
       // Round 21 #2: the alpha scan was GATED OFF for an oversize loose page — surface that honestly in
       // unparsed[] (it was a SILENT skip before). Only when scanAlpha was wanted AND the page busted the cap;
       // a non-alpha format or an under-cap page pushes nothing ⇒ additive (no entry, no number change).
-      if (scanSkipped) unparsed.push({ ref: assetRef, reason: scanSkipReason(w, h) });
+      if (decoded.scanSkipped) unparsed.push({ ref: assetRef, reason: scanSkipReason(decoded.w, decoded.h) });
     }
 
     // Hoisted so the frame-redundancy hashing runs on the POST-MERGE sprite list (mergeSharedAtlases unions
@@ -293,108 +262,6 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
 async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
-/** ONE 9×8 decode → BOTH the dHash (near-dup detection) AND the content class (format verdict). The
- *  9×8 RGBA sample is read once with getImageData; `dHash` is null for featureless fills (they collapse
- *  to one hash → false near-dup matches), `contentClass` is the lossy-vs-lossless hint (Inv 4: NO
- *  encode here — the class is pure math over the already-decoded sample). The 9×8 sample also yields the
- *  `solid` CANDIDATE (single-color / fully transparent — drives the loose-only solid-fill finding), which
- *  is then CONFIRMED at full resolution (`isSolidFullRes`) before being reported — a sub-cell feature can
- *  box-average away in the 72-px sample, so an unconfirmed candidate would fabricate a VRAM saving on a
- *  not-actually-solid image (invariant 3). When `scanAlpha` (a loose PNG/WebP) OR the 9×8 flagged a solid
- *  candidate, the SAME decoded bitmap is drawn ONCE at FULL resolution and read once for BOTH the opaque
- *  scan (`opaque` — alpha === 255 on every pixel; short-circuits on the first non-opaque pixel, so most
- *  images bail instantly) AND the solid confirmation (PNG/WebP already pay this read for the opaque scan;
- *  a rare solid-candidate JPEG/AVIF pays a bounded on-demand read; an over-budget candidate ⇒ solid stays
- *  false, an honest conservative miss). The full-frame scan is GATED by the shared
- *  pageExceedsScanBudget (Round 21 #2: ANALYZE_PAGE_MAX_PX, the single-sourced ≈25.2 MP per-page cap that
- *  bounds this transient w·h·4 getImageData read ≤10s) — an oversize page sets `scanSkipped` so the CALLER
- *  can surface it honestly in unparsed[] (it was a SILENT skip before). 'unknown' / solid:false /
- *  opaque:false / scanSkipped:false on any decode failure or when OffscreenCanvas is unavailable. `w`/`h`
- *  are the decoded dimensions (0 when never decoded) so the caller can build the skip reason after the
- *  bitmap is closed. */
-async function decodeFeatures(
-  bytes: ArrayBuffer,
-  scanAlpha: boolean,
-): Promise<{
-  dHash: string | null;
-  contentClass: ContentClass;
-  solid: boolean;
-  opaque: boolean;
-  meanColor: { r: number; g: number; b: number } | null;
-  scanSkipped: boolean;
-  upscaleDepth: number;
-  premult: PremultEdgeResult | null;
-  shape: AlphaShapeResult | null;
-  w: number;
-  h: number;
-}> {
-  if (typeof OffscreenCanvas === 'undefined')
-    return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, meanColor: null, scanSkipped: false, upscaleDepth: 0, premult: null, shape: null, w: 0, h: 0 };
-  try {
-    const bmp = await createImageBitmap(new Blob([bytes]));
-    const { width, height } = bmp; // capture before close() so the caller's skip reason has the dimensions
-    const canvas = new OffscreenCanvas(9, 8);
-    const c2d = canvas.getContext('2d');
-    if (!c2d) {
-      bmp.close();
-      return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, meanColor: null, scanSkipped: false, upscaleDepth: 0, premult: null, shape: null, w: width, h: height };
-    }
-    c2d.drawImage(bmp, 0, 0, 9, 8);
-    const data = c2d.getImageData(0, 0, 9, 8).data;
-    // Alpha-weighted mean color over the SAME 9×8 sample (zero extra decode) — feeds the duplicate-similar
-    // mean-color guard (dHash is luma-sign-only ⇒ color-blind). null when Σα === 0 (nothing to measure).
-    const meanColor = meanColorFromSample(data);
-    const gray: number[] = [];
-    for (let p = 0; p < 9 * 8; p++) gray.push(luma(data, p * 4));
-    const dHash = isFlat(gray) ? null : dHashFromGray(gray); // featureless → skip perceptual matching
-    const contentClass = classifyContent(gray, data);
-    // The 9×8 `solid` CANDIDATE (cheap pre-filter). It rules out virtually every real image instantly, but a
-    // sub-cell feature can box-average away in the 72-px sample, so a candidate MUST be confirmed at full
-    // resolution before we claim solid (invariant 3 — otherwise a sparse-but-not-solid image fabricates a
-    // ~w·h·4 VRAM saving). Confirmed below; `solid` stays false unless BOTH agree.
-    const solidCandidate = isSolidColor(gray, data);
-    // `scanSkipped` is true ONLY when the OPAQUE scan was WANTED (scanAlpha) but the page busted the cap — a
-    // non-alpha format never wanted it ⇒ never "skipped" ⇒ no unparsed entry. (Unchanged semantics.)
-    const overBudget = pageExceedsScanBudget(width, height);
-    const scanSkipped = scanAlpha && overBudget;
-    // Full-resolution buffer needed iff the opaque scan wants it (loose PNG/WebP) OR the 9×8 flagged a solid
-    // candidate — and the page fits the px budget. ONE decode+read serves BOTH measurements: PNG/WebP already
-    // pay this read for the opaque scan, so the solid confirmation is nearly free there; only a RARE
-    // solid-candidate JPEG/AVIF pays a bounded on-demand read here. An over-budget solid candidate is left
-    // UNconfirmed ⇒ solid stays false (a conservative miss within ≤10s, never a guess — invariant 3).
-    let opaque = false;
-    let solid = false;
-    let upscaleDepth = 0;
-    let premult: PremultEdgeResult | null = null;
-    let shape: AlphaShapeResult | null = null;
-    if ((scanAlpha || solidCandidate) && !overBudget) {
-      const full = new OffscreenCanvas(width, height);
-      const fctx = full.getContext('2d', { willReadFrequently: true });
-      if (fctx) {
-        fctx.drawImage(bmp, 0, 0); // 1:1 draw — no canvas resampler, so the confirmation is resampler-independent
-        const fullData = fctx.getImageData(0, 0, width, height).data;
-        opaque = scanAlpha ? alphaFullyOpaque(fullData) : false; // unchanged
-        solid = solidCandidate ? isSolidFullRes(fullData) : false; // full-res CONFIRMATION of the 9×8 candidate
-        // PROVABLE nearest-2× upscale depth (upscaled-source finding) — reuses this same full-res buffer, zero
-        // extra decode. Skip on a confirmed solid (solid-fill owns it; a solid descends fully for nothing).
-        // The first pass short-circuits on the first non-constant block, so a real detailed image costs ~O(N).
-        if (!solid) upscaleDepth = blockUpscaleDepth(fullData, width, height);
-        // Premultiplied-shaped edge scan (premultiplied-alpha folder disclosure) — reuses this SAME fullData
-        // buffer (zero extra decode), gated to the alpha-bearing formats the opaque scan already targets.
-        if (scanAlpha) premult = premultipliedEdgeShape(fullData, width, height);
-        // Alpha-shape scan (interior-transparency + binary-alpha disclosures) — ONE call off this SAME
-        // fullData buffer (zero extra decode), same alpha-format gate. null (fully transparent / degenerate)
-        // ⇒ the caller omits the feature and neither disclosure can ever fire.
-        if (scanAlpha) shape = alphaShape(fullData, width, height);
-      }
-    }
-    bmp.close();
-    return { dHash, contentClass, solid, opaque, meanColor, scanSkipped, upscaleDepth, premult, shape, w: width, h: height };
-  } catch {
-    return { dHash: null, contentClass: 'unknown', solid: false, opaque: false, meanColor: null, scanSkipped: false, upscaleDepth: 0, premult: null, shape: null, w: 0, h: 0 };
-  }
 }
 
 /** Discriminated result of hashAtlasFrames (Round 21 #2). `ok` carries the index-aligned hashes + bboxes;
