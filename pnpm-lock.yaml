@@ -115,6 +115,9 @@ importers:
       '@asset-doctor/parsers':
         specifier: workspace:*
         version: link:../../packages/parsers
+      '@asset-doctor/pixel':
+        specifier: workspace:*
+        version: link:../../packages/pixel
       '@asset-doctor/probe':
         specifier: workspace:*
         version: link:../../packages/probe
@@ -244,6 +247,15 @@ importers:
 
   packages/parsers:
     dependencies:
+      '@asset-doctor/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/pixel:
+    dependencies:
+      '@asset-doctor/analysis':
+        specifier: workspace:*
+        version: link:../analysis
       '@asset-doctor/core':
         specifier: workspace:*
         version: link:../core

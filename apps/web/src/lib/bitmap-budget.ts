@@ -46,22 +46,10 @@
 // the exact same pages are scanned ⇒ identical findings/report. DETERMINISM: pure integer-ish px math, no
 // Date/random/iteration order.
 
-/** Per-page px cap on the analyze worker's FULL-RESOLUTION reads (decodeFeatures' alpha scan + the
- *  hashAtlasFrames page buffer, each a w·h·4 RGBA surface resident transiently). ONE source of truth
- *  replacing the worker's old inline ALPHA_SCAN_MAX_PX and perceptual's FRAME_HASH_MAX_PX (both
- *  4096·4096·1.5 ≈ 25.2 MP — a generous loose-art/page ceiling). Above it the worker skips honestly. */
-export const ANALYZE_PAGE_MAX_PX = 4096 * 4096 * 1.5; // ≈ 25.2 MP
-
-/** TRUE when a w×h page exceeds the scan budget (skip the full-resolution read honestly). Pure. A
- *  degenerate w≤0 || h≤0 page ⇒ true (nothing to scan — matches the worker's existing >0 guards). Uses
- *  `>` so a page EXACTLY at the cap is still scanned, byte-identical to the old `<= ALPHA_SCAN_MAX_PX`. */
-export const pageExceedsScanBudget = (w: number, h: number): boolean =>
-  w <= 0 || h <= 0 || w * h > ANALYZE_PAGE_MAX_PX;
-
-/** Deterministic English reason for an oversize-skip `unparsed[]` entry (free-form, matching the existing
- *  ingest/parse skip reasons; CLI stays EN). `toFixed(1)` ⇒ stable across runs. */
-export const scanSkipReason = (w: number, h: number): string =>
-  `skipped for size: ${w}×${h} (${((w * h) / 1e6).toFixed(1)} MP) exceeds ${(ANALYZE_PAGE_MAX_PX / 1e6).toFixed(1)} MP scan budget`;
+// The per-page scan-cap POLICY (ANALYZE_PAGE_MAX_PX / pageExceedsScanBudget / scanSkipReason) moved to
+// @asset-doctor/pixel so the extension overlay shares it verbatim with the analyze worker. Re-exported here
+// so every existing `./bitmap-budget` importer keeps resolving them unchanged.
+export { ANALYZE_PAGE_MAX_PX, pageExceedsScanBudget, scanSkipReason } from '@asset-doctor/pixel';
 
 /** Anything with byte-cost dimensions + a close() that frees native memory. ImageBitmap satisfies this
  *  structurally, so the worker passes real bitmaps while the test passes a fake that records close() calls —
