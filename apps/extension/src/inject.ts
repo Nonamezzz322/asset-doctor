@@ -7,9 +7,10 @@ import { installRuntimeProfiler, blendModeLabel } from '@asset-doctor/probe/runt
 import { groupFiles, type RawFile } from '@asset-doctor/ingest';
 import { parseAtlas, parseImage, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
 import { analyze } from '@asset-doctor/analysis';
+import { decodeImageFeatures, featureFromDecode } from '@asset-doctor/pixel';
 import { correlate, type CorrelationReport } from '@asset-doctor/correlate';
 import { detectLocale, isLocale, LOCALES, makeT, NATIVE_NAME, renderCorrelated, type Locale, type T } from '@asset-doctor/i18n';
-import type { AnalysisReport, Asset, Severity } from '@asset-doctor/core';
+import type { AnalysisReport, Asset, ImageFeatures, Severity } from '@asset-doctor/core';
 
 const profiler = installRuntimeProfiler({ warmupFrames: 60 });
 const fmt = (n: number): string => (n < 1024 * 1024 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
@@ -135,6 +136,11 @@ timer = window.setInterval(() => {
 /* ── static audit + correlation ──────────────────────────────────────── */
 const RELEVANT = /\.(json|atlas|png|webp|jpe?g|avif)$/i;
 
+async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 async function runAudit(list: FileList): Promise<void> {
   corr.replaceChildren(el('div', 'color:#9fb0bd', t('ext.corr.auditing')));
   const files: RawFile[] = [];
@@ -144,16 +150,28 @@ async function runAudit(list: FileList): Promise<void> {
   }
   const grouped = groupFiles(files);
   const assets: Asset[] = [];
+  const features: ImageFeatures[] = [];
   for (const a of grouped.atlases) {
     const img = { ref: a.name, bytes: new Uint8Array(a.image.bytes) };
     const r = a.kind === 'spine' ? parseSpinePage(a.manifest as SpinePage, img) : parseAtlas(a.manifest, img);
     if (r.ok && r.asset.kind === 'atlas') assets.push(r.asset);
   }
   for (const im of grouped.images) {
-    const r = parseImage(im.name.split('/').pop() ?? im.name, new Uint8Array(im.bytes));
-    if (r.ok && r.asset.kind === 'image') assets.push(r.asset);
+    const ref = im.name.split('/').pop() ?? im.name;
+    const r = parseImage(ref, new Uint8Array(im.bytes));
+    if (!r.ok || r.asset.kind !== 'image') continue;
+    assets.push(r.asset);
+    // Same per-image pixel scan the web analyze worker runs (shared @asset-doctor/pixel: decode →
+    // measurements → additive features), so the overlay surfaces the same feature-gated folder findings
+    // (premultiplied-alpha, solid-fill, wasted-alpha, upscaled-source, interior-transparency, binary-alpha,
+    // duplicate-exact) — closing the featureless-static gap and giving correlate the premultiplied input
+    // its P8 blend capture needs. Loose-only pixel scan; atlas-page frame-hash deps stay web-only for now.
+    const mime = r.asset.image.mime;
+    const scanAlpha = mime === 'image/png' || mime === 'image/webp';
+    const decoded = await decodeImageFeatures(im.bytes, scanAlpha);
+    features.push(featureFromDecode(ref, await sha256Hex(im.bytes), decoded));
   }
-  lastStatic = await analyze(assets); // no features/encoder → no dup/format findings (not needed to correlate)
+  lastStatic = await analyze(assets, undefined, { features });
   lastCorrelation = correlate(lastStatic, profiler.report());
   (window as unknown as { __assetDoctorCorrelation: CorrelationReport }).__assetDoctorCorrelation = lastCorrelation;
   renderCorrelation(lastCorrelation);

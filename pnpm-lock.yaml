@@ -81,6 +81,9 @@ importers:
       '@asset-doctor/parsers':
         specifier: workspace:*
         version: link:../../packages/parsers
+      '@asset-doctor/pixel':
+        specifier: workspace:*
+        version: link:../../packages/pixel
       '@asset-doctor/probe':
         specifier: workspace:*
         version: link:../../packages/probe
