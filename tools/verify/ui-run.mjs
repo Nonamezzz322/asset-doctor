@@ -6,7 +6,7 @@ import puppeteer from 'puppeteer-core';
 import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { CHROME_ARGS, chromePath } from './lib.mjs';
+import { CHROME_ARGS, chromePath, forceEnLocale } from './lib.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIX = join(HERE, '../../fixtures/sample-projects/tp-hash-symbols');
@@ -17,6 +17,7 @@ const browser = await puppeteer.launch({ executablePath: chromePath(), headless:
 const logs = [];
 try {
   const page = await browser.newPage();
+  await forceEnLocale(page); // deterministic EN asserts on a ru-locale system Chromium
   await page.setViewport({ width: 1280, height: 900 });
   page.on('pageerror', (e) => logs.push('PAGEERROR ' + String(e)));
   page.on('console', (m) => logs.push(`${m.type().toUpperCase()} ${m.text()}`));

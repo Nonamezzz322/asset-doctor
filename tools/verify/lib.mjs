@@ -35,3 +35,12 @@ export function chromePath() {
   }
   return p;
 }
+
+/** Pin the app to the EN locale BEFORE any app script runs (the app reads localStorage 'ad.locale' at
+ *  boot). The system Chromium reports the OS locale (ru on this machine), which made every English text
+ *  assertion locale-fragile — the diagnosis worked, the assert read the wrong language. Deterministic
+ *  via the app's own persisted switch, not --lang (snap Chromium ignores it). */
+export function forceEnLocale(page) {
+  return page.evaluateOnNewDocument(() => localStorage.setItem('ad.locale', 'en'));
+}
+

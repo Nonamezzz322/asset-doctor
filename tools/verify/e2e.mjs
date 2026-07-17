@@ -35,7 +35,15 @@ async function waitFor(url, tries = 80) {
 }
 
 console.log('e2e: build');
-await sh('pnpm', ['--filter', '@asset-doctor/web', 'build']);
+// Force the FREE-beta config (the deployed GH Pages build) regardless of a local .env.local — a dev
+// machine wiring VITE_PRO_GATE=true for the backend would otherwise gate the FixCard behind Activate
+// and break the fix/polygon scenarios. These flags mirror .env.example (production defaults).
+await sh('pnpm', ['--filter', '@asset-doctor/web', 'build'], {
+  VITE_PRO_GATE: 'false',
+  VITE_API_BASE: '',
+  VITE_LICENSE_PUBKEY: '',
+  VITE_CHECKOUT_URL: '',
+});
 
 console.log('e2e: serve', APP_URL);
 const server = spawn('node', ['tools/verify/serve-sub.mjs'], {
@@ -52,6 +60,8 @@ try {
   await sh('node', ['tools/verify/folder-run.mjs'], { APP_URL });
   console.log('\ne2e: scenario 3 — polygon packer');
   await sh('node', ['tools/verify/fix-polygon-run.mjs'], { APP_URL });
+  console.log('\ne2e: scenario 4 — smoke (demo button · history strip · settings persist · compare)');
+  await sh('node', ['tools/verify/smoke-run.mjs'], { APP_URL });
   console.log('\ne2e: PASS');
 } catch (e) {
   console.error('\ne2e: FAIL —', e.message);

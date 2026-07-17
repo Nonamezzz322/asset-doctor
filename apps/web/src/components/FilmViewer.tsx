@@ -147,6 +147,11 @@ export function FilmViewer({
           ctx.restore();
         });
       }
+    }).catch(() => {
+      // Undecodable bytes: honest empty film (cleared canvas, no dims) — never an uncaught rejection.
+      if (cancelled) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      setDims(null);
     });
 
     return () => {
@@ -187,6 +192,14 @@ export function FilmViewer({
       canvas.width = Math.round(bmp.width * scale);
       canvas.height = Math.round(bmp.height * scale);
       setDrawNonce((n) => n + 1);
+    }).catch(() => {
+      // Undecodable bytes (a corrupt image, or a folder-row anchor that is not an image at all): stay on
+      // the honest empty film — clear the retained bitmap + dims, never an uncaught rejection (e2e smoke
+      // caught this as a PAGEERROR). Nothing is fabricated; the readout shows no dims.
+      if (cancelled) return;
+      bmpRef.current?.close();
+      bmpRef.current = null;
+      setDims(null);
     });
     return () => {
       cancelled = true;

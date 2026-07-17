@@ -6,7 +6,7 @@ import puppeteer from 'puppeteer-core';
 import { readdirSync, statSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { CHROME_ARGS, chromePath } from './lib.mjs';
+import { CHROME_ARGS, chromePath, forceEnLocale } from './lib.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIX = join(HERE, '../../fixtures/sample-projects/folder-waste');
@@ -18,6 +18,7 @@ const browser = await puppeteer.launch({ executablePath: chromePath(), headless:
 const logs = [];
 try {
   const page = await browser.newPage();
+  await forceEnLocale(page); // deterministic EN asserts on a ru-locale system Chromium
   await page.setViewport({ width: 1280, height: 1200 });
   page.on('pageerror', (e) => logs.push('PAGEERROR ' + String(e)));
   page.on('console', (m) => {
@@ -35,11 +36,13 @@ try {
   await input.uploadFile(...files);
   await page.evaluate((el) => el.dispatchEvent(new Event('change', { bubbles: true })), input);
 
-  await page.waitForFunction(() => /Folder report/i.test(document.body.innerText), { timeout: 30000 });
+  // The triage-ledger results view replaced the old separate "Folder report" panel — folder findings
+  // now render as ledger rows (P7 assert refresh; the stale heading made this scenario time out).
+  await page.waitForFunction(() => /identical file/i.test(document.body.innerText), { timeout: 30000 });
   const text = await page.evaluate(() => document.body.innerText.replace(/\s+/g, ' ').trim());
   await page.screenshot({ path: join(OUT, 'folder.png'), fullPage: true });
 
-  console.log('FOLDER_REPORT ' + /Folder report/i.test(text));
+  console.log('LEDGER ' + /SHOWING/i.test(text));
   console.log('DUP_EXACT ' + /identical file/i.test(text));
   console.log('SHOULD_ATLAS ' + /loose sprites/i.test(text));
   console.log('INTEGRITY ' + /Missing atlas image/i.test(text));
@@ -47,7 +50,6 @@ try {
   console.log('SNIPPET ' + JSON.stringify(text.slice(0, 760)));
 
   const pass =
-    /Folder report/i.test(text) &&
     /identical file/i.test(text) &&
     /loose sprites/i.test(text) &&
     /Missing atlas image/i.test(text);
