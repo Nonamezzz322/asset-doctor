@@ -1,0 +1,14 @@
+{
+  "name": "Asset Doctor",
+  "short_name": "AssetDoctor",
+  "description": "In-browser asset audit for HTML5 games (PixiJS/Phaser). Your assets never leave the device.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#0C1116",
+  "theme_color": "#0C1116",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

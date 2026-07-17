@@ -62,6 +62,8 @@ try {
   await sh('node', ['tools/verify/fix-polygon-run.mjs'], { APP_URL });
   console.log('\ne2e: scenario 4 — smoke (demo button · history strip · settings persist · compare)');
   await sh('node', ['tools/verify/smoke-run.mjs'], { APP_URL });
+  console.log('\ne2e: scenario 5 — PWA offline (service worker precache · offline diagnosis)');
+  await sh('node', ['tools/verify/offline-run.mjs'], { APP_URL });
   console.log('\ne2e: PASS');
 } catch (e) {
   console.error('\ne2e: FAIL —', e.message);

@@ -12,6 +12,7 @@ import './index.css';
 import { App } from './App';
 import { I18nProvider } from './lib/i18n';
 import { applyTheme, loadTheme } from './lib/theme';
+import { registerServiceWorker } from './lib/register-sw';
 
 // Apply the stored display-theme once at startup. The inline <head> script (index.html) already set data-theme
 // FOUC-free for a forced light/dark choice; this reconciles the 'auto' case (removes the attribute so the CSS
@@ -28,3 +29,6 @@ createRoot(rootEl).render(
     </I18nProvider>
   </StrictMode>,
 );
+
+// PWA offline shell (PROD only — a SW conflicts with Vite HMR in dev). Best-effort; see register-sw.ts.
+if (import.meta.env.PROD) registerServiceWorker();
