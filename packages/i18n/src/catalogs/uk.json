@@ -483,6 +483,7 @@
   "ext.hud.binds": "binds текстур/кадр {avg} · надлишкових {redundant}",
   "ext.hud.vram": "VRAM ~{vram} · текстур {textures}",
   "ext.hud.hitches": "завантаження з підвисанням {uploads} · шейдери {shaders}",
+  "ext.hud.blend": "змішування {mode}",
   "ext.hud.fps": "fps {fps} · {ms}ms (залежить від пристрою)",
   "fix.optimizing": "Оптимізація…",
   "fix.optimized": "оптимізовано",

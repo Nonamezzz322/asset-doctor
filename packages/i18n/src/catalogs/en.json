@@ -399,6 +399,7 @@
   "ext.hud.binds": "texture binds/frame {avg} · redundant {redundant}",
   "ext.hud.vram": "VRAM ~{vram} · textures {textures}",
   "ext.hud.hitches": "hitch uploads {uploads} · shaders {shaders}",
+  "ext.hud.blend": "blend {mode}",
   "ext.hud.fps": "fps {fps} · {ms}ms (device-dep)",
   "fix.optimizing": "Optimizing…",
   "fix.optimized": "optimized",

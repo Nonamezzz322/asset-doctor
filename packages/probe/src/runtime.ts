@@ -20,6 +20,9 @@ function aggregate(probes: InstrumentHandle[]): GlStats {
   let liveTextures = 0;
   let vramBytes = 0;
   let compressedBytes = 0;
+  let blendPremultiplied = false;
+  let blendStraight = false;
+  let unpackPremultiply = false;
   for (const p of probes) {
     const s = p.stats();
     drawElementsCalls += s.drawElementsCalls;
@@ -34,6 +37,10 @@ function aggregate(probes: InstrumentHandle[]): GlStats {
     liveTextures += s.liveTextures;
     vramBytes += s.vramBytes;
     compressedBytes += s.compressedBytes;
+    // Blend config is OR-aggregated across contexts (a mode seen in any probe was seen).
+    blendPremultiplied ||= s.blendPremultiplied;
+    blendStraight ||= s.blendStraight;
+    unpackPremultiply ||= s.unpackPremultiply;
   }
   return {
     drawCalls: drawElementsCalls + drawArraysCalls,
@@ -49,6 +56,9 @@ function aggregate(probes: InstrumentHandle[]): GlStats {
     liveTextures,
     vramBytes,
     compressedBytes,
+    blendPremultiplied,
+    blendStraight,
+    unpackPremultiply,
   };
 }
 
@@ -79,6 +89,13 @@ export interface RuntimeReport {
    *  to raster on this device). OPTIONAL: absent when reading an OLDER exported session that predates
    *  this field (undefined = "not recorded", which the A/B comparer treats differently from a measured 0). */
   compressedBytes?: number;
+  /** OBSERVED alpha-blend configuration of the running renderer (P8, gl-instrument GlStats). A MEASURED
+   *  device-independent fact of the app's own GL calls — never interpreted here. `premultiplied`/`straight`
+   *  are whether a premultiplied-style (srcRGB=ONE) / straight-style (srcRGB=SRC_ALPHA) blend was EVER
+   *  seen (both true ⇒ mixed passes); `unpackPremultiply` ⇒ WebGL premultiplied on upload was ever set.
+   *  It is the V3-reopen precondition for a premultiplied-alpha × runtime verdict. OPTIONAL: absent from an
+   *  OLDER exported session predating this field (undefined = "not recorded"). */
+  blend?: { premultiplied: boolean; straight: boolean; unpackPremultiply: boolean };
   hitches: { frame: number; ms: number; cause: string }[];
   // ── timing (only trustworthy on the real target device) ──
   timing: { fps: number; frameTimeMsAvg: number; frameTimeMsP95: number; deviceDependent: true };
@@ -191,6 +208,12 @@ function buildReport(recs: FrameRec[], warmup: number, probes: InstrumentHandle[
     liveTextures: stats?.liveTextures ?? 0,
     vramBytes: stats?.vramBytes ?? 0,
     compressedBytes: stats?.compressedBytes ?? 0, // device-measured; the live path always records it (0 = no compressed uploads seen)
+    // Observed blend config (P8) — the live path always records it (all-false = no blend/pixelStorei seen).
+    blend: {
+      premultiplied: stats?.blendPremultiplied ?? false,
+      straight: stats?.blendStraight ?? false,
+      unpackPremultiply: stats?.unpackPremultiply ?? false,
+    },
     hitches: hitches.slice(0, 20),
     timing: {
       fps: round1(dts.length ? 1000 / avg(dts) : 0),
@@ -199,4 +222,24 @@ function buildReport(recs: FrameRec[], warmup: number, probes: InstrumentHandle[
       deviceDependent: true,
     },
   };
+}
+
+/** Pure, presentation-neutral label for an OBSERVED blend config (RuntimeReport.blend) — a stable
+ *  technical token the extension HUD / any surface renders beside a translated "blend" label. null when
+ *  nothing blend-related was observed (no line to show). Never a verdict, just the measured mode:
+ *   • 'mixed'          — both straight AND premultiplied blends were seen (per-pass variation);
+ *   • 'straight-alpha' — only straight (srcRGB=SRC_ALPHA) was seen;
+ *   • 'premultiplied'  — only premultiplied (srcRGB=ONE) was seen;
+ *   • 'upload-premultiplied' — no blendFunc classified, but UNPACK_PREMULTIPLY_ALPHA was set.
+ *  The '+upload-premultiply' suffix is appended whenever unpackPremultiply is set alongside a blend mode. */
+export function blendModeLabel(blend: RuntimeReport['blend']): string | null {
+  if (!blend) return null;
+  const { premultiplied, straight, unpackPremultiply } = blend;
+  let mode: string | null = null;
+  if (premultiplied && straight) mode = 'mixed';
+  else if (straight) mode = 'straight-alpha';
+  else if (premultiplied) mode = 'premultiplied';
+  else if (unpackPremultiply) mode = 'upload-premultiplied';
+  if (mode === null) return null;
+  return unpackPremultiply && mode !== 'upload-premultiplied' ? `${mode} +upload-premultiply` : mode;
 }

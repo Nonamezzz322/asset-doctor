@@ -29,7 +29,28 @@ export interface GlStats {
    *  transcode target), NEVER w·h·4 and NEVER charged a synthetic MIP_OVERHEAD (the mips are real, already
    *  summed). A compressed texture contributes THIS (not w·h·4) to `vramBytes`. */
   compressedBytes: number;
+  /** OBSERVED alpha-blend configuration of the running renderer (P8 — the V3-reopen precondition for a
+   *  premultiplied-alpha × runtime correlation). Blend state is set PER-DRAW and can vary across passes,
+   *  so we record what was EVER seen, never a single "mode" (mixed ⇒ both true):
+   *   • `blendPremultiplied` — a premultiplied-style blend was observed: srcRGB factor === ONE (the
+   *     shader expects pre-multiplied texture colour);
+   *   • `blendStraight` — a straight-alpha blend was observed: srcRGB factor === SRC_ALPHA (expects
+   *     un-premultiplied colour, multiplied by alpha at blend time);
+   *   • `unpackPremultiply` — pixelStorei(UNPACK_PREMULTIPLY_ALPHA_WEBGL, true) was ever set (WebGL
+   *     premultiplies texture RGB by alpha at UPLOAD).
+   *  These are MEASURED facts of the app's own GL calls (no interpretation here); the honest premultiplied
+   *  verdict that consumes them lives above and is intentionally cautious about the intricate interaction. */
+  blendPremultiplied: boolean;
+  blendStraight: boolean;
+  unpackPremultiply: boolean;
 }
+
+// WebGL blend-factor + pixelStore enum values (stable across contexts; hard-coded so the instrument needs
+// no live GL to read them). ONE=1, SRC_ALPHA=0x0302, UNPACK_PREMULTIPLY_ALPHA_WEBGL=0x9241, TRUE flags are
+// truthy. blendFunc's FIRST arg (srcRGB) is the premultiply-discriminating factor.
+const GL_ONE = 1;
+const GL_SRC_ALPHA = 0x0302;
+const GL_UNPACK_PREMULTIPLY_ALPHA_WEBGL = 0x9241;
 
 export interface InstrumentHandle {
   /** Snapshot: per-frame call counters (since last reset) + live VRAM / texture count. */
@@ -104,6 +125,13 @@ export function instrument(gl: GlLike): InstrumentHandle {
   const boundByTarget = new Map<unknown, unknown>(); // GL state: persists across frames (not reset)
   let currentProgram: unknown;
   let bound: unknown = null;
+  // Observed blend config (P8). Session-sticky (never reset per-frame — it is a config fact, not a
+  // per-frame counter): once a mode is seen it stays recorded.
+  const blend = { premultiplied: false, straight: false, unpackPremultiply: false };
+  const recordBlendSrc = (srcRGB: unknown): void => {
+    if (srcRGB === GL_ONE) blend.premultiplied = true;
+    else if (srcRGB === GL_SRC_ALPHA) blend.straight = true;
+  };
 
   const patch = (name: string, make: (orig: Fn) => Fn): void => {
     const orig = target[name];
@@ -165,6 +193,16 @@ export function instrument(gl: GlLike): InstrumentHandle {
   patch('generateMipmap', (orig) => (...a) => {
     const t = textures.get(bound);
     if (t) t.mip = true;
+    return orig(...a);
+  });
+
+  // Blend config capture (P8). blendFunc(srcRGB, dstRGB) + blendFuncSeparate(srcRGB, dstRGB, srcA, dstA):
+  // the FIRST arg (srcRGB) discriminates premultiplied (ONE) vs straight (SRC_ALPHA). pixelStorei records
+  // the upload-premultiply flag. Pure observation — the real call always runs.
+  patch('blendFunc', (orig) => (...a) => (recordBlendSrc(a[0]), orig(...a)));
+  patch('blendFuncSeparate', (orig) => (...a) => (recordBlendSrc(a[0]), orig(...a)));
+  patch('pixelStorei', (orig) => (...a) => {
+    if (a[0] === GL_UNPACK_PREMULTIPLY_ALPHA_WEBGL && a[1]) blend.unpackPremultiply = true;
     return orig(...a);
   });
 
@@ -245,6 +283,9 @@ export function instrument(gl: GlLike): InstrumentHandle {
       liveTextures: textures.size,
       vramBytes: vram(),
       compressedBytes: compressedTotal(),
+      blendPremultiplied: blend.premultiplied,
+      blendStraight: blend.straight,
+      unpackPremultiply: blend.unpackPremultiply,
     }),
     reset: () => {
       counters.drawElementsCalls = 0;

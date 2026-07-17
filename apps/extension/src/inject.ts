@@ -3,7 +3,7 @@
 // workload into one verdict — shown in a polished, LOCALIZED on-page overlay (minimise/close, language
 // picker, severity colours, re-correlate, export). Bundled into one IIFE (~no pixi) by build.mjs.
 
-import { installRuntimeProfiler } from '@asset-doctor/probe/runtime';
+import { installRuntimeProfiler, blendModeLabel } from '@asset-doctor/probe/runtime';
 import { groupFiles, type RawFile } from '@asset-doctor/ingest';
 import { parseAtlas, parseImage, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
 import { analyze } from '@asset-doctor/analysis';
@@ -110,11 +110,16 @@ else document.addEventListener('DOMContentLoaded', mount, { once: true });
 
 /* ── live HUD ────────────────────────────────────────────────────────── */
 function renderStats(r: ReturnType<typeof profiler.report>): void {
+  // P8: the MEASURED blend mode of the running game (only once a blend/pixelStorei was observed) — a
+  // factual GL readout, not a verdict. The mode token is technical GL terminology (kept as-is in every
+  // locale, like fps/RGBA8888); only the "blend" label is localized.
+  const blend = blendModeLabel(r.blend);
   stats.textContent = [
     t('ext.hud.drawCalls', { avg: r.drawCalls.avg, max: r.drawCalls.max }),
     t('ext.hud.binds', { avg: r.textureBinds.avg, redundant: r.redundantBinds }),
     t('ext.hud.vram', { vram: fmt(r.vramBytes), textures: r.liveTextures }),
     t('ext.hud.hitches', { uploads: r.uploadsDuringGameplay, shaders: r.shaderCompilesDuringGameplay }),
+    ...(blend ? [t('ext.hud.blend', { mode: blend })] : []),
     t('ext.hud.fps', { fps: r.timing.fps, ms: r.timing.frameTimeMsAvg }),
   ].join('\n');
 }

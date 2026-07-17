@@ -395,6 +395,7 @@
   "ext.hud.binds": "纹理绑定/帧 {avg} · 冗余 {redundant}",
   "ext.hud.vram": "VRAM ~{vram} · 纹理 {textures}",
   "ext.hud.hitches": "卡顿上传 {uploads} · 着色器 {shaders}",
+  "ext.hud.blend": "混合 {mode}",
   "ext.hud.fps": "fps {fps} · {ms}ms（依设备而定）",
   "fix.optimizing": "优化中…",
   "fix.optimized": "已优化",

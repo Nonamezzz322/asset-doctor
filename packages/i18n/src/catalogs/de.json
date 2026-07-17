@@ -401,6 +401,7 @@
   "ext.hud.binds": "Textur-Binds/Frame {avg} · redundant {redundant}",
   "ext.hud.vram": "VRAM ~{vram} · Texturen {textures}",
   "ext.hud.hitches": "Ruckler-Uploads {uploads} · Shader {shaders}",
+  "ext.hud.blend": "Blending {mode}",
   "ext.hud.fps": "fps {fps} · {ms}ms (geräteabh.)",
   "fix.optimizing": "Optimierung…",
   "fix.optimized": "optimiert",

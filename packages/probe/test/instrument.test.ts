@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { instrument, compressedDataByteLength } from '../src/gl-instrument';
+import { blendModeLabel } from '../src/runtime';
 
 // Minimal mock GL context: just the methods the instrument patches. No real WebGL needed —
 // this proves the accounting (counters + VRAM) is correct, which is the device-independent core.
@@ -20,6 +21,9 @@ function fakeGl() {
     useProgram: () => {},
     compileShader: () => {},
     linkProgram: () => {},
+    blendFunc: () => {},
+    blendFuncSeparate: () => {},
+    pixelStorei: () => {},
   };
 }
 
@@ -231,5 +235,69 @@ describe('GL instrument', () => {
     expect(
       compressedDataByteLength('compressedTexImage2D', [0, 0, 0, 64, 64, 0, new Uint8Array(1000), 0, 999999]),
     ).toBe(1000);
+  });
+});
+
+describe('blend-config capture (P8 — the premultiplied×runtime precondition)', () => {
+  const ONE = 1, SRC_ALPHA = 0x0302, UNPACK_PREMULT = 0x9241;
+
+  it('records straight-alpha blend (srcRGB=SRC_ALPHA) — not premultiplied', () => {
+    const gl = fakeGl();
+    const p = instrument(gl as unknown as WebGL2RenderingContext);
+    gl.blendFunc(SRC_ALPHA, 0x0303);
+    const s = p.stats();
+    expect(s.blendStraight).toBe(true);
+    expect(s.blendPremultiplied).toBe(false);
+    expect(s.unpackPremultiply).toBe(false);
+  });
+
+  it('records premultiplied blend (srcRGB=ONE) + the upload-premultiply pixelStore flag', () => {
+    const gl = fakeGl();
+    const p = instrument(gl as unknown as WebGL2RenderingContext);
+    gl.blendFunc(ONE, 0x0303);
+    gl.pixelStorei(UNPACK_PREMULT, true);
+    const s = p.stats();
+    expect(s.blendPremultiplied).toBe(true);
+    expect(s.blendStraight).toBe(false);
+    expect(s.unpackPremultiply).toBe(true);
+  });
+
+  it('MIXED: both blend modes observed across draws (blendFuncSeparate srcRGB is arg 0)', () => {
+    const gl = fakeGl();
+    const p = instrument(gl as unknown as WebGL2RenderingContext);
+    gl.blendFunc(SRC_ALPHA, 0x0303);
+    gl.blendFuncSeparate(ONE, 0x0303, ONE, 0x0303);
+    const s = p.stats();
+    expect(s.blendStraight).toBe(true);
+    expect(s.blendPremultiplied).toBe(true);
+  });
+
+  it('an unrelated pixelStorei pname (or premultiply=false) does NOT set the flag', () => {
+    const gl = fakeGl();
+    const p = instrument(gl as unknown as WebGL2RenderingContext);
+    gl.pixelStorei(0x0cf5, 1); // UNPACK_ALIGNMENT — not the premultiply flag
+    gl.pixelStorei(UNPACK_PREMULT, 0); // explicitly false
+    expect(p.stats().unpackPremultiply).toBe(false);
+  });
+
+  it('blend flags are session-sticky (survive reset, like texture residency)', () => {
+    const gl = fakeGl();
+    const p = instrument(gl as unknown as WebGL2RenderingContext);
+    gl.blendFunc(SRC_ALPHA, 0x0303);
+    p.reset();
+    expect(p.stats().blendStraight).toBe(true);
+  });
+});
+
+describe('blendModeLabel (pure presentation helper)', () => {
+  const B = (premultiplied: boolean, straight: boolean, unpackPremultiply = false) => ({ premultiplied, straight, unpackPremultiply });
+  it('classifies the observed config; null when nothing blend-related was seen', () => {
+    expect(blendModeLabel(undefined)).toBeNull();
+    expect(blendModeLabel(B(false, false))).toBeNull();
+    expect(blendModeLabel(B(false, true))).toBe('straight-alpha');
+    expect(blendModeLabel(B(true, false))).toBe('premultiplied');
+    expect(blendModeLabel(B(true, true))).toBe('mixed');
+    expect(blendModeLabel(B(false, false, true))).toBe('upload-premultiplied');
+    expect(blendModeLabel(B(false, true, true))).toBe('straight-alpha +upload-premultiply');
   });
 });

@@ -5,5 +5,5 @@ export { instrument, compressedDataByteLength } from './gl-instrument';
 export type { GlStats, InstrumentHandle } from './gl-instrument';
 export { probeAtlas, probeKtx2 } from './probe';
 export type { ProbeReading, ProbeKtx2Reading, Ktx2TranscoderPaths } from './probe';
-export { installRuntimeProfiler } from './runtime';
+export { installRuntimeProfiler, blendModeLabel } from './runtime';
 export type { RuntimeReport, RuntimeProfiler } from './runtime';

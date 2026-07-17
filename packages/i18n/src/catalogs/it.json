@@ -405,6 +405,7 @@
   "ext.hud.binds": "bind di texture/frame {avg} · ridondanti {redundant}",
   "ext.hud.vram": "VRAM ~{vram} · texture {textures}",
   "ext.hud.hitches": "caricamenti con scatto {uploads} · shader {shaders}",
+  "ext.hud.blend": "fusione {mode}",
   "ext.hud.fps": "fps {fps} · {ms}ms (dipende dal dispositivo)",
   "fix.optimizing": "Ottimizzazione…",
   "fix.optimized": "ottimizzato",
