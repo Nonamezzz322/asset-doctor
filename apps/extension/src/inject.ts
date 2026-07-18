@@ -7,10 +7,10 @@ import { installRuntimeProfiler, blendModeLabel } from '@asset-doctor/probe/runt
 import { groupFiles, type RawFile } from '@asset-doctor/ingest';
 import { parseAtlas, parseImage, parseSpinePage, type SpinePage } from '@asset-doctor/parsers';
 import { analyze } from '@asset-doctor/analysis';
-import { decodeImageFeatures, featureFromDecode } from '@asset-doctor/pixel';
+import { decodeImageFeatures, featureFromDecode, extractFrameRegions, FRAME_HASH_MAX_SPRITES, pageExceedsScanBudget } from '@asset-doctor/pixel';
 import { correlate, type CorrelationReport } from '@asset-doctor/correlate';
 import { detectLocale, isLocale, LOCALES, makeT, NATIVE_NAME, renderCorrelated, renderFinding, type Locale, type T } from '@asset-doctor/i18n';
-import type { AnalysisReport, Asset, Finding, ImageFeatures, Severity } from '@asset-doctor/core';
+import type { AnalysisReport, Asset, AtlasFrameHashes, Finding, ImageFeatures, Severity, Sprite } from '@asset-doctor/core';
 
 const profiler = installRuntimeProfiler({ warmupFrames: 60 });
 const fmt = (n: number): string => (n < 1024 * 1024 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
@@ -148,6 +148,39 @@ async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** Per-atlas frame-region hashes — the SAME decoded-RGBA basis as the loose pixelHash (SHA-256 is universal,
+ *  so an untrimmed frame's region hash equals a loose copy's pixelHash by construction). ONE
+ *  createImageBitmap + getImageData per page; the pure extractFrameRegions does the caps / bounds / flat-guard
+ *  / region extraction (identical to the web worker). Null (no OffscreenCanvas / decode fail / over-cap) ⇒ the
+ *  atlas contributes no hashes ⇒ its relationship findings simply don't fire (deps-gated, honest). */
+async function hashAtlasFrames(pageBytes: ArrayBuffer, sprites: Sprite[]): Promise<(string | null)[] | null> {
+  if (typeof OffscreenCanvas === 'undefined' || sprites.length > FRAME_HASH_MAX_SPRITES) return null;
+  try {
+    const bmp = await createImageBitmap(new Blob([pageBytes]));
+    const { width, height } = bmp;
+    if (width <= 0 || height <= 0 || pageExceedsScanBudget(width, height)) {
+      bmp.close();
+      return null;
+    }
+    const canvas = new OffscreenCanvas(width, height);
+    const c2d = canvas.getContext('2d', { willReadFrequently: true });
+    if (!c2d) {
+      bmp.close();
+      return null;
+    }
+    c2d.drawImage(bmp, 0, 0);
+    bmp.close();
+    const page = c2d.getImageData(0, 0, width, height).data;
+    const regions = extractFrameRegions(page, width, height, sprites.map((sp) => sp.frame));
+    if (!regions) return null;
+    const hashes: (string | null)[] = [];
+    for (const region of regions) hashes.push(region === null ? null : await sha256Hex(region.buffer as ArrayBuffer));
+    return hashes;
+  } catch {
+    return null;
+  }
+}
+
 async function runAudit(list: FileList): Promise<void> {
   corr.replaceChildren(el('div', 'color:#9fb0bd', t('ext.corr.auditing')));
   const files: RawFile[] = [];
@@ -158,10 +191,16 @@ async function runAudit(list: FileList): Promise<void> {
   const grouped = groupFiles(files);
   const assets: Asset[] = [];
   const features: ImageFeatures[] = [];
+  const frameHashes: AtlasFrameHashes[] = [];
   for (const a of grouped.atlases) {
     const img = { ref: a.name, bytes: new Uint8Array(a.image.bytes) };
     const r = a.kind === 'spine' ? parseSpinePage(a.manifest as SpinePage, img) : parseAtlas(a.manifest, img);
-    if (r.ok && r.asset.kind === 'atlas') assets.push(r.asset);
+    if (!r.ok || r.asset.kind !== 'atlas') continue;
+    assets.push(r.asset);
+    // Frame-region hashes (same decoded-RGBA basis as the loose pixelHash) so the atlas-relationship
+    // findings — cross-atlas-redundancy, frame-redundancy, loose-in-atlas — fire + display in the overlay.
+    const hashes = await hashAtlasFrames(a.image.bytes, r.asset.atlas.sprites);
+    if (hashes) frameHashes.push({ atlasRef: r.asset.atlas.name, frameHashes: hashes });
   }
   for (const im of grouped.images) {
     const ref = im.name.split('/').pop() ?? im.name;
@@ -178,7 +217,7 @@ async function runAudit(list: FileList): Promise<void> {
     const decoded = await decodeImageFeatures(im.bytes, scanAlpha);
     features.push(featureFromDecode(ref, await sha256Hex(im.bytes), decoded));
   }
-  lastStatic = await analyze(assets, undefined, { features });
+  lastStatic = await analyze(assets, undefined, { features, ...(frameHashes.length ? { frameHashes } : {}) });
   lastCorrelation = correlate(lastStatic, profiler.report());
   (window as unknown as { __assetDoctorCorrelation: CorrelationReport }).__assetDoctorCorrelation = lastCorrelation;
   renderCorrelation(lastCorrelation);
