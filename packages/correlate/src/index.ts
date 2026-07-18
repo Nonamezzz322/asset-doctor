@@ -4,11 +4,11 @@
 // the two halves of the moat become one diagnosis — neither static nor runtime alone could say it.
 
 import type { AnalysisReport, FindingParams, Severity } from '@asset-doctor/core';
-import type { RuntimeReport } from '@asset-doctor/probe/runtime';
+import { blendModeLabel, type RuntimeReport } from '@asset-doctor/probe/runtime';
 
 export interface CorrelatedFinding {
   id: string;
-  rule: 'batching' | 'vram' | 'upload-hitch' | 'shader-hitch' | 'redundant-state';
+  rule: 'batching' | 'vram' | 'upload-hitch' | 'shader-hitch' | 'redundant-state' | 'premultiplied-blend';
   severity: Severity;
   title: string;
   /** Proof from the folder audit. */
@@ -58,6 +58,53 @@ const REDUNDANT_PER_FRAME = 5; // redundant binds/frame above this = state thras
 const FIX_BATCH_CRIT_RATIO = 0.34; // ≈3×+ fewer measured draws
 const FIX_BATCH_WARN_RATIO = 0.67; // ≈1.5×+ fewer measured draws
 const fmtMB = (n: number): string => `${(n / 1048576).toFixed(1)} MB`;
+
+type PremultBlendVariant = 'halo' | 'safe' | 'inconclusive';
+
+/** Build the R6 premultiplied × measured-blend verdict. Baked English matches the corr.premultiplied-blend.*
+ *  EN catalog templates (drift-guarded). `blendMode` is the technical GL mode token (English, like fps/RGBA8888)
+ *  — cited only in the inconclusive runtime evidence. severity: `warn` for `halo` (a MEASURED fringe risk, but
+ *  the flagged shape could be intentional dark art, so not a crit defect), `info` for `safe`/`inconclusive`.
+ *  HONESTY: the static evidence keeps the irreducible "edge shape, not blend mode" hedge; the verdict resolves
+ *  only the loader's blend mode (which we measured), never the art's authoring intent. */
+function premultBlendFinding(variant: PremultBlendVariant, n: number, blendMode: string): CorrelatedFinding {
+  const staticEvidence = `${n} sprites have premultiplied-shaped soft edges (measured edge shape, not blend mode)`;
+  const copy: Record<PremultBlendVariant, { severity: Severity; title: string; runtimeEvidence: string; diagnosis: string; fix: string }> = {
+    halo: {
+      severity: 'warn',
+      title: `${n} premultiplied-shaped sprites will fringe — renderer blends straight alpha`,
+      runtimeEvidence: `renderer observed blending straight (un-premultiplied) alpha`,
+      diagnosis: `At their soft edges these sprites store RGB that collapses toward black; under the straight-alpha blending we measured, that dark RGB shows through as a dark fringe.`,
+      fix: `Match the texture premultiply/alphaMode to how the art was exported, or re-export with matching alpha association, so the edges blend cleanly.`,
+    },
+    safe: {
+      severity: 'info',
+      title: `${n} premultiplied-shaped sprites — consistent with the renderer's premultiplied blending`,
+      runtimeEvidence: `renderer observed blending premultiplied alpha`,
+      diagnosis: `Premultiplied-shaped edges blended as premultiplied alpha composite correctly — no fringe from this pairing.`,
+      fix: `No action needed for this blend mode; if a fringe still appears, confirm the art was exported premultiplied.`,
+    },
+    inconclusive: {
+      severity: 'info',
+      title: `${n} premultiplied-shaped sprites — blend mode inconclusive`,
+      runtimeEvidence: `renderer alpha blending is inconclusive (${blendMode})`,
+      diagnosis: `We could not tie a single blend mode to these sprites, so whether they fringe depends on the draw — inspect the passes that render them.`,
+      fix: `Inspect the draws that render these sprites and make their blend mode match how the art was exported.`,
+    },
+  };
+  const c = copy[variant];
+  return {
+    id: 'corr:premultiplied-blend',
+    rule: 'premultiplied-blend',
+    severity: c.severity,
+    title: c.title,
+    staticEvidence,
+    runtimeEvidence: c.runtimeEvidence,
+    diagnosis: c.diagnosis,
+    fix: c.fix,
+    params: { n, variant, blendMode },
+  };
+}
 
 export function correlate(stat: AnalysisReport, rt: RuntimeReport): CorrelationReport {
   const out: CorrelatedFinding[] = [];
@@ -170,6 +217,24 @@ export function correlate(stat: AnalysisReport, rt: RuntimeReport): CorrelationR
       fix: 'Sort draws by texture/material so the batcher can dedupe binds.',
       params: { perFrame: Math.round(redundantPerFrame), redundant: rt.redundantBinds, frames: rt.frames },
     });
+  }
+
+  // R6 — premultiplied × measured blend (P8). The static premultiplied-alpha disclosure hedges on the
+  // loader's blend mode; the live capture RESOLVES that hedge. A premultiplied-shaped edge stores RGB that
+  // collapses toward black, so under MEASURED straight-alpha blending it fringes regardless of which
+  // authoring produced the bytes (the residual "edge shape, not blend mode" hedge governs only the FIX). Fires
+  // ONLY when the static finding exists AND a blend signal was observed — an old exported session carries no
+  // `blend`, and a run where no blend/pixelStorei was seen leaves all three false ⇒ no verdict (honesty).
+  const premult = find('premultiplied-alpha');
+  if (premult && rt.blend) {
+    const { premultiplied, straight, unpackPremultiply } = rt.blend;
+    const variant: PremultBlendVariant | null =
+      straight && premultiplied ? 'inconclusive' : straight ? 'halo' : premultiplied ? 'safe' : unpackPremultiply ? 'inconclusive' : null;
+    if (variant) {
+      const nParam = premult.params?.n;
+      const n = typeof nParam === 'number' ? nParam : (premult.relatedRefs?.length ?? 0);
+      out.push(premultBlendFinding(variant, n, blendModeLabel(rt.blend) ?? 'unknown'));
+    }
   }
 
   return {

@@ -1031,5 +1031,19 @@
   "history.metric.vram": "VRAM (declarada)",
   "history.metric.loadedVram": "VRAM cargada (peor nivel)",
   "history.metric.recoverable": "Disco recuperable",
-  "history.metric.drawFloor": "Suelo de draw calls"
+  "history.metric.drawFloor": "Suelo de draw calls",
+  "corr.premultiplied-blend.title": "{n} sprites con forma premultiplied frente al blend mode medido",
+  "corr.premultiplied-blend.title_halo": "{n} sprites con forma premultiplied van a hacer fringe — el renderer mezcla straight alpha",
+  "corr.premultiplied-blend.title_safe": "{n} sprites con forma premultiplied — consistente con el blending premultiplied del renderer",
+  "corr.premultiplied-blend.title_inconclusive": "{n} sprites con forma premultiplied — blend mode no concluyente",
+  "corr.premultiplied-blend.static": "{n} sprites tienen bordes suaves con forma premultiplied (forma de borde medida, no el blend mode)",
+  "corr.premultiplied-blend.runtime_halo": "se observó que el renderer mezclaba straight alpha (un-premultiplied)",
+  "corr.premultiplied-blend.runtime_safe": "se observó que el renderer mezclaba premultiplied alpha",
+  "corr.premultiplied-blend.runtime_inconclusive": "el alpha blending del renderer no es concluyente ({blendMode})",
+  "corr.premultiplied-blend.diag_halo": "En sus bordes suaves estos sprites almacenan RGB que colapsa hacia el negro; bajo el blending de straight alpha que medimos, ese RGB oscuro se transparenta como un fringe oscuro.",
+  "corr.premultiplied-blend.diag_safe": "Los bordes con forma premultiplied mezclados como premultiplied alpha componen correctamente — sin fringe por esta combinación.",
+  "corr.premultiplied-blend.diag_inconclusive": "No pudimos asociar un único blend mode a estos sprites, así que si hacen fringe depende del draw — inspecciona los passes que los renderizan.",
+  "corr.premultiplied-blend.fix_halo": "Ajusta el premultiply/alphaMode de la textura a cómo se exportó el arte, o vuelve a exportar con la misma asociación de alpha, para que los bordes se mezclen limpiamente.",
+  "corr.premultiplied-blend.fix_safe": "No se necesita acción para este blend mode; si aún aparece un fringe, confirma que el arte se exportó premultiplied.",
+  "corr.premultiplied-blend.fix_inconclusive": "Inspecciona los draws que renderizan estos sprites y haz que su blend mode coincida con cómo se exportó el arte."
 }

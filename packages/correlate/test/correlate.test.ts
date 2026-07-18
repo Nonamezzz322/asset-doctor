@@ -163,3 +163,67 @@ describe('correlateFix — MEASURED before→after fix probe → CorrelatedFindi
     expect(correlateFix({ sheetDiffs: [sheet({ drawCallsBefore: 0, drawCallsAfter: 0 })] })).toEqual([]);
   });
 });
+
+describe('correlate R6 — premultiplied × measured blend (P8)', () => {
+  const pma = () =>
+    finding('premultiplied-alpha', {
+      scope: 'folder',
+      severity: 'info',
+      params: { n: 3 },
+      relatedRefs: ['a.png', 'b.png', 'c.png'],
+    });
+  const r6 = (c: ReturnType<typeof correlate>) => c.findings.find((f) => f.rule === 'premultiplied-blend');
+
+  it('straight-alpha blend → halo verdict (warn), n from params, static keeps the shape hedge', () => {
+    const f = r6(correlate(stat({ findings: [pma()] }), rt({ blend: { premultiplied: false, straight: true, unpackPremultiply: false } })));
+    expect(f?.severity).toBe('warn');
+    expect(f?.params?.variant).toBe('halo');
+    expect(f?.title).toContain('3');
+    expect(f?.title).toContain('will fringe');
+    expect(f?.staticEvidence).toContain('edge shape, not blend mode'); // irreducible hedge preserved
+    expect(f?.runtimeEvidence).toContain('straight');
+  });
+
+  it('premultiplied blend → safe verdict (info reassurance)', () => {
+    const f = r6(correlate(stat({ findings: [pma()] }), rt({ blend: { premultiplied: true, straight: false, unpackPremultiply: false } })));
+    expect(f?.severity).toBe('info');
+    expect(f?.params?.variant).toBe('safe');
+    expect(f?.runtimeEvidence).toContain('premultiplied');
+  });
+
+  it('BOTH blends observed → inconclusive (info), cites the measured mode token', () => {
+    const f = r6(correlate(stat({ findings: [pma()] }), rt({ blend: { premultiplied: true, straight: true, unpackPremultiply: false } })));
+    expect(f?.severity).toBe('info');
+    expect(f?.params?.variant).toBe('inconclusive');
+    expect(f?.runtimeEvidence).toContain('mixed');
+  });
+
+  it('only unpack-premultiply observed → inconclusive, mode token upload-premultiplied', () => {
+    const f = r6(correlate(stat({ findings: [pma()] }), rt({ blend: { premultiplied: false, straight: false, unpackPremultiply: true } })));
+    expect(f?.params?.variant).toBe('inconclusive');
+    expect(f?.runtimeEvidence).toContain('upload-premultiplied');
+  });
+
+  it('no blend signal at all (all false) → NO verdict (honesty: nothing measured)', () => {
+    expect(r6(correlate(stat({ findings: [pma()] }), rt({ blend: { premultiplied: false, straight: false, unpackPremultiply: false } })))).toBeUndefined();
+  });
+
+  it('blend absent (old exported session) → NO verdict', () => {
+    expect(r6(correlate(stat({ findings: [pma()] }), rt({})))).toBeUndefined();
+  });
+
+  it('no premultiplied finding → NO verdict even with a clear blend signal', () => {
+    expect(r6(correlate(stat({ findings: [] }), rt({ blend: { premultiplied: false, straight: true, unpackPremultiply: false } })))).toBeUndefined();
+  });
+
+  it('n falls back to relatedRefs.length when params.n is absent', () => {
+    const f = r6(
+      correlate(
+        stat({ findings: [finding('premultiplied-alpha', { scope: 'folder', severity: 'info', relatedRefs: ['a.png', 'b.png'] })] }),
+        rt({ blend: { premultiplied: false, straight: true, unpackPremultiply: false } }),
+      ),
+    );
+    expect(f?.params?.n).toBe(2);
+    expect(f?.title).toContain('2');
+  });
+});

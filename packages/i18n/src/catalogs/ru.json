@@ -1053,5 +1053,19 @@
   "history.metric.vram": "VRAM (заявлено)",
   "history.metric.loadedVram": "Загружаемый VRAM (худший tier)",
   "history.metric.recoverable": "Возвращаемый диск",
-  "history.metric.drawFloor": "Флор draw-calls"
+  "history.metric.drawFloor": "Флор draw-calls",
+  "corr.premultiplied-blend.title": "{n} спрайтов с premultiplied-краями против измеренного blend mode",
+  "corr.premultiplied-blend.title_halo": "{n} спрайтов с premultiplied-краями дадут кайму — renderer блендит straight alpha",
+  "corr.premultiplied-blend.title_safe": "{n} спрайтов с premultiplied-краями — согласуется с premultiplied-блендингом рендерера",
+  "corr.premultiplied-blend.title_inconclusive": "{n} спрайтов с premultiplied-краями — blend mode не определён",
+  "corr.premultiplied-blend.static": "{n} спрайтов имеют мягкие края в форме premultiplied alpha (измерена форма краёв, а не blend mode)",
+  "corr.premultiplied-blend.runtime_halo": "renderer, по наблюдениям, блендит straight (un-premultiplied) alpha",
+  "corr.premultiplied-blend.runtime_safe": "renderer, по наблюдениям, блендит premultiplied alpha",
+  "corr.premultiplied-blend.runtime_inconclusive": "alpha-блендинг рендерера не определён ({blendMode})",
+  "corr.premultiplied-blend.diag_halo": "На мягких краях эти спрайты хранят RGB, который стягивается к чёрному; при измеренном нами straight-alpha блендинге этот тёмный RGB просвечивает тёмной каймой.",
+  "corr.premultiplied-blend.diag_safe": "Края в форме premultiplied alpha, сблендённые как premultiplied alpha, композитятся корректно — от этой пары каймы нет.",
+  "corr.premultiplied-blend.diag_inconclusive": "Мы не смогли привязать единый blend mode к этим спрайтам, поэтому появится ли кайма — зависит от вызова отрисовки; проверьте проходы, которые их рендерят.",
+  "corr.premultiplied-blend.fix_halo": "Согласуйте premultiply/alphaMode текстуры с тем, как был экспортирован арт, или переэкспортируйте с совпадающей ассоциацией альфы, чтобы края блендились чисто.",
+  "corr.premultiplied-blend.fix_safe": "Для этого blend mode действий не требуется; если кайма всё же появляется, убедитесь, что арт экспортирован premultiplied.",
+  "corr.premultiplied-blend.fix_inconclusive": "Проверьте вызовы отрисовки, которые рендерят эти спрайты, и приведите их blend mode в соответствие с тем, как был экспортирован арт."
 }

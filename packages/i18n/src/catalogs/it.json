@@ -1031,5 +1031,19 @@
   "history.metric.vram": "VRAM (dichiarata)",
   "history.metric.loadedVram": "VRAM caricata (livello peggiore)",
   "history.metric.recoverable": "Disco recuperabile",
-  "history.metric.drawFloor": "Soglia minima draw call"
+  "history.metric.drawFloor": "Soglia minima draw call",
+  "corr.premultiplied-blend.title": "{n} sprite con bordi in stile premultiplied alpha rispetto al blend mode misurato",
+  "corr.premultiplied-blend.title_halo": "{n} sprite con bordi in stile premultiplied alpha avranno un alone — il renderer usa straight alpha",
+  "corr.premultiplied-blend.title_safe": "{n} sprite con bordi in stile premultiplied alpha — coerenti con il blending premultiplied del renderer",
+  "corr.premultiplied-blend.title_inconclusive": "{n} sprite con bordi in stile premultiplied alpha — blend mode non conclusivo",
+  "corr.premultiplied-blend.static": "{n} sprite hanno bordi morbidi in stile premultiplied alpha (forma dei bordi misurata, non il blend mode)",
+  "corr.premultiplied-blend.runtime_halo": "il renderer è stato osservato mentre eseguiva il blending di straight alpha (un-premultiplied)",
+  "corr.premultiplied-blend.runtime_safe": "il renderer è stato osservato mentre eseguiva il blending di premultiplied alpha",
+  "corr.premultiplied-blend.runtime_inconclusive": "il blending alpha del renderer non è conclusivo ({blendMode})",
+  "corr.premultiplied-blend.diag_halo": "Sui loro bordi morbidi questi sprite memorizzano un RGB che collassa verso il nero; con il blending in straight alpha che abbiamo misurato, quell'RGB scuro traspare come un alone scuro.",
+  "corr.premultiplied-blend.diag_safe": "I bordi in stile premultiplied alpha, composti come premultiplied alpha, si combinano correttamente — nessun alone da questo abbinamento.",
+  "corr.premultiplied-blend.diag_inconclusive": "Non siamo riusciti ad associare un unico blend mode a questi sprite, quindi la comparsa di un alone dipende dal draw — ispeziona i pass che li renderizzano.",
+  "corr.premultiplied-blend.fix_halo": "Allinea il premultiply/alphaMode della texture al modo in cui l'arte è stata esportata, oppure riesportala con un'associazione alpha corrispondente, così i bordi si combinano in modo pulito.",
+  "corr.premultiplied-blend.fix_safe": "Nessuna azione necessaria per questo blend mode; se l'alone appare comunque, verifica che l'arte sia stata esportata premultiplied.",
+  "corr.premultiplied-blend.fix_inconclusive": "Ispeziona i draw che renderizzano questi sprite e fai in modo che il loro blend mode corrisponda al modo in cui l'arte è stata esportata."
 }

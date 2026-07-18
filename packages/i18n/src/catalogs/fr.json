@@ -1031,5 +1031,19 @@
   "history.metric.vram": "VRAM (déclarée)",
   "history.metric.loadedVram": "VRAM chargée (pire palier)",
   "history.metric.recoverable": "Disque récupérable",
-  "history.metric.drawFloor": "Plancher de draw calls"
+  "history.metric.drawFloor": "Plancher de draw calls",
+  "corr.premultiplied-blend.title": "{n} sprites de forme premultiplied vs le blend mode mesuré",
+  "corr.premultiplied-blend.title_halo": "{n} sprites de forme premultiplied vont franger — le renderer blende en straight alpha",
+  "corr.premultiplied-blend.title_safe": "{n} sprites de forme premultiplied — cohérent avec le blending premultiplied du renderer",
+  "corr.premultiplied-blend.title_inconclusive": "{n} sprites de forme premultiplied — blend mode non concluant",
+  "corr.premultiplied-blend.static": "{n} sprites ont des bords doux de forme premultiplied (forme de bord mesurée, pas le blend mode)",
+  "corr.premultiplied-blend.runtime_halo": "le renderer a été observé en train de blender de la straight (un-premultiplied) alpha",
+  "corr.premultiplied-blend.runtime_safe": "le renderer a été observé en train de blender de la premultiplied alpha",
+  "corr.premultiplied-blend.runtime_inconclusive": "le blending alpha du renderer est non concluant ({blendMode})",
+  "corr.premultiplied-blend.diag_halo": "Sur leurs bords doux, ces sprites stockent un RGB qui s'effondre vers le noir ; sous le blending en straight alpha que nous avons mesuré, ce RGB sombre transparaît sous forme de frange sombre.",
+  "corr.premultiplied-blend.diag_safe": "Les bords de forme premultiplied, blendés en premultiplied alpha, se composent correctement — aucune frange due à cet appariement.",
+  "corr.premultiplied-blend.diag_inconclusive": "Nous n'avons pas pu associer un blend mode unique à ces sprites, donc leur franging dépend du draw — inspectez les passes qui les rendent.",
+  "corr.premultiplied-blend.fix_halo": "Accordez le premultiply/alphaMode de la texture à la façon dont l'art a été exporté, ou ré-exportez avec une association alpha correspondante, afin que les bords se blendent proprement.",
+  "corr.premultiplied-blend.fix_safe": "Aucune action requise pour ce blend mode ; si une frange apparaît malgré tout, vérifiez que l'art a été exporté en premultiplied.",
+  "corr.premultiplied-blend.fix_inconclusive": "Inspectez les draws qui rendent ces sprites et faites correspondre leur blend mode à la façon dont l'art a été exporté."
 }

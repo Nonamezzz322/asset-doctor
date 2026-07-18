@@ -37,7 +37,7 @@ import {
   variantsFinding,
 } from '@asset-doctor/analysis';
 import { correlate, correlateFix } from '@asset-doctor/correlate';
-import { detectLocale, renderCorrelated, renderFinding, translate } from '../src/index';
+import { detectLocale, LOCALES, renderCorrelated, renderFinding, translate } from '../src/index';
 
 const img = (name: string, w: number, h: number, byteSize = 1000, mime: ImageAsset['mime'] = 'image/png'): Asset => ({
   kind: 'image',
@@ -314,6 +314,43 @@ describe('renderCorrelated — English catalog reproduces the baked correlate st
       for (const v of [ru.title, ru.staticEvidence, ru.runtimeEvidence, ru.diagnosis, ru.fix]) {
         expect(v.length).toBeGreaterThan(0);
         expect(v).not.toContain('{');
+      }
+    }
+  });
+
+  // R6 premultiplied × measured blend — the EN catalog must reproduce the baked variant strings, and every
+  // locale must render each variant non-empty + brace-free (no leftover {n}/{blendMode}).
+  it('premultiplied-blend variants render identically in EN and non-empty/brace-free in every locale', () => {
+    const pma: Finding = {
+      id: 'folder:premultiplied-alpha',
+      rule: 'premultiplied-alpha',
+      severity: 'info',
+      scope: 'folder',
+      assetRef: 'a.png',
+      title: '',
+      detail: '',
+      relatedRefs: ['a.png', 'b.png', 'c.png'],
+      params: { n: 3 },
+    };
+    const findingsR6 = [
+      correlate(stat([pma]), rt({ blend: { premultiplied: false, straight: true, unpackPremultiply: false } })),
+      correlate(stat([pma]), rt({ blend: { premultiplied: true, straight: false, unpackPremultiply: false } })),
+      correlate(stat([pma]), rt({ blend: { premultiplied: true, straight: true, unpackPremultiply: false } })),
+    ].map((c) => c.findings.find((f) => f.rule === 'premultiplied-blend')!);
+    expect(findingsR6.map((f) => f.params?.variant)).toEqual(['halo', 'safe', 'inconclusive']);
+    for (const f of findingsR6) {
+      const en = renderCorrelated(f, 'en');
+      expect(en.title, `${f.params?.variant}.title`).toBe(f.title);
+      expect(en.staticEvidence, `${f.params?.variant}.static`).toBe(f.staticEvidence);
+      expect(en.runtimeEvidence, `${f.params?.variant}.runtime`).toBe(f.runtimeEvidence);
+      expect(en.diagnosis, `${f.params?.variant}.diag`).toBe(f.diagnosis);
+      expect(en.fix, `${f.params?.variant}.fix`).toBe(f.fix);
+      for (const loc of LOCALES) {
+        const r = renderCorrelated(f, loc);
+        for (const v of [r.title, r.staticEvidence, r.runtimeEvidence, r.diagnosis, r.fix]) {
+          expect(v.length, `${loc} ${f.params?.variant}`).toBeGreaterThan(0);
+          expect(v, `${loc} ${f.params?.variant} brace-free`).not.toContain('{');
+        }
       }
     }
   });

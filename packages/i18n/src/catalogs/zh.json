@@ -1013,5 +1013,19 @@
   "history.metric.vram": "显存（声明）",
   "history.metric.loadedVram": "加载显存（最差档位）",
   "history.metric.recoverable": "可回收磁盘",
-  "history.metric.drawFloor": "绘制调用下限"
+  "history.metric.drawFloor": "绘制调用下限",
+  "corr.premultiplied-blend.title": "{n} 个 premultiplied 形态的 sprite 与实测的 blend mode 不匹配",
+  "corr.premultiplied-blend.title_halo": "{n} 个 premultiplied 形态的 sprite 将出现镶边 —— renderer 混合的是 straight alpha",
+  "corr.premultiplied-blend.title_safe": "{n} 个 premultiplied 形态的 sprite —— 与 renderer 的 premultiplied alpha 混合一致",
+  "corr.premultiplied-blend.title_inconclusive": "{n} 个 premultiplied 形态的 sprite —— blend mode 无法确定",
+  "corr.premultiplied-blend.static": "{n} 个 sprite 具有 premultiplied 形态的柔和边缘（实测的是边缘形态，而非 blend mode）",
+  "corr.premultiplied-blend.runtime_halo": "观测到 renderer 混合的是 straight（un-premultiplied）alpha",
+  "corr.premultiplied-blend.runtime_safe": "观测到 renderer 混合的是 premultiplied alpha",
+  "corr.premultiplied-blend.runtime_inconclusive": "renderer 的 alpha 混合无法确定（{blendMode}）",
+  "corr.premultiplied-blend.diag_halo": "在柔和边缘处，这些 sprite 存储的 RGB 会向黑色塌陷；在我们实测的 straight alpha 混合下，那些暗 RGB 会透出，形成一圈暗色镶边。",
+  "corr.premultiplied-blend.diag_safe": "premultiplied 形态的边缘按 premultiplied alpha 混合能正确合成 —— 这一组合不会产生镶边。",
+  "corr.premultiplied-blend.diag_inconclusive": "我们无法为这些 sprite 确定单一的 blend mode，因此它们是否出现镶边取决于具体绘制 —— 请检查渲染它们的各个 pass。",
+  "corr.premultiplied-blend.fix_halo": "让纹理的 premultiply/alphaMode 与美术导出方式一致，或以匹配的 alpha 关联方式重新导出，使边缘干净地混合。",
+  "corr.premultiplied-blend.fix_safe": "此 blend mode 无需处理；若仍出现镶边，请确认美术是以 premultiplied 方式导出的。",
+  "corr.premultiplied-blend.fix_inconclusive": "检查渲染这些 sprite 的各个绘制，使其 blend mode 与美术的导出方式一致。"
 }

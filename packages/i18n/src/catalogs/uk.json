@@ -1131,5 +1131,19 @@
   "history.metric.vram": "VRAM (заявлено)",
   "history.metric.loadedVram": "Завантажуваний VRAM (найгірший tier)",
   "history.metric.recoverable": "Повернений диск",
-  "history.metric.drawFloor": "Флор draw-calls"
+  "history.metric.drawFloor": "Флор draw-calls",
+  "corr.premultiplied-blend.title": "{n} sprites з premultiplied-формою краю проти виміряного blend mode",
+  "corr.premultiplied-blend.title_halo": "{n} sprites з premultiplied-формою краю дадуть облямівку — renderer змішує straight alpha",
+  "corr.premultiplied-blend.title_safe": "{n} sprites з premultiplied-формою краю — узгоджено з premultiplied-змішуванням renderer'а",
+  "corr.premultiplied-blend.title_inconclusive": "{n} sprites з premultiplied-формою краю — blend mode невизначений",
+  "corr.premultiplied-blend.static": "{n} sprites мають м'які краї premultiplied-форми (виміряна форма краю, не blend mode)",
+  "corr.premultiplied-blend.runtime_halo": "renderer спостережено змішував straight (un-premultiplied) alpha",
+  "corr.premultiplied-blend.runtime_safe": "renderer спостережено змішував premultiplied alpha",
+  "corr.premultiplied-blend.runtime_inconclusive": "alpha-змішування renderer'а невизначене ({blendMode})",
+  "corr.premultiplied-blend.diag_halo": "На своїх м'яких краях ці sprites зберігають RGB, що завалюється до чорного; під straight-alpha змішуванням, яке ми виміряли, цей темний RGB проступає як темна облямівка.",
+  "corr.premultiplied-blend.diag_safe": "Краї premultiplied-форми, змішані як premultiplied alpha, компонуються коректно — облямівки від цієї пари немає.",
+  "corr.premultiplied-blend.diag_inconclusive": "Ми не змогли прив'язати єдиний blend mode до цих sprites, тож поява облямівки залежить від конкретного draw — перевірте проходи, що їх рендерять.",
+  "corr.premultiplied-blend.fix_halo": "Приведіть premultiply/alphaMode текстури у відповідність до того, як експортовано графіку, або переекспортуйте з відповідною alpha-асоціацією, щоб краї змішувалися чисто.",
+  "corr.premultiplied-blend.fix_safe": "Для цього blend mode дій не потрібно; якщо облямівка все ж з'являється, переконайтеся, що графіку експортовано premultiplied.",
+  "corr.premultiplied-blend.fix_inconclusive": "Перевірте draws, що рендерять ці sprites, і приведіть їхній blend mode у відповідність до того, як експортовано графіку."
 }

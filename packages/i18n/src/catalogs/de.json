@@ -1027,5 +1027,19 @@
   "history.metric.vram": "VRAM (deklariert)",
   "history.metric.loadedVram": "Geladenes VRAM (schlechtester Tier)",
   "history.metric.recoverable": "Rückgewinnbarer Speicher",
-  "history.metric.drawFloor": "Draw-Call-Untergrenze"
+  "history.metric.drawFloor": "Draw-Call-Untergrenze",
+  "corr.premultiplied-blend.title": "{n} premultiplied-förmige sprites vs. der gemessene Blend-Mode",
+  "corr.premultiplied-blend.title_halo": "{n} premultiplied-förmige sprites werden fransen — renderer blendet straight alpha",
+  "corr.premultiplied-blend.title_safe": "{n} premultiplied-förmige sprites — konsistent mit dem premultiplied-Blending des renderer",
+  "corr.premultiplied-blend.title_inconclusive": "{n} premultiplied-förmige sprites — Blend-Mode nicht eindeutig",
+  "corr.premultiplied-blend.static": "{n} sprites haben premultiplied-förmige weiche Kanten (gemessene Kantenform, nicht Blend-Mode)",
+  "corr.premultiplied-blend.runtime_halo": "renderer blendet beobachtet straight (un-premultiplied) alpha",
+  "corr.premultiplied-blend.runtime_safe": "renderer blendet beobachtet premultiplied alpha",
+  "corr.premultiplied-blend.runtime_inconclusive": "Alpha-Blending des renderer ist nicht eindeutig ({blendMode})",
+  "corr.premultiplied-blend.diag_halo": "An ihren weichen Kanten speichern diese sprites RGB, das gegen Schwarz kippt; unter dem gemessenen straight-alpha-Blending scheint dieses dunkle RGB als dunkler Saum durch.",
+  "corr.premultiplied-blend.diag_safe": "Premultiplied-förmige Kanten, als premultiplied alpha geblendet, komponieren korrekt — kein Saum durch diese Kombination.",
+  "corr.premultiplied-blend.diag_inconclusive": "Wir konnten diesen sprites keinen einzelnen Blend-Mode zuordnen, daher hängt es vom Draw ab, ob sie fransen — prüfe die Passes, die sie rendern.",
+  "corr.premultiplied-blend.fix_halo": "Gleiche das Texture-premultiply/alphaMode daran an, wie die Grafik exportiert wurde, oder exportiere mit passender Alpha-Zuordnung neu, damit die Kanten sauber blenden.",
+  "corr.premultiplied-blend.fix_safe": "Für diesen Blend-Mode ist keine Aktion nötig; falls dennoch ein Saum erscheint, prüfe, ob die Grafik premultiplied exportiert wurde.",
+  "corr.premultiplied-blend.fix_inconclusive": "Prüfe die Draws, die diese sprites rendern, und bringe ihren Blend-Mode in Einklang damit, wie die Grafik exportiert wurde."
 }

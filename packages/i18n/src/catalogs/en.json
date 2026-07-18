@@ -1007,5 +1007,19 @@
   "history.metric.vram": "VRAM (declared)",
   "history.metric.loadedVram": "Loaded VRAM (worst tier)",
   "history.metric.recoverable": "Recoverable disk",
-  "history.metric.drawFloor": "Draw-call floor"
+  "history.metric.drawFloor": "Draw-call floor",
+  "corr.premultiplied-blend.title": "{n} premultiplied-shaped sprites vs the measured blend mode",
+  "corr.premultiplied-blend.title_halo": "{n} premultiplied-shaped sprites will fringe — renderer blends straight alpha",
+  "corr.premultiplied-blend.title_safe": "{n} premultiplied-shaped sprites — consistent with the renderer's premultiplied blending",
+  "corr.premultiplied-blend.title_inconclusive": "{n} premultiplied-shaped sprites — blend mode inconclusive",
+  "corr.premultiplied-blend.static": "{n} sprites have premultiplied-shaped soft edges (measured edge shape, not blend mode)",
+  "corr.premultiplied-blend.runtime_halo": "renderer observed blending straight (un-premultiplied) alpha",
+  "corr.premultiplied-blend.runtime_safe": "renderer observed blending premultiplied alpha",
+  "corr.premultiplied-blend.runtime_inconclusive": "renderer alpha blending is inconclusive ({blendMode})",
+  "corr.premultiplied-blend.diag_halo": "At their soft edges these sprites store RGB that collapses toward black; under the straight-alpha blending we measured, that dark RGB shows through as a dark fringe.",
+  "corr.premultiplied-blend.diag_safe": "Premultiplied-shaped edges blended as premultiplied alpha composite correctly — no fringe from this pairing.",
+  "corr.premultiplied-blend.diag_inconclusive": "We could not tie a single blend mode to these sprites, so whether they fringe depends on the draw — inspect the passes that render them.",
+  "corr.premultiplied-blend.fix_halo": "Match the texture premultiply/alphaMode to how the art was exported, or re-export with matching alpha association, so the edges blend cleanly.",
+  "corr.premultiplied-blend.fix_safe": "No action needed for this blend mode; if a fringe still appears, confirm the art was exported premultiplied.",
+  "corr.premultiplied-blend.fix_inconclusive": "Inspect the draws that render these sprites and make their blend mode match how the art was exported."
 }
