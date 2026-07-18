@@ -1,7 +1,8 @@
 # N4 design — `loose-in-atlas` (a loose sprite shipped ALSO inside an atlas)
 
-Status: **DESIGNED / PROCEED** (impl pending). Skeptic-vetted 2026-07-18. Exact-match rule (proof-based,
-no fuzzy threshold to corpus-calibrate — same class as `duplicate-exact` / `frame-redundancy`).
+Status: **SHIPPED 2026-07-18** (`01b10ea`). Skeptic-vetted + implemented per the plan below. Exact-match
+rule (proof-based, no fuzzy threshold to corpus-calibrate — same class as `duplicate-exact` /
+`frame-redundancy`). Gate green + all 5 e2e PASS; 5 analysis unit tests, i18n ×10 drift-guarded.
 
 ## The gap (confirmed against the real rule set)
 

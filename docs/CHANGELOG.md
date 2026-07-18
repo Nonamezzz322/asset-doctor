@@ -10,6 +10,23 @@ GitHub-кредов — пушит пользователь); хэши комм�
 
 ---
 
+## N4: `loose-in-atlas` ОТГРУЖЕН — спрайт, отгруженный и loose, и в атласе — 2026-07-18
+`01b10ea`. Реализация по дизайну (`docs/improvements/n4-loose-in-atlas.md`). Новое folder-правило: loose-картинка, чья
+ПОЛНОРАЗМЕРНАЯ декодированная RGBA байт-идентична региону кадра атласа ⇒ тот же спрайт отгружен дважды (loose + упакован).
+PROOF, не эвристика:
+- `@asset-doctor/pixel` `decodeImageFeatures` теперь SHA-256-хэширует полноразмерную декодированную RGBA каждой loose PNG/WebP
+  (flat-guard) в `ImageFeatures.pixelHash` — на ТОЧНО той же основе, на которой воркер хэширует регионы кадров атласа, так что
+  они напрямую сравнимы.
+- analysis `looseInAtlasFindings` сопоставляет loose-pixelHash с картой хэшей кадров. ДВАЖДЫ deps-gated (нужны И pixelHash-фичи,
+  И frameHashes — на CLI нет ни того, ни другого) ⇒ CLI/budget байт-идентичны.
+Честность (инв. 3/5): severity warn с хеджем «какая копия используется — зависит от игры»; срабатывает только для UNtrimmed
+кадров (proof недо-заявляет, ложных срабатываний нет); ТОЧНАЯ экономия (disk-байты loose + w·h·4 VRAM, раздельные поля) — на
+находке, НЕ в headline `potentialDiskSaved` (консервативно, прецедент cross-atlas). Группа savings; per-sprite drill-down
+показывает disk-байты на копию. Правил 30→31; 5 i18n-ключей (label + cabinet-value + find.title/detail/fix) × 10 локалей,
+EN drift-guard. +5 analysis-тестов, +1 pixel. Gate зелёный + все 5 e2e PASS.
+
+---
+
 ## N4 (дизайн): `loose-in-atlas` — новая честная детекция спроектирована (impl следующим тиком) — 2026-07-18
 Design-first + ABORT-capable раунд по новым детекциям. Реестр из 30 правил уже очень полон; скептик-обзор нашёл ОДНУ настоящую
 непокрытую честную детекцию и ЗАРУБИЛ слабые. Дизайн закоммичен `docs/improvements/n4-loose-in-atlas.md` (переживает потерю сессии;
