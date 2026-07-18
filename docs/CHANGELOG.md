@@ -10,6 +10,42 @@ GitHub-кредов — пушит пользователь); хэши комм�
 
 ---
 
+## N1: premultiplied×blend ВЕРДИКТ доведён — расшаренный пиксельный слой + R6, проверено вживую — 2026-07-18
+Довод P8-отложенного: у premultiplied×blend вердикта теперь есть ЧЕСТНЫЙ живой потребитель. Пять мелких коммитов.
+- **`2ae234f` — новый пакет `@asset-doctor/pixel`.** Чистая пиксельная математика (dHash / flat-guard / solid /
+  opaque / upscale-depth / **premultiplied-edge** / alpha-shape / frame-region-хэши / content-class) + чистая
+  scan-budget-политика (`ANALYZE_PAGE_MAX_PX`/`pageExceedsScanBudget`/`scanSkipReason`) вынесены из `apps/web` в
+  leaf-пакет, чтобы оверлей расширения ДЕЛИЛ их с analyze-воркером — один источник правды, ноль дрейфа.
+  Byte-identical: `apps/web/src/lib/perceptual.ts` — re-export-шим, `bitmap-budget.ts` реэкспортирует scan-cap-трио,
+  все 7 веб-консьюмеров резолвятся без изменений. Gate зелёный (1214 web) + все 5 e2e-сценариев PASS.
+- **`46131c8` — расшарен canvas-декод + сборка фич.** `decodeFeatures` воркера (createImageBitmap + OffscreenCanvas
+  полноразмерный скан) и аддитивная сборка `ImageFeatures` переехали в пакет как `decodeImageFeatures` +
+  чистый `featureFromDecode`. Воркер зовёт их ⇒ расширение декодит + собирает фичи ИДЕНТИЧНО. `featureFromDecode` —
+  honesty-critical половина (аддитивно, omit-when-absent) — теперь чистая и юнит-тестируется в пакете (5 тестов):
+  хост, ничего не посчитавший, byte-identical headless CLI-прогону. Поведение воркера не изменилось; 5 e2e PASS.
+- **`b7de7ec` — расширение считает пиксельные фичи в оверлее.** `runAudit` звал `analyze(assets)` без фич ⇒
+  premultiplied-alpha (и solid/wasted-alpha/upscale/interior/binary/dup-exact) там НЕ срабатывали — «featureless-static
+  дыра». Теперь тот же per-image скан (`@asset-doctor/pixel`) по каждому loose PNG/WebP, фичи → analyze. Оверлей
+  рендерит корреляции ⇒ визуально ничего не меняется, пока R6 не потребит новый вход; существующие корреляции
+  не затронуты (они на структурных находках). Loose-only; atlas-frame-хэш-деп пока веб-only. Extension typecheck+build.
+- **`e310f97` — correlate R6: premultiplied × ИЗМЕРЕННЫЙ blend.** Находка premultiplied-alpha хеджирует по режиму
+  смешивания; P8-захват его РЕЗОЛВИТ. R6 срабатывает, когда есть И статическая находка, И измеренный `RuntimeReport.blend`:
+  **halo** (измерен straight-alpha, warn) — тёмно-схлопнутый RGB краёв просвечивает каймой под измеренным блендом;
+  **safe** (измерен premultiplied, info) — согласовано, каймы нет; **inconclusive** (оба/только-upload, info) — единый
+  вердикт невозможен, цитирует измеренный mode-токен. Честность: static-доказательство хранит неустранимый хедж
+  «измерена ФОРМА края, не blend mode»; R6 резолвит ТОЛЬКО режим смешивания (измеренный), никогда не авторинг арта, и
+  не срабатывает без измеренного сигнала (старые сессии без `blend`). 14 i18n-ключей × 10 локалей, drift-guard (EN
+  воспроизводит baked) + all-locale non-empty/brace-free. +8 correlate юнит-тестов.
+- **`a44fc58` — ЖИВОЙ e2e-харнесс R6.** Честный капстоун: `ext-premult-run.mjs` грузит реальное расширение на
+  `webgl-blend.html` (наблюдаемый `gl.blendFunc(SRC_ALPHA, ONE_MINUS_SRC_ALPHA)`), затем `premult-halo`-фикстуру (2
+  premultiplied-shaped спрайта из `fixtures/_generator/gen-premult.mjs`) через оверлей. Проверено в headless Chromium:
+  проба измерила `blend.straight=true`; оверлей декодировал фикстуры в странице и analyze выдал premultiplied-alpha из
+  РЕАЛЬНЫХ пикселей; correlate дал R6 **halo** (warn); вердикт отрендерился локализованно в оверлее. То есть расширение —
+  настоящий живой потребитель корреляции ⇒ причина отложения P8 (нет честного живого потребителя) снята. Отдельный
+  харнесс (нужен поднятый сервер), не в веб-e2e-гейте.
+
+---
+
 ## P8: захват blend-конфигурации живой игры в пробе (precondition переоткрытия V3) — 2026-07-17
 Десятый (последний) пункт бэклога — сделан skeptic-narrowed с честным ABORT рискованной части (дисциплина
 V3). Находка premultiplied-alpha — УСЛОВНЫЙ дисклеймер («тёмно-матовые края дают кайму, ЕСЛИ лоадер блендит
