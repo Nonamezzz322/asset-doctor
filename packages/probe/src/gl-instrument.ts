@@ -68,9 +68,20 @@ interface TexRecord {
   w: number;
   h: number;
   mip: boolean;
-  /** Σ compressed-upload data byteLengths charged to this texture (all mip levels). 0 for raster. When
-   *  >0 the texture contributes THIS to VRAM (measured residency), NOT w·h·4 — see `vram()`. */
-  compressed: number;
+  /** Compressed-upload resident bytes PER LEVEL (level → byteLength). A `compressedTexImage2D(level)`
+   *  DEFINES / reallocates that level, so it REPLACES the level's byte total (a re-upload of the same
+   *  texture must not stack — mirrors raster `texImage2D` overwriting w/h); a level-0 (re)definition
+   *  starts a fresh mip chain (clear). `compressedTexSubImage2D` rewrites bytes already resident ⇒ NO
+   *  new residency (like raster `texSubImage2D`). Σ over levels = the real compressed footprint (all mips
+   *  summed once). Empty for raster; when non-empty the texture contributes that Σ to VRAM, NOT w·h·4. */
+  compressed: Map<number, number>;
+}
+
+/** Σ of a texture's per-level compressed residency (0 for a raster texture — an empty map). */
+function compressedOf(t: TexRecord): number {
+  let s = 0;
+  for (const v of t.compressed.values()) s += v;
+  return s;
 }
 
 /** Real resident byte length of a compressed upload's data argument. PURE — a deterministic arg reader,
@@ -123,7 +134,10 @@ export function instrument(gl: GlLike): InstrumentHandle {
   };
   const textures = new Map<unknown, TexRecord>();
   const boundByTarget = new Map<unknown, unknown>(); // GL state: persists across frames (not reset)
-  let currentProgram: unknown;
+  // Unique sentinel so the FIRST useProgram (with any real program / null / even undefined) is never
+  // mis-counted as a redundant re-bind — `undefined === undefined` would otherwise flag useProgram(undefined).
+  const NO_PROGRAM = Symbol('gl-no-program');
+  let currentProgram: unknown = NO_PROGRAM;
   let bound: unknown = null;
   // Observed blend config (P8). Session-sticky (never reset per-frame — it is a config fact, not a
   // per-frame counter): once a mode is seen it stays recorded.
@@ -159,7 +173,7 @@ export function instrument(gl: GlLike): InstrumentHandle {
 
   patch('createTexture', (orig) => (...a) => {
     const tex = orig(...a);
-    textures.set(tex, { w: 0, h: 0, mip: false, compressed: 0 });
+    textures.set(tex, { w: 0, h: 0, mip: false, compressed: new Map() });
     return tex;
   });
   patch('deleteTexture', (orig) => (...a) => {
@@ -230,17 +244,18 @@ export function instrument(gl: GlLike): InstrumentHandle {
   function recordCompressed(name: string, a: unknown[]): void {
     const t = textures.get(bound);
     if (!t) return;
-    // MEASURED residency: the data arg's real byteLength (each mip level is its own call ⇒ summed).
-    t.compressed += compressedDataByteLength(name, a);
-    // compressedTexImage2D level 0 defines the footprint (w/h). The sub variant never resets dims.
-    if (
-      name === 'compressedTexImage2D' &&
-      (typeof a[1] === 'number' ? a[1] : 0) === 0 &&
-      typeof a[3] === 'number' &&
-      typeof a[4] === 'number' &&
-      a[3] > 0 &&
-      a[4] > 0
-    ) {
+    // A sub-image REWRITES bytes already resident (the level was allocated by its defining
+    // compressedTexImage2D) ⇒ adds NO new residency (mirrors raster texSubImage2D, which adds 0 VRAM).
+    // Streaming N sub-updates to the same region must not inflate the footprint N×.
+    if (name === 'compressedTexSubImage2D') return;
+    // compressedTexImage2D DEFINES (reallocates) this mip level ⇒ REPLACE the level's byte total, so a
+    // re-upload of the same texture replaces rather than stacks. A level-0 (re)definition begins a fresh
+    // mip chain, so clear the prior chain first; Σ over the surviving levels = the real residency.
+    const level = typeof a[1] === 'number' ? a[1] : 0;
+    if (level === 0) t.compressed.clear();
+    t.compressed.set(level, compressedDataByteLength(name, a));
+    // Level 0 defines the footprint (w/h).
+    if (level === 0 && typeof a[3] === 'number' && typeof a[4] === 'number' && a[3] > 0 && a[4] > 0) {
       t.w = a[3];
       t.h = a[4]; // compressedTexImage2D(target, level, internalformat, w, h, border, ...)
     }
@@ -250,9 +265,10 @@ export function instrument(gl: GlLike): InstrumentHandle {
     let total = 0;
     for (const t of textures.values()) {
       // A texture that received a compressed upload contributes its MEASURED compressed total (real
-      // resident bytes, all mips already summed) — NOT w·h·4 and NO synthetic MIP_OVERHEAD on it.
-      if (t.compressed > 0) {
-        total += t.compressed;
+      // resident bytes, all mips already summed once) — NOT w·h·4 and NO synthetic MIP_OVERHEAD on it.
+      const c = compressedOf(t);
+      if (c > 0) {
+        total += c;
         continue;
       }
       // Raster: CONDITIONAL +33% chain charged only for textures we actually saw mipmapped — the same
@@ -264,7 +280,7 @@ export function instrument(gl: GlLike): InstrumentHandle {
 
   function compressedTotal(): number {
     let total = 0;
-    for (const t of textures.values()) total += t.compressed;
+    for (const t of textures.values()) total += compressedOf(t);
     return total;
   }
 

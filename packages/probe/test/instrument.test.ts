@@ -98,6 +98,16 @@ describe('GL instrument', () => {
     expect(s.redundantProgBinds).toBe(1);
   });
 
+  it('the FIRST useProgram is never counted redundant, even useProgram(undefined)', () => {
+    const gl = fakeGl();
+    const probe = instrument(gl as unknown as WebGL2RenderingContext);
+    gl.useProgram(undefined); // a first bind (of any value) must not equal the initial sentinel
+    gl.useProgram(null); // a genuine change (unbind)
+    const s = probe.stats();
+    expect(s.programBinds).toBe(2);
+    expect(s.redundantProgBinds).toBe(0); // neither is a re-bind of an already-active program
+  });
+
   it('restore() unpatches the context', () => {
     const gl = fakeGl();
     const probe = instrument(gl as unknown as WebGL2RenderingContext);
@@ -152,7 +162,7 @@ describe('GL instrument', () => {
     expect(s.liveTextures).toBe(2);
   });
 
-  it('PBO 8-arg compressedTexImage2D uses the explicit imageSize; sub-image adds without resetting dims', () => {
+  it('PBO 8-arg compressedTexImage2D uses the explicit imageSize; a sub-image adds NO residency', () => {
     const gl = fakeGl();
     const probe = instrument(gl as unknown as WebGL2RenderingContext);
 
@@ -162,10 +172,30 @@ describe('GL instrument', () => {
     gl.compressedTexImage2D(gl.TEXTURE_2D, 0, COMPRESSED_RGBA_S3TC_DXT5, 64, 64, 0, 2048, 0);
     expect(probe.stats().compressedBytes).toBe(2048);
 
-    // compressedTexSubImage2D(target, level, x, y, w, h, format, data) — adds byteLength, no dim reset.
+    // compressedTexSubImage2D REWRITES bytes already resident (allocated by the defining call) ⇒ adds NO new
+    // residency (mirrors raster texSubImage2D). Streaming sub-updates must not inflate the footprint.
     gl.compressedTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 64, 64, COMPRESSED_RGBA_S3TC_DXT5, new Uint8Array(512));
-    expect(probe.stats().compressedBytes).toBe(2048 + 512);
-    expect(probe.stats().vramBytes).toBe(2048 + 512); // still measured-compressed, not w·h·4
+    expect(probe.stats().compressedBytes).toBe(2048); // unchanged — the sub-image is a rewrite
+    expect(probe.stats().vramBytes).toBe(2048); // still measured-compressed, not w·h·4
+    expect(probe.stats().textureUploads).toBe(2); // both calls still count as uploads
+  });
+
+  it('re-uploading the SAME compressed texture REPLACES residency, never stacks (no VRAM overcount)', () => {
+    const gl = fakeGl();
+    const probe = instrument(gl as unknown as WebGL2RenderingContext);
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+
+    // Full mip chain, then re-upload the whole chain (a reallocation). Residency must equal ONE chain.
+    gl.compressedTexImage2D(gl.TEXTURE_2D, 0, COMPRESSED_RGBA_S3TC_DXT5, 64, 64, 0, new Uint8Array(4096));
+    gl.compressedTexImage2D(gl.TEXTURE_2D, 1, COMPRESSED_RGBA_S3TC_DXT5, 32, 32, 0, new Uint8Array(1024));
+    expect(probe.stats().compressedBytes).toBe(4096 + 1024);
+
+    // Re-upload level 0 (a smaller reallocation): the level-0 (re)definition starts a fresh chain, so the
+    // stale level-1 is discarded and residency becomes just the new level 0 — never 4096+1024+2048.
+    gl.compressedTexImage2D(gl.TEXTURE_2D, 0, COMPRESSED_RGBA_S3TC_DXT5, 32, 32, 0, new Uint8Array(2048));
+    expect(probe.stats().compressedBytes).toBe(2048);
+    expect(probe.stats().vramBytes).toBe(2048);
   });
 
   it('reset() keeps compressedBytes (residency state); restore() unpatches the compressed methods', () => {

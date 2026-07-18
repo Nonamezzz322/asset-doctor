@@ -62,7 +62,7 @@ function aggregate(probes: InstrumentHandle[]): GlStats {
   };
 }
 
-interface FrameRec {
+export interface FrameRec {
   dt: number;
   draws: number;
   binds: number;
@@ -120,6 +120,10 @@ export function installRuntimeProfiler(
   const seen = new Set<unknown>();
   let stopped = false;
   const recs: FrameRec[] = [];
+  // Absolute frames captured this session (NEVER decremented — recs is a rolling window that shifts out old
+  // frames). Anchors the warmup skip to session START, so a session longer than maxFrames does not re-apply
+  // warmup to steady-state gameplay frames that merely happen to sit at the front of the window.
+  let totalFrames = 0;
   let lastT = now();
 
   // 1) instrument EVERY WebGL context (games often create a throwaway capability-probe context first)
@@ -150,6 +154,7 @@ export function installRuntimeProfiler(
           uploads: s.textureUploads,
           compiles: s.shaderCompiles,
         });
+        totalFrames++;
         if (recs.length > maxFrames) recs.shift();
         lastT = t2;
         for (const p of probes) p.reset();
@@ -166,13 +171,20 @@ export function installRuntimeProfiler(
       for (const p of probes) p.restore();
     },
     report() {
-      return buildReport(recs, warmup, probes);
+      return buildReport(recs, warmup, probes, totalFrames);
     },
   };
 }
 
-function buildReport(recs: FrameRec[], warmup: number, probes: InstrumentHandle[]): RuntimeReport {
-  const play = recs.slice(warmup); // post-warmup "gameplay" frames
+/** Pure report builder over the rolling frame window (exported for unit testing — `recs` is the current
+ *  window, `totalFrames` the absolute session frame count so warmup anchors to session start). */
+export function buildReport(recs: FrameRec[], warmup: number, probes: InstrumentHandle[], totalFrames: number): RuntimeReport {
+  // Warmup is anchored to session START, not the window: frames already shifted out of the rolling window
+  // (totalFrames − recs.length) count toward the warmup skip, so once the whole warmup phase has scrolled
+  // off, the entire window is gameplay (effWarmup 0) instead of perpetually re-skipping real gameplay frames.
+  const shiftedOut = totalFrames - recs.length;
+  const effWarmup = Math.max(0, warmup - shiftedOut);
+  const play = recs.slice(effWarmup); // post-warmup "gameplay" frames
   const dts = play.map((r) => r.dt).filter((d) => d > 0);
   const sum = (xs: number[]) => xs.reduce((s, v) => s + v, 0);
   const avg = (xs: number[]) => (xs.length ? sum(xs) / xs.length : 0);
