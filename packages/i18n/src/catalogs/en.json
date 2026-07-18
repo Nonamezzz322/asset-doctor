@@ -1026,5 +1026,6 @@
   "cabinet.value.loose-in-atlas": "Value: disk bytes the redundant loose copy costs (measured)",
   "find.loose-in-atlas.title": "{n} loose sprites also ship inside an atlas",
   "find.loose-in-atlas.detail": "These loose images are byte-identical (decoded pixels) to a frame already packed in an atlas, so the same sprite ships twice: {refs}. If the game loads the atlas, each loose copy is redundant — dropping it reclaims its file bytes on disk and its w·h·4 VRAM (a separate cost from disk). We match decoded pixels, not which copy your game references.",
-  "find.loose-in-atlas.fix": "Drop the redundant loose copies and reference the atlas frames, or exclude them from the build if the atlas is authoritative."
+  "find.loose-in-atlas.fix": "Drop the redundant loose copies and reference the atlas frames, or exclude them from the build if the atlas is authoritative.",
+  "ext.static.header": "static audit · {n}"
 }

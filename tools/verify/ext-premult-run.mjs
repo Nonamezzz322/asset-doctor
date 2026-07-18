@@ -61,6 +61,13 @@ try {
   console.log('R6_CARD ' + JSON.stringify(cardText));
   check('R6 verdict rendered in the overlay', !!cardText);
 
+  // The STATIC folder-audit findings now surface in the overlay too (the pixel-feature findings computed
+  // in-page are visible, not just fed to correlate) — the premultiplied-alpha finding is one of them.
+  const staticCards = await page.evaluate(() => document.querySelectorAll('#__ad_static [data-sev]').length);
+  console.log('STATIC_CARDS ' + staticCards);
+  check('static folder-audit findings render in the overlay', staticCards >= 1);
+  check('the static premultiplied-alpha finding is among the surfaced static findings', staticFindings.some((f) => f.rule === 'premultiplied-alpha'));
+
   console.log(failed ? 'EXT_PREMULT_R6 FAIL' : 'EXT_PREMULT_R6 PASS');
 } finally {
   await browser.close();

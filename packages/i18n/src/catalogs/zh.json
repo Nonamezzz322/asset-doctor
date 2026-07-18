@@ -1032,5 +1032,6 @@
   "cabinet.value.loose-in-atlas": "数值：冗余散图副本占用的磁盘字节数（实测）",
   "find.loose-in-atlas.title": "{n} 张散图 sprite 同时也打包在某个 atlas 内",
   "find.loose-in-atlas.detail": "这些散图与某个 atlas 中已打包的 frame 字节完全相同（已解码像素），因此同一个 sprite 被发布了两次：{refs}。如果游戏加载了该 atlas，每一份散图副本都是冗余的 — 删除它可回收其在磁盘上的文件字节以及 w·h·4 的 VRAM（与磁盘相互独立的成本）。我们比对的是已解码像素，而不是你的游戏实际引用的是哪一份副本。",
-  "find.loose-in-atlas.fix": "删除冗余的散图副本并改为引用 atlas 中的 frame；若以 atlas 为准，则将它们排除出构建。"
+  "find.loose-in-atlas.fix": "删除冗余的散图副本并改为引用 atlas 中的 frame；若以 atlas 为准，则将它们排除出构建。",
+  "ext.static.header": "静态审计 · {n}"
 }

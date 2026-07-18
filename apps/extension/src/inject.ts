@@ -9,8 +9,8 @@ import { parseAtlas, parseImage, parseSpinePage, type SpinePage } from '@asset-d
 import { analyze } from '@asset-doctor/analysis';
 import { decodeImageFeatures, featureFromDecode } from '@asset-doctor/pixel';
 import { correlate, type CorrelationReport } from '@asset-doctor/correlate';
-import { detectLocale, isLocale, LOCALES, makeT, NATIVE_NAME, renderCorrelated, type Locale, type T } from '@asset-doctor/i18n';
-import type { AnalysisReport, Asset, ImageFeatures, Severity } from '@asset-doctor/core';
+import { detectLocale, isLocale, LOCALES, makeT, NATIVE_NAME, renderCorrelated, renderFinding, type Locale, type T } from '@asset-doctor/i18n';
+import type { AnalysisReport, Asset, Finding, ImageFeatures, Severity } from '@asset-doctor/core';
 
 const profiler = installRuntimeProfiler({ warmupFrames: 60 });
 const fmt = (n: number): string => (n < 1024 * 1024 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
@@ -54,6 +54,7 @@ langSel.addEventListener('change', () => {
   t = makeT(locale);
   renderStats(profiler.report());
   if (lastCorrelation) renderCorrelation(lastCorrelation);
+  if (lastStatic) renderStatic(lastStatic);
 });
 const minBtn = el('button', ICON, '–');
 const closeBtn = el('button', ICON, '×');
@@ -67,7 +68,13 @@ const recorrBtn = el('button', ACTION);
 const exportBtn = el('button', ACTION);
 actions.append(loadBtn, recorrBtn, exportBtn);
 const corr = el('div', 'margin-top:6px');
-body.append(stats, actions, corr);
+// Static folder-audit findings (the SAME measured findings the web app shows) — computed off the loaded
+// folder incl. the shared pixel-feature scan, so the feature-gated findings (solid/opaque/upscale/
+// premultiplied/interior/binary/duplicate) are now VISIBLE here, not just fed to correlate. Scrolls so a
+// large audit never blows out the compact overlay.
+const staticEl = el('div', 'margin-top:6px;max-height:220px;overflow-y:auto');
+staticEl.id = '__ad_static';
+body.append(stats, actions, corr, staticEl);
 root.append(header, body);
 
 function relabel(): void {
@@ -175,6 +182,26 @@ async function runAudit(list: FileList): Promise<void> {
   lastCorrelation = correlate(lastStatic, profiler.report());
   (window as unknown as { __assetDoctorCorrelation: CorrelationReport }).__assetDoctorCorrelation = lastCorrelation;
   renderCorrelation(lastCorrelation);
+  renderStatic(lastStatic);
+}
+
+/** The static folder-audit findings, localized (the SAME renderFinding the web app uses). Title + fix per
+ *  card — concise for the compact overlay; the full detail rides the exported session JSON. Findings arrive
+ *  already severity-sorted from analyze; a crit-first list needs no re-sort here. */
+function renderStatic(report: AnalysisReport): void {
+  staticEl.replaceChildren();
+  const findings: Finding[] = report.findings;
+  if (!findings.length) return; // nothing measured — no section (the correlation area owns the empty state)
+  staticEl.append(el('div', 'color:#566472;margin-bottom:2px', t('ext.static.header', { n: findings.length })));
+  for (const f of findings) {
+    const r = renderFinding(f, locale);
+    const card = el('div', `border-left:2px solid ${SEV[f.severity]};padding-left:6px;margin:5px 0`);
+    const titleEl = el('div', `color:${SEV[f.severity]};font-weight:bold`, `[${t(`severity.${f.severity}`)}] ${r.title}`);
+    titleEl.setAttribute('data-sev', f.severity);
+    card.append(titleEl);
+    if (r.fix) card.append(el('div', 'color:#0e8c8c', `→ ${r.fix}`));
+    staticEl.append(card);
+  }
 }
 
 function renderCorrelation(c: CorrelationReport): void {
@@ -226,6 +253,7 @@ function downloadSession(): void {
       langSel.value = l;
       renderStats(profiler.report());
       if (lastCorrelation) renderCorrelation(lastCorrelation);
+      if (lastStatic) renderStatic(lastStatic);
     }
   },
 };
