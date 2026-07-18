@@ -342,6 +342,10 @@ export type Rule =
   // current page. Carries a vramBytesSaved MEASURED by actually packing (never an area model), under
   // the explicit condition "apply the geometry repack" (npot/upscaled-source estimate precedent)
   | 'repack-opportunity'
+  // whole-folder (scope: 'folder'): a LOOSE image whose DECODED pixels are byte-identical to an atlas
+  // FRAME's region — the same sprite ships twice (loose + packed). A PROOF (SHA of decoded RGBA); warn with
+  // a which-copy hedge; exact disk (the loose file) + VRAM (w·h·4) estimate, on the finding not the headline
+  | 'loose-in-atlas'
   // per-bmfont-page glyph-sheet readout (informational; a parsed .fnt page IS an atlas)
   | 'font-glyph-page';
 
@@ -498,6 +502,14 @@ export interface ImageFeatures {
    *  when no whole cell qualifies OR the merged map exceeds the host's all-or-nothing cap (a partial map
    *  would lie by omission); only ever drives the interior-transparency finding's overlay, never its gate. */
   alphaShape?: { bboxW: number; bboxH: number; interiorTransparent: number; binaryAlpha: boolean; opaqueCount: number; holeRects?: Rect[] };
+  /** Hex SHA-256 of the LOOSE image's FULL-RESOLUTION decoded RGBA (PNG/WebP) — on the SAME basis as the
+   *  atlas frame-region hashes (`AtlasFrameHashes.frameHashes`), so a loose image whose decoded pixels equal
+   *  an UNTRIMMED atlas frame's region hash matches. Drives the folder-scope `loose-in-atlas` disclosure (the
+   *  sprite ships both loose and packed). Set by the worker ONLY for a NON-FLAT loose alpha-bearing image
+   *  (flat/near-uniform ⇒ null so a degenerate transparent match never fires — mirrors the dHash flat-guard);
+   *  absent (no scan, non-alpha format, decode failed, headless/CLI, atlas page) ⇒ the finding never fires ⇒
+   *  today's behavior, byte-identical (gated exactly like frameHashes / premultipliedEdge). */
+  pixelHash?: string;
 }
 
 /** Per-atlas sprite-region hashes computed by the host (worker) from the ALREADY-DECODED atlas page, fed
@@ -875,6 +887,16 @@ export interface ThresholdConfig {
    *  finding is suppressed. Browser-only — NOT enumerated by resolveThresholds (mirrors
    *  interiorTransparency: the same full-res alphaShape scan the CLI never performs). */
   binaryAlpha?: { minEdgePx: number };
+  /** Loose-in-atlas disclosure gate (loose images only). Fires when a loose image's host-measured
+   *  `ImageFeatures.pixelHash` (SHA of its full-res decoded RGBA) equals an UNTRIMMED atlas frame's region
+   *  hash — the SAME sprite ships both loose AND packed. A PROOF (exact decoded-pixel match); the loose copy
+   *  is redundant if the game loads the atlas. `minSprites` — at least this many redundant loose copies before
+   *  the folder finding fires (1 ⇒ even one is a real waste). Severity `warn` with a which-copy hedge; the
+   *  EXACT saving (loose file disk bytes + w·h·4 VRAM) rides the finding but is NOT folded into the headline
+   *  potentialDiskSaved (conservative — mirrors cross-atlas-redundancy). Optional/additive: absent ⇒
+   *  suppressed. Browser-only — NOT enumerated by resolveThresholds (needs the full-res decode the CLI never
+   *  performs; mirrors premultipliedAlpha). */
+  looseInAtlas?: { minSprites: number };
 }
 
 export interface AnalysisReport {

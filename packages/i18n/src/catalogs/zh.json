@@ -1027,5 +1027,10 @@
   "corr.premultiplied-blend.diag_inconclusive": "我们无法为这些 sprite 确定单一的 blend mode，因此它们是否出现镶边取决于具体绘制 —— 请检查渲染它们的各个 pass。",
   "corr.premultiplied-blend.fix_halo": "让纹理的 premultiply/alphaMode 与美术导出方式一致，或以匹配的 alpha 关联方式重新导出，使边缘干净地混合。",
   "corr.premultiplied-blend.fix_safe": "此 blend mode 无需处理；若仍出现镶边，请确认美术是以 premultiplied 方式导出的。",
-  "corr.premultiplied-blend.fix_inconclusive": "检查渲染这些 sprite 的各个绘制，使其 blend mode 与美术的导出方式一致。"
+  "corr.premultiplied-blend.fix_inconclusive": "检查渲染这些 sprite 的各个绘制，使其 blend mode 与美术的导出方式一致。",
+  "rule.loose-in-atlas": "随包发布两次（散图 + atlas）",
+  "cabinet.value.loose-in-atlas": "数值：冗余散图副本占用的磁盘字节数（实测）",
+  "find.loose-in-atlas.title": "{n} 张散图 sprite 同时也打包在某个 atlas 内",
+  "find.loose-in-atlas.detail": "这些散图与某个 atlas 中已打包的 frame 字节完全相同（已解码像素），因此同一个 sprite 被发布了两次：{refs}。如果游戏加载了该 atlas，每一份散图副本都是冗余的 — 删除它可回收其在磁盘上的文件字节以及 w·h·4 的 VRAM（与磁盘相互独立的成本）。我们比对的是已解码像素，而不是你的游戏实际引用的是哪一份副本。",
+  "find.loose-in-atlas.fix": "删除冗余的散图副本并改为引用 atlas 中的 frame；若以 atlas 为准，则将它们排除出构建。"
 }

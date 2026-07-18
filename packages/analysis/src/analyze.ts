@@ -59,6 +59,7 @@ import {
   mipmapCostFinding,
   gpuCompressionAlignmentFinding,
   premultipliedAlphaFinding,
+  looseInAtlasFindings,
   shouldAtlasFinding,
   strippableMetadataAggregateFinding,
 } from './folder';
@@ -425,6 +426,12 @@ export async function analyze(
     // reveal the loader's blend mode, invariant 3), so NOTHING flows into potentialDiskSaved/totals.
     const pma = premultipliedAlphaFinding(assets, deps.features, cfg);
     if (pma) folder.push(pma);
+    // Loose-in-atlas: a loose image whose full-res decoded RGBA hash equals an atlas frame's region hash ⇒
+    // the SAME sprite ships twice (loose + packed). Doubly deps-gated — needs BOTH the loose `pixelHash`
+    // features AND the atlas `frameHashByRef` (neither present on the CLI) ⇒ byte-identical to today off the
+    // browser path. The exact disk+VRAM saving rides the finding, NOT potentialDiskSaved (cross-atlas precedent).
+    const lia = looseInAtlasFindings(assets, deps.features, frameHashByRef, cfg);
+    if (lia) folder.push(lia);
   }
   const sa = shouldAtlasFinding(assets, cfg);
   if (sa) folder.push(sa);

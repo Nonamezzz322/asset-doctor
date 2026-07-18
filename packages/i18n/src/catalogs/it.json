@@ -1045,5 +1045,10 @@
   "corr.premultiplied-blend.diag_inconclusive": "Non siamo riusciti ad associare un unico blend mode a questi sprite, quindi la comparsa di un alone dipende dal draw — ispeziona i pass che li renderizzano.",
   "corr.premultiplied-blend.fix_halo": "Allinea il premultiply/alphaMode della texture al modo in cui l'arte è stata esportata, oppure riesportala con un'associazione alpha corrispondente, così i bordi si combinano in modo pulito.",
   "corr.premultiplied-blend.fix_safe": "Nessuna azione necessaria per questo blend mode; se l'alone appare comunque, verifica che l'arte sia stata esportata premultiplied.",
-  "corr.premultiplied-blend.fix_inconclusive": "Ispeziona i draw che renderizzano questi sprite e fai in modo che il loro blend mode corrisponda al modo in cui l'arte è stata esportata."
+  "corr.premultiplied-blend.fix_inconclusive": "Ispeziona i draw che renderizzano questi sprite e fai in modo che il loro blend mode corrisponda al modo in cui l'arte è stata esportata.",
+  "rule.loose-in-atlas": "Spedito due volte (loose + atlas)",
+  "cabinet.value.loose-in-atlas": "Valore: byte su disco che costa la copia loose ridondante (misurato)",
+  "find.loose-in-atlas.title": "{n} sprite loose presenti anche dentro un atlas",
+  "find.loose-in-atlas.detail": "Queste immagini loose sono identiche byte per byte (pixel decodificati) a un frame già impacchettato in un atlas, quindi lo stesso sprite viene spedito due volte: {refs}. Se il gioco carica l'atlas, ogni copia loose è ridondante — rimuoverla recupera i suoi byte su disco e la sua VRAM w·h·4 (un costo separato dal disco). Confrontiamo i pixel decodificati, non quale copia il tuo gioco referenzia.",
+  "find.loose-in-atlas.fix": "Rimuovi le copie loose ridondanti e referenzia i frame dell'atlas, oppure escludile dalla build se l'atlas è la fonte autorevole."
 }

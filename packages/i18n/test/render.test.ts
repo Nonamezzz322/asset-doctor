@@ -29,6 +29,7 @@ import {
   gutterFinding,
   spineUnreferencedRegionsFindings,
   premultipliedAlphaFinding,
+  looseInAtlasFindings,
   fontGlyphPageFinding,
   repackOpportunityFinding,
   integrityFindings,
@@ -155,6 +156,16 @@ async function realFindings(): Promise<Finding[]> {
     sprites: [{ name: 'b0', frame: { x: 64, y: 0, w: 32, h: 32 }, rotated: false, trimmed: false, sourceSize: { w: 32, h: 32 } }],
   };
   out.push(crossAtlasRedundancyFinding([caA, caB], new Map([['caA.png', ['sh']], ['caB.png', ['sh']]]), new Map([['caA.png', 8000], ['caB.png', 8000]]), cfg)!);
+  // loose-in-atlas: a loose image whose decoded-RGBA pixelHash equals an untrimmed atlas frame's region hash
+  // (the sprite ships twice — loose + packed). Constructed via the real rule so the EN catalog is drift-checked.
+  out.push(
+    looseInAtlasFindings(
+      [{ kind: 'atlas', atlas: atlas('packed', 1, 200) }, img('dup.png', 200, 200, 5000)],
+      [{ assetRef: 'dup.png', contentHash: 'lc', pixelHash: 'LIAHASH' }],
+      new Map([['packed', ['LIAHASH']]]),
+      cfg,
+    )!,
+  );
   // premultiplied-alpha: two loose sprites whose host-measured edge shape clears the default gate
   // (edgePixels ≥ 24, fringeFrac ≥ 0.5, minSprites 2) → the ONE folder disclosure (info, NO estimate).
   out.push(premultipliedAlphaFinding(
@@ -215,7 +226,7 @@ describe('renderFinding — English catalog reproduces the baked strings (drift 
     const findings = await realFindings();
     const keys = new Set(findings.map((f) => f.messageKey));
     // sanity: we exercised every messageKey family the rules emit
-    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'upscaled-source', 'frame-redundancy', 'trim-margin', 'bleeding', 'dimension-mismatch-shrunk-offedge', 'dimension-mismatch-shrunk', 'dimension-mismatch-grown', 'cross-atlas-redundancy', 'premultiplied-alpha', 'gpu-compression-alignment', 'excessive-gutter', 'spine-unreferenced-regions', 'interior-transparency', 'binary-alpha', 'font-glyph-page', 'repack-opportunity', 'wasted-alpha', 'strippable-metadata', 'strippable-metadata-aggregate', 'icc-non-srgb', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'atlas-merge-batching', 'integrity', 'format-aggregate', 'variants']));
+    expect(keys).toEqual(new Set(['occupancy', 'wasted-regions', 'oversize', 'npot', 'solid-fill', 'upscaled-source', 'frame-redundancy', 'trim-margin', 'bleeding', 'dimension-mismatch-shrunk-offedge', 'dimension-mismatch-shrunk', 'dimension-mismatch-grown', 'cross-atlas-redundancy', 'premultiplied-alpha', 'gpu-compression-alignment', 'excessive-gutter', 'spine-unreferenced-regions', 'interior-transparency', 'binary-alpha', 'font-glyph-page', 'repack-opportunity', 'wasted-alpha', 'strippable-metadata', 'strippable-metadata-aggregate', 'icc-non-srgb', 'format', 'format-lossless', 'duplicate-exact', 'duplicate-similar', 'should-atlas', 'atlas-merge', 'atlas-merge-batching', 'integrity', 'format-aggregate', 'variants', 'loose-in-atlas']));
     for (const f of findings) {
       expect(f.messageKey, `${f.id} must carry a messageKey`).toBeTruthy();
       const r = renderFinding(f, 'en');

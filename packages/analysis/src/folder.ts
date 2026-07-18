@@ -392,6 +392,93 @@ export function premultipliedAlphaFinding(
   };
 }
 
+/** Folder-scope loose-in-atlas DISCLOSURE. A LOOSE image whose host-measured `pixelHash` (SHA of its
+ *  FULL-RESOLUTION decoded RGBA) equals an atlas frame's region hash ships the SAME sprite TWICE — once
+ *  loose, once packed inside an atlas. A PROOF (exact decoded-pixel match; SHA collision negligible), on the
+ *  SAME hash basis the worker computes frame-region hashes, so it fires ONLY for an UNTRIMMED frame (a trimmed
+ *  frame's region ≠ the full loose image ⇒ no match — the proof deliberately under-claims, never a false
+ *  positive). HONESTY (invariant 3/5): severity `warn` with a which-copy hedge — the pixels prove the sprite
+ *  ships twice, but not which copy the game references; the EXACT saving from dropping the loose copy (its
+ *  file disk bytes + w·h·4 VRAM, kept as DISTINCT estimate fields) rides the finding but is DELIBERATELY NOT
+ *  folded into `potentialDiskSaved` (conservative — the cross-atlas-redundancy precedent). The frame targets
+ *  come from `frameHashByRef` (absent ⇒ CLI/headless ⇒ never fires); the loose pixel hashes from `features`
+ *  (absent ⇒ never fires) — doubly deps-gated, byte-identical to today off the browser path. Loose-only
+ *  (`looseMeta` keys only image assets). Deterministic: frame map by asset/index order (first wins), hits
+ *  sorted by ref. Returns null with no config, no frame hashes, or below `minSprites`. */
+export function looseInAtlasFindings(
+  assets: Asset[],
+  features: ImageFeatures[],
+  frameHashByRef: Map<string, (string | null)[]>,
+  cfg: ThresholdConfig,
+): Finding | null {
+  const gate = cfg.looseInAtlas;
+  if (!gate) return null;
+  // frameHash → the FIRST (atlas, frame name) it appears at. Deterministic (atlases in asset order, sprites
+  // by index); a null (host-skipped flat/failed) region is never a match target (mirrors cross-atlas).
+  const frameByHash = new Map<string, { atlasRef: string; frameName: string }>();
+  for (const a of assets) {
+    if (a.kind !== 'atlas') continue;
+    const hashes = frameHashByRef.get(a.atlas.name);
+    if (!hashes || hashes.length !== a.atlas.sprites.length) continue; // no/desynced hashes ⇒ skip this atlas
+    for (let i = 0; i < a.atlas.sprites.length; i++) {
+      const h = hashes[i];
+      if (h == null) continue;
+      if (!frameByHash.has(h)) frameByHash.set(h, { atlasRef: a.atlas.name, frameName: a.atlas.sprites[i]!.name });
+    }
+  }
+  if (frameByHash.size === 0) return null;
+  // Loose image name → {w,h,byteSize} for the EXACT disk + w·h·4 VRAM saving.
+  const looseMeta = new Map<string, { w: number; h: number; byteSize: number }>();
+  for (const a of assets)
+    if (a.kind === 'image') looseMeta.set(a.image.name, { w: a.image.size.w, h: a.image.size.h, byteSize: a.image.byteSize });
+  interface Hit {
+    ref: string;
+    atlasRef: string;
+    frameName: string;
+    disk: number;
+    vram: number;
+  }
+  const hits: Hit[] = [];
+  for (const f of features) {
+    const ph = f.pixelHash;
+    if (!ph) continue; // no decoded-RGBA hash (CLI/headless/flat/atlas page) ⇒ never matches
+    const meta = looseMeta.get(f.assetRef);
+    if (!meta) continue; // not a loose image
+    const frame = frameByHash.get(ph);
+    if (!frame) continue;
+    hits.push({ ref: f.assetRef, atlasRef: frame.atlasRef, frameName: frame.frameName, disk: meta.byteSize, vram: meta.w * meta.h * 4 });
+  }
+  if (hits.length < gate.minSprites) return null;
+  hits.sort((a, b) => a.ref.localeCompare(b.ref));
+  const refsList = hits.map((h) => h.ref); // the loose refs — fold / drill-down / highlight set
+  const mapping = hits.map((h) => `${h.ref} (${h.atlasRef}#${h.frameName})`); // display: which frame each duplicates
+  const diskTotal = hits.reduce((s, h) => s + h.disk, 0);
+  const vramTotal = hits.reduce((s, h) => s + h.vram, 0);
+  // Per-ref MEASURED disk saving, worst-first (P2) — the exact file bytes each redundant loose copy costs.
+  const perRef = [...hits].sort((a, b) => b.disk - a.disk || a.ref.localeCompare(b.ref)).map((h) => ({ ref: h.ref, value: h.disk }));
+  return {
+    id: 'folder:loose-in-atlas',
+    rule: 'loose-in-atlas',
+    severity: 'warn',
+    scope: 'folder',
+    assetRef: refsList[0]!,
+    relatedRefs: refsList,
+    title: `${refsList.length} loose sprites also ship inside an atlas`,
+    detail:
+      `These loose images are byte-identical (decoded pixels) to a frame already packed in an atlas, so the ` +
+      `same sprite ships twice: ${refsPreview(mapping)}. If the game loads the atlas, each loose copy is ` +
+      `redundant — dropping it reclaims its file bytes on disk and its w·h·4 VRAM (a separate cost from disk). ` +
+      `We match decoded pixels, not which copy your game references.`,
+    fix: 'Drop the redundant loose copies and reference the atlas frames, or exclude them from the build if the atlas is authoritative.',
+    // EXACT saving (loose file disk + w·h·4 VRAM), kept as distinct fields (invariant 5). NOT folded into
+    // potentialDiskSaved (conservative — cross-atlas-redundancy precedent; the which-copy hedge is real).
+    estimate: { diskBytesSaved: diskTotal, vramBytesSaved: vramTotal },
+    messageKey: 'loose-in-atlas',
+    params: { n: refsList.length, refs: refsPreview(mapping) },
+    perRef,
+  };
+}
+
 /** Folder-scope GPU block-compression ALIGNMENT disclosure. Block-compressed GPU formats (the KTX2 →
  *  BC/ASTC transcode targets the shipped opt-in KTX2 backend produces) work on 4×4-pixel blocks; a texture
  *  whose width OR height is not a multiple of 4 cannot map cleanly onto them — on BC-class targets the

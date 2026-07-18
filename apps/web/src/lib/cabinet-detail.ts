@@ -43,7 +43,7 @@ export interface AffectedRow {
 /** Rules whose perRef VALUE the drill-down knows how to format + label. The i18n label key is
  *  `cabinet.value.<rule>` — asserted to exist in en for every entry (drift test), because the JSX reads it
  *  via a template over this map (the static app-keys scanner cannot expand an unregistered prefix). */
-export const CABINET_VALUE_RULES = ['premultiplied-alpha', 'atlas-merge', 'format', 'strippable-metadata'] as const;
+export const CABINET_VALUE_RULES = ['premultiplied-alpha', 'atlas-merge', 'format', 'strippable-metadata', 'loose-in-atlas'] as const;
 
 const pct = (v: number): string => `${Math.round(v * 100)}%`;
 const bytes = (v: number): string =>
@@ -59,6 +59,7 @@ export function perRefValueText(rule: Finding['rule'], value: number): string | 
       return pct(value);
     case 'format': // the folder format-aggregate carries rule 'format' — measured saved bytes per image
     case 'strippable-metadata': // aggregate — exact strippable bytes per image
+    case 'loose-in-atlas': // exact disk bytes each redundant loose copy costs (the file that ships twice)
       return bytes(value);
     default:
       return null;

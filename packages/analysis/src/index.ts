@@ -43,6 +43,7 @@ export {
   strippableMetadataAggregateFinding,
   gpuCompressionAlignmentFinding,
   premultipliedAlphaFinding,
+  looseInAtlasFindings,
 } from './folder';
 export { fontGlyphPageFinding } from './font';
 export { defaultCell, buildCoverage, mergeEmptyRects, summarizeEmpty } from './grid';

@@ -1045,5 +1045,10 @@
   "corr.premultiplied-blend.diag_inconclusive": "Nous n'avons pas pu associer un blend mode unique à ces sprites, donc leur franging dépend du draw — inspectez les passes qui les rendent.",
   "corr.premultiplied-blend.fix_halo": "Accordez le premultiply/alphaMode de la texture à la façon dont l'art a été exporté, ou ré-exportez avec une association alpha correspondante, afin que les bords se blendent proprement.",
   "corr.premultiplied-blend.fix_safe": "Aucune action requise pour ce blend mode ; si une frange apparaît malgré tout, vérifiez que l'art a été exporté en premultiplied.",
-  "corr.premultiplied-blend.fix_inconclusive": "Inspectez les draws qui rendent ces sprites et faites correspondre leur blend mode à la façon dont l'art a été exporté."
+  "corr.premultiplied-blend.fix_inconclusive": "Inspectez les draws qui rendent ces sprites et faites correspondre leur blend mode à la façon dont l'art a été exporté.",
+  "rule.loose-in-atlas": "Livré en double (libre + atlas)",
+  "cabinet.value.loose-in-atlas": "Valeur : octets disque que coûte la copie libre redondante (mesuré)",
+  "find.loose-in-atlas.title": "{n} sprites libres présents aussi dans un atlas",
+  "find.loose-in-atlas.detail": "Ces images libres sont identiques octet pour octet (pixels décodés) à une frame déjà packée dans un atlas, donc le même sprite est livré deux fois : {refs}. Si le jeu charge l'atlas, chaque copie libre est redondante — la supprimer récupère ses octets de fichier sur le disque et sa VRAM w·h·4 (un coût distinct de celui du disque). Nous comparons les pixels décodés, pas la copie que votre jeu référence.",
+  "find.loose-in-atlas.fix": "Supprimez les copies libres redondantes et référencez les frames de l'atlas, ou excluez-les du build si l'atlas fait autorité."
 }

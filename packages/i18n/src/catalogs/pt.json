@@ -1045,5 +1045,10 @@
   "corr.premultiplied-blend.diag_inconclusive": "Não conseguimos associar um único blend mode a esses sprites, então se vão criar franjas depende do draw — inspecione as passes que os renderizam.",
   "corr.premultiplied-blend.fix_halo": "Ajuste o premultiply/alphaMode da textura ao modo como a arte foi exportada, ou re-exporte com a associação de alpha correspondente, para que as bordas misturem de forma limpa.",
   "corr.premultiplied-blend.fix_safe": "Nenhuma ação necessária para esse blend mode; se ainda aparecer uma franja, confirme que a arte foi exportada premultiplied.",
-  "corr.premultiplied-blend.fix_inconclusive": "Inspecione os draws que renderizam esses sprites e faça o blend mode deles corresponder ao modo como a arte foi exportada."
+  "corr.premultiplied-blend.fix_inconclusive": "Inspecione os draws que renderizam esses sprites e faça o blend mode deles corresponder ao modo como a arte foi exportada.",
+  "rule.loose-in-atlas": "Embarca duas vezes (avulso + atlas)",
+  "cabinet.value.loose-in-atlas": "Valor: bytes em disco que a cópia avulsa redundante custa (medido)",
+  "find.loose-in-atlas.title": "{n} sprites avulsos também embarcam dentro de um atlas",
+  "find.loose-in-atlas.detail": "Estas imagens avulsas são idênticas byte a byte (pixels decodificados) a um frame já empacotado em um atlas, então o mesmo sprite embarca duas vezes: {refs}. Se o jogo carrega o atlas, cada cópia avulsa é redundante — removê-la recupera seus bytes de arquivo em disco e sua VRAM de w·h·4 (um custo separado do disco). Comparamos os pixels decodificados, não qual cópia o seu jogo referencia.",
+  "find.loose-in-atlas.fix": "Remova as cópias avulsas redundantes e referencie os frames do atlas, ou exclua-as do build se o atlas for a fonte autoritativa."
 }

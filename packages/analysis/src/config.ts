@@ -179,4 +179,9 @@ export const DEFAULT_THRESHOLDS: ThresholdConfig = {
   // (no sim ⇒ no finding, bounded work; mirrors the worker's FRAME_HASH_MAX_SPRITES discipline).
   // Browser-only in v1: the CLI passes no repackSims dep, so it can never fire there regardless of
   // thresholds (deps-gated like frameHashes — CLI/budget output stays byte-identical).
+  looseInAtlas: { minSprites: 1 }, // exact-match PROOF (a loose image's decoded RGBA == an untrimmed atlas
+  // frame's region hash ⇒ the sprite ships twice). minSprites 1 — even one redundant copy is a real waste;
+  // no fuzzy threshold to calibrate (proof-based, like duplicate-exact). Browser-only — NOT in
+  // resolveThresholds (needs the full-res decode + frame hashes the CLI never performs; deps-gated so
+  // CLI/budget output stays byte-identical, mirrors premultipliedAlpha).
 };

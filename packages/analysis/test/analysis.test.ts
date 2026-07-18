@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import type { SpineSkeletonBinding, Asset, Atlas, ImageAsset, ImageFeatures, ImageMime, Rect, ThresholdConfig } from '@asset-doctor/core';
 import { parseAtlas, parseImage, parseFntText, parseFntPage, type FntPage } from '@asset-doctor/parsers';
 import { groupFiles, type RawFile } from '@asset-doctor/ingest';
-import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, upscaledSourceFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, atlasMergeFinding, formatAggregateFinding, iccNonSrgbFinding, interiorTransparencyFinding, binaryAlphaFinding, crossAtlasRedundancyFinding, premultipliedAlphaFinding, gpuCompressionAlignmentFinding, gutterFinding, spineUnreferencedRegionsFindings, repackOpportunityFinding, duplicateSimilarFindings, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
+import { analyze, buildCoverage, mergeEmptyRects, summarizeEmpty, occupancyValue, occupancyFinding, wastedRegions, formatFinding, solidFillFinding, upscaledSourceFinding, frameRedundancyFinding, trimMarginFinding, bleedingFinding, dimensionMismatchFinding, wastedAlphaFinding, strippableMetadataFinding, strippableMetadataAggregateFinding, atlasMergeFinding, formatAggregateFinding, iccNonSrgbFinding, interiorTransparencyFinding, binaryAlphaFinding, crossAtlasRedundancyFinding, premultipliedAlphaFinding, looseInAtlasFindings, gpuCompressionAlignmentFinding, gutterFinding, spineUnreferencedRegionsFindings, repackOpportunityFinding, duplicateSimilarFindings, DEFAULT_THRESHOLDS, mergeSharedAtlases, groupVariants, stemOf, hasResolutionToken } from '../src/index';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '../../../fixtures/sample-projects');
 const readJson = (p: string): unknown => JSON.parse(readFileSync(join(FIXTURES, p), 'utf8'));
@@ -3082,5 +3082,58 @@ describe('perRef (P2 per-sprite drill-down) — the WORST-FIRST measured breakdo
       { ref: 'm2.png', value: 9000 },
       { ref: 'm1.png', value: 5000 },
     ]);
+  });
+});
+
+describe('looseInAtlasFindings — a loose image whose decoded pixels match an atlas frame (ships twice)', () => {
+  const atlasAsset = (name: string, spriteName: string, w: number, h: number): Asset => ({
+    kind: 'atlas',
+    atlas: {
+      name,
+      imageRef: `${name}.png`,
+      size: { w: 1024, h: 1024 },
+      sprites: [{ name: spriteName, frame: { x: 0, y: 0, w, h }, rotated: false, trimmed: false, sourceSize: { w, h } }],
+      source: { kind: 'pixi' },
+    },
+  });
+  const imageAsset = (name: string, w: number, h: number, byteSize: number): Asset => ({
+    kind: 'image',
+    image: { name, imageRef: name, size: { w, h }, mime: 'image/png' as ImageMime, byteSize },
+  });
+  const cfg = DEFAULT_THRESHOLDS;
+  const setup = (
+    features: ImageFeatures[],
+    frames: Map<string, (string | null)[]>,
+    conf: ThresholdConfig = cfg,
+  ) => looseInAtlasFindings([atlasAsset('sheet', 'hero', 200, 200), imageAsset('hero.png', 200, 200, 5000)], features, frames, conf);
+
+  it('fires on an exact loose↔untrimmed-frame match: warn, exact disk + w·h·4 VRAM, worst-first perRef', () => {
+    const f = setup([{ assetRef: 'hero.png', contentHash: 'c', pixelHash: 'H' }], new Map([['sheet', ['H']]]));
+    expect(f).not.toBeNull();
+    expect(f!.rule).toBe('loose-in-atlas');
+    expect(f!.severity).toBe('warn');
+    expect(f!.scope).toBe('folder');
+    expect(f!.relatedRefs).toEqual(['hero.png']);
+    expect(f!.estimate?.diskBytesSaved).toBe(5000);
+    expect(f!.estimate?.vramBytesSaved).toBe(200 * 200 * 4);
+    expect(f!.perRef?.[0]).toEqual({ ref: 'hero.png', value: 5000 });
+  });
+
+  it('does NOT fire when the loose pixelHash matches no frame', () => {
+    expect(setup([{ assetRef: 'hero.png', contentHash: 'c', pixelHash: 'DIFFERENT' }], new Map([['sheet', ['H']]]))).toBeNull();
+  });
+
+  it('does NOT fire without a pixelHash (CLI/headless) or without frame hashes (deps-gated)', () => {
+    expect(setup([{ assetRef: 'hero.png', contentHash: 'c' }], new Map([['sheet', ['H']]]))).toBeNull();
+    expect(setup([{ assetRef: 'hero.png', contentHash: 'c', pixelHash: 'H' }], new Map())).toBeNull();
+  });
+
+  it('a null (flat/skipped) frame hash is never a match target', () => {
+    expect(setup([{ assetRef: 'hero.png', contentHash: 'c', pixelHash: 'H' }], new Map([['sheet', [null]]]))).toBeNull();
+  });
+
+  it('respects minSprites and a missing config (both suppress a single hit)', () => {
+    expect(setup([{ assetRef: 'hero.png', contentHash: 'c', pixelHash: 'H' }], new Map([['sheet', ['H']]]), { ...cfg, looseInAtlas: { minSprites: 2 } })).toBeNull();
+    expect(setup([{ assetRef: 'hero.png', contentHash: 'c', pixelHash: 'H' }], new Map([['sheet', ['H']]]), { ...cfg, looseInAtlas: undefined })).toBeNull();
   });
 });

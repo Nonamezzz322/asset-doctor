@@ -37,8 +37,20 @@ export interface DecodedImageFeatures {
   upscaleDepth: number;
   premult: PremultEdgeResult | null;
   shape: AlphaShapeResult | null;
+  /** Hex SHA-256 of the full-resolution decoded RGBA (same basis as the atlas frame-region hashes) — null
+   *  for a flat image (the flat-guard, so a degenerate transparent match never fires) or when no full-res
+   *  scan ran. Drives the loose-in-atlas disclosure. */
+  pixelHash: string | null;
   w: number;
   h: number;
+}
+
+/** SHA-256 hex of a byte source. Uses WebCrypto (present in a Web Worker, a page/extension MAIN world, and
+ *  Node 20+). Identical to the worker's frame-region hash, so a loose image's decoded RGBA and an untrimmed
+ *  atlas frame's region hash are directly comparable. */
+async function sha256Hex(bytes: BufferSource): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 const EMPTY = (w: number, h: number): DecodedImageFeatures => ({
@@ -51,6 +63,7 @@ const EMPTY = (w: number, h: number): DecodedImageFeatures => ({
   upscaleDepth: 0,
   premult: null,
   shape: null,
+  pixelHash: null,
   w,
   h,
 });
@@ -88,7 +101,8 @@ export async function decodeImageFeatures(bytes: ArrayBuffer, scanAlpha: boolean
     const meanColor = meanColorFromSample(data);
     const gray: number[] = [];
     for (let p = 0; p < 9 * 8; p++) gray.push(luma(data, p * 4));
-    const dHash = isFlat(gray) ? null : dHashFromGray(gray); // featureless → skip perceptual matching
+    const flat = isFlat(gray);
+    const dHash = flat ? null : dHashFromGray(gray); // featureless → skip perceptual matching
     const contentClass = classifyContent(gray, data);
     // The 9×8 `solid` CANDIDATE (cheap pre-filter). It rules out virtually every real image instantly, but a
     // sub-cell feature can box-average away in the 72-px sample, so a candidate MUST be confirmed at full
@@ -106,6 +120,7 @@ export async function decodeImageFeatures(bytes: ArrayBuffer, scanAlpha: boolean
     let upscaleDepth = 0;
     let premult: PremultEdgeResult | null = null;
     let shape: AlphaShapeResult | null = null;
+    let pixelHash: string | null = null;
     if ((scanAlpha || solidCandidate) && !overBudget) {
       const full = new OffscreenCanvas(width, height);
       const fctx = full.getContext('2d', { willReadFrequently: true });
@@ -124,10 +139,15 @@ export async function decodeImageFeatures(bytes: ArrayBuffer, scanAlpha: boolean
         // fullData buffer (zero extra decode), same alpha-format gate. null (fully transparent / degenerate)
         // ⇒ the caller omits the feature and neither disclosure can ever fire.
         if (scanAlpha) shape = alphaShape(fullData, width, height);
+        // Decoded-RGBA hash (loose-in-atlas disclosure) — SHA of this SAME fullData buffer, on the exact
+        // basis the worker hashes atlas frame regions, so a loose image equal to an untrimmed atlas frame
+        // matches. Flat-guarded (a flat/transparent image would falsely match a flat frame region) and
+        // gated to the same alpha-bearing loose formats; null otherwise.
+        if (scanAlpha && !flat) pixelHash = await sha256Hex(fullData);
       }
     }
     bmp.close();
-    return { dHash, contentClass, solid, opaque, meanColor, scanSkipped, upscaleDepth, premult, shape, w: width, h: height };
+    return { dHash, contentClass, solid, opaque, meanColor, scanSkipped, upscaleDepth, premult, shape, pixelHash, w: width, h: height };
   } catch {
     return EMPTY(0, 0);
   }
@@ -154,5 +174,8 @@ export function featureFromDecode(assetRef: string, contentHash: string, d: Deco
   // Attached whenever measured (non-null): the duplicate-similar mean-color guard consumes it; features that
   // never enter perceptual matching (dHash-null) are filtered downstream, so it's inert there.
   if (d.meanColor) feat.meanColor = d.meanColor;
+  // Attached only for a non-flat loose image with a full-res decode — absent ⇒ the loose-in-atlas disclosure
+  // can never fire (byte-identical to a host that never hashed decoded pixels).
+  if (d.pixelHash) feat.pixelHash = d.pixelHash;
   return feat;
 }

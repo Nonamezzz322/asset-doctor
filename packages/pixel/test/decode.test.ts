@@ -11,6 +11,7 @@ const base: DecodedImageFeatures = {
   upscaleDepth: 0,
   premult: null,
   shape: null,
+  pixelHash: null,
   w: 0,
   h: 0,
 };
@@ -28,6 +29,12 @@ describe('featureFromDecode — additive, omit-when-absent (the honesty contract
     expect('contentClass' in f).toBe(false);
     expect('dHash' in f).toBe(false);
     expect('meanColor' in f).toBe(false);
+    expect('pixelHash' in f).toBe(false);
+  });
+
+  it('pixelHash is carried when present (drives loose-in-atlas), absent when null', () => {
+    expect('pixelHash' in featureFromDecode('r', 'h', base)).toBe(false);
+    expect(featureFromDecode('r', 'h', { ...base, pixelHash: 'abc123' }).pixelHash).toBe('abc123');
   });
 
   it("contentClass 'unknown' is omitted; a real class is carried", () => {

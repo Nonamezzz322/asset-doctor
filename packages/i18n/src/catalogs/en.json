@@ -1021,5 +1021,10 @@
   "corr.premultiplied-blend.diag_inconclusive": "We could not tie a single blend mode to these sprites, so whether they fringe depends on the draw — inspect the passes that render them.",
   "corr.premultiplied-blend.fix_halo": "Match the texture premultiply/alphaMode to how the art was exported, or re-export with matching alpha association, so the edges blend cleanly.",
   "corr.premultiplied-blend.fix_safe": "No action needed for this blend mode; if a fringe still appears, confirm the art was exported premultiplied.",
-  "corr.premultiplied-blend.fix_inconclusive": "Inspect the draws that render these sprites and make their blend mode match how the art was exported."
+  "corr.premultiplied-blend.fix_inconclusive": "Inspect the draws that render these sprites and make their blend mode match how the art was exported.",
+  "rule.loose-in-atlas": "Ships twice (loose + atlas)",
+  "cabinet.value.loose-in-atlas": "Value: disk bytes the redundant loose copy costs (measured)",
+  "find.loose-in-atlas.title": "{n} loose sprites also ship inside an atlas",
+  "find.loose-in-atlas.detail": "These loose images are byte-identical (decoded pixels) to a frame already packed in an atlas, so the same sprite ships twice: {refs}. If the game loads the atlas, each loose copy is redundant — dropping it reclaims its file bytes on disk and its w·h·4 VRAM (a separate cost from disk). We match decoded pixels, not which copy your game references.",
+  "find.loose-in-atlas.fix": "Drop the redundant loose copies and reference the atlas frames, or exclude them from the build if the atlas is authoritative."
 }

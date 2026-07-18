@@ -1041,5 +1041,10 @@
   "corr.premultiplied-blend.diag_inconclusive": "Wir konnten diesen sprites keinen einzelnen Blend-Mode zuordnen, daher hängt es vom Draw ab, ob sie fransen — prüfe die Passes, die sie rendern.",
   "corr.premultiplied-blend.fix_halo": "Gleiche das Texture-premultiply/alphaMode daran an, wie die Grafik exportiert wurde, oder exportiere mit passender Alpha-Zuordnung neu, damit die Kanten sauber blenden.",
   "corr.premultiplied-blend.fix_safe": "Für diesen Blend-Mode ist keine Aktion nötig; falls dennoch ein Saum erscheint, prüfe, ob die Grafik premultiplied exportiert wurde.",
-  "corr.premultiplied-blend.fix_inconclusive": "Prüfe die Draws, die diese sprites rendern, und bringe ihren Blend-Mode in Einklang damit, wie die Grafik exportiert wurde."
+  "corr.premultiplied-blend.fix_inconclusive": "Prüfe die Draws, die diese sprites rendern, und bringe ihren Blend-Mode in Einklang damit, wie die Grafik exportiert wurde.",
+  "rule.loose-in-atlas": "Wird doppelt ausgeliefert (lose + Atlas)",
+  "cabinet.value.loose-in-atlas": "Wert: Disk-Bytes, die die redundante lose Kopie kostet (gemessen)",
+  "find.loose-in-atlas.title": "{n} lose Sprites werden zusätzlich in einem Atlas ausgeliefert",
+  "find.loose-in-atlas.detail": "Diese losen Bilder sind Byte-identisch (dekodierte Pixel) zu einem Frame, der bereits in einem Atlas gepackt ist, sodass dasselbe Sprite doppelt ausgeliefert wird: {refs}. Wenn das Spiel den Atlas lädt, ist jede lose Kopie redundant — sie zu entfernen gibt ihre Datei-Bytes auf der Disk und ihr w·h·4 VRAM zurück (ein von der Disk getrennter Kostenpunkt). Wir vergleichen dekodierte Pixel, nicht welche Kopie dein Spiel referenziert.",
+  "find.loose-in-atlas.fix": "Entferne die redundanten losen Kopien und referenziere die Atlas-Frames, oder schließe sie vom Build aus, wenn der Atlas maßgeblich ist."
 }

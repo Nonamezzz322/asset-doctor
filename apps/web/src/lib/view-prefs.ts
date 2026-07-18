@@ -46,6 +46,7 @@ export const RULE_GROUP: Record<Rule, RuleGroupId> = {
   'duplicate-similar': 'savings',
   'frame-redundancy': 'savings',
   'cross-atlas-redundancy': 'savings',
+  'loose-in-atlas': 'savings',
   // 3. Atlas packing & layout.
   occupancy: 'packing',
   'wasted-regions': 'packing',

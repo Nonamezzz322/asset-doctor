@@ -1041,5 +1041,10 @@
   "corr.premultiplied-blend.diag_inconclusive": "हम इन sprites के लिए एक ही blend mode नहीं जोड़ पाए, इसलिए उनमें fringe आएगा या नहीं यह draw पर निर्भर करता है — उन्हें render करने वाले passes की जाँच करें।",
   "corr.premultiplied-blend.fix_halo": "texture की premultiply/alphaMode को उस तरीके से मिलाएँ जैसे art को export किया गया था, या मिलती-जुलती alpha association के साथ फिर से export करें, ताकि किनारे साफ़-सुथरे ब्लेंड हों।",
   "corr.premultiplied-blend.fix_safe": "इस blend mode के लिए कोई कार्रवाई ज़रूरी नहीं; अगर फिर भी fringe दिखे, तो पुष्टि करें कि art premultiplied export किया गया था।",
-  "corr.premultiplied-blend.fix_inconclusive": "इन sprites को render करने वाले draws की जाँच करें और उनका blend mode उस तरीके से मिलाएँ जैसे art को export किया गया था।"
+  "corr.premultiplied-blend.fix_inconclusive": "इन sprites को render करने वाले draws की जाँच करें और उनका blend mode उस तरीके से मिलाएँ जैसे art को export किया गया था।",
+  "rule.loose-in-atlas": "दो बार शिप होता है (loose + atlas)",
+  "cabinet.value.loose-in-atlas": "मान: फालतू loose कॉपी जितने disk बाइट खर्च करती है (मापा गया)",
+  "find.loose-in-atlas.title": "{n} loose sprites एक atlas के अंदर भी शिप होते हैं",
+  "find.loose-in-atlas.detail": "ये loose इमेज एक atlas में पहले से पैक किए गए frame के साथ बाइट-समान (डिकोड किए गए पिक्सेल) हैं, इसलिए वही sprite दो बार शिप होता है: {refs}. अगर game atlas लोड करता है, तो हर loose कॉपी फालतू है — इसे हटाने से disk पर उसके फ़ाइल बाइट और उसका w·h·4 VRAM (disk से अलग खर्च) वापस मिलते हैं। हम डिकोड किए गए पिक्सेल मिलाते हैं, यह नहीं कि आपका game किस कॉपी को रेफ़र करता है।",
+  "find.loose-in-atlas.fix": "फालतू loose कॉपियों को हटाएं और atlas frames को रेफ़र करें, या अगर atlas ही आधिकारिक है तो उन्हें build से बाहर रखें।"
 }
