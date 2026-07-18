@@ -214,7 +214,9 @@ async function runAudit(list: FileList): Promise<void> {
     // its P8 blend capture needs. Loose-only pixel scan; atlas-page frame-hash deps stay web-only for now.
     const mime = r.asset.image.mime;
     const scanAlpha = mime === 'image/png' || mime === 'image/webp';
-    const decoded = await decodeImageFeatures(im.bytes, scanAlpha);
+    // loose-in-atlas needs the loose pixelHash only when an atlas exists to match against ⇒ skip the full-res
+    // SHA in a loose-only folder (byte-identical — that finding can never fire without frame hashes).
+    const decoded = await decodeImageFeatures(im.bytes, scanAlpha, { pixelHash: grouped.atlases.length > 0 });
     features.push(featureFromDecode(ref, await sha256Hex(im.bytes), decoded));
   }
   lastStatic = await analyze(assets, undefined, { features, ...(frameHashes.length ? { frameHashes } : {}) });

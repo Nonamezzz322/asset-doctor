@@ -124,6 +124,9 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
 
     // Per-image features for folder-level duplicate detection + the content-class format verdict.
     // ONE decode per image yields both the dHash AND the content class (zero extra getImageData).
+    // loose-in-atlas needs the loose pixelHash ONLY when an atlas exists to match against — so a loose-only
+    // folder (the common should-atlas case) skips that full-res SHA (byte-identical, just less work).
+    const hasAtlas = grouped.atlases.length > 0;
     const features: ImageFeatures[] = [];
     for (const [assetRef, bytes] of imageBytes) {
       if (cancelled) return; // superseded — stop before the next (heavy) decode/hash
@@ -134,7 +137,7 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
       const scanAlpha = m === 'image/png' || m === 'image/webp';
       // Shared with the extension overlay (@asset-doctor/pixel): decode → measurements → additive assembly,
       // so both hosts compute byte-identical ImageFeatures (no drift in which findings can fire).
-      const decoded = await decodeImageFeatures(bytes, scanAlpha);
+      const decoded = await decodeImageFeatures(bytes, scanAlpha, { pixelHash: hasAtlas });
       features.push(featureFromDecode(assetRef, contentHash, decoded));
       // Round 21 #2: the alpha scan was GATED OFF for an oversize loose page — surface that honestly in
       // unparsed[] (it was a SILENT skip before). Only when scanAlpha was wanted AND the page busted the cap;

@@ -83,7 +83,15 @@ const EMPTY = (w: number, h: number): DecodedImageFeatures => ({
  *  w·h·4 getImageData read ≤10s) — an oversize page sets `scanSkipped` so the CALLER can surface it
  *  honestly in unparsed[]. 'unknown' / false / null on any decode failure or when OffscreenCanvas is
  *  unavailable (Node / an environment without a canvas). */
-export async function decodeImageFeatures(bytes: ArrayBuffer, scanAlpha: boolean): Promise<DecodedImageFeatures> {
+export async function decodeImageFeatures(
+  bytes: ArrayBuffer,
+  scanAlpha: boolean,
+  opts: { pixelHash?: boolean } = {},
+): Promise<DecodedImageFeatures> {
+  // `pixelHash` feeds ONLY the loose-in-atlas finding, which needs atlas frame hashes to match against — so
+  // a caller that KNOWS the folder has no atlas passes { pixelHash: false } to skip the full-res SHA (the
+  // finding can never fire there ⇒ byte-identical, just less work in the common loose-only / should-atlas case).
+  const wantPixelHash = opts.pixelHash !== false;
   if (typeof OffscreenCanvas === 'undefined') return EMPTY(0, 0);
   try {
     const bmp = await createImageBitmap(new Blob([bytes]));
@@ -142,8 +150,8 @@ export async function decodeImageFeatures(bytes: ArrayBuffer, scanAlpha: boolean
         // Decoded-RGBA hash (loose-in-atlas disclosure) — SHA of this SAME fullData buffer, on the exact
         // basis the worker hashes atlas frame regions, so a loose image equal to an untrimmed atlas frame
         // matches. Flat-guarded (a flat/transparent image would falsely match a flat frame region) and
-        // gated to the same alpha-bearing loose formats; null otherwise.
-        if (scanAlpha && !flat) pixelHash = await sha256Hex(fullData);
+        // gated to the same alpha-bearing loose formats; skipped when the caller knows no atlas exists.
+        if (wantPixelHash && scanAlpha && !flat) pixelHash = await sha256Hex(fullData);
       }
     }
     bmp.close();
