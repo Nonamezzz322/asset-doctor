@@ -184,6 +184,7 @@ export function repackAtlases(
   const trimOf = new Map<string, ResolvedTrim>();
   let trimmedSprites = 0;
   let trimmedAreaReclaimed = 0;
+  let rotatedFrames = 0; // v2: representatives the packer placed rotated 90° (eligible groups only)
   // Cross-atlas merge dedup (round22 #1): when a mergeAliasMap is supplied it SUPERSEDES the per-atlas aliasMaps
   // for this whole group. `flatCursor` walks the SAME flat index space the map was built over (group order,
   // sprite index order); its repOf entries point at FLAT indices, which we resolve to `${repAtlasName} repName`.
@@ -226,6 +227,10 @@ export function repackAtlases(
       });
     }
   }
+  // v2 rotation eligibility: a group is rotation-eligible ONLY when NO source sprite is already rotated
+  // (keeps the compose to a single 90° rotation — no double-rotation math) AND nothing is trimmed on this
+  // repack (trim × rotation is out of scope — mutually exclusive). Set during the item scan below.
+  let sourceHasRotated = false;
   for (let ai = 0; ai < atlases.length; ai++) {
     const a = atlases[ai]!;
     const atlasTrim = opts.trim?.[ai];
@@ -244,6 +249,7 @@ export function repackAtlases(
     if (am) aliasedFrames += am.aliasedFrames;
     a.sprites.forEach((s, idx) => {
       const id = `${a.name} ${s.name}`;
+      if (s.rotated) sourceHasRotated = true; // any pre-rotated source sprite blocks packer-rotation for the group
       srcOf.set(id, { sprite: s, atlasRef: a.name });
       coveredAreaSource += s.frame.w * s.frame.h;
       // Resolve the representative. mergeAliasMap: repOf is FLAT, so map the flat rep index back to its (atlas,
@@ -290,7 +296,12 @@ export function repackAtlases(
   }
   const occupancyBefore = areaBefore > 0 ? coveredAreaSource / areaBefore : 0;
 
-  const bins = pack(items, { allowRotation: opts.allowRotation, padding: opts.padding, maxSize: opts.maxSize, ...(opts.gutter ? { gutter: opts.gutter } : {}) });
+  // Rotation is offered to the packer ONLY for an eligible group (no pre-rotated source sprite, nothing
+  // trimmed on this repack). An ineligible group packs exactly as before (allowRotation false ⇒ p.rotated
+  // always false ⇒ byte-identical). NB: `opts.allowRotation` is false on every production plan today, so the
+  // packer never rotates until the compose lands + plan.ts opts in — this only makes the EMIT correct for it.
+  const rotationEligible = opts.allowRotation && !sourceHasRotated && trimOf.size === 0;
+  const bins = pack(items, { allowRotation: rotationEligible, padding: opts.padding, maxSize: opts.maxSize, ...(opts.gutter ? { gutter: opts.gutter } : {}) });
 
   const baseRef = atlases[0]?.imageRef ?? 'atlas.png';
   const format = atlases[0]?.format;
@@ -310,14 +321,22 @@ export function repackAtlases(
       // core) into the tight placement `p` (= bbox extent), and emit `trimmed:true` + `sourceSize` (full) +
       // `spriteSourceSize`/offset. `tr.fromRect` is the source-frame inset; absent ⇒ today's full-frame blit.
       const tr = trimOf.get(p.id);
+      // v2 rotation: the packer may place an ELIGIBLE sprite rotated 90° (p.rotated). Its ON-PAGE footprint is
+      // then p.h × p.w (swapped); the emitted frame is stored AS PLACED (swapped) with `rotated:true`, and the
+      // Blit carries `rotate90:true` so the compose rotates the source region into the box. Trim and rotation
+      // are mutually exclusive (an eligible group has trimOf.size===0), so a rotated placement never has `tr`.
+      if (p.rotated) rotatedFrames++;
+      const onW = p.rotated ? p.h : p.w; // on-page width (swapped when the packer rotated)
+      const onH = p.rotated ? p.w : p.h;
+      const rotated = s.rotated || p.rotated; // on-page orientation: source-rotated (verbatim) OR packer-rotated
       // ONE Blit per representative - the pixels of an aliased cluster are written exactly once.
       blits.push({
         name: s.name,
         from: { atlasRef, rect: tr ? tr.fromRect : s.frame, rotated: s.rotated },
-        to: { x: p.x, y: p.y, w: p.w, h: p.h },
-        rotate90: false,
+        to: { x: p.x, y: p.y, w: onW, h: onH },
+        rotate90: p.rotated,
       });
-      const out: Sprite = { name: s.name, frame: { x: p.x, y: p.y, w: p.w, h: p.h }, rotated: s.rotated, trimmed: tr ? true : s.trimmed, sourceSize: tr ? tr.sourceSize : s.sourceSize };
+      const out: Sprite = { name: s.name, frame: { x: p.x, y: p.y, w: onW, h: onH }, rotated, trimmed: tr ? true : s.trimmed, sourceSize: tr ? tr.sourceSize : s.sourceSize };
       if (tr) out.spriteSourceSize = { ...tr.spriteSourceSize };
       else if (s.spriteSourceSize) out.spriteSourceSize = s.spriteSourceSize;
       if (s.pivot) out.pivot = s.pivot;
@@ -330,7 +349,10 @@ export function repackAtlases(
       // the rep was NOT trimmed the alias keeps its OWN trim/source/pivot/rotated (per-name geometry correct;
       // only the RECT shared). No Blit either way — the pixels are already written by the representative above.
       for (const { sprite: alias } of aliasesOf.get(p.id) ?? []) {
-        const aout: Sprite = { name: alias.name, frame: { x: p.x, y: p.y, w: p.w, h: p.h }, rotated: alias.rotated, trimmed: tr ? true : alias.trimmed, sourceSize: tr ? tr.sourceSize : alias.sourceSize };
+        // An alias of a packer-rotated rep lands at the SAME rotated rect (byte-identical pixels ⇒ same
+        // on-page footprint + orientation). `alias.rotated` is false for an eligible group (else rotation was
+        // blocked), so `alias.rotated || p.rotated` = the rep's rotation.
+        const aout: Sprite = { name: alias.name, frame: { x: p.x, y: p.y, w: onW, h: onH }, rotated: alias.rotated || p.rotated, trimmed: tr ? true : alias.trimmed, sourceSize: tr ? tr.sourceSize : alias.sourceSize };
         if (tr) aout.spriteSourceSize = { ...tr.spriteSourceSize };
         else if (alias.spriteSourceSize) aout.spriteSourceSize = alias.spriteSourceSize;
         if (alias.pivot) aout.pivot = alias.pivot;
@@ -389,6 +411,7 @@ export function repackAtlases(
     vramBytesAfter: vramAfter,
     ...(aliasedFrames > 0 ? { aliasedFrames } : {}),
     ...(trimmedSprites > 0 ? { trimmedSprites, trimmedAreaReclaimed } : {}),
+    ...(rotatedFrames > 0 ? { rotatedFrames } : {}),
     ...(mergeAliasMap && mergeAliasMap.aliasedFrames > 0 ? { vramReclaimedBytes, potTierDropped } : {}),
   };
 }

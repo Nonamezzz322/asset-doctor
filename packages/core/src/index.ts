@@ -1067,6 +1067,11 @@ export interface RepackResult {
    *  MEASURED atlas px reclaimed by tightening untrimmed frames (exact, never the detector's "up to" estimate).
    *  Absent/0 ⇒ nothing was trimmed ⇒ byte-identical to today. */
   trimmedAreaReclaimed?: number;
+  /** Rotation-packing v2: the count of representatives the packer placed rotated 90° (their on-page frame w/h
+   *  swapped, `rotated:true` + a `rotate90` Blit the compose rotates). Only ever >0 for a rotation-ELIGIBLE
+   *  group (no pre-rotated source sprite, nothing trimmed) packed with `allowRotation` on. Absent/0 ⇒ no
+   *  packer rotation (every production plan today) ⇒ byte-identical to before. */
+  rotatedFrames?: number;
   /** Cross-atlas frame dedup during MERGE (round22 #1): the EXACT VRAM bytes reclaimed by aliasing byte-
    *  identical frames that spanned MULTIPLE source sheets onto ONE shared region — measured as the no-alias
    *  baseline pack of the SAME group's POT bin(s) (`vram(w,h)` summed) MINUS this result's `vramBytesAfter`.
