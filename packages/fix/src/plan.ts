@@ -274,7 +274,7 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
         trim: true,
         padding: opts.padding,
         maxSize: opts.maxSize,
-        allowRotation: false,
+        allowRotation: false, // loose-pack (packLoose) is v1-unrotated by design — rotation is REPACK-path only
         ...extrudeField,
       });
     }
@@ -289,7 +289,7 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
       const fresh = (f.relatedRefs ?? []).filter((r) => !repacked.has(r) && !protectedOwners.has(r) && !dropped.has(r));
       if (fresh.length < 2) continue;
       fresh.forEach((r) => repacked.add(r));
-      ops.push({ kind: 'repack', atlasRefs: fresh, targetMime: opts.targetMime, pot: true, allowRotation: false, padding: opts.padding, maxSize: opts.maxSize, ...extrudeField });
+      ops.push({ kind: 'repack', atlasRefs: fresh, targetMime: opts.targetMime, pot: true, allowRotation: true, padding: opts.padding, maxSize: opts.maxSize, ...extrudeField });
     }
   }
 
@@ -327,7 +327,7 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
       // owners are never repack targets (guard before the existing repacked check).
       if (protectedOwners.has(f.assetRef) || repacked.has(f.assetRef)) continue;
       repacked.add(f.assetRef);
-      ops.push({ kind: 'repack', atlasRefs: [f.assetRef], targetMime: opts.targetMime, pot: true, allowRotation: false, padding: opts.padding, maxSize: opts.maxSize, ...extrudeField });
+      ops.push({ kind: 'repack', atlasRefs: [f.assetRef], targetMime: opts.targetMime, pot: true, allowRotation: true, padding: opts.padding, maxSize: opts.maxSize, ...extrudeField });
     } else if (f.rule === 'dimensions-oversize' && f.scope !== 'folder') {
       const w = Number(f.params?.w ?? 0);
       const h = Number(f.params?.h ?? 0);
@@ -354,7 +354,7 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
       // ⇒ byte-identical to today. Folder findings have no single atlas target — skip them.
       if (f.scope === 'folder' || protectedOwners.has(f.assetRef) || repacked.has(f.assetRef)) continue;
       repacked.add(f.assetRef);
-      ops.push({ kind: 'repack', atlasRefs: [f.assetRef], targetMime: opts.targetMime, pot: true, allowRotation: false, padding: opts.padding, maxSize: opts.maxSize, ...extrudeField });
+      ops.push({ kind: 'repack', atlasRefs: [f.assetRef], targetMime: opts.targetMime, pot: true, allowRotation: true, padding: opts.padding, maxSize: opts.maxSize, ...extrudeField });
     } else if (f.rule === 'trim-margin' && opts.trimMargin !== false) {
       // round21 #0: a trim-margin atlas is usually FULLY packed (its untrimmed sprites — padding and all —
       // fill the sheet), so it triggers NO occupancy/wasted finding and therefore NO repack op above. Emit
@@ -369,7 +369,7 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
       // ⇒ byte-identical to today. Folder findings have no single atlas target — skip them.
       if (f.scope === 'folder' || protectedOwners.has(f.assetRef) || repacked.has(f.assetRef)) continue;
       repacked.add(f.assetRef);
-      ops.push({ kind: 'repack', atlasRefs: [f.assetRef], targetMime: opts.targetMime, pot: true, allowRotation: false, padding: opts.padding, maxSize: opts.maxSize, ...extrudeField });
+      ops.push({ kind: 'repack', atlasRefs: [f.assetRef], targetMime: opts.targetMime, pot: true, allowRotation: true, padding: opts.padding, maxSize: opts.maxSize, ...extrudeField });
     } else if (opts.aggressive && (f.rule === 'duplicate-exact' || f.rule === 'duplicate-similar')) {
       // Owner-aware drops already emitted in pass 0a when groups supplied; only exact dupes are
       // owner-modelled, so near-duplicates still use the legacy bare-drop path either way.

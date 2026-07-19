@@ -64,6 +64,8 @@ try {
   await sh('node', ['tools/verify/smoke-run.mjs'], { APP_URL });
   console.log('\ne2e: scenario 5 — PWA offline (service worker precache · offline diagnosis)');
   await sh('node', ['tools/verify/offline-run.mjs'], { APP_URL });
+  console.log('\ne2e: scenario 6 — rotation compose direction (rotate90 blit == true 90-CW rotation)');
+  await sh('node', ['tools/verify/rotate-compose-check.mjs'], { APP_URL });
   console.log('\ne2e: PASS');
 } catch (e) {
   console.error('\ne2e: FAIL —', e.message);
