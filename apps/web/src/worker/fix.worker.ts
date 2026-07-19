@@ -1493,6 +1493,22 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           c2d.restore();
           // Meshed/clip blit + extrude requested: NO bleed in v1 (no polygon-edge extrude). Surface honestly.
           if (extrude > 0) noteExtrudeSkip(blit);
+        } else if (blit.rotate90) {
+          // Rotation-packing v2: the packer placed this sprite rotated 90°, so the source region (sw×sh,
+          // read UN-rotated — from.rotated is false for an eligible group) is drawn rotated 90° CW into the
+          // destination box, which is the source w/h SWAPPED (to.w=sh, to.h=sw). TexturePacker/Pixi
+          // convention: on-page pixels = source rotated 90° CW; the loader rotates CCW to display, so a
+          // reader honoring rotated:true reconstructs the original. Origin at the box's top-right (its width
+          // is sh) then rotate(+π/2) (clockwise on the y-down canvas). PINNED by the compose+un-rotate
+          // identity e2e (fix-rotation-run.mjs) — never shipped on reasoning alone.
+          const sw = blit.from.rect.w;
+          const sh = blit.from.rect.h;
+          c2d.save();
+          c2d.translate(blit.to.x + sh, blit.to.y);
+          c2d.rotate(Math.PI / 2);
+          c2d.drawImage(bmp, blit.from.rect.x, blit.from.rect.y, sw, sh, 0, 0, sw, sh);
+          c2d.restore();
+          if (extrude > 0) noteExtrudeSkip(blit); // no rotated-edge extrude in v1 — honest no-op
         } else {
           c2d.drawImage(
             bmp,

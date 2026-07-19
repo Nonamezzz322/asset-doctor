@@ -16,49 +16,54 @@ const sprite = (name: string, w: number, h: number, x = 0, y = 0) => ({
   sourceSize: { w, h },
 });
 
-// A (64×20) fills a top strip ⇒ leaves a 64×44 free-rect; B (40×30) fits that TIGHTER rotated (short-side
-// leftover 4 vs 14), so best-short-side-fit rotates B.
+// A (100×60) + B (60×100): unrotated they only fit a 128×256 bin (B can't fit beside/below A in 128²), but
+// rotating B to 100×60 stacks both into a 128×128 bin (HALF the VRAM). So the measured gate uses the rotated
+// pack and B is emitted rotated.
 const twoSpriteAtlas: Atlas = {
   name: 'sheet.png',
   imageRef: 'sheet.png',
-  size: { w: 128, h: 128 },
-  sprites: [sprite('a', 64, 20), sprite('b', 40, 30, 0, 20)],
+  size: { w: 256, h: 256 },
+  sprites: [sprite('a', 100, 60), sprite('b', 60, 100, 100, 0)],
   source: { kind: 'texturepacker-hash' },
 };
 
-describe('rotation-packing v2 — repack emit geometry (slice 1)', () => {
-  it('rotates B to fit tighter and emits swapped frame + rotate90 + rotated (round-trips)', () => {
-    const res = repackAtlases([twoSpriteAtlas], { allowRotation: true, padding: 0, maxSize: 4096 });
-    const b = res.atlases.flatMap((a) => a.sprites).find((s) => s.name === 'b')!;
-    const bBlit = res.blits.find((bl) => bl.name === 'b')!;
+const totalVram = (r: ReturnType<typeof repackAtlases>): number => r.atlases.reduce((s, at) => s + at.size.w * at.size.h * 4, 0);
 
-    expect(b.rotated).toBe(true); // the packer rotated it
-    expect(res.rotatedFrames).toBeGreaterThanOrEqual(1);
-    // on-page frame stored AS PLACED (swapped vs source): frame.w == sourceSize.h, frame.h == sourceSize.w
-    expect(b.sourceSize).toEqual({ w: 40, h: 30 });
-    expect(b.frame.w).toBe(30);
-    expect(b.frame.h).toBe(40);
-    // the Blit rotates the source region into the destination box
-    expect(bBlit.rotate90).toBe(true);
-    expect(bBlit.from.rotated).toBe(false); // source region read UN-rotated (packer applies the 90°)
-    expect(bBlit.from.rect.w).toBe(40); // the un-rotated source frame
-    expect(bBlit.from.rect.h).toBe(30);
-    expect(bBlit.to.w).toBe(b.frame.w); // destination box == the emitted on-page frame
-    expect(bBlit.to.h).toBe(b.frame.h);
+describe('rotation-packing v2 — repack emit geometry (slice 1)', () => {
+  it('rotates a sprite into a smaller bin (measured VRAM win) and emits swapped frame + rotate90 (round-trips)', () => {
+    const res = repackAtlases([twoSpriteAtlas], { allowRotation: true, padding: 0, maxSize: 4096 });
+    const unrot = repackAtlases([twoSpriteAtlas], { allowRotation: false, padding: 0, maxSize: 4096 });
+
+    expect(res.rotatedFrames).toBeGreaterThanOrEqual(1); // rotation happened AND won the measured gate
+    expect(totalVram(res)).toBeLessThan(totalVram(unrot)); // the honesty gate: strictly smaller VRAM only
+
+    // Whichever sprite the packer rotated: its on-page frame is stored AS PLACED (swapped vs sourceSize), and
+    // its Blit rotates the un-rotated source region into the destination box.
+    const rot = res.atlases.flatMap((a) => a.sprites).find((s) => s.rotated)!;
+    expect(rot).toBeDefined();
+    expect(rot.frame.w).toBe(rot.sourceSize.h); // frame.w == sourceSize.h
+    expect(rot.frame.h).toBe(rot.sourceSize.w); // frame.h == sourceSize.w
+    const blit = res.blits.find((bl) => bl.name === rot.name)!;
+    expect(blit.rotate90).toBe(true);
+    expect(blit.from.rotated).toBe(false); // source region read UN-rotated (the compose applies the 90°)
+    expect(blit.from.rect.w).toBe(rot.sourceSize.w); // the un-rotated source frame
+    expect(blit.from.rect.h).toBe(rot.sourceSize.h);
+    expect(blit.to.w).toBe(rot.frame.w); // destination box == the emitted on-page frame
+    expect(blit.to.h).toBe(rot.frame.h);
 
     // Manifest round-trip: emit → parse → the placed frame recovers (w/h swapped), sourceSize un-rotated.
     const json = JSON.parse(emitTexturePackerJson(res.atlases[0]!)) as { frames: Record<string, { frame: { w: number; h: number }; rotated: boolean }> };
-    expect(json.frames.b!.rotated).toBe(true);
-    expect(json.frames.b!.frame.w).toBe(40); // emitted UN-rotated (source dims); loader swaps to on-page
-    expect(json.frames.b!.frame.h).toBe(30);
+    const jf = json.frames[rot.name]!;
+    expect(jf.rotated).toBe(true);
+    expect(jf.frame.w).toBe(rot.sourceSize.w); // emitted UN-rotated (source dims); loader swaps to on-page
+    expect(jf.frame.h).toBe(rot.sourceSize.h);
     const back = parseAtlasManifest(json, {});
     expect(back.ok).toBe(true);
     if (back.ok) {
-      const bp = back.atlas.sprites.find((s) => s.name === 'b')!;
+      const bp = back.atlas.sprites.find((s) => s.name === rot.name)!;
       expect(bp.rotated).toBe(true);
-      expect(bp.frame.w).toBe(30); // back to placed (swapped)
-      expect(bp.frame.h).toBe(40);
-      expect(bp.sourceSize).toEqual({ w: 40, h: 30 });
+      expect(bp.frame.w).toBe(rot.frame.w); // back to placed (swapped)
+      expect(bp.frame.h).toBe(rot.frame.h);
     }
   });
 

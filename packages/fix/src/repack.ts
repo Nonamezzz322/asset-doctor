@@ -4,7 +4,7 @@
 // repack is non-destructive (a sprite renders identically in-engine, just from a smaller sheet).
 
 import type { Atlas, Blit, Rect, RepackResult, Sprite, SpriteMesh, TrimRect } from '@asset-doctor/core';
-import { pack, type PackItem } from './pack';
+import { pack, type PackBin, type PackItem } from './pack';
 import type { MaskItem } from './mask';
 import type { RawMesh } from './mesh';
 import { nestMasks } from './polygon-pack';
@@ -301,7 +301,18 @@ export function repackAtlases(
   // always false ⇒ byte-identical). NB: `opts.allowRotation` is false on every production plan today, so the
   // packer never rotates until the compose lands + plan.ts opts in — this only makes the EMIT correct for it.
   const rotationEligible = opts.allowRotation && !sourceHasRotated && trimOf.size === 0;
-  const bins = pack(items, { allowRotation: rotationEligible, padding: opts.padding, maxSize: opts.maxSize, ...(opts.gutter ? { gutter: opts.gutter } : {}) });
+  const packOpts = { padding: opts.padding, maxSize: opts.maxSize, ...(opts.gutter ? { gutter: opts.gutter } : {}) };
+  // MEASURED rotation gate (honesty): pack UNrotated always; for an eligible group ALSO pack rotated and use
+  // the rotated bins ONLY when they are strictly smaller in Σ w·h·4 VRAM. So rotation is emitted (and the
+  // receipt's rotatedFrames > 0) ONLY when it produces a real, measured shrink — never a same-size rotate.
+  const binsUnrot = pack(items, { ...packOpts, allowRotation: false });
+  const sumVram = (bs: PackBin[]): number => bs.reduce((s, b) => s + vram(b.w, b.h), 0);
+  const bins = rotationEligible
+    ? ((): PackBin[] => {
+        const binsRot = pack(items, { ...packOpts, allowRotation: true });
+        return sumVram(binsRot) < sumVram(binsUnrot) ? binsRot : binsUnrot;
+      })()
+    : binsUnrot;
 
   const baseRef = atlases[0]?.imageRef ?? 'atlas.png';
   const format = atlases[0]?.format;
