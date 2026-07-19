@@ -1051,5 +1051,6 @@
   "find.loose-in-atlas.title": "{n} sprites sueltos también se incluyen dentro de un atlas",
   "find.loose-in-atlas.detail": "Estas imágenes sueltas son idénticas byte a byte (píxeles decodificados) a un frame ya empaquetado en un atlas, así que el mismo sprite se incluye dos veces: {refs}. Si el juego carga el atlas, cada copia suelta es redundante — eliminarla recupera sus bytes de archivo en disco y su VRAM de w·h·4 (un coste independiente del disco). Comparamos píxeles decodificados, no qué copia referencia tu juego.",
   "find.loose-in-atlas.fix": "Elimina las copias sueltas redundantes y referencia los frames del atlas, o exclúyelas del build si el atlas es la fuente autoritativa.",
-  "ext.static.header": "auditoría estática · {n}"
+  "ext.static.header": "auditoría estática · {n}",
+  "fix.rotatedFrames": {"$count":"n","one":"Se rotó {n} sprite 90° para un empaquetado más compacto — tu loader debe respetar los frames con rotated:true (Pixi / Phaser / TexturePacker lo hacen)","other":"Se rotaron {n} sprites 90° para un empaquetado más compacto — tu loader debe respetar los frames con rotated:true (Pixi / Phaser / TexturePacker lo hacen)"}
 }

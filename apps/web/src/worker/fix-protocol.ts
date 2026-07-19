@@ -444,6 +444,13 @@ export interface FixReceipt {
    *  VRAM win is ALREADY inside vramBytesBefore/After (exact, no estimate). Absent/0 ⇒ no frames were aliased
    *  (no frame-redundancy finding, or the toggle was off) ⇒ receipt byte-identical to today. */
   framesAliased?: number;
+  /** Rotation-packing v2: the count of sprites the fix rotated 90° across every repack this run to pack a
+   *  tighter sheet (only ever >0 when the measured gate found a strictly smaller VRAM bin). Each rotated
+   *  sprite ships `rotated:true` in the manifest, so a loader that honours rotated frames (Pixi / Phaser /
+   *  TexturePacker) reconstructs it exactly — the receipt surfaces the count so a CUSTOM loader author knows
+   *  to check. The VRAM/disk win is ALREADY inside vramBytesBefore/After. Absent/0 ⇒ nothing rotated ⇒
+   *  receipt byte-identical to today. */
+  rotatedFrames?: number;
   /** Cross-atlas frame dedup during MERGE (round22 #1): the count of byte-identical frames that spanned ≥2
    *  SOURCE sheets and were deduped onto ONE shared region when an atlas-MERGE folded them together — every
    *  duplicate name (across all merged sheets) still resolves in the merged manifest; the pixels are written

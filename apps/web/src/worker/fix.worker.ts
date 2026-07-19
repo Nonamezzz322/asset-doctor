@@ -1676,6 +1676,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
     let trimmedSpritesTotal = 0; // round20: Σ untrimmed sprites tightened to their opaque bounds across repacks
     let trimmedAreaTotal = 0; // round20: Σ MEASURED atlas px reclaimed by those trims (frame − bbox, exact)
     let framesAliasedTotal = 0; // round19: Σ byte-identical frames aliased onto a shared region across repacks
+    let rotatedFramesTotal = 0; // rotation-packing v2: Σ sprites the packer rotated 90° for a tighter pack
     // Cross-atlas frame dedup during MERGE (round22 #1): Σ byte-identical frames that spanned ≥2 SOURCE sheets
     // and were deduped onto one merged region (the headline cross-sheet figure) + the EXACT VRAM reclaimed by
     // those dedups (Σ RepackResult.vramReclaimedBytes — a real measured delta from the merge's actual bin) +
@@ -2129,6 +2130,7 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           // Frame-redundancy (round19): count + surface the byte-identical frames this repack aliased onto a
           // shared region (the smaller-sheet VRAM win is ALREADY inside vramSaved). 0/absent ⇒ today's string.
           framesAliasedTotal += r.aliasedFrames ?? 0;
+          rotatedFramesTotal += r.rotatedFrames ?? 0;
           // Trim-on-repack (round20): count + measure the untrimmed regions this repack tightened (the VRAM win
           // is ALREADY inside vramSaved). 0/absent ⇒ today's string + no receipt field.
           trimmedSpritesTotal += r.trimmedSprites ?? 0;
@@ -2486,6 +2488,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         // is never trimmed). 0/absent ⇒ no receipt field.
         trimmedSpritesTotal += r.trimmedSprites ?? 0;
         trimmedAreaTotal += r.trimmedAreaReclaimed ?? 0;
+        // Rotation-packing v2: count the sprites the packer rotated 90° for a tighter sheet (the VRAM/disk win
+        // is ALREADY inside vramSaved). 0/absent (no rotation win, or a polygon page selected) ⇒ no receipt field.
+        rotatedFramesTotal += r.rotatedFrames ?? 0;
         // HONESTY (invariant 5): a symmetric gutter CAN grow a sheet to the next POT ⇒ MORE VRAM. When the
         // rectangle path shipped WITH a gutter, surface the truthful delta (gutter pack footprint − the SAME
         // pack with no gutter). The growth is ALSO already inside vramSaved/vramBytes* — never claimed free.
@@ -4495,6 +4500,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       // shared region. The smaller-sheet VRAM win is ALREADY inside vramBytesBefore/After (exact). 0 ⇒ omitted
       // ⇒ receipt byte-identical to today (no frame-redundancy finding, or the toggle was off).
       ...(framesAliasedTotal > 0 ? { framesAliased: framesAliasedTotal } : {}),
+      // Rotation-packing v2 (additive/optional): Σ sprites the packer rotated 90° for a tighter sheet. The
+      // VRAM/disk win is ALREADY inside vramBytesBefore/After; the count is surfaced so a custom-loader author
+      // knows rotated:true frames ship. 0 ⇒ omitted ⇒ receipt byte-identical to today (no rotation win).
+      ...(rotatedFramesTotal > 0 ? { rotatedFrames: rotatedFramesTotal } : {}),
       // Cross-atlas frame dedup during MERGE (round22 #1, additive/optional): byte-identical frames that spanned
       // MULTIPLE source sheets, deduped onto ONE merged region. crossSheetFramesDeduped = the headline count
       // (subset of framesAliased); crossSheetVramReclaimedBytes = the EXACT measured VRAM delta (0 ⇒ disk-only,

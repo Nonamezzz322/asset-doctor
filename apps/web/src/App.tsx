@@ -2012,6 +2012,12 @@ function Receipt({ receipt, onRedownload }: { receipt: FixReceipt; onRedownload:
           {t('fix.trimmedOnRepack', { n: receipt.trimmedSprites ?? 0, area: receipt.trimmedAreaReclaimed ?? 0, before: receipt.vramBytesBefore, after: receipt.vramBytesAfter })}
         </p>
       ) : null}
+      {/* Rotation-packing v2: sprites the packer rotated 90° for a tighter sheet. The VRAM/disk win is EXACT
+          (already inside vramBytesBefore→After); the count is surfaced so a custom-loader author knows
+          rotated:true frames ship (Pixi/Phaser/TexturePacker restore them). Present ONLY when ≥1 rotated. */}
+      {(receipt.rotatedFrames ?? 0) > 0 ? (
+        <p className="font-mono text-[10px] text-ink-soft">{t('fix.rotatedFrames', { n: receipt.rotatedFrames ?? 0 })}</p>
+      ) : null}
       {/* Export-profile summary: variant files emitted (formats × resolutions × assets). DISK-only fan-out —
           the device loads ONE variant, so this is a count, never a saving (invariant 5). */}
       {receipt.exportProfile ? (
