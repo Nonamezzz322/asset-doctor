@@ -185,22 +185,30 @@ ctx.onmessage = async (e: MessageEvent<WorkerRequest>): Promise<void> => {
     // ── Dry-run repack sims (repack-opportunity) ─────────────────────────────────────────────────────
     // Run the REAL fix packer (pack.ts MaxRects) over each post-merge atlas's frames at frame extents —
     // the EXACT item derivation repackAtlases uses with no trim/alias inputs, with the FIX-DEFAULT options
-    // (settingsDefaults padding/maxSize; rotation false — the fix always packs unrotated, repack.ts v1),
-    // so the reported number is BY CONSTRUCTION what the plain fix repack produces. Pure synchronous rect
-    // math (no decode, no pixels); the maxSprites cap keeps the O(n²) pack bounded (skipped sheet ⇒ no
-    // sim ⇒ no finding — deps-gated like frameHashes).
+    // (settingsDefaults padding/maxSize), so the reported number is BY CONSTRUCTION what the plain fix
+    // repack produces. Pure synchronous rect math (no decode, no pixels); the maxSprites cap keeps the O(n²)
+    // pack bounded (skipped sheet ⇒ no sim ⇒ no finding — deps-gated like frameHashes).
+    // Rotation-packing v2: the fix now rotates, so the sim MIRRORS repackAtlases' measured rotation gate —
+    // pack unrotated, and for a rotation-eligible sheet (no pre-rotated source sprite; the sim never trims)
+    // ALSO pack rotated, using the rotated bins ONLY when strictly smaller in Σ w·h·4 VRAM. This keeps the
+    // dry-run a match for what the fix produces (rotation included) instead of the pre-v2 unrotated under-count;
+    // it stays a CONSERVATIVE FLOOR overall (the full fix's trim/dedup shrink further, still omitted here).
     const fixDefaults = settingsDefaults();
     const simCap = DEFAULT_THRESHOLDS.repackSim?.maxSprites ?? 2000;
+    const simVram = (bs: { w: number; h: number }[]): number => bs.reduce((s, b) => s + b.w * b.h * 4, 0);
     const repackSims: RepackSim[] = [];
     for (const a of merged) {
       if (a.kind !== 'atlas' || a.atlas.sprites.length < 2 || a.atlas.sprites.length > simCap) continue;
       // bmfont pages never enter the fix pipeline (its ingest parses spine/TP only) — the rule gates them
       // too; skipping here just saves the pack work.
       if (a.atlas.source.kind === 'bmfont') continue;
-      const bins = pack(
-        a.atlas.sprites.map((s, i) => ({ id: String(i), w: s.frame.w, h: s.frame.h })),
-        { padding: fixDefaults.padding, maxSize: fixDefaults.maxSize, allowRotation: false },
-      );
+      const items = a.atlas.sprites.map((s, i) => ({ id: String(i), w: s.frame.w, h: s.frame.h }));
+      const packOpts = { padding: fixDefaults.padding, maxSize: fixDefaults.maxSize };
+      let bins = pack(items, { ...packOpts, allowRotation: false });
+      if (a.atlas.sprites.every((s) => !s.rotated)) {
+        const binsRot = pack(items, { ...packOpts, allowRotation: true });
+        if (simVram(binsRot) < simVram(bins)) bins = binsRot;
+      }
       repackSims.push({
         assetRef: a.atlas.name,
         pages: bins.map((b) => ({ w: b.w, h: b.h })),
