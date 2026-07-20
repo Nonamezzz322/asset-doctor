@@ -51,3 +51,5 @@ export {
   REPORT_MIME,
 } from './report-export';
 export type { ReportFormat } from './report-export';
+export { biggestWins, hasWins } from './biggest-wins';
+export type { BiggestWins, WinRow } from './biggest-wins';

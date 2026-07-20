@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { AnalysisReport, Finding } from '@asset-doctor/core';
-import { biggestWins, hasWins } from './biggest-wins';
+import { biggestWins, hasWins } from '../src/biggest-wins';
 
 // Minimal finding factory — only the fields biggest-wins reads.
 const f = (id: string, opts: Partial<Finding> & { disk?: number; vram?: number } = {}): Finding => {

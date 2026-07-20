@@ -15,6 +15,7 @@
 import type { AnalysisReport, Finding, Severity } from '@asset-doctor/core';
 import { fmtBytes } from '@asset-doctor/analysis';
 import { toJSON } from './serialize';
+import { biggestWins, hasWins, type WinRow } from './biggest-wins';
 
 export type ReportFormat = 'json' | 'md' | 'csv' | 'html';
 export const REPORT_MIME: Record<ReportFormat, string> = {
@@ -59,6 +60,18 @@ export function reportToMarkdown(r: AnalysisReport, opts: { subject?: string } =
     '',
   );
   L.push('> ' + NOTE.replace('{naive}', fmtBytes(t.vramBytes)), '');
+  // "Biggest wins — start here": the SAME ranking the in-app panel shows (biggest-wins.ts), so a shared report
+  // names the same top reclaims. TWO separate single-unit lists (disk / VRAM), never summed (invariant 5); a
+  // finding appears only when its measured saving on that axis is > 0 (sparse excluded). No total. Omitted when
+  // no finding carries an estimate ⇒ the MD is byte-identical to before.
+  const w = biggestWins(r);
+  if (hasWins(w)) {
+    const mdList = (rows: WinRow[]): string[] =>
+      rows.map((row) => `- ${fmtBytes(row.bytes)} — ${escMd(row.assetRef)}${row.relatedCount > 0 ? ` (${row.relatedCount} files)` : ''}`);
+    L.push('## Biggest wins — start here', '');
+    if (w.disk.length > 0) L.push('**Reclaim the most disk:**', ...mdList(w.disk), '');
+    if (w.vram.length > 0) L.push('**Reclaim the most VRAM:**', ...mdList(w.vram), '');
+  }
   const fs = sortFindings(r.findings);
   if (fs.length === 0) {
     L.push('_No findings._');
@@ -144,6 +157,10 @@ td.num,th.num{font-family:ui-monospace,Menlo,Consolas,monospace;text-align:right
 td.asset{font-family:ui-monospace,Menlo,Consolas,monospace;word-break:break-all}
 .sev{font-weight:600;text-transform:uppercase;font-size:.78rem}
 .sev-crit{color:#E5484D}.sev-warn{color:#D98A00}.sev-ok{color:#1F9D63}.sev-info{color:#2B8FC9}
+.wins{background:#FFF;border:1px solid #DCE3EA;border-radius:6px;padding:.75rem 1rem;margin:1rem 0}
+.wins h2{font-size:1rem;margin:0 0 .5rem}.wins h3{font-size:.82rem;color:#566472;text-transform:uppercase;letter-spacing:.04em;margin:.6rem 0 .3rem}
+.wins ul{margin:0;padding-left:1.1rem}.wins li{margin:.15rem 0}
+.wins .num{font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:600;color:#0E8C8C}
 footer{color:#566472;font-size:.85rem;margin-top:1.25rem}`;
 
 export function reportToHTML(r: AnalysisReport, opts: { subject?: string } = {}): string {
@@ -155,6 +172,18 @@ export function reportToHTML(r: AnalysisReport, opts: { subject?: string } = {})
     `${r.assets.length} assets · disk ${escapeHtml(fmtBytes(t.diskBytes))} · ` +
     `VRAM(loaded) ${escapeHtml(fmtBytes(t.loadedVramBytes))} · draw-call floor ≥ ${floor}`;
   const note = escapeHtml(NOTE.replace('{naive}', fmtBytes(t.vramBytes))); // REUSE the existing NOTE
+  // "Biggest wins" section — SAME ranking as MD + the in-app panel (biggest-wins.ts). Two separate single-unit
+  // lists, never summed (invariant 5); every dynamic value routed through escapeHtml. Omitted when no estimates.
+  const w = biggestWins(r);
+  const winLi = (row: WinRow): string =>
+    `<li><span class="num">${escapeHtml(fmtBytes(row.bytes))}</span> — <span class="asset">${escapeHtml(row.assetRef)}</span>` +
+    `${row.relatedCount > 0 ? ` (${escapeHtml(row.relatedCount)} files)` : ''}</li>`;
+  const winsHtml = !hasWins(w)
+    ? ''
+    : `<section class="wins"><h2>Biggest wins — start here</h2>` +
+      (w.disk.length > 0 ? `<h3>Reclaim the most disk</h3><ul>${w.disk.map(winLi).join('')}</ul>` : '') +
+      (w.vram.length > 0 ? `<h3>Reclaim the most VRAM</h3><ul>${w.vram.map(winLi).join('')}</ul>` : '') +
+      `</section>`;
   const rows = fs
     .map((f) => {
       const d = f.estimate?.diskBytesSaved;
@@ -185,6 +214,7 @@ export function reportToHTML(r: AnalysisReport, opts: { subject?: string } = {})
     `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
     `<title>${titleText}</title>\n<style>${HTML_STYLE}</style>\n</head>\n<body>\n<main>\n` +
     `<h1>${titleText}</h1>\n<p class="summary">${summary}</p>\n<p class="note">${note}</p>\n` +
+    winsHtml +
     table +
     `\n<footer>Generated in-browser by Asset Doctor · ${fs.length} finding${fs.length === 1 ? '' : 's'}.</footer>\n` +
     `</main>\n</body>\n</html>\n`

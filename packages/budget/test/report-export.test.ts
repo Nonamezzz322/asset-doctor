@@ -127,7 +127,8 @@ describe('reportToMarkdown — findings table', () => {
     const r = makeReport({
       findings: [finding({ assetRef: 'meta.png', rule: 'strippable-metadata', estimate: { diskBytesSaved: 4096 } })],
     });
-    const row = reportToMarkdown(r).split('\n').find((l) => l.includes('meta.png'))!;
+    // The TABLE row (starts with '| ') — NOT the biggest-wins line (starts with '- '), which also names the asset.
+    const row = reportToMarkdown(r).split('\n').find((l) => l.startsWith('| ') && l.includes('meta.png'))!;
     expect(row).toContain(`| ${fmtBytes(4096)} |  |`); // disk filled, vram blank
   });
 
@@ -135,7 +136,8 @@ describe('reportToMarkdown — findings table', () => {
     const r = makeReport({
       findings: [finding({ assetRef: 'dup.png', rule: 'duplicate-exact', estimate: { vramBytesSaved: 16 * 1048576 } })],
     });
-    const row = reportToMarkdown(r).split('\n').find((l) => l.includes('dup.png'))!;
+    // The TABLE row (starts with '| ') — NOT the biggest-wins line, which also names the asset.
+    const row = reportToMarkdown(r).split('\n').find((l) => l.startsWith('| ') && l.includes('dup.png'))!;
     expect(row).toContain(`|  | ${fmtBytes(16 * 1048576)} |`); // disk blank, vram filled
   });
 
@@ -480,5 +482,82 @@ describe('reportToHTML — dispatch, filename, MIME', () => {
   it('maps html to text/html and produces a .html filename', () => {
     expect(REPORT_MIME.html).toBe('text/html');
     expect(reportFilename('My Game', 'html')).toBe('my-game-audit.html');
+  });
+});
+
+describe('Biggest wins — start here (MD + HTML prioritization section)', () => {
+  // A report with a mix: a big VRAM-only win, a big disk win, a folder win spanning assets, a disclosure.
+  const winReport = () =>
+    makeReport({
+      findings: [
+        finding({ assetRef: 'atlas.png', rule: 'repack-opportunity', severity: 'warn', estimate: { vramBytesSaved: 3_000_000 } }),
+        finding({ assetRef: 'dup.png', rule: 'duplicate-exact', severity: 'warn', estimate: { diskBytesSaved: 1_200_000, vramBytesSaved: 500_000 } }),
+        finding({ id: 'folder:should-atlas', assetRef: 'ui/a.png', rule: 'should-atlas', scope: 'folder', relatedRefs: ['ui/a.png', 'ui/b.png', 'ui/c.png'], estimate: { vramBytesSaved: 4_000_000 } }),
+        finding({ assetRef: 'flat.png', rule: 'binary-alpha', severity: 'info' }), // disclosure, NO estimate
+      ],
+    });
+
+  it('MD ranks disk + VRAM wins in SEPARATE single-unit lists (never summed, invariant 5)', () => {
+    const md = reportToMarkdown(winReport());
+    expect(md).toContain('## Biggest wins — start here');
+    expect(md).toContain('**Reclaim the most disk:**');
+    expect(md).toContain('**Reclaim the most VRAM:**');
+    // VRAM list ordered by measured reclaim DESC: should-atlas 4MB > repack 3MB > dup 0.5MB.
+    const vramIdx = md.indexOf('**Reclaim the most VRAM:**');
+    const a = md.indexOf('ui/a.png', vramIdx);
+    const b = md.indexOf('atlas.png', vramIdx);
+    expect(a).toBeGreaterThan(-1);
+    expect(a).toBeLessThan(b);
+    // the folder win shows its span count; the disclosure (no estimate) never appears in the WINS section
+    // (it still appears in the full findings table below — scope the exclusion to the section).
+    expect(md).toContain('(3 files)');
+    const winsMd = md.slice(md.indexOf('## Biggest wins'), md.indexOf('| Severity'));
+    expect(winsMd).not.toContain('flat.png');
+    // no fabricated total anywhere (the summed 7.5 MB must not appear).
+    expect(md).not.toContain('7.2 MB');
+  });
+
+  it('MD disk list carries the disk win with its own measured bytes', () => {
+    const md = reportToMarkdown(winReport());
+    const diskIdx = md.indexOf('**Reclaim the most disk:**');
+    const vramIdx = md.indexOf('**Reclaim the most VRAM:**');
+    expect(md.indexOf('dup.png', diskIdx)).toBeGreaterThan(-1);
+    expect(md.indexOf('dup.png', diskIdx)).toBeLessThan(vramIdx); // in the disk block, above the VRAM block
+    expect(md).toContain(fmtBytes(1_200_000));
+  });
+
+  it('MD omits the section entirely when NO finding carries an estimate (byte-identical to before)', () => {
+    const md = reportToMarkdown(makeReport({ findings: [finding({ assetRef: 'a.png', rule: 'binary-alpha' })] }));
+    expect(md).not.toContain('Biggest wins');
+  });
+
+  it('HTML renders the wins section with escaped values and the same ranking', () => {
+    const html = reportToHTML(winReport());
+    expect(html).toContain('<section class="wins">');
+    expect(html).toContain('Biggest wins — start here');
+    expect(html).toContain('Reclaim the most disk');
+    expect(html).toContain('Reclaim the most VRAM');
+    expect(html).toContain('(3 files)');
+    // disclosure excluded from the WINS section (it still appears in the findings table below).
+    const winsHtml = html.slice(html.indexOf('<section class="wins">'), html.indexOf('</section>'));
+    expect(winsHtml).not.toContain('flat.png');
+  });
+
+  it('HTML escapes a hostile assetRef in the wins list (no raw < or unescaped quote)', () => {
+    const r = makeReport({ findings: [finding({ assetRef: '<img src=x>.png', rule: 'duplicate-exact', estimate: { diskBytesSaved: 1000 } })] });
+    const html = reportToHTML(r);
+    expect(html).toContain('&lt;img src=x&gt;.png');
+    expect(html).not.toContain('<img src=x>.png');
+  });
+
+  it('HTML omits the section when there are no estimate-bearing findings', () => {
+    const html = reportToHTML(makeReport({ findings: [finding({ assetRef: 'a.png', rule: 'binary-alpha' })] }));
+    expect(html).not.toContain('class="wins"');
+  });
+
+  it('JSON is UNCHANGED by the wins section (byte-identical to audit --json — contract)', () => {
+    const r = winReport();
+    expect(JSON.parse(reportToJSON(r))).toEqual(toJSON(r));
+    expect(reportToJSON(r)).not.toContain('Biggest wins');
   });
 });
