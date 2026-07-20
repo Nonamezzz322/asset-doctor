@@ -2121,9 +2121,11 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           if (gutter > 0)
             extrudeVramDelta +=
               r.vramBytesAfter -
+              // The no-gutter baseline MUST match the main pack's rotation too (op.allowRotation), else the
+              // delta would fold a rotation difference into the gutter cost and the readout would lie (inv 5).
               repackAtlases(
                 [atlas],
-                { allowRotation: false, padding: op.padding, maxSize: op.maxSize, ...trimOpt },
+                { allowRotation: op.allowRotation, padding: op.padding, maxSize: op.maxSize, ...trimOpt },
                 aliasMaps,
               ).vramBytesAfter;
           if (tieringOn) tierTransformed.add(ref); // repacked → tier loop surfaces an honest skip (§7 v1 scope)
@@ -2230,10 +2232,12 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
             emitMesh: true,
           });
           // The rectangle fallback owns the gutter (only it composes with extrude); the polygon nester never does.
+          // Rotation-packing v2: the rect fallback honors the op's allowRotation (measured gate inside), so a
+          // rotated rect can legitimately beat the polygon nest (polygonWins compares the two honestly).
           const rect = repackAtlases(
             group,
             {
-              allowRotation: false,
+              allowRotation: op.allowRotation,
               padding: op.padding,
               maxSize: op.maxSize,
               ...(gutter ? { gutter } : {}),
@@ -2257,7 +2261,12 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           r = repackAtlases(
             group,
             {
-              allowRotation: false,
+              // Rotation-packing v2: honor the plan op's allowRotation (true on repack ops). repackAtlases only
+              // ROTATES behind its own measured twice-pack VRAM gate (strictly-smaller Σw·h·4), so this is a
+              // no-op unless rotation genuinely shrinks the sheet — and the rotated compose is proven end-to-end
+              // (e2e scenario 8: composed rotated sprite == the forward-rotated source). Was hardcoded false,
+              // which left v2 inert in production despite the plan enabling it (integration gap).
+              allowRotation: op.allowRotation,
               padding: op.padding,
               maxSize: op.maxSize,
               ...(gutter ? { gutter } : {}),

@@ -68,6 +68,8 @@ try {
   await sh('node', ['tools/verify/rotate-compose-check.mjs'], { APP_URL });
   console.log('\ne2e: scenario 7 — fix output pixel-identity (composed sprites == source, verbatim path)');
   await sh('node', ['tools/verify/fix-run.mjs'], { APP_URL });
+  console.log('\ne2e: scenario 8 — fix ACTIVE rotation compose (composed rotated sprite == forward-rotated source)');
+  await sh('node', ['tools/verify/fix-rotate-run.mjs'], { APP_URL });
   console.log('\ne2e: PASS');
 } catch (e) {
   console.error('\ne2e: FAIL —', e.message);

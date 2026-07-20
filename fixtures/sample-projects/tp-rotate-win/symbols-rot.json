@@ -1,0 +1,53 @@
+{
+  "frames": {
+    "A.png": {
+      "frame": {
+        "x": 0,
+        "y": 0,
+        "w": 100,
+        "h": 60
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 100,
+        "h": 60
+      },
+      "sourceSize": {
+        "w": 100,
+        "h": 60
+      }
+    },
+    "B.png": {
+      "frame": {
+        "x": 110,
+        "y": 0,
+        "w": 60,
+        "h": 100
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 60,
+        "h": 100
+      },
+      "sourceSize": {
+        "w": 60,
+        "h": 100
+      }
+    }
+  },
+  "meta": {
+    "image": "symbols-rot.png",
+    "format": "RGBA8888",
+    "size": {
+      "w": 256,
+      "h": 256
+    },
+    "scale": "1"
+  }
+}
