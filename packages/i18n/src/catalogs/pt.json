@@ -1052,5 +1052,9 @@
   "find.loose-in-atlas.detail": "Estas imagens avulsas são idênticas byte a byte (pixels decodificados) a um frame já empacotado em um atlas, então o mesmo sprite embarca duas vezes: {refs}. Se o jogo carrega o atlas, cada cópia avulsa é redundante — removê-la recupera seus bytes de arquivo em disco e sua VRAM de w·h·4 (um custo separado do disco). Comparamos os pixels decodificados, não qual cópia o seu jogo referencia.",
   "find.loose-in-atlas.fix": "Remova as cópias avulsas redundantes e referencie os frames do atlas, ou exclua-as do build se o atlas for a fonte autoritativa.",
   "ext.static.header": "auditoria estática · {n}",
-  "fix.rotatedFrames": {"$count":"n","one":"Girou {n} sprite em 90° para um empacotamento mais compacto — seu loader precisa respeitar frames rotated:true (Pixi / Phaser / TexturePacker respeitam)","other":"Girou {n} sprites em 90° para um empacotamento mais compacto — seu loader precisa respeitar frames rotated:true (Pixi / Phaser / TexturePacker respeitam)"}
+  "fix.rotatedFrames": {"$count":"n","one":"Girou {n} sprite em 90° para um empacotamento mais compacto — seu loader precisa respeitar frames rotated:true (Pixi / Phaser / TexturePacker respeitam)","other":"Girou {n} sprites em 90° para um empacotamento mais compacto — seu loader precisa respeitar frames rotated:true (Pixi / Phaser / TexturePacker respeitam)"},
+  "wins.title": "Por onde começar — os maiores ganhos",
+  "wins.disk": "Recupere o máximo de disco",
+  "wins.vram": "Recupere o máximo de VRAM",
+  "wins.span": {"$count":"n","one":"{n} ficheiro","other":"{n} ficheiros"}
 }

@@ -69,6 +69,10 @@ const appSrc =
   // nowhere else; without scanning it a renamed recommend.pack.* key would silently render a raw dotted key.
   comp('PrimaryRecommendation.tsx') +
   '\n' +
+  // BiggestWins.tsx owns the wins.* keys (title/disk/vram/span) — App.tsx only MOUNTS the panel, never names
+  // those keys — so it must be scanned or a renamed wins.* key would silently render a raw dotted key.
+  comp('BiggestWins.tsx') +
+  '\n' +
   // ledger-empty.ts owns the triage.empty.* card keys + reuses triage.showClean (the t() literals live in the
   // PURE module's emptyLedgerCard switch, not in TriageLedger.tsx), so it must be scanned or a renamed
   // empty-card key would silently render a raw dotted key. skipped-chip.ts likewise owns report.skippedChip*.

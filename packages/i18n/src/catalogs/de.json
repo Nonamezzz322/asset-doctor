@@ -1048,5 +1048,9 @@
   "find.loose-in-atlas.detail": "Diese losen Bilder sind Byte-identisch (dekodierte Pixel) zu einem Frame, der bereits in einem Atlas gepackt ist, sodass dasselbe Sprite doppelt ausgeliefert wird: {refs}. Wenn das Spiel den Atlas lädt, ist jede lose Kopie redundant — sie zu entfernen gibt ihre Datei-Bytes auf der Disk und ihr w·h·4 VRAM zurück (ein von der Disk getrennter Kostenpunkt). Wir vergleichen dekodierte Pixel, nicht welche Kopie dein Spiel referenziert.",
   "find.loose-in-atlas.fix": "Entferne die redundanten losen Kopien und referenziere die Atlas-Frames, oder schließe sie vom Build aus, wenn der Atlas maßgeblich ist.",
   "ext.static.header": "statisches Audit · {n}",
-  "fix.rotatedFrames": {"$count":"n","one":"{n} Sprite für dichtere Packung um 90° gedreht — dein Loader muss rotated:true-Frames berücksichtigen (Pixi / Phaser / TexturePacker tun das)","other":"{n} Sprites für dichtere Packung um 90° gedreht — dein Loader muss rotated:true-Frames berücksichtigen (Pixi / Phaser / TexturePacker tun das)"}
+  "fix.rotatedFrames": {"$count":"n","one":"{n} Sprite für dichtere Packung um 90° gedreht — dein Loader muss rotated:true-Frames berücksichtigen (Pixi / Phaser / TexturePacker tun das)","other":"{n} Sprites für dichtere Packung um 90° gedreht — dein Loader muss rotated:true-Frames berücksichtigen (Pixi / Phaser / TexturePacker tun das)"},
+  "wins.title": "Wo anfangen — die größten Einsparungen",
+  "wins.disk": "Am meisten Speicherplatz zurückgewinnen",
+  "wins.vram": "Am meisten VRAM zurückgewinnen",
+  "wins.span": {"$count":"n","one":"{n} Datei","other":"{n} Dateien"}
 }

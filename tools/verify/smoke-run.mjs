@@ -57,6 +57,25 @@ try {
   const body1 = await page.evaluate(() => document.body.innerText);
   ok('demo → diagnosis renders (demo-project header)', /demo-project/i.test(body1));
   ok('demo → a crit finding surfaced (stale-manifest sheet)', /\bcrit\b/i.test(body1));
+  // biggest-wins panel: renders on a REAL diagnosis (the demo has disk + VRAM estimate-bearing findings) and a
+  // row click JUMPS the film to that asset (onSelect sets the same selection state onRowClick does).
+  ok('demo → biggest-wins panel renders', /the biggest wins/i.test(body1));
+  const winAsset = await page.evaluate(() => {
+    const h = document.getElementById('ad-wins-h');
+    const panel = h && h.closest('section');
+    const btn = panel && panel.querySelector('ul button');
+    if (!btn) return null;
+    const asset = btn.querySelectorAll('span')[1]?.textContent ?? ''; // [0]=dot, [1]=assetRef
+    btn.click();
+    return asset;
+  });
+  ok('demo → a biggest-win row is present + clickable', typeof winAsset === 'string' && winAsset.length > 0);
+  await page.waitForFunction(
+    (asset) => [...document.querySelectorAll('span.truncate.text-film-soft')].some((e) => e.textContent === asset),
+    { timeout: 10000, polling: 200 },
+    winAsset,
+  );
+  ok('demo → clicking a biggest-win jumps the film to that asset', true); // waitForFunction throws on timeout
   await page.screenshot({ path: join(OUT, 'smoke-demo.png'), fullPage: true });
   await new Promise((r) => setTimeout(r, 500)); // let the history snapshot persist before the reload
 

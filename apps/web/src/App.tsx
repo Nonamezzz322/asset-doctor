@@ -43,6 +43,8 @@ import { VerdictBar } from './components/VerdictBar';
 import { TriageLedger } from './components/TriageLedger';
 import { PrimaryRecommendation } from './components/PrimaryRecommendation';
 import { CabinetIssueDetail } from './components/CabinetIssueDetail';
+import { BiggestWins } from './components/BiggestWins';
+import { biggestWins, hasWins } from './lib/biggest-wins';
 import { cabinetDetailFinding } from './lib/cabinet-detail';
 import { useDebounced } from './lib/useDebounced';
 import { buildIndex, countCandidates, defaultSelectOpts, DEFAULT_SEVERITIES, DEFAULT_SORT, foldableFindingIds, isAssetAxis, looseRecommendation, selectRows, typeHiddenCount, type LedgerRow, type SelectOpts, type SortKey } from './lib/triage';
@@ -323,6 +325,10 @@ export function App() {
   // presence + its verbatim `n`; the ledger/tally/VerdictBar are untouched (invariant 3). The collapse that
   // also consumes this signal lands in task C.
   const rec = useMemo(() => (report ? looseRecommendation(report) : null), [report]);
+  // Impact-first "biggest wins": the findings that reclaim the most, ranked from their own MEASURED estimates
+  // (disk + VRAM as two independent single-unit lists — biggest-wins.ts). Rendered only when hasWins ⇒ a
+  // report with no estimate-bearing finding leaves the results DOM byte-identical to before.
+  const wins = useMemo(() => (report ? biggestWins(report) : null), [report]);
   // problemsOnly is forced off whenever "show clean" is on, so the synthesized `ok` rows can surface
   // (honest hiding). showClean also drives includeClean — analysis emits no ok finding, so clean assets
   // only become rows when selectRows synthesizes them. Toggling now changes the row set by exactly N clean.
@@ -696,6 +702,19 @@ export function App() {
               skippedCount={report.unparsed?.length ?? 0}
               onSkippedJump={jumpToUnparsed}
             />
+            {/* Impact-first "biggest wins" (design: instant "с чего начать") — ranks the measured reclaims so
+                the user starts with the largest, without needing to change the ledger sort. Selecting a row sets
+                the SAME selection state onRowClick does (asset drives the film, finding drives the overlay /
+                cabinet detail). Absent when no finding carries an estimate ⇒ DOM-identical to before. */}
+            {wins && report.assets.length > 0 && hasWins(wins) ? (
+              <BiggestWins
+                wins={wins}
+                onSelect={(assetRef, id) => {
+                  setSelectedAsset(assetRef);
+                  setSelectedFinding(id);
+                }}
+              />
+            ) : null}
             {report.assets.length === 0 && index.rows.length === 0 ? (
               <p className="font-mono text-sm text-ink-soft">{t('report.noAssets')}</p>
             ) : (

@@ -1052,5 +1052,9 @@
   "find.loose-in-atlas.detail": "Ces images libres sont identiques octet pour octet (pixels décodés) à une frame déjà packée dans un atlas, donc le même sprite est livré deux fois : {refs}. Si le jeu charge l'atlas, chaque copie libre est redondante — la supprimer récupère ses octets de fichier sur le disque et sa VRAM w·h·4 (un coût distinct de celui du disque). Nous comparons les pixels décodés, pas la copie que votre jeu référence.",
   "find.loose-in-atlas.fix": "Supprimez les copies libres redondantes et référencez les frames de l'atlas, ou excluez-les du build si l'atlas fait autorité.",
   "ext.static.header": "audit statique · {n}",
-  "fix.rotatedFrames": {"$count":"n","one":"{n} sprite pivoté de 90° pour un packing plus serré — votre loader doit gérer les frames rotated:true (Pixi / Phaser / TexturePacker le font)","other":"{n} sprites pivotés de 90° pour un packing plus serré — votre loader doit gérer les frames rotated:true (Pixi / Phaser / TexturePacker le font)"}
+  "fix.rotatedFrames": {"$count":"n","one":"{n} sprite pivoté de 90° pour un packing plus serré — votre loader doit gérer les frames rotated:true (Pixi / Phaser / TexturePacker le font)","other":"{n} sprites pivotés de 90° pour un packing plus serré — votre loader doit gérer les frames rotated:true (Pixi / Phaser / TexturePacker le font)"},
+  "wins.title": "Par où commencer — les plus gros gains",
+  "wins.disk": "Récupérez le plus d'espace disque",
+  "wins.vram": "Récupérez le plus de VRAM",
+  "wins.span": {"$count":"n","one":"{n} fichier","other":"{n} fichiers"}
 }

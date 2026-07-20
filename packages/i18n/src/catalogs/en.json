@@ -1028,5 +1028,9 @@
   "find.loose-in-atlas.detail": "These loose images are byte-identical (decoded pixels) to a frame already packed in an atlas, so the same sprite ships twice: {refs}. If the game loads the atlas, each loose copy is redundant — dropping it reclaims its file bytes on disk and its w·h·4 VRAM (a separate cost from disk). We match decoded pixels, not which copy your game references.",
   "find.loose-in-atlas.fix": "Drop the redundant loose copies and reference the atlas frames, or exclude them from the build if the atlas is authoritative.",
   "ext.static.header": "static audit · {n}",
-  "fix.rotatedFrames": {"$count":"n","one":"Rotated {n} sprite 90° for a tighter pack — your loader must honour rotated:true frames (Pixi / Phaser / TexturePacker do)","other":"Rotated {n} sprites 90° for a tighter pack — your loader must honour rotated:true frames (Pixi / Phaser / TexturePacker do)"}
+  "fix.rotatedFrames": {"$count":"n","one":"Rotated {n} sprite 90° for a tighter pack — your loader must honour rotated:true frames (Pixi / Phaser / TexturePacker do)","other":"Rotated {n} sprites 90° for a tighter pack — your loader must honour rotated:true frames (Pixi / Phaser / TexturePacker do)"},
+  "wins.title": "Where to start — the biggest wins",
+  "wins.disk": "Reclaim the most disk",
+  "wins.vram": "Reclaim the most VRAM",
+  "wins.span": {"$count":"n","one":"{n} file","other":"{n} files"}
 }
