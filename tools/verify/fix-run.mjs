@@ -93,7 +93,73 @@ try {
   const sheetInZip = Object.keys(entries).some((n) => n.endsWith(sheetRef));
   console.log('SHEET', sheetRef, '· in zip', sheetInZip);
 
-  const ok = newArea < 512 * 512 && frameNames.length === 5 && inBounds && sheetInZip;
+  // ── PIXEL-IDENTITY of the composed output vs the source (end-to-end compose correctness) ──
+  // For every sprite that is untrimmed + unrotated in BOTH the source and the output manifest, the output
+  // sheet region [outFrame] must equal the source sheet region [srcFrame] pixel-for-pixel — the verbatim
+  // drawImage copy carried through the WHOLE fix (crop → compose → lossless-WebP encode). This is the first
+  // end-to-end proof that the paid fix does not corrupt pixels. The transform paths (rotation, trim inset)
+  // are covered by rotate-compose-check.mjs + the fix unit tests, so this deliberately compares only the
+  // verbatim-copy sprites (no fragile un-rotate / un-trim math in the harness itself).
+  const srcPng = readFileSync(join(FIX, 'symbols.png'));
+  const srcManifest = JSON.parse(readFileSync(join(FIX, 'symbols.json'), 'utf8'));
+  const outSheetName = Object.keys(entries).find((n) => n.endsWith(sheetRef));
+  const pixel = await page.evaluate(
+    async (srcB64, srcMani, outB64, outMani) => {
+      const toBmp = async (b64, type) => {
+        const bin = atob(b64);
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        return createImageBitmap(new Blob([arr], { type }));
+      };
+      const imgData = (bmp) => {
+        const c = new OffscreenCanvas(bmp.width, bmp.height);
+        const x = c.getContext('2d');
+        x.drawImage(bmp, 0, 0);
+        return x.getImageData(0, 0, bmp.width, bmp.height);
+      };
+      const region = (img, f) => {
+        const out = new Uint8ClampedArray(f.w * f.h * 4);
+        for (let y = 0; y < f.h; y++)
+          for (let x = 0; x < f.w; x++) {
+            const si = ((f.y + y) * img.width + (f.x + x)) * 4;
+            const di = (y * f.w + x) * 4;
+            for (let k = 0; k < 4; k++) out[di + k] = img.data[si + k];
+          }
+        return out;
+      };
+      const s = imgData(await toBmp(srcB64, 'image/png'));
+      const o = imgData(await toBmp(outB64, 'image/webp'));
+      let compared = 0;
+      let mismatchSprites = 0;
+      let firstBad = null;
+      for (const name of Object.keys(outMani.frames)) {
+        const of = outMani.frames[name];
+        const sf = srcMani.frames[name];
+        if (!sf) continue;
+        if (of.rotated || sf.rotated || of.trimmed || sf.trimmed) continue; // verbatim-copy sprites only
+        if (of.frame.w !== sf.frame.w || of.frame.h !== sf.frame.h) continue;
+        const op = region(o, of.frame);
+        const sp = region(s, sf.frame);
+        compared++;
+        for (let i = 0; i < op.length; i++) {
+          if (Math.abs(op[i] - sp[i]) > 1) {
+            mismatchSprites++;
+            if (!firstBad) firstBad = { name, i, got: op[i], exp: sp[i] };
+            break;
+          }
+        }
+      }
+      return { compared, mismatchSprites, firstBad };
+    },
+    srcPng.toString('base64'),
+    srcManifest,
+    entries[outSheetName].toString('base64'),
+    manifest,
+  );
+  console.log('PIXEL_IDENTITY compared', pixel.compared, 'verbatim sprites · mismatches', pixel.mismatchSprites, pixel.firstBad ? JSON.stringify(pixel.firstBad) : '');
+  const pixelOk = pixel.compared >= 1 && pixel.mismatchSprites === 0;
+
+  const ok = newArea < 512 * 512 && frameNames.length === 5 && inBounds && sheetInZip && pixelOk;
   console.log(ok ? 'FIX_E2E PASS' : 'FIX_E2E FAIL');
   if (!ok) process.exitCode = 1;
 } finally {

@@ -66,6 +66,8 @@ try {
   await sh('node', ['tools/verify/offline-run.mjs'], { APP_URL });
   console.log('\ne2e: scenario 6 — rotation compose direction (rotate90 blit == true 90-CW rotation)');
   await sh('node', ['tools/verify/rotate-compose-check.mjs'], { APP_URL });
+  console.log('\ne2e: scenario 7 — fix output pixel-identity (composed sprites == source, verbatim path)');
+  await sh('node', ['tools/verify/fix-run.mjs'], { APP_URL });
   console.log('\ne2e: PASS');
 } catch (e) {
   console.error('\ne2e: FAIL —', e.message);
