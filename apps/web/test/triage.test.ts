@@ -148,6 +148,26 @@ describe('buildIndex', () => {
     expect(byId.get('withEst')?.metric.wastedDisk).toBe(5000);
     expect(byId.get('noEst')?.metric.wastedDisk).toBeUndefined(); // sparse, NOT 0
   });
+
+  it('reads vramWin straight off estimate.vramBytesSaved on EVERY finding (folder findings too — finding-axis)', () => {
+    const idx = buildIndex(
+      report(
+        [asset('a.png')],
+        [
+          finding('assetWin', 'a.png', 'warn', { estimate: { vramBytesSaved: 1_048_576 } }),
+          // A folder finding (repack/should-atlas) carries a VRAM reclaim but NO per-asset footprint — it must
+          // still get vramWin (unlike the asset-axis `vram` footprint, which is undefined for folder rows).
+          finding('folderWin', 'a.png', 'warn', { scope: 'folder', relatedRefs: ['a.png', 'b.png'], estimate: { vramBytesSaved: 4_000_000 } }),
+          finding('noEst', 'a.png', 'info'),
+        ],
+      ),
+    );
+    const byId = new Map(idx.rows.map((r) => [r.id, r]));
+    expect(byId.get('assetWin')?.metric.vramWin).toBe(1_048_576);
+    expect(byId.get('folderWin')?.metric.vramWin).toBe(4_000_000);
+    expect(byId.get('folderWin')?.metric.vram).toBeUndefined(); // footprint stays folder-undefined
+    expect(byId.get('noEst')?.metric.vramWin).toBeUndefined(); // sparse, NOT 0
+  });
 });
 
 // ── selectRows: filtering ───────────────────────────────────────────────────────────────────────────
@@ -223,6 +243,23 @@ describe('selectRows ordering & determinism', () => {
     );
     // big > small, then the estimate-less row LAST — never sorted as if it were 0 (which would beat small).
     expect(ids(selectRows(idx, opts({ sort: 'wastedDisk' })))).toEqual(['big', 'small', 'none']);
+  });
+
+  it('vramWin sort: FINDING-axis, largest VRAM reclaim first, SPARSE estimates sort LAST (— not a fake 0)', () => {
+    const idx = buildIndex(
+      report(
+        [asset('a.png'), asset('b.png'), asset('c.png')],
+        [
+          finding('small', 'a.png', 'warn', { estimate: { vramBytesSaved: 512 * 1024 } }),
+          finding('none', 'b.png', 'warn'), // no VRAM win ⇒ sorts last, never as a fake 0
+          // a VRAM-only folder win (repack-opportunity precedent) is rankable — finding-axis, not collapsed away.
+          finding('big', 'c.png', 'warn', { scope: 'folder', relatedRefs: ['c.png'], estimate: { vramBytesSaved: 3 * 1024 * 1024 } }),
+        ],
+      ),
+    );
+    expect(ids(selectRows(idx, opts({ sort: 'vramWin' })))).toEqual(['big', 'small', 'none']);
+    // vramWin is FINDING-axis (like wastedDisk) — NOT collapsed per asset.
+    expect(isAssetAxis('vramWin')).toBe(false);
   });
 });
 

@@ -1078,5 +1078,6 @@
   "wins.title": "С чего начать — наибольший выигрыш",
   "wins.disk": "Больше всего срезать с диска",
   "wins.vram": "Больше всего срезать VRAM",
-  "wins.span": {"$count":"n","one":"{n} файл","few":"{n} файла","many":"{n} файлов","other":"{n} файла"}
+  "wins.span": {"$count":"n","one":"{n} файл","few":"{n} файла","many":"{n} файлов","other":"{n} файла"},
+  "triage.sort.vramWin": "Потери в VRAM"
 }

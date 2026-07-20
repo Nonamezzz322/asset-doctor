@@ -1038,5 +1038,6 @@
   "wins.title": "从哪里入手 — 收益最大的优化",
   "wins.disk": "回收最多磁盘空间",
   "wins.vram": "回收最多 VRAM",
-  "wins.span": {"$count":"n","one":"{n} 个文件","other":"{n} 个文件"}
+  "wins.span": {"$count":"n","one":"{n} 个文件","other":"{n} 个文件"},
+  "triage.sort.vramWin": "浪费的 VRAM"
 }

@@ -140,7 +140,7 @@ const SPINE_GRAN_SUFFIXES = ['bones', 'regionAttachments', 'meshes', 'paths', 'b
 // spine.kind.${s.kind} (SpineViewer.tsx slot badges) — mirrors the AttachmentKind union in lib/spine-inspect.ts.
 const SPINE_KIND_SUFFIXES = ['mesh', 'region', 'clip', 'bbox', 'path', 'point', 'none', 'other'];
 const TRIAGE_FILTER_SUFFIXES = ['crit', 'warn', 'info'];
-const TRIAGE_SORT_SUFFIXES = ['severity', 'wastedDisk', 'vram', 'occupancy'];
+const TRIAGE_SORT_SUFFIXES = ['severity', 'wastedDisk', 'vramWin', 'vram', 'occupancy'];
 const TRIAGE_SCOPE_SUFFIXES = ['asset', 'folder'];
 // fix.op.${kind} (App.tsx:2210,2287) — OP_KIND_ORDER is the live verb set (op-manifest.ts); the UI adds an
 // 'other' bucket for the null/unknown group (App.tsx:2287 `g.kind ?? 'other'`). Imported ⇒ cannot drift.

@@ -20,6 +20,11 @@ export interface MetricBadge {
 /** The row's scope/metric badge. Under an asset-axis sort surface that asset metric; otherwise prefer the
  *  row's measured wasted-disk. Sparse ⇒ '—'. null ⇒ no badge (e.g. a synthesized clean row). */
 export function metricBadge(row: LedgerRow, sort: SortKey): MetricBadge | null {
+  if (sort === 'vramWin') {
+    // The measured VRAM RECLAIM (a green saving, like DISK) — distinct from the neutral VRAM FOOTPRINT badge
+    // below. Sparse ⇒ '—' (a finding with no VRAM win sorts last under this key and reads honestly blank).
+    return { label: 'VRAM', value: row.metric.vramWin === undefined ? '—' : fmtBytes(row.metric.vramWin), role: 'saving' };
+  }
   if (sort === 'vram') {
     return { label: 'VRAM', value: row.metric.vram === undefined ? '—' : fmtBytes(row.metric.vram), role: 'measure' };
   }

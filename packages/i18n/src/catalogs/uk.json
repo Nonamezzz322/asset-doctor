@@ -1156,5 +1156,6 @@
   "wins.title": "З чого почати — найбільша вигода",
   "wins.disk": "Звільнити найбільше диска",
   "wins.vram": "Звільнити найбільше VRAM",
-  "wins.span": {"$count":"n","one":"{n} файл","few":"{n} файли","many":"{n} файлів","other":"{n} файла"}
+  "wins.span": {"$count":"n","one":"{n} файл","few":"{n} файли","many":"{n} файлів","other":"{n} файла"},
+  "triage.sort.vramWin": "Втрати в VRAM"
 }

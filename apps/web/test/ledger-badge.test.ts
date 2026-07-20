@@ -29,9 +29,17 @@ describe('metricBadge — labelled, role-tagged, sparse ⇒ dash', () => {
   it('severity sort, no wasted-disk ⇒ null (no badge)', () => {
     expect(metricBadge(row({}), 'severity' as SortKey)).toBeNull();
   });
-  it('the ONLY saving role is DISK; VRAM/OCC are never green', () => {
-    expect(metricBadge(row({ vram: 1 }), 'vram' as SortKey)!.role).toBe('measure');
+  it('vramWin sort ⇒ VRAM RECLAIM saving (green, like DISK — the measured win, not the footprint)', () => {
+    const b = metricBadge(row({ vramWin: 3 * 1024 * 1024 }), 'vramWin' as SortKey);
+    expect(b).toEqual({ label: 'VRAM', value: fmtBytes(3 * 1024 * 1024), role: 'saving' });
+  });
+  it("vramWin sort, absent ⇒ '—' (never invented); still a saving role", () => {
+    expect(metricBadge(row({ vramWin: undefined }), 'vramWin' as SortKey)).toEqual({ label: 'VRAM', value: '—', role: 'saving' });
+  });
+  it('FOOTPRINT metrics (VRAM declared / OCC) are measurements; RECLAIMS (DISK / VRAM-win) are savings', () => {
+    expect(metricBadge(row({ vram: 1 }), 'vram' as SortKey)!.role).toBe('measure'); // declared footprint
     expect(metricBadge(row({ occupancy: 0.5 }), 'occupancy' as SortKey)!.role).toBe('measure');
     expect(metricBadge(row({ wastedDisk: 1 }), 'severity' as SortKey)!.role).toBe('saving');
+    expect(metricBadge(row({ vramWin: 1 }), 'vramWin' as SortKey)!.role).toBe('saving'); // measured reclaim
   });
 });

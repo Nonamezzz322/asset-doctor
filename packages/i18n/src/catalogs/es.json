@@ -1056,5 +1056,6 @@
   "wins.title": "Por dónde empezar — las mayores mejoras",
   "wins.disk": "Recupera más disco",
   "wins.vram": "Recupera más VRAM",
-  "wins.span": {"$count":"n","one":"{n} archivo","other":"{n} archivos"}
+  "wins.span": {"$count":"n","one":"{n} archivo","other":"{n} archivos"},
+  "triage.sort.vramWin": "VRAM desperdiciada"
 }

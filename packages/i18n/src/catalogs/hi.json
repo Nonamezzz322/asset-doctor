@@ -1052,5 +1052,6 @@
   "wins.title": "कहाँ से शुरू करें — सबसे बड़ी बचत",
   "wins.disk": "सबसे ज़्यादा disk बचाएँ",
   "wins.vram": "सबसे ज़्यादा VRAM बचाएँ",
-  "wins.span": {"$count":"n","one":"{n} फ़ाइल","other":"{n} फ़ाइलें"}
+  "wins.span": {"$count":"n","one":"{n} फ़ाइल","other":"{n} फ़ाइलें"},
+  "triage.sort.vramWin": "बर्बाद VRAM"
 }

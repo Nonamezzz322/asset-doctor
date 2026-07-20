@@ -33,7 +33,7 @@ import { metricBadge } from '../lib/ledger-badge';
 
 const ROW_H = 52; // fixed item height (rows AND headers) — the windower's slice math depends on it.
 
-const SORT_KEYS: SortKey[] = ['severity', 'wastedDisk', 'vram', 'occupancy'];
+const SORT_KEYS: SortKey[] = ['severity', 'wastedDisk', 'vramWin', 'vram', 'occupancy'];
 
 // Per-cause empty-ledger card border (UX-4). ok = the clean-bill agreement with the VerdictBar all-clear dot;
 // teal = the filter-interaction color (severity reset); neutral line = a plain search miss. Only existing

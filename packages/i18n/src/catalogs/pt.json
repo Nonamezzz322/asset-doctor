@@ -1056,5 +1056,6 @@
   "wins.title": "Por onde começar — os maiores ganhos",
   "wins.disk": "Recupere o máximo de disco",
   "wins.vram": "Recupere o máximo de VRAM",
-  "wins.span": {"$count":"n","one":"{n} ficheiro","other":"{n} ficheiros"}
+  "wins.span": {"$count":"n","one":"{n} ficheiro","other":"{n} ficheiros"},
+  "triage.sort.vramWin": "VRAM desperdiçada"
 }

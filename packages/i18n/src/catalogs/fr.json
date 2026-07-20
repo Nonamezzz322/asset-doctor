@@ -1056,5 +1056,6 @@
   "wins.title": "Par où commencer — les plus gros gains",
   "wins.disk": "Récupérez le plus d'espace disque",
   "wins.vram": "Récupérez le plus de VRAM",
-  "wins.span": {"$count":"n","one":"{n} fichier","other":"{n} fichiers"}
+  "wins.span": {"$count":"n","one":"{n} fichier","other":"{n} fichiers"},
+  "triage.sort.vramWin": "VRAM gaspillée"
 }

@@ -1052,5 +1052,6 @@
   "wins.title": "Wo anfangen — die größten Einsparungen",
   "wins.disk": "Am meisten Speicherplatz zurückgewinnen",
   "wins.vram": "Am meisten VRAM zurückgewinnen",
-  "wins.span": {"$count":"n","one":"{n} Datei","other":"{n} Dateien"}
+  "wins.span": {"$count":"n","one":"{n} Datei","other":"{n} Dateien"},
+  "triage.sort.vramWin": "Verschwendetes VRAM"
 }

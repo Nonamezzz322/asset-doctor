@@ -1032,5 +1032,6 @@
   "wins.title": "Where to start — the biggest wins",
   "wins.disk": "Reclaim the most disk",
   "wins.vram": "Reclaim the most VRAM",
-  "wins.span": {"$count":"n","one":"{n} file","other":"{n} files"}
+  "wins.span": {"$count":"n","one":"{n} file","other":"{n} files"},
+  "triage.sort.vramWin": "Wasted VRAM"
 }

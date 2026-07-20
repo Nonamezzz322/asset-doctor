@@ -20,11 +20,13 @@
 
 import type { AnalysisReport, AssetMetrics, Rule, Severity } from '@asset-doctor/core';
 
-export type SortKey = 'severity' | 'wastedDisk' | 'vram' | 'occupancy';
+export type SortKey = 'severity' | 'wastedDisk' | 'vramWin' | 'vram' | 'occupancy';
 
-/** severity + wastedDisk are FINDING-axis (a row per finding); vram + occupancy are ASSET-axis (a row
- *  per asset — its worst finding shown) because a per-asset metric repeated across that asset's findings
- *  would list the same number many times (round11 correction #3). */
+/** severity + wastedDisk + vramWin are FINDING-axis (a row per finding — each carries its OWN measured
+ *  estimate); vram + occupancy are ASSET-axis (a row per asset — its worst finding shown) because a
+ *  per-asset FOOTPRINT metric repeated across that asset's findings would list the same number many times
+ *  (round11 correction #3). NOTE the pair: `wastedDisk`/`vramWin` are RECLAIMS (finding.estimate saving,
+ *  finding-axis); `vram` is the asset's declared FOOTPRINT (asset-axis) — never conflate reclaim vs footprint. */
 const ASSET_AXIS: ReadonlySet<SortKey> = new Set<SortKey>(['vram', 'occupancy']);
 export const isAssetAxis = (sort: SortKey): boolean => ASSET_AXIS.has(sort);
 
@@ -55,9 +57,12 @@ export interface LedgerRow {
   relatedRefs: string[];
   /** Pre-resolved sort metrics — NONE invented; read straight off existing fields. All sparse ⇒ "—". */
   metric: {
-    /** finding.estimate?.diskBytesSaved — a MEASURED saving. Sparse (undefined ≠ 0). */
+    /** finding.estimate?.diskBytesSaved — a MEASURED disk saving. Sparse (undefined ≠ 0). */
     wastedDisk?: number;
-    /** ASSET-scope only: the asset's DECLARED vramBytes. undefined for folder rows (correction #2). */
+    /** finding.estimate?.vramBytesSaved — a MEASURED VRAM RECLAIM (the win, NOT the footprint below).
+     *  Finding-axis, so it lives on every finding's row, sparse (undefined ≠ 0). Drives the `vramWin` sort. */
+    vramWin?: number;
+    /** ASSET-scope only: the asset's DECLARED vramBytes FOOTPRINT. undefined for folder rows (correction #2). */
     vram?: number;
     /** ASSET-scope, atlas only: the asset's occupancy (0..1). undefined otherwise. */
     occupancy?: number;
@@ -163,6 +168,9 @@ export function buildIndex(report: AnalysisReport): TriageIndex {
       relatedRefs: scope === 'folder' ? f.relatedRefs ?? [] : [],
       metric: {
         wastedDisk: f.estimate?.diskBytesSaved,
+        // The VRAM RECLAIM the finding measured — finding-axis (rides every finding, folder or asset), so a
+        // VRAM-only win (repack-opportunity / upscaled-source) is rankable without a per-asset footprint.
+        vramWin: f.estimate?.vramBytesSaved,
         // Per-asset footprint metrics are ONLY meaningful for an asset-scoped finding (correction #2).
         vram: scope === 'asset' ? m?.vramBytes : undefined,
         occupancy: scope === 'asset' ? m?.occupancy : undefined,
@@ -219,6 +227,10 @@ function sortVal(row: LedgerRow, sort: SortKey): SortVal {
       return { v: SEV_RANK[row.severity], missing: false, desc: false };
     case 'wastedDisk': {
       const w = row.metric.wastedDisk;
+      return { v: w ?? 0, missing: w === undefined, desc: true };
+    }
+    case 'vramWin': {
+      const w = row.metric.vramWin;
       return { v: w ?? 0, missing: w === undefined, desc: true };
     }
     case 'vram': {

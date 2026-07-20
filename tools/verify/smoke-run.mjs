@@ -76,6 +76,20 @@ try {
     winAsset,
   );
   ok('demo → clicking a biggest-win jumps the film to that asset', true); // waitForFunction throws on timeout
+  // vramWin sort: switching to it surfaces a green VRAM RECLAIM badge (a measured saving, role=saving ⇒
+  // text-cta-text) on a real ledger row — proving the new finding-axis sort + badge work end-to-end.
+  await page.select('select[aria-label="Sort"]', 'vramWin');
+  await page.waitForFunction(
+    () =>
+      [...document.querySelectorAll('.ad-label-sm')]
+        .filter((e) => e.textContent === 'VRAM')
+        .some((lbl) => {
+          const val = lbl.parentElement?.querySelector('.text-cta-text');
+          return !!val && /\d/.test(val.textContent ?? '') && /(B|KB|MB|GB)/.test(val.textContent ?? '');
+        }),
+    { timeout: 10000, polling: 200 },
+  );
+  ok('demo → vramWin sort surfaces a measured VRAM reclaim badge (green saving)', true);
   await page.screenshot({ path: join(OUT, 'smoke-demo.png'), fullPage: true });
   await new Promise((r) => setTimeout(r, 500)); // let the history snapshot persist before the reload
 

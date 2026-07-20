@@ -1056,5 +1056,6 @@
   "wins.title": "Da dove partire — i maggiori guadagni",
   "wins.disk": "Recupera più spazio su disco",
   "wins.vram": "Recupera più VRAM",
-  "wins.span": {"$count":"n","one":"{n} file","other":"{n} file"}
+  "wins.span": {"$count":"n","one":"{n} file","other":"{n} file"},
+  "triage.sort.vramWin": "VRAM sprecata"
 }
