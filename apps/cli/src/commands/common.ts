@@ -13,6 +13,10 @@ export interface Flags {
   json: boolean;
   /** `audit` only: emit the self-contained HTML report (mutually exclusive with --json; --out writes it). */
   html: boolean;
+  /** `audit` only: emit the Markdown report (PR-body friendly; the shared serializer, carries biggest-wins). */
+  md: boolean;
+  /** `audit` only: emit RFC4180 CSV rows (one per finding, raw integer bytes). */
+  csv: boolean;
   sarif?: string;
   out?: string;
   summary?: string;

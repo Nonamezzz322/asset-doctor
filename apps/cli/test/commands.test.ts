@@ -22,7 +22,7 @@ function fakeIO(): { io: IO; out: string[]; err: string[] } {
   const err: string[] = [];
   return { io: { cwd: REPO, out: (s) => out.push(s), err: (s) => err.push(s), color: false }, out, err };
 }
-const FLAGS: Flags = { json: false, html: false, annotate: false, warnOnly: false, failOn: 'error', quiet: true, force: false };
+const FLAGS: Flags = { json: false, html: false, md: false, csv: false, annotate: false, warnOnly: false, failOn: 'error', quiet: true, force: false };
 const cfgFile = (name: string, body: object): string => {
   const p = join(tmp, name);
   writeFileSync(p, JSON.stringify(body));
@@ -55,6 +55,46 @@ describe('command exit codes', () => {
   it('audit --json --html is a fail-closed config conflict (exit 2 via ConfigError)', async () => {
     const { io } = fakeIO();
     await expect(auditCmd(`${FIX}/tp-array-oversize`, { ...FLAGS, json: true, html: true }, io)).rejects.toThrow(
+      /mutually exclusive/,
+    );
+  });
+
+  it('audit --md emits the Markdown report (with the biggest-wins section) to stdout; --out writes it', async () => {
+    const { io, out } = fakeIO();
+    // folder-waste has estimate-bearing findings (byte-dup + npot) ⇒ the wins section is present.
+    expect(await auditCmd(`${FIX}/folder-waste`, { ...FLAGS, md: true }, io)).toBe(0);
+    const md = out.join('');
+    expect(md).toContain('# Asset Doctor'); // SAME serializer the web export button uses (zero drift)
+    expect(md).toContain('## Biggest wins — start here');
+    expect(md).toContain('| Severity | Scope | Asset |'); // the findings table below the wins section
+    // --out writes the MD artifact (the CI / PR-body use), nothing printed
+    const file = join(tmp, 'report.md');
+    const { io: io2, out: out2 } = fakeIO();
+    expect(await auditCmd(`${FIX}/folder-waste`, { ...FLAGS, md: true, out: file }, io2)).toBe(0);
+    expect(out2.join('')).toBe('');
+    expect(readFileSync(file, 'utf8')).toContain('## Biggest wins — start here');
+  });
+
+  it('audit --csv emits RFC4180 finding rows (raw integer bytes) to stdout; --out writes it', async () => {
+    const { io, out } = fakeIO();
+    expect(await auditCmd(`${FIX}/folder-waste`, { ...FLAGS, csv: true }, io)).toBe(0);
+    const csv = out.join('');
+    expect(csv).toContain('severity,scope,asset,relatedRefs,title,detail,fix,diskSavedBytes,vramSavedBytes,occupancyPct');
+    expect(csv).toContain('\r\n'); // RFC4180 CRLF
+    const file = join(tmp, 'report.csv');
+    const { io: io2, out: out2 } = fakeIO();
+    expect(await auditCmd(`${FIX}/folder-waste`, { ...FLAGS, csv: true, out: file }, io2)).toBe(0);
+    expect(out2.join('')).toBe('');
+    expect(readFileSync(file, 'utf8')).toContain('severity,scope,asset');
+  });
+
+  it('audit --md --csv (and any two formats) are a fail-closed config conflict (exit 2)', async () => {
+    const { io } = fakeIO();
+    await expect(auditCmd(`${FIX}/folder-waste`, { ...FLAGS, md: true, csv: true }, io)).rejects.toThrow(
+      /mutually exclusive/,
+    );
+    const { io: io2 } = fakeIO();
+    await expect(auditCmd(`${FIX}/folder-waste`, { ...FLAGS, json: true, md: true }, io2)).rejects.toThrow(
       /mutually exclusive/,
     );
   });
