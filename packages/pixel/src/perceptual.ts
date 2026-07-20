@@ -169,16 +169,23 @@ export const SOLID_FULL_TOL = 8;
 export function isSolidFullRes(rgba: Uint8ClampedArray | Uint8Array | number[], tol = SOLID_FULL_TOL): boolean {
   const n = Math.floor(rgba.length / 4);
   if (n === 0) return false;
-  const mn = [255, 255, 255, 255];
-  const mx = [0, 0, 0, 0];
-  for (let p = 0; p < n; p++) {
-    const b = p * 4;
-    for (let c = 0; c < 4; c++) {
-      const v = rgba[b + c] ?? 0;
-      if (v < mn[c]!) mn[c] = v;
-      if (v > mx[c]!) mx[c] = v;
-      if (mx[c]! - mn[c]! > tol) return false; // a real feature — bail immediately
-    }
+  // Scalar-unrolled per-channel min/max — behaviorally identical to the 4-element-array form but keeps the
+  // eight accumulators in registers (no per-read bounds check / `mn[c]` load-store), a hot full-res path
+  // that runs on every solid CANDIDATE (large flat plates are common). Same early-out: bail the instant any
+  // channel's spread exceeds `tol`. Reads still `?? 0` to preserve the sparse-`number[]` contract.
+  let mnR = 255, mnG = 255, mnB = 255, mnA = 255;
+  let mxR = 0, mxG = 0, mxB = 0, mxA = 0;
+  for (let b = 0; b < n * 4; b += 4) {
+    const r = rgba[b] ?? 0, g = rgba[b + 1] ?? 0, bl = rgba[b + 2] ?? 0, a = rgba[b + 3] ?? 0;
+    if (r < mnR) mnR = r;
+    if (r > mxR) mxR = r;
+    if (g < mnG) mnG = g;
+    if (g > mxG) mxG = g;
+    if (bl < mnB) mnB = bl;
+    if (bl > mxB) mxB = bl;
+    if (a < mnA) mnA = a;
+    if (a > mxA) mxA = a;
+    if (mxR - mnR > tol || mxG - mnG > tol || mxB - mnB > tol || mxA - mnA > tol) return false;
   }
   return true;
 }
