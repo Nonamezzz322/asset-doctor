@@ -116,3 +116,48 @@ describe('pack — gutter>0 is deterministic and may grow the bin (honest VRAM c
     expect(area(bled)).toBeGreaterThan(area(tight)); // and in this case it genuinely grows
   });
 });
+
+// Property-based hardening of the ONE load-bearing correctness invariant of the paid product: two placed
+// BODIES must never share interior area (an overlap corrupts both sprites when composed), every placement
+// stays inside its POT bin, and every item is placed exactly once. Existing overlap-free tests use FIXED
+// item sets; this stresses random sizes across BOTH the rotation and gutter paths (where the free-space split
+// swaps the footprint) — the audit verified the split is correct, this guards it against regression.
+describe('pack — property: overlap-free + in-bin + no-loss across random item sets (rotation & gutter)', () => {
+  // Deterministic LCG so any failure reproduces exactly (no Math.random flakiness across CI runs).
+  const lcg = (seed: number): (() => number) => {
+    let s = seed >>> 0;
+    return () => (s = (s * 1664525 + 1013904223) >>> 0) / 0x100000000;
+  };
+
+  for (const allowRotation of [false, true]) {
+    for (const gutter of [0, 3]) {
+      it(`rotation=${allowRotation}, gutter=${gutter}: 150 random packs — bodies non-overlapping, in-bin, none lost/duped`, () => {
+        const rnd = lcg((0x9e3779b1 ^ (allowRotation ? 0x55 : 0) ^ (gutter << 8)) >>> 0);
+        for (let trial = 0; trial < 150; trial++) {
+          const n = 2 + Math.floor(rnd() * 30);
+          const items: PackItem[] = Array.from({ length: n }, (_, i) => ({ id: `s${i}`, w: 1 + Math.floor(rnd() * 300), h: 1 + Math.floor(rnd() * 300) }));
+          const bins = pack(items, { allowRotation, padding: 1, maxSize: 4096, ...(gutter ? { gutter } : {}) });
+          const placedIds: string[] = [];
+          for (const bin of bins) {
+            // p.w/p.h are the ORIGINAL item dims (pack.ts) — the ON-PAGE body swaps them when placed rotated.
+            const bodies = bin.placements.map((p) => ({ id: p.id, x: p.x, y: p.y, w: p.rotated ? p.h : p.w, h: p.rotated ? p.w : p.h }));
+            for (const r of bodies) {
+              placedIds.push(r.id);
+              expect(r.x, `${r.id} x`).toBeGreaterThanOrEqual(0);
+              expect(r.y, `${r.id} y`).toBeGreaterThanOrEqual(0);
+              expect(r.x + r.w, `${r.id} right vs bin.w`).toBeLessThanOrEqual(bin.w);
+              expect(r.y + r.h, `${r.id} bottom vs bin.h`).toBeLessThanOrEqual(bin.h);
+            }
+            for (let i = 0; i < bodies.length; i++) {
+              for (let j = i + 1; j < bodies.length; j++) {
+                expect(overlaps(bodies[i]!, bodies[j]!), `trial ${trial}: ${bodies[i]!.id} overlaps ${bodies[j]!.id}`).toBe(false);
+              }
+            }
+          }
+          // Every item placed exactly once (all fit ≤301px under maxSize 4096 ⇒ no legitimate spill-drop).
+          expect(placedIds.slice().sort()).toEqual(items.map((it) => it.id).sort());
+        }
+      });
+    }
+  }
+});
