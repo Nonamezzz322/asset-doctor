@@ -1,11 +1,14 @@
-// Rotation-packing v2 — slice 1 (PURE emit geometry). The packer may place an eligible sprite rotated 90°;
-// repackAtlases must emit the on-page frame AS PLACED (w/h swapped), rotated:true, a rotate90 Blit, and a
-// manifest that round-trips. Trim × rotation are mutually exclusive; a pre-rotated source blocks rotation.
-// NB: production plans pass allowRotation:false, so this exercises the not-yet-enabled path (compose lands next).
+// Rotation-packing v2 (PURE emit geometry). The packer may place an eligible sprite rotated 90°; repackAtlases
+// must emit the on-page frame AS PLACED (w/h swapped), rotated:true, a rotate90 Blit, and a manifest that
+// round-trips. Trim × rotation are mutually exclusive; a pre-rotated source blocks rotation; byte-identical
+// aliases inherit a rotated representative's rect. NB: rotation is LIVE on production repack plans (the compose
+// is pixel-verified by tools/verify/rotate-compose-check.mjs, e2e scenario 6); the measured VRAM gate keeps it
+// emitting only on a real shrink.
 import { describe, it, expect } from 'vitest';
 import type { Atlas } from '@asset-doctor/core';
 import { parseAtlasManifest } from '@asset-doctor/parsers';
 import { repackAtlases } from '../src/repack';
+import { buildAtlasAliasMap } from '../src/alias';
 import { emitTexturePackerJson } from '../src/manifest';
 
 const sprite = (name: string, w: number, h: number, x = 0, y = 0) => ({
@@ -82,5 +85,49 @@ describe('rotation-packing v2 — repack emit geometry (slice 1)', () => {
     const res = repackAtlases([withRotatedSource], { allowRotation: true, padding: 0, maxSize: 4096 });
     expect(res.rotatedFrames).toBeUndefined(); // no NEW packer rotation — group blocked by the pre-rotated source
     expect(res.blits.every((bl) => bl.rotate90 === false)).toBe(true);
+  });
+
+  it('a byte-identical ALIAS inherits its representative rect exactly, including a packer-rotation', () => {
+    // The proven rotation pair (a 100×60 + b 60×100 ⇒ one rotates to stack into 128²), but each is now a
+    // 2-frame byte-identical cluster ⇒ a0 rep + a1 alias, b0 rep + b1 alias (only the reps pack; aliases land
+    // on the rep's FINAL rect). Whichever rep the packer rotates, its alias must inherit the swapped rect +
+    // rotated:true, and each cluster writes ONE shared blit. This is the alias × packer-rotation path (repack.ts).
+    const atlas: Atlas = {
+      name: 'sheet.png',
+      imageRef: 'sheet.png',
+      size: { w: 256, h: 256 },
+      sprites: [
+        sprite('a0', 100, 60, 0, 0),
+        sprite('a1', 100, 60, 0, 60), // byte-identical to a0, distinct rect
+        sprite('b0', 60, 100, 0, 120),
+        sprite('b1', 60, 100, 60, 120), // byte-identical to b0, distinct rect
+      ],
+      source: { kind: 'texturepacker-hash' },
+    };
+    const aliasMap = buildAtlasAliasMap(atlas.sprites, ['ha', 'ha', 'hb', 'hb'], 2);
+    expect(aliasMap.aliasedFrames).toBe(2); // a1 onto a0, b1 onto b0
+    const res = repackAtlases([atlas], { allowRotation: true, padding: 0, maxSize: 4096 }, new Map([['sheet.png', aliasMap]]));
+    expect(res.rotatedFrames).toBeGreaterThanOrEqual(1); // the gate won ⇒ a representative was rotated
+
+    const out = res.atlases.flatMap((at) => at.sprites);
+    const byName = (n: string) => out.find((s) => s.name === n)!;
+    // Each alias mirrors its representative EXACTLY — same placed rect, same rotation flag (never a broken
+    // half-rotated frame where the alias kept the rep's rect but not its rotation, or vice versa).
+    for (const [rep, alias] of [['a0', 'a1'], ['b0', 'b1']] as const) {
+      expect(byName(alias).frame).toEqual(byName(rep).frame);
+      expect(byName(alias).rotated).toBe(byName(rep).rotated);
+      expect(byName(alias).sourceSize).toEqual(byName(rep).sourceSize);
+    }
+    // The rotated pair specifically: the rep's frame is its sourceSize swapped, and its alias rides along.
+    const rotatedRep = [byName('a0'), byName('b0')].find((s) => s.rotated)!;
+    expect(rotatedRep).toBeDefined();
+    expect(rotatedRep.frame.w).toBe(rotatedRep.sourceSize.h);
+    expect(rotatedRep.frame.h).toBe(rotatedRep.sourceSize.w);
+    const rotatedAlias = byName(rotatedRep.name === 'a0' ? 'a1' : 'b1');
+    expect(rotatedAlias.rotated).toBe(true);
+    expect(rotatedAlias.frame).toEqual(rotatedRep.frame);
+    // Pixels written ONCE per cluster — the rep's blit; neither alias carries its own blit.
+    expect(res.blits.filter((bl) => bl.name === 'a0' || bl.name === 'a1')).toHaveLength(1);
+    expect(res.blits.filter((bl) => bl.name === 'b0' || bl.name === 'b1')).toHaveLength(1);
   });
 });
