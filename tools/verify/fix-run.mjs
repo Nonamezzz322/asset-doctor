@@ -94,12 +94,13 @@ try {
   console.log('SHEET', sheetRef, '· in zip', sheetInZip);
 
   // ── PIXEL-IDENTITY of the composed output vs the source (end-to-end compose correctness) ──
-  // For every sprite that is untrimmed + unrotated in BOTH the source and the output manifest, the output
-  // sheet region [outFrame] must equal the source sheet region [srcFrame] pixel-for-pixel — the verbatim
-  // drawImage copy carried through the WHOLE fix (crop → compose → lossless-WebP encode). This is the first
-  // end-to-end proof that the paid fix does not corrupt pixels. The transform paths (rotation, trim inset)
-  // are covered by rotate-compose-check.mjs + the fix unit tests, so this deliberately compares only the
-  // verbatim-copy sprites (no fragile un-rotate / un-trim math in the harness itself).
+  // For every sprite whose rotated/trimmed REPRESENTATION the fix preserved (same flags in both manifests),
+  // the output sheet region [outFrame] must equal the source sheet region [srcFrame] pixel-for-pixel — the
+  // verbatim drawImage copy carried through the WHOLE fix (crop → compose → lossless-WebP encode). Because the
+  // on-page pixels are the SAME orientation/trim in both, a direct region compare needs NO un-rotate / un-trim
+  // math in the harness (which would be bug-prone) yet still covers the trimmed + rotated sprites' compose.
+  // A sprite the fix RE-transforms (flags differ) is skipped here — its transform is covered by
+  // rotate-compose-check.mjs + the fix unit tests. This is the end-to-end proof the paid fix keeps pixels.
   const srcPng = readFileSync(join(FIX, 'symbols.png'));
   const srcManifest = JSON.parse(readFileSync(join(FIX, 'symbols.json'), 'utf8'));
   const outSheetName = Object.keys(entries).find((n) => n.endsWith(sheetRef));
@@ -136,7 +137,9 @@ try {
         const of = outMani.frames[name];
         const sf = srcMani.frames[name];
         if (!sf) continue;
-        if (of.rotated || sf.rotated || of.trimmed || sf.trimmed) continue; // verbatim-copy sprites only
+        // Only when the fix PRESERVED the sprite's representation ⇒ the on-page pixels are a verbatim copy
+        // (a re-transformed sprite has legitimately different on-page pixels — skip, covered elsewhere).
+        if (!!of.rotated !== !!sf.rotated || !!of.trimmed !== !!sf.trimmed) continue;
         if (of.frame.w !== sf.frame.w || of.frame.h !== sf.frame.h) continue;
         const op = region(o, of.frame);
         const sp = region(s, sf.frame);
