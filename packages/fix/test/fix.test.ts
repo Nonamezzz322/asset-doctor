@@ -914,6 +914,16 @@ describe('planFix — pack pass (packGroups)', () => {
     expect(p[0]!.group.regions.map((r) => r.ref)).toEqual(['icons/a.png', 'icons/b.png']);
   });
 
+  it('packTrim toggle controls the pack op trim (was INERT — hardcoded trim:true — so turning it off did nothing)', () => {
+    const groups = [staticGroup('icons', [['icons/a.png', 'a'], ['icons/b.png', 'b']])];
+    const refs = ['icons/a.png', 'icons/b.png'];
+    const trimOf = (packTrim?: boolean) =>
+      packs(planFix(reportOf(refs), { ...base, aggressive: false, ...(packTrim === undefined ? {} : { packTrim }) }, undefined, groups))[0]!.trim;
+    expect(trimOf(false)).toBe(false); // off ⇒ pack the full untrimmed footprint (the fix now honors it)
+    expect(trimOf(true)).toBe(true);
+    expect(trimOf(undefined)).toBe(true); // absent ⇒ default true ⇒ byte-identical to before
+  });
+
   it('a ref with BOTH should-atlas and format → exactly ONE pack op and ZERO transcode ops', () => {
     const groups = [staticGroup('icons', [['icons/a.png', 'a'], ['icons/b.png', 'b']])];
     const plan = planFix(reportOf(['icons/a.png', 'icons/b.png']), { ...base, aggressive: false }, undefined, groups);

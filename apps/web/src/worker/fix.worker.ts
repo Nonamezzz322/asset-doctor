@@ -630,6 +630,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         // trim itself is worker-side (buildTrimArrays → repackAtlases({trim}), the r20 execute path). false ⇒
         // no new op (and no frameTrims fed above) ⇒ byte-identical to today.
         trimMargin: trimMarginOn,
+        // Pack-trim toggle: forward it so a `pack` op honors the user's "trim before packing" switch. The pack
+        // op was hardcoded trim:true, so this toggle was INERT (turning it off had no effect). Absent ⇒ true
+        // (byte-identical to today); false ⇒ packLoose packs each sprite at its full untrimmed footprint.
+        packTrim: opts.packTrim,
         isAtlasRef: (ref) => atlasByRef.has(ref),
         // Edge-extrude (bleed, design OPTION A): forward the UI knob. planFix floors it to a non-negative
         // int and STAMPS it onto every repack/pack op (the only ops whose worker compose blits a rectangle

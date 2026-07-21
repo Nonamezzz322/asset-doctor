@@ -24,6 +24,10 @@ export interface PlanOptions {
   maxEdge: number;
   /** Aggressive, NON-drop-in: merge under-filled atlas groups + drop exact & near duplicates. */
   aggressive: boolean;
+  /** Trim loose sprites to their opaque bbox during a `pack` op (→ TP spriteSourceSize / Spine offset). The
+   *  worker's packLoose reads the pack op's `trim`. DEFAULT true (absent ⇒ true) ⇒ byte-identical to today;
+   *  false ⇒ the pack op keeps every sprite at its FULL untrimmed footprint (the `packTrim` UI toggle). */
+  packTrim?: boolean;
   /** Opaque-encode the Pro fix for a `wasted-alpha` finding (a fully-opaque image still carrying a dead
    *  alpha channel): re-encode it WITHOUT the alpha channel for a DISK/download saving (invariant 5 — never
    *  a VRAM claim; the GPU still allocates RGBA8888). When ON, every `wasted-alpha`-flagged loose ref gets a
@@ -271,7 +275,7 @@ export function planFix(report: AnalysisReport, opts: PlanOptions, groups?: Dedu
         kind: 'pack',
         group: { ...g, regions: ownedRegions },
         targetMime: opts.targetMime,
-        trim: true,
+        trim: opts.packTrim ?? true, // honor the packTrim toggle (default true); false ⇒ pack untrimmed footprints
         padding: opts.padding,
         maxSize: opts.maxSize,
         allowRotation: false, // loose-pack (packLoose) is v1-unrotated by design — rotation is REPACK-path only
