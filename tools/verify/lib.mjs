@@ -44,3 +44,24 @@ export function forceEnLocale(page) {
   return page.evaluateOnNewDocument(() => localStorage.setItem('ad.locale', 'en'));
 }
 
+/** Enable/change a persisted BuildSetting in an e2e: regex-edit the app's `ad.buildSettings` config JSON, then
+ *  FULL-reload so the settings provider re-mounts and loads the change. This full reload is load-bearing — a
+ *  HASH navigation (goto `${appUrl}#settings`) does NOT re-mount the provider ⇒ the app keeps its stale
+ *  settings and the flip appears to do nothing (a real pitfall found the hard way). The app must have been
+ *  loaded at least once so the provider has persisted the default config. `replacements` is an array of
+ *  [patternSource, replacement] applied in order to the raw config string (patternSource is a RegExp source,
+ *  no slashes, e.g. ['"packLoose":\\s*false', '"packLoose": true']). Silent no-op if a pattern misses — assert
+ *  the resulting toggle state (aria-checked) when correctness matters. Returns the flipped raw JSON. */
+export async function setBuildSetting(page, appUrl, replacements) {
+  await page.goto(appUrl, { waitUntil: 'load', timeout: 60000 });
+  await page.waitForFunction(() => !!localStorage.getItem('ad.buildSettings'), { timeout: 20000 });
+  const raw = await page.evaluate((reps) => {
+    let cfg = localStorage.getItem('ad.buildSettings');
+    for (const [from, to] of reps) cfg = cfg.replace(new RegExp(from), to);
+    localStorage.setItem('ad.buildSettings', cfg);
+    return cfg;
+  }, replacements);
+  await page.goto(appUrl, { waitUntil: 'load', timeout: 60000 }); // FULL reload re-mounts the provider ⇒ change applies
+  return raw;
+}
+

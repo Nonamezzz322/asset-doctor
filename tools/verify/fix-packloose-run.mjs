@@ -8,7 +8,7 @@ import puppeteer from 'puppeteer-core';
 import { readdirSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { CHROME_ARGS, chromePath, forceEnLocale } from './lib.mjs';
+import { CHROME_ARGS, chromePath, forceEnLocale, setBuildSetting } from './lib.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIX = join(HERE, '../../fixtures/sample-projects/loose-pack');
@@ -43,26 +43,13 @@ try {
   const client = await page.createCDPSession();
   await client.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: DL });
 
-  // 1. Enable packLoose. Load the app once so the settings provider persists the DEFAULT config (packLoose
-  //    false), then flip packLoose→true directly in localStorage (robust — no fragile Switch-click) and reload.
-  await page.goto(appUrl, { waitUntil: 'load', timeout: 60000 });
-  await page.waitForFunction(() => !!localStorage.getItem('ad.buildSettings'), { timeout: 20000 });
-  const flip = await page.evaluate(() => {
-    const raw = localStorage.getItem('ad.buildSettings');
-    if (!raw || !/"packLoose":\s*false/.test(raw)) return 'no-packLoose-false-key';
-    // packLoose ON + force the sheet format to lossless PNG (default is lossy AVIF) so packed sprites can be
-    // verified pixel-for-pixel — a lossy sheet would blur the compare and hide a subtle placement bug.
-    localStorage.setItem(
-      'ad.buildSettings',
-      raw.replace(/"packLoose":\s*false/, '"packLoose": true').replace(/"target":\s*"image\/avif"/, '"target": "image/png"'),
-    );
-    return 'flipped';
-  });
-  console.log('PACKLOOSE_FLIP', flip);
-  await page.goto(appUrl, { waitUntil: 'load', timeout: 60000 }); // reload ⇒ provider seeds packLoose:true
-  const persisted = await page.evaluate(() => localStorage.getItem('ad.buildSettings'));
-  const m = persisted && persisted.match(/"packLoose":\s*(true|false)/);
-  console.log('PACKLOOSE_PERSISTED', m ? m[1] : 'none');
+  // 1. Enable packLoose + force a lossless-PNG sheet (default is lossy AVIF) so packed sprites can be verified
+  //    pixel-for-pixel. setBuildSetting flips ad.buildSettings then FULL-reloads so the provider applies it.
+  const raw = await setBuildSetting(page, appUrl, [
+    ['"packLoose":\\s*false', '"packLoose": true'],
+    ['"target":\\s*"image/avif"', '"target": "image/png"'],
+  ]);
+  console.log('PACKLOOSE_PERSISTED', (raw.match(/"packLoose":\s*(true|false)/) || [])[1]);
 
   // 2. Load the loose fixture on the main page.
   await page.goto(appUrl, { waitUntil: 'load', timeout: 60000 });
