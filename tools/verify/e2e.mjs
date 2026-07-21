@@ -70,6 +70,8 @@ try {
   await sh('node', ['tools/verify/fix-run.mjs'], { APP_URL });
   console.log('\ne2e: scenario 8 — fix ACTIVE rotation compose (composed rotated sprite == forward-rotated source)');
   await sh('node', ['tools/verify/fix-rotate-run.mjs'], { APP_URL });
+  console.log('\ne2e: scenario 9 — loose-pack compose (packLoose toggle → each packed sprite == source loose image)');
+  await sh('node', ['tools/verify/fix-packloose-run.mjs'], { APP_URL });
   console.log('\ne2e: PASS');
 } catch (e) {
   console.error('\ne2e: FAIL —', e.message);
