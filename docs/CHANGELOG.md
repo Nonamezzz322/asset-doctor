@@ -10,6 +10,19 @@ GitHub-кредов — пушит пользователь); хэши комм�
 
 ---
 
+## ФИКС БАГА: тумблер packTrim заработал — pack-op хардкодил trim:true (инертный свитч) — 2026-07-21
+`ac11cb2`. Тот же класс бага, что и rotation-wiring: `packTrim` — первоклассный UI-тумблер (Switch
+`fix.pack.trim` в SettingsPage, «Триммить прозрачные поля перед упаковкой», дефолт true), сериализуется в
+build-config и едет на FixOptions — но pack-op хардкодил `trim:true`, а в PlanOptions вообще не было поля
+packTrim, поэтому воркер его не пробрасывал. Выключение тумблера НИЧЕГО не делало: loose-pack всегда триммил.
+Пробросил: PlanOptions получил `packTrim`, pack-op эмитит `trim: opts.packTrim ?? true` (дефолт true ⇒
+байт-идентично сегодня), воркер форвардит `opts.packTrim` в planFix. Теперь `packTrim:false` пакует каждый
+спрайт в ПОЛНЫЙ un-trimmed-футпринт (предсказуемые размеры кадров / без spriteSourceSize-смещения) — ровно то,
+что тумблер обещал. packLoose уже читает `op.trim` (его trim:false-путь юнит-тестирован) ⇒ последнее звено
+закрыто. Найдено адресным аудитом «plan ставит настройку, воркер игнорит» (мотивирован находкой ротации);
+проверил ВСЕ поля FixOptions — packTrim был ЕДИНСТВЕННЫМ инертным (0 usages), остальные потребляются. Тест:
+trim pack-op следует packTrim (false⇒false, true/absent⇒true). Gate зелёный (typecheck · fix 532 · lint · все 8 e2e).
+
 ## ФИКС БАГА: rotation-packing v2 РЕАЛЬНО включён — воркер хардкодил allowRotation false — 2026-07-20
 `0a72881`. Rotation-packing v2 числился DONE + LIVE, но в проде был ИНЕРТЕН: план ставит `allowRotation:true`
 на каждый repack-op, а вызовы репака в воркере хардкодили `allowRotation:false` — фикс НИ РАЗУ не поворачивал
