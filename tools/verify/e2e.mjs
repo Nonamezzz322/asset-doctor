@@ -72,6 +72,8 @@ try {
   await sh('node', ['tools/verify/fix-rotate-run.mjs'], { APP_URL });
   console.log('\ne2e: scenario 9 — loose-pack compose (packLoose toggle → each packed sprite == source loose image)');
   await sh('node', ['tools/verify/fix-packloose-run.mjs'], { APP_URL });
+  console.log('\ne2e: scenario 10 — atlas-merge compose (aggressive → merged sprites == their source atlas regions)');
+  await sh('node', ['tools/verify/fix-merge-run.mjs'], { APP_URL });
   console.log('\ne2e: PASS');
 } catch (e) {
   console.error('\ne2e: FAIL —', e.message);

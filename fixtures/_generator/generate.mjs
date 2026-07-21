@@ -60,11 +60,13 @@ function fillChecker(png, x, y, w, h, a, b, sq = 8) {
   }
 }
 
-function atlasPng(size, frames) {
+function atlasPng(size, frames, colorOffset = 0) {
   const png = new PNG({ width: size.w, height: size.h });
   png.data.fill(0); // transparent background
+  // colorOffset shifts the per-frame color palette so two atlases with the SAME frame layout produce
+  // DIFFERENT pixels (else they are byte-identical and get de-duplicated, not merged). Default 0 = today.
   frames.forEach((f, i) =>
-    fillRect(png, f.frame.x, f.frame.y, f.frame.w, f.frame.h, COLORS[i % COLORS.length]),
+    fillRect(png, f.frame.x, f.frame.y, f.frame.w, f.frame.h, COLORS[(i + colorOffset) % COLORS.length]),
   );
   return PNG.sync.write(png);
 }
@@ -505,7 +507,9 @@ the Spine parser end-to-end (group → parseSpinePage → analyze).
     {
       'atlas_a.png': atlasPng(size, aFrames),
       'atlas_a.json': hashManifest('atlas_a.png', size, aFrames),
-      'atlas_b.png': atlasPng(size, bFrames),
+      // DISTINCT palette (colorOffset 2) so atlas_b differs from atlas_a — else they are byte-identical and the
+      // fix DE-DUPLICATES instead of MERGING (atlas-merge needs 2 distinct sheets). Regen fixed the broken fixture.
+      'atlas_b.png': atlasPng(size, bFrames, 2),
       'atlas_b.json': hashManifest('atlas_b.png', size, bFrames),
       'expected.json': {
         kind: 'folder',

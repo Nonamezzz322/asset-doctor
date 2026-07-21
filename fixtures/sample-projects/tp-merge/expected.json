@@ -9,7 +9,7 @@
     },
     {
       "rule": "occupancy",
-      "severity": "info"
+      "severity": "crit"
     }
   ],
   "note": "Two ~12.5% atlases whose content fits in one sheet → atlas-merge."
