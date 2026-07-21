@@ -1339,8 +1339,11 @@ is always false; Spine pages default to PNG.
       .map((f) => `${f.name}\n  rotate: 0\n  xy: ${f.frame.x}, ${f.frame.y}\n  size: ${f.frame.w}, ${f.frame.h}\n  orig: ${f.frame.w}, ${f.frame.h}\n  offset: 0, 0\n  index: -1`)
       .join('\n') + '\n';
   const singleAtlas = spinePage('spine_single.png', spFrames);
-  // two page blocks concatenated → one .atlas, two pages (the v1 skip case).
-  const multiAtlas = spinePage('spine_multi_0.png', [spFrames[0]]) + spinePage('spine_multi_1.png', [spFrames[1]]);
+  // two page blocks separated by the CANONICAL blank line (the libGDX/spine-ts page-separator contract
+  // real exporters emit; P3 parser fix, 2026-07-17). spinePage ends each block with one \n, so the extra
+  // '\n' produces the empty line between `index: -1` and the next page header.
+  const multiAtlas =
+    spinePage('spine_multi_0.png', [spFrames[0]]) + '\n' + spinePage('spine_multi_1.png', [spFrames[1]]);
 
   writeCase(
     'tier-source',
@@ -1388,6 +1391,10 @@ Mixed inputs for the **SCALE-TIER export** slice (\`docs/scale-tiers-design.md\`
 
 Pixels are irrelevant to the pure scale tests (geometry only); they exist so the parse/ingest
 round-trip is real.
+
+Note (P3 parser fixes, 2026-07-17): \`spine_multi.atlas\` pages are separated by the CANONICAL
+blank line (the libGDX/spine-ts page-separator contract real exporters emit; the parser's old
+\`size:\`-lookahead tolerated its absence but mis-split real files both ways).
 `,
   );
 }
@@ -2202,8 +2209,13 @@ fires with the documented recoverable area.
     occupancy, // ≈ 0.0977 (sparse → the documented defect)
     malformedGlyph: { id: '255', reason: 'glyph id=255 extends past page 256×256' },
     findings: [
+      // excessive-gutter (info) fires FIRST alphabetically: the sparse page's median glyph gap clears
+      // minMedianPx (systematic over-padding — exactly what this fixture depicts). Added round 6.
+      { rule: 'excessive-gutter', severity: 'info' },
       { rule: 'font-glyph-page', severity: 'warn' },
-      { rule: 'occupancy', severity: 'crit' }, // sparse page also trips the generic occupancy finding (free)
+      // sparse page also trips the generic occupancy finding (free); a 256×256 page wastes few absolute
+      // bytes ⇒ INFO (contrast tp-merge's larger sheet → CRIT — severity follows wasted bytes, not just %).
+      { rule: 'occupancy', severity: 'info' },
       { rule: 'wasted-regions', severity: 'info' },
     ],
     note:
@@ -2215,7 +2227,9 @@ fires with the documented recoverable area.
       + 'for free. The font readout estimate carries ONLY occupancyPct — the generic findings own the VRAM '
       + 'on the same page (invariant 5; no double-count). Emitted in all THREE serializations (TEXT/XML/'
       + 'binary) from the SAME glyph data + the SAME font.png + this SAME expected.json; each parser '
-      + 'produces a byte-identical FntPage[]. Exercised through the REAL path (groupFiles → parseFntPage → analyze).',
+      + 'produces a byte-identical FntPage[]. Exercised through the REAL path (groupFiles → parseFntPage → analyze). '
+      + '[round 6] excessive-gutter (info) now fires too: the sparse page’s median nearest-neighbour glyph gap '
+      + 'clears minMedianPx — systematic over-padding is exactly what this fixture depicts.',
   };
 
   writeCase(
