@@ -7,6 +7,7 @@ import { fmtBytes } from '@asset-doctor/analysis';
 import { formatValue } from './evaluate';
 import { ASSET_METRICS, GLOBAL_METRICS } from './metrics';
 import type { GateEntry, GateResult } from './types';
+import { biggestWins, hasWins, type WinRow } from './biggest-wins';
 
 /* ── colour ──────────────────────────────────────────────────────────── */
 const CODES = { reset: 0, dim: 2, red: 31, green: 32, yellow: 33, cyan: 36, gray: 90 } as const;
@@ -147,6 +148,21 @@ export function renderReport(report: AnalysisReport, opts: { color?: boolean; di
   out.push(c('cyan', '▣ Asset Doctor — audit') + (opts.dir ? c('gray', `  ${opts.dir}`) : ''));
   out.push(`  ${report.assets.length} assets · disk ${c('cyan', fmtBytes(t.diskBytes))} · VRAM summed ${fmtBytes(t.vramBytes)} → loaded ${c('cyan', fmtBytes(t.loadedVramBytes))}`);
   out.push(c('gray', `  disk weight ≠ GPU footprint: VRAM = Σ w×h×4. draw calls ≥ ${report.assets.length} (one per distinct texture).`));
+  // Impact-first "start here" — the SAME ranking the web panel / MD+HTML report use (biggest-wins.ts). Two
+  // SEPARATE single-unit lists (disk / VRAM), never summed (invariant 5); each finding present only when its
+  // measured saving on that axis is > 0; no total. Absent when nothing carries an estimate ⇒ byte-identical.
+  const w = biggestWins(report);
+  if (hasWins(w)) {
+    out.push('');
+    out.push(c('cyan', '  ◆ Biggest wins — start here'));
+    const winLines = (label: string, rows: WinRow[]): void => {
+      if (rows.length === 0) return;
+      out.push(c('gray', `    ${label}`));
+      for (const r of rows) out.push(`      ${c('green', fmtBytes(r.bytes).padStart(9))}  ${r.assetRef}${r.relatedCount > 0 ? c('gray', ` (${r.relatedCount} files)`) : ''}`);
+    };
+    winLines('reclaim the most disk:', w.disk);
+    winLines('reclaim the most VRAM:', w.vram);
+  }
   const findings = report.findings;
   out.push('');
   if (findings.length === 0) out.push(c('green', '  ✓ no findings'));

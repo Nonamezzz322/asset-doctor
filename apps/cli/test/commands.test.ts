@@ -35,6 +35,15 @@ describe('command exit codes', () => {
     expect(await auditCmd(`${FIX}/tp-array-oversize`, FLAGS, io)).toBe(0);
   });
 
+  it('audit default human output leads with the Biggest wins prioritization (impact-first, start here)', async () => {
+    const { io, out } = fakeIO();
+    // folder-waste has estimate-bearing findings (byte-dup + npot) ⇒ the wins summary renders.
+    expect(await auditCmd(`${FIX}/folder-waste`, { ...FLAGS, quiet: false }, io)).toBe(0);
+    const text = out.join('');
+    expect(text).toContain('Biggest wins — start here');
+    expect(text).toMatch(/reclaim the most (disk|VRAM):/);
+  });
+
   it('audit --html emits the self-contained page to stdout; --out writes it as the artifact (P10)', async () => {
     const { io, out } = fakeIO();
     expect(await auditCmd(`${FIX}/tp-array-oversize`, { ...FLAGS, html: true }, io)).toBe(0);
