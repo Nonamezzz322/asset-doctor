@@ -1225,6 +1225,31 @@ describe('emitSpineAtlasText (inverse of the parser)', () => {
     expect(sp.trimmed).toBe(true);
     expect(sp.spriteSourceSize).toEqual({ x: 5, y: 8, w: 50, h: 40 });
   });
+
+  it('preserves page filter + repeat (pixel-art Nearest / tiling wrap are NOT silently forced to Linear/none)', () => {
+    const atlas: Atlas = { name: 'pa', imageRef: 'pa.png', size: { w: 64, h: 64 }, filter: 'Nearest,Nearest', repeat: 'x', sprites: [{ name: 'r', frame: { x: 0, y: 0, w: 10, h: 10 }, rotated: false, trimmed: false, sourceSize: { w: 10, h: 10 } }], source: { kind: 'spine' } };
+    const out = emitSpineAtlasText(atlas);
+    expect(out).toContain('filter: Nearest,Nearest');
+    expect(out).toContain('repeat: x');
+    const re = parseSpineAtlasText(out)[0]!;
+    expect(re.filter).toBe('Nearest,Nearest');
+    expect(re.repeat).toBe('x');
+  });
+
+  it('emits today defaults when filter/repeat absent (byte-identical to the common Linear/none atlas)', () => {
+    const atlas: Atlas = { name: 'd', imageRef: 'd.png', size: { w: 32, h: 32 }, sprites: [{ name: 'r', frame: { x: 0, y: 0, w: 8, h: 8 }, rotated: false, trimmed: false, sourceSize: { w: 8, h: 8 } }], source: { kind: 'spine' } };
+    const out = emitSpineAtlasText(atlas);
+    expect(out).toContain('filter: Linear,Linear');
+    expect(out).toContain('repeat: none');
+  });
+
+  it('repackAtlases carries filter/repeat from the source through to the re-emit', () => {
+    const atlas: Atlas = { name: 's', imageRef: 'sheet.png', size: { w: 256, h: 256 }, filter: 'Nearest,Nearest', repeat: 'xy', sprites: [{ name: 'r', frame: { x: 0, y: 0, w: 40, h: 40 }, rotated: false, trimmed: false, sourceSize: { w: 40, h: 40 } }], source: { kind: 'spine' } };
+    const packed = repackAtlases([atlas], { allowRotation: false, padding: 0, maxSize: 2048 }).atlases[0]!;
+    expect(packed.filter).toBe('Nearest,Nearest');
+    expect(packed.repeat).toBe('xy');
+    expect(emitSpineAtlasText(packed)).toContain('filter: Nearest,Nearest');
+  });
 });
 
 describe('scaleAtlas', () => {

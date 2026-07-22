@@ -19,6 +19,11 @@ export interface SpinePage {
   /** Page `scale:` factor (Spine "scaled variants" export). Carried onto Atlas.scale — dropping it made
    *  downstream oversize/variant math treat a 0.5× page as 1× (P3 parsers audit #8). */
   scale?: number;
+  /** Page `filter:` (min,mag sampling, e.g. 'Nearest,Nearest') + `repeat:` (wrap mode) carried VERBATIM
+   *  onto the Atlas so a repack re-emit keeps them — dropping them silently forced Linear/none, blurring a
+   *  pixel-art (Nearest) atlas or dropping a tiling wrap mode. Sampler hints only (no pixel interaction). */
+  filter?: string;
+  repeat?: string;
   sprites: Sprite[];
   /** Regions on THIS page that named an asset but were unusable (a required field — xy/size/orig/bounds —
    *  had a non-finite OR non-positive value, or the region fell outside the page). Per-region recovery: the page keeps its
@@ -81,6 +86,14 @@ function applyPageKey(page: SpinePage, key: string, val: string): void {
     // factor is carried; garbage stays absent (never a fabricated 1× or 0×).
     const s = parseFloat(val.trim());
     if (Number.isFinite(s) && s > 0) page.scale = s;
+  } else if (key === 'filter') {
+    // Verbatim sampling hint (e.g. 'Nearest,Nearest'). Only a non-empty value is carried so an empty
+    // `filter:` line stays absent ⇒ emit falls back to today's default (byte-identical).
+    const f = val.trim();
+    if (f) page.filter = f;
+  } else if (key === 'repeat') {
+    const r = val.trim();
+    if (r) page.repeat = r;
   }
 }
 
@@ -257,6 +270,8 @@ export function parseSpinePage(
   };
   if (page.format) atlas.format = page.format;
   if (page.scale !== undefined) atlas.scale = page.scale; // P3 #8: a 0.5× page is not a 1× page
+  if (page.filter) atlas.filter = page.filter; // pixel-art Nearest must survive a repack re-emit
+  if (page.repeat) atlas.repeat = page.repeat;
   const strippable = strippableMetadataBytes(image.bytes);
   const icc = iccAssetField(image.bytes);
   const imageAsset: ImageAsset = {

@@ -58,7 +58,10 @@ export function emitTexturePackerJson(atlas: Atlas): string {
 /** Emit a Spine / libGDX `.atlas` text page (the inverse of parseSpineAtlasText). Deterministic:
  *  regions sorted by name. The page `size:` line is non-indented so the parser detects the page. */
 export function emitSpineAtlasText(atlas: Atlas): string {
-  const lines: string[] = [atlas.imageRef, `size: ${atlas.size.w},${atlas.size.h}`, `format: ${atlas.format ?? 'RGBA8888'}`, 'filter: Linear,Linear', 'repeat: none'];
+  // filter/repeat carried from the source page (Atlas.filter/repeat) so a repack keeps a pixel-art
+  // (Nearest) or tiling atlas's sampler settings — dropping them silently forced Linear/none. Absent ⇒
+  // today's defaults ⇒ byte-identical for the common Linear/none atlas. Sampler hints only (no pixels).
+  const lines: string[] = [atlas.imageRef, `size: ${atlas.size.w},${atlas.size.h}`, `format: ${atlas.format ?? 'RGBA8888'}`, `filter: ${atlas.filter ?? 'Linear,Linear'}`, `repeat: ${atlas.repeat ?? 'none'}`];
   for (const s of [...atlas.sprites].sort((a, b) => a.name.localeCompare(b.name))) {
     // the page-space `size:` is the UN-rotated region extent (parser swaps w/h when rotate=90)
     const w = s.rotated ? s.frame.h : s.frame.w;

@@ -614,6 +614,18 @@ regionB
     expect(pages[1]!.size).toEqual({ w: 64, h: 64 });
     expect(pages[1]!.sprites).toHaveLength(1);
   });
+
+  it('captures page filter + repeat verbatim (pixel-art Nearest / tiling wrap must survive a repack re-emit)', () => {
+    // Dropping these silently forced Linear/none on re-emit — a Nearest (pixel-art) atlas rendered blurry.
+    const pixelArt = `pa.png\nsize: 64,64\nformat: RGBA8888\nfilter: Nearest,Nearest\nrepeat: x\nrgn\n  rotate: 0\n  xy: 0,0\n  size: 10,10\n  orig: 10,10\n  index: -1\n`;
+    const p = parseSpineAtlasText(pixelArt)[0]!;
+    expect(p.filter).toBe('Nearest,Nearest');
+    expect(p.repeat).toBe('x');
+    // the default Linear,Linear / none page is captured verbatim too (round-trips byte-identically).
+    const d = parseSpineAtlasText(ATLAS)[0]!;
+    expect(d.filter).toBe('Linear,Linear');
+    expect(d.repeat).toBe('none');
+  });
 });
 
 describe('parseFntText — BMFont TEXT', () => {

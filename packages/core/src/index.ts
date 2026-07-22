@@ -75,6 +75,16 @@ export interface Atlas {
   size: Size;
   /** e.g. 'RGBA8888' from meta.format, when present. */
   format?: string;
+  /** Spine/libGDX page `filter:` value carried VERBATIM (e.g. 'Nearest,Nearest' for pixel art,
+   *  'Linear,Linear' for smooth). GPU texture min/mag sampling hint — orthogonal to pixel VALUES, so it
+   *  survives any recompose. emitSpineAtlasText re-emits it (defaulting to 'Linear,Linear' when absent) so
+   *  a repack no longer silently forces Linear onto a Nearest (pixel-art) atlas ⇒ blurred sprites. Absent
+   *  ⇒ emit uses today's default ⇒ .atlas byte-identical. TexturePacker/Pixi JSON has no equivalent. */
+  filter?: string;
+  /** Spine/libGDX page `repeat:` wrap mode carried VERBATIM ('none' | 'x' | 'y' | 'xy'). GPU sampler wrap
+   *  hint — orthogonal to pixel VALUES. emitSpineAtlasText re-emits it (default 'none' when absent) so a
+   *  repack no longer silently drops a tiling atlas's wrap mode. Absent ⇒ emit default ⇒ byte-identical. */
+  repeat?: string;
   scale?: number;
   /** TexturePacker/Pixi multipack linkage: sibling **manifest** (`.json`) filenames Pixi auto-loads
    *  from page-0 (meta.related_multi_packs). Carried VERBATIM from parse and re-emitted by

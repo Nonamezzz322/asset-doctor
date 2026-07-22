@@ -316,6 +316,11 @@ export function repackAtlases(
 
   const baseRef = atlases[0]?.imageRef ?? 'atlas.png';
   const format = atlases[0]?.format;
+  // Spine page sampler hints (filter/repeat) carried from the source so the Spine re-emit keeps them
+  // (a repack must not silently force Linear/none onto a Nearest/tiling atlas). No pixel interaction ⇒
+  // safe to propagate verbatim. TexturePacker JSON emit ignores them, so this is a no-op for TP atlases.
+  const filter = atlases[0]?.filter;
+  const repeat = atlases[0]?.repeat;
   const atlasesOut: Atlas[] = [];
   const blits: Blit[] = [];
   let vramAfter = 0;
@@ -372,7 +377,7 @@ export function repackAtlases(
       }
     });
     sprites.sort((a, b) => a.name.localeCompare(b.name)); // deterministic, matches the emitted manifest order
-    atlasesOut.push({ name: imageRef, imageRef, size: { w: bin.w, h: bin.h }, sprites, source: { kind: 'texturepacker-hash' }, ...(format ? { format } : {}) });
+    atlasesOut.push({ name: imageRef, imageRef, size: { w: bin.w, h: bin.h }, sprites, source: { kind: 'texturepacker-hash' }, ...(format ? { format } : {}), ...(filter ? { filter } : {}), ...(repeat ? { repeat } : {}) });
   });
 
   const occupancyAfter = areaAfter > 0 ? coveredAreaPacked / areaAfter : 0;
@@ -466,6 +471,11 @@ export function repackAtlasesPolygon(
 
   const baseRef = atlases[0]?.imageRef ?? 'atlas.png';
   const format = atlases[0]?.format;
+  // Spine page sampler hints (filter/repeat) carried from the source so the Spine re-emit keeps them
+  // (a repack must not silently force Linear/none onto a Nearest/tiling atlas). No pixel interaction ⇒
+  // safe to propagate verbatim. TexturePacker JSON emit ignores them, so this is a no-op for TP atlases.
+  const filter = atlases[0]?.filter;
+  const repeat = atlases[0]?.repeat;
   const atlasesOut: Atlas[] = [];
   const blits: Blit[] = [];
   let vramAfter = 0;
@@ -506,7 +516,7 @@ export function repackAtlasesPolygon(
       return out;
     });
     sprites.sort((a, b) => a.name.localeCompare(b.name)); // deterministic, matches the emitted manifest order
-    atlasesOut.push({ name: imageRef, imageRef, size: { w: bin.w, h: bin.h }, sprites, source: { kind: 'texturepacker-hash' }, ...(format ? { format } : {}) });
+    atlasesOut.push({ name: imageRef, imageRef, size: { w: bin.w, h: bin.h }, sprites, source: { kind: 'texturepacker-hash' }, ...(format ? { format } : {}), ...(filter ? { filter } : {}), ...(repeat ? { repeat } : {}) });
   });
 
   const occupancyAfter = areaAfter > 0 ? coveredArea / areaAfter : 0;
