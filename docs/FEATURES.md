@@ -63,7 +63,7 @@ Pro-фикс генерирует оптимизированный вывод; �
 - **Binary polygon packer** — nesting по occupancy через bitmap-mask (trace alpha → conservative RDP → ear-clip → bitmap nesting + mesh-clip compose); TexturePacker-совместимый mesh-манифест (`vertices/verticesUV/triangles`); честный VRAM-гейт, rect-фолбэк; trim по content-extent (без пустого низа).
 - **Resize** — даунскейл оверсайз loose-изображений + атласов (кадры clamped); drop-in.
 - **Transcode** — WebP/PNG (нативный `convertToBlob`) + AVIF + lossless-WebP + oxipng (через `@jsquash`, честный фолбэк).
-- **Spine repack** — более плотный single-page Spine-лист + переэмитированный `.atlas`.
+- **Spine repack** — более плотный single-page Spine-лист + переэмитированный `.atlas`. **Сохраняет `filter:`/`repeat:` страницы дословно** (Nearest для пиксель-арта, tiling-wrap) — раньше эмит захардкоживал `Linear,Linear`/`none`, молча замыливая пиксель-арт-атлас при репаке; теперь GPU-хинты сэмплера переносятся из источника (модель `Atlas.filter?`/`repeat?`), откат на дефолт только при отсутствии ⇒ обычный атлас байт-идентичен. (`pma`/premultiplied — отдельно, требует pixel-верификации recompose.)
 - **Aggressive dedup** — модель owner/consumer (pools/skin, lazy-aware), отбрасывает exact + near-дубликаты, перепривязка ссылок.
 - **Edge-extrude (bleed)** — симметричный gutter для устранения bilinear-швов.
 - **Per-image выбор измеренного лучшего формата** — переносит в фикс измеренного в диагнозе победителя по наименьшему энкоду.
