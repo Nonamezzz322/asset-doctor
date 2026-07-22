@@ -10,7 +10,7 @@ import puppeteer from 'puppeteer-core';
 import { readdirSync, statSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { CHROME_ARGS, chromePath, forceEnLocale } from './lib.mjs';
+import { CHROME_ARGS, chromePath, forceEnLocale, setBuildSetting } from './lib.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIX = join(HERE, '../../fixtures/sample-projects/poly-concave');
@@ -41,9 +41,12 @@ const FRAME_COUNT = Object.keys(JSON.parse(readFileSync(join(FIX, 'atlas.json'),
 
 const browser = await puppeteer.launch({ executablePath: chromePath(), headless: true, args: CHROME_ARGS });
 
-/** Upload the fixture, optionally toggle the polygon checkbox, click the fix button, wait for the
- *  receipt, and return { zip files, receipt text } for one run. Each run uses a fresh page. */
-async function runFix(togglePolygon) {
+/** Upload the fixture, optionally enable polygon mode, click the fix button, wait for the receipt, and
+ *  return { zip files, receipt text } for one run. Each run uses a fresh page. Polygon is a persisted
+ *  BuildSetting (the Settings-page Switch), NOT a FixCard control — since the settings refactor the
+ *  FixCard has no polygon checkbox, so it must be flipped in localStorage + full reload (setBuildSetting).
+ *  Clicking a stray checkbox would silently leave polygon OFF and quietly run the rectangle path. */
+async function runFix(polygon) {
   rmSync(DL, { recursive: true, force: true });
   mkdirSync(DL, { recursive: true });
   const page = await browser.newPage();
@@ -53,7 +56,13 @@ async function runFix(togglePolygon) {
   const client = await page.createCDPSession();
   await client.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: DL });
 
-  await page.goto(appUrl, { waitUntil: 'load', timeout: 60000 });
+  if (polygon) {
+    const raw = await setBuildSetting(page, appUrl, [['"polygon":\\s*false', '"polygon": true']]);
+    if (!/"polygon":\s*true/.test(raw)) throw new Error('failed to enable the polygon build setting');
+    console.log('POLYGON_SETTING on');
+  } else {
+    await page.goto(appUrl, { waitUntil: 'load', timeout: 60000 });
+  }
   const input = await page.$('input[type=file]');
   await page.evaluate((el) => el.removeAttribute('webkitdirectory'), input);
   await input.uploadFile(...fixFiles);
@@ -64,21 +73,6 @@ async function runFix(togglePolygon) {
     () => [...document.querySelectorAll('button')].some((b) => /optimized folder|оптимизир/i.test(b.textContent || '')),
     { timeout: 30000 },
   );
-
-  if (togglePolygon) {
-    // Toggle the polygon checkbox: find the <input type=checkbox> whose label text is the EN value of
-    // fix.polygon ("Polygon pack…"); fall back to the 2nd checkbox in the FixCard (aggressive is 1st).
-    const toggled = await page.evaluate(() => {
-      const boxes = [...document.querySelectorAll('input[type=checkbox]')];
-      const byLabel = boxes.find((b) => /polygon|mesh-aware|полигон/i.test(b.closest('label')?.textContent || ''));
-      const target = byLabel || boxes[1];
-      if (!target) return false;
-      if (!target.checked) target.click();
-      return target.checked;
-    });
-    console.log('POLYGON_CHECKBOX', toggled);
-    if (!toggled) throw new Error('could not toggle the polygon checkbox');
-  }
 
   const clicked = await page.evaluate(() => {
     const b = [...document.querySelectorAll('button')].find((x) => /optimized folder|оптимизир/i.test(x.textContent || ''));
@@ -158,8 +152,73 @@ try {
 
   // referenced sheet present in the zip
   const sheetRef = m.meta.image;
-  const sheetInZip = Object.keys(poly.files).some((n) => n.endsWith(sheetRef));
+  const sheetEntry = Object.keys(poly.files).find((n) => n.endsWith(sheetRef));
+  const sheetInZip = !!sheetEntry;
   console.log('SHEET', sheetRef, '· in zip', sheetInZip);
+
+  // ── (c2) MESH-CLIP COMPOSE PIXEL-IDENTITY ───────────────────────────────────────────────────────────
+  // The geometry checks above prove the mesh SHIPS; this proves the mesh-clip compose DREW correctly — the
+  // most corruption-prone fix path (Blit.clip regions must be ⊆ footprint + mutually disjoint, else opaque
+  // pixels are lost, misplaced, or overwritten by an interlocked neighbour, and the manifest looks perfect).
+  // The polygon compose repositions without scaling (to.w == from.rect.w), so each source pixel (sx,sy) lands
+  // at (packedFrame.x + (sx - srcFrame.x), packedFrame.y + (sy - srcFrame.y)), clipped to the mesh. Because
+  // the conservative mesh ⊇ every opaque pixel (dilated outward), opaque source pixels are INTERIOR to the
+  // clip ⇒ drawn fully (no edge antialiasing) ⇒ each must equal its source pixel in the (lossless) sheet.
+  if (meshedFrames > 0 && sheetInZip) {
+    const srcManifest = JSON.parse(readFileSync(join(FIX, 'atlas.json'), 'utf8'));
+    const sheetMime = sheetRef.endsWith('.webp') ? 'image/webp' : sheetRef.endsWith('.png') ? 'image/png' : sheetRef.endsWith('.avif') ? 'image/avif' : 'image/webp';
+    if (sheetMime === 'image/avif') {
+      console.log('FAIL: packed sheet is lossy AVIF — pixel-identity is not decidable (expected lossless WebP/PNG for a repack sheet)');
+      ok = false;
+    } else {
+      const meshedNames = frameNames.filter((n) => frames[n].vertices);
+      const payload = {
+        sheetB64: Buffer.from(poly.files[sheetEntry]).toString('base64'),
+        sheetMime,
+        srcB64: readFileSync(join(FIX, 'atlas.png')).toString('base64'),
+        sprites: meshedNames.map((n) => ({ name: n, src: srcManifest.frames[n].frame, dst: frames[n].frame, rot: !!frames[n].rotated })),
+      };
+      const vpage = await browser.newPage();
+      const res = await vpage.evaluate(async (p) => {
+        const toImg = async (b64, type) => {
+          const bin = atob(b64);
+          const a = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+          const bmp = await createImageBitmap(new Blob([a], { type }));
+          const c = new OffscreenCanvas(bmp.width, bmp.height);
+          const x = c.getContext('2d');
+          x.drawImage(bmp, 0, 0);
+          return { d: x.getImageData(0, 0, bmp.width, bmp.height), w: bmp.width, h: bmp.height };
+        };
+        const src = await toImg(p.srcB64, 'image/png');
+        const sheet = await toImg(p.sheetB64, p.sheetMime);
+        let compared = 0, mismatch = 0, spritesChecked = 0, firstBad = null, dimBad = null;
+        for (const s of p.sprites) {
+          if (s.rot) { dimBad = dimBad || { name: s.name, why: 'unexpected rotated meshed frame' }; continue; }
+          if (s.dst.w !== s.src.w || s.dst.h !== s.src.h) { dimBad = dimBad || { name: s.name, why: 'scaled (dst != src dims)', src: s.src, dst: s.dst }; continue; }
+          spritesChecked++;
+          for (let j = 0; j < s.src.h; j++) {
+            for (let i = 0; i < s.src.w; i++) {
+              const si = ((s.src.y + j) * src.w + (s.src.x + i)) * 4;
+              if (src.d.data[si + 3] === 0) continue; // transparent source pixel — the mesh need not cover it
+              const di = ((s.dst.y + j) * sheet.w + (s.dst.x + i)) * 4;
+              let bad = false;
+              for (let k = 0; k < 4; k++) if (Math.abs(src.d.data[si + k] - sheet.d.data[di + k]) > 1) { bad = true; break; }
+              compared++;
+              if (bad) { mismatch++; if (!firstBad) firstBad = { name: s.name, i, j, src: [...src.d.data.slice(si, si + 4)], dst: [...sheet.d.data.slice(di, di + 4)] }; }
+            }
+          }
+        }
+        return { compared, mismatch, spritesChecked, firstBad, dimBad };
+      }, payload);
+      await vpage.close();
+      console.log('MESH_PIXEL sprites', res.spritesChecked, '/', meshedNames.length, '· opaque px compared', res.compared, '· mismatches', res.mismatch, res.dimBad ? '· DIMBAD ' + JSON.stringify(res.dimBad) : '', res.firstBad ? '· firstBad ' + JSON.stringify(res.firstBad) : '');
+      if (res.dimBad) { console.log('FAIL: a meshed frame is rotated/scaled — the pure-translation pixel map does not hold'); ok = false; }
+      if (res.spritesChecked !== meshedNames.length) { console.log('FAIL: not every meshed sprite was pixel-checked'); ok = false; }
+      if (res.compared === 0) { console.log('FAIL: no opaque pixels compared — the check is vacuous'); ok = false; }
+      if (res.mismatch > 0) { console.log('FAIL: mesh-clip compose corrupted opaque pixels (lost/misplaced/overwritten)'); ok = false; }
+    }
+  }
 
   // HONEST polygon gate (polygonWins = poly VRAM < rect VRAM). Two valid outcomes, both asserted:
   //  • a real win → mesh frames are emitted AND AREA_POLY < AREA_RECT;
