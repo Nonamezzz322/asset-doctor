@@ -325,6 +325,13 @@ export function repackAtlases(
   // repositions frames but keeps pixels 1:1, so the resolution multiplier is unchanged. Dropping it made a
   // loader treat a 0.5x atlas as 1x ⇒ sprites rendered double-size. emitTexturePackerJson re-emits it.
   const scale = atlases[0]?.scale;
+  // Top-level `animations` (frame-name → play order) carried ONLY for a SINGLE-source repack: a repack
+  // repositions frames but keeps every frame NAME (aliasing emits all alias names), so the map's refs stay
+  // valid — exactly the "frame-NAME-stable ⇒ animations survive" rule resize already follows. Attached only
+  // to a single OUTPUT sheet (bins.length===1 at the push); a spill splits frames across pages (multipack
+  // territory) and a merge (atlases.length>1) would drop the other sources' maps + risk name collisions ⇒
+  // both keep dropping it (documented). Absent ⇒ no key ⇒ byte-identical.
+  const srcAnimations = atlases.length === 1 ? atlases[0]?.animations : undefined;
   const atlasesOut: Atlas[] = [];
   const blits: Blit[] = [];
   let vramAfter = 0;
@@ -381,7 +388,7 @@ export function repackAtlases(
       }
     });
     sprites.sort((a, b) => a.name.localeCompare(b.name)); // deterministic, matches the emitted manifest order
-    atlasesOut.push({ name: imageRef, imageRef, size: { w: bin.w, h: bin.h }, sprites, source: { kind: 'texturepacker-hash' }, ...(format ? { format } : {}), ...(filter ? { filter } : {}), ...(repeat ? { repeat } : {}), ...(scale !== undefined ? { scale } : {}) });
+    atlasesOut.push({ name: imageRef, imageRef, size: { w: bin.w, h: bin.h }, sprites, source: { kind: 'texturepacker-hash' }, ...(format ? { format } : {}), ...(filter ? { filter } : {}), ...(repeat ? { repeat } : {}), ...(scale !== undefined ? { scale } : {}), ...(srcAnimations && bins.length === 1 ? { animations: srcAnimations } : {}) });
   });
 
   const occupancyAfter = areaAfter > 0 ? coveredAreaPacked / areaAfter : 0;
@@ -484,6 +491,13 @@ export function repackAtlasesPolygon(
   // repositions frames but keeps pixels 1:1, so the resolution multiplier is unchanged. Dropping it made a
   // loader treat a 0.5x atlas as 1x ⇒ sprites rendered double-size. emitTexturePackerJson re-emits it.
   const scale = atlases[0]?.scale;
+  // Top-level `animations` (frame-name → play order) carried ONLY for a SINGLE-source repack: a repack
+  // repositions frames but keeps every frame NAME (aliasing emits all alias names), so the map's refs stay
+  // valid — exactly the "frame-NAME-stable ⇒ animations survive" rule resize already follows. Attached only
+  // to a single OUTPUT sheet (bins.length===1 at the push); a spill splits frames across pages (multipack
+  // territory) and a merge (atlases.length>1) would drop the other sources' maps + risk name collisions ⇒
+  // both keep dropping it (documented). Absent ⇒ no key ⇒ byte-identical.
+  const srcAnimations = atlases.length === 1 ? atlases[0]?.animations : undefined;
   const atlasesOut: Atlas[] = [];
   const blits: Blit[] = [];
   let vramAfter = 0;
@@ -524,7 +538,7 @@ export function repackAtlasesPolygon(
       return out;
     });
     sprites.sort((a, b) => a.name.localeCompare(b.name)); // deterministic, matches the emitted manifest order
-    atlasesOut.push({ name: imageRef, imageRef, size: { w: bin.w, h: bin.h }, sprites, source: { kind: 'texturepacker-hash' }, ...(format ? { format } : {}), ...(filter ? { filter } : {}), ...(repeat ? { repeat } : {}), ...(scale !== undefined ? { scale } : {}) });
+    atlasesOut.push({ name: imageRef, imageRef, size: { w: bin.w, h: bin.h }, sprites, source: { kind: 'texturepacker-hash' }, ...(format ? { format } : {}), ...(filter ? { filter } : {}), ...(repeat ? { repeat } : {}), ...(scale !== undefined ? { scale } : {}), ...(srcAnimations && bins.length === 1 ? { animations: srcAnimations } : {}) });
   });
 
   const occupancyAfter = areaAfter > 0 ? coveredArea / areaAfter : 0;

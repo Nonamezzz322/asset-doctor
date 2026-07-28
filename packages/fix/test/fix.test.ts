@@ -1275,6 +1275,21 @@ describe('emitSpineAtlasText (inverse of the parser)', () => {
     const json = JSON.parse(emitTexturePackerJson(packed)) as { meta: { scale?: string } };
     expect(json.meta.scale).toBe('0.5');
   });
+
+  it('single-source repack carries the animations map (frame names stable); a MERGE (2 sources) drops it', () => {
+    const anim = { walk: ['w0', 'w1'], idle: ['i0'] };
+    const mk = (names: string[]) => names.map((n, k) => ({ name: n, frame: { x: (k % 4) * 24, y: Math.floor(k / 4) * 24, w: 20, h: 20 }, rotated: false, trimmed: false, sourceSize: { w: 20, h: 20 } }));
+    const a: Atlas = { name: 'a', imageRef: 'a.png', size: { w: 128, h: 128 }, animations: anim, sprites: mk(['w0', 'w1', 'i0']), source: { kind: 'texturepacker-hash' } };
+    const one = repackAtlases([a], { allowRotation: false, padding: 0, maxSize: 2048 });
+    expect(one.atlases).toHaveLength(1);
+    expect(one.atlases[0]!.animations).toEqual(anim); // every referenced frame name is still emitted
+    expect((JSON.parse(emitTexturePackerJson(one.atlases[0]!)) as { animations?: Record<string, string[]> }).animations).toEqual(anim);
+    // A merge combines multiple sources ⇒ carrying only atlases[0]'s map would silently lose the rest / risk
+    // name collisions ⇒ animations stays dropped (documented). atlases.length>1 gates it off.
+    const b: Atlas = { name: 'b', imageRef: 'b.png', size: { w: 128, h: 128 }, animations: { run: ['r0'] }, sprites: mk(['r0', 'r1']), source: { kind: 'texturepacker-hash' } };
+    const merged = repackAtlases([a, b], { allowRotation: false, padding: 0, maxSize: 4096 });
+    expect(merged.atlases.every((x) => x.animations === undefined)).toBe(true);
+  });
 });
 
 describe('scaleAtlas', () => {

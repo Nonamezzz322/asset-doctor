@@ -218,11 +218,14 @@ describe('top-level animations round-trip (round29)', () => {
     if (res.ok) expect(res.atlas.animations).toEqual(anims);
   });
 
-  it('a FRESH repackAtlases result has animations === undefined (strip-by-construction)', () => {
-    const src = withAnims(anims); // source atlas DOES carry animations
+  it('a single-source repackAtlases result CARRIES animations (frame-NAME-stable ⇒ refs valid, like resize)', () => {
+    const src = withAnims(anims); // source atlas carries animations
     const result = repackAtlases([src], { allowRotation: false, padding: 0, maxSize: 2048 });
-    expect(result.atlases.length).toBeGreaterThan(0);
-    for (const a of result.atlases) expect(a.animations).toBeUndefined(); // fresh atlas never had it
+    // A single source packing into a single sheet keeps every frame NAME (repositioning + aliasing emit all
+    // names), so the animations map's refs stay valid and it is carried verbatim — the same rule scaleAtlas
+    // follows. (A MERGE or a multi-sheet SPILL still strips it; covered in fix.test.ts.)
+    expect(result.atlases.length).toBe(1);
+    expect(result.atlases[0]!.animations).toEqual(anims);
   });
 
   it('PURE end-to-end parse → emit → reparse deep-equal round-trip (covers the real defect at the seam)', () => {
