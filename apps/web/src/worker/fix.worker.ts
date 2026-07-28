@@ -591,6 +591,9 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
       if (atlas) {
         if (atlas.sprites.some((s) => s.mesh))
           return 'tier skipped: meshed atlas not supported (scaleAtlas drops mesh)';
+        // Premultiplied atlas: scaleAtlas recomposes via canvas 2D, which is not byte-lossless for
+        // premultiplied pixels (same limitation as the repack refusal) ⇒ refuse rather than degrade.
+        if (atlas.pma) return 'tier skipped: premultiplied Spine atlas (recompose is not byte-lossless for premultiplied pixels)';
         if (spineRefs.has(ref)) {
           const info = spineInfoOf(ref);
           if (info && info.pages > 1) return 'tier skipped: multi-page Spine not supported in v1';
@@ -876,6 +879,10 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
         const info = spineInfoOf(ref);
         if (info && info.pages > 1)
           planSkips.push({ assetRef: ref, reason: 'multi-page Spine repack not supported in v1' });
+        else if (atlasByRef.get(ref)?.pma)
+          // pma atlas repack is refused pre-compose (canvas recompose is not byte-lossless for premultiplied
+          // pixels) — mirror the execute skip in the preview so the plan matches the receipt.
+          planSkips.push({ assetRef: ref, reason: 'premultiplied Spine atlas repack not supported (recompose is not byte-lossless for premultiplied pixels)' });
       }
       // Owner-aware dedup would-be-skips (Phase C, fix.worker.ts:1118-1203) — Phase C turns a subset of the
       // owner-aware drop ops into NO-OP keeps for PIXEL-FREE, plan-determinable reasons (drops nothing). They
@@ -2016,6 +2023,14 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
                   ? 'multi-page Spine repack not supported in v1'
                   : 'Spine atlas not found',
             });
+            continue;
+          }
+          // Premultiplied-alpha atlas: a canvas-2D recompose cannot round-trip premultiplied bytes
+          // losslessly (measured Δ up to 8 on low-alpha edges — tools/verify/pma-roundtrip-measure.mjs),
+          // and dropping the pma flag makes a loader read them as straight. Refuse rather than silently
+          // degrade the antialiased edges — the original atlas ships untouched (pma intact).
+          if (atlas.pma) {
+            skipped.push({ assetRef: ref, reason: 'premultiplied Spine atlas repack not supported (recompose is not byte-lossless for premultiplied pixels)' });
             continue;
           }
           // Polygon mode has no mesh slot in the Spine `.atlas` format → rectangle repack, surfaced honestly.

@@ -626,6 +626,14 @@ regionB
     expect(d.filter).toBe('Linear,Linear');
     expect(d.repeat).toBe('none');
   });
+
+  it('captures pma: true (premultiplied page); pma: false / absent stay undefined', () => {
+    const premult = `pm.png\nsize: 64,64\nformat: RGBA8888\nfilter: Linear,Linear\nrepeat: none\npma: true\nrgn\n  rotate: 0\n  xy: 0,0\n  size: 10,10\n  orig: 10,10\n  index: -1\n`;
+    expect(parseSpineAtlasText(premult)[0]!.pma).toBe(true);
+    const straightFalse = premult.replace('pma: true', 'pma: false');
+    expect(parseSpineAtlasText(straightFalse)[0]!.pma).toBeUndefined();
+    expect(parseSpineAtlasText(ATLAS)[0]!.pma).toBeUndefined(); // no pma line at all
+  });
 });
 
 describe('parseFntText — BMFont TEXT', () => {

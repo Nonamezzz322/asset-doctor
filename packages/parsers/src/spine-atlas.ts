@@ -24,6 +24,9 @@ export interface SpinePage {
    *  pixel-art (Nearest) atlas or dropping a tiling wrap mode. Sampler hints only (no pixel interaction). */
   filter?: string;
   repeat?: string;
+  /** `pma: true` — premultiplied-alpha page. Carried so the fix can REFUSE to recompose it (canvas 2D is
+   *  not byte-lossless for premultiplied pixels) and never silently drop the flag. Only set when true. */
+  pma?: boolean;
   sprites: Sprite[];
   /** Regions on THIS page that named an asset but were unusable (a required field — xy/size/orig/bounds —
    *  had a non-finite OR non-positive value, or the region fell outside the page). Per-region recovery: the page keeps its
@@ -94,6 +97,9 @@ function applyPageKey(page: SpinePage, key: string, val: string): void {
   } else if (key === 'repeat') {
     const r = val.trim();
     if (r) page.repeat = r;
+  } else if (key === 'pma') {
+    // Only `true` marks the page premultiplied; `pma: false` / absent stay undefined (⇒ no skip, no emit).
+    if (val.trim() === 'true') page.pma = true;
   }
 }
 
@@ -272,6 +278,7 @@ export function parseSpinePage(
   if (page.scale !== undefined) atlas.scale = page.scale; // P3 #8: a 0.5× page is not a 1× page
   if (page.filter) atlas.filter = page.filter; // pixel-art Nearest must survive a repack re-emit
   if (page.repeat) atlas.repeat = page.repeat;
+  if (page.pma) atlas.pma = true; // premultiplied ⇒ the fix refuses to recompose (canvas not byte-lossless)
   const strippable = strippableMetadataBytes(image.bytes);
   const icc = iccAssetField(image.bytes);
   const imageAsset: ImageAsset = {

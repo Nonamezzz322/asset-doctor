@@ -74,6 +74,8 @@ try {
   await sh('node', ['tools/verify/fix-packloose-run.mjs'], { APP_URL });
   console.log('\ne2e: scenario 10 — atlas-merge compose (aggressive → merged sprites == their source atlas regions)');
   await sh('node', ['tools/verify/fix-merge-run.mjs'], { APP_URL });
+  console.log('\ne2e: scenario 11 — premultiplied Spine atlas repack refusal (pma: true → surfaced skip, flag preserved)');
+  await sh('node', ['tools/verify/fix-pma-run.mjs'], { APP_URL });
   console.log('\ne2e: PASS');
 } catch (e) {
   console.error('\ne2e: FAIL —', e.message);

@@ -1241,6 +1241,14 @@ describe('emitSpineAtlasText (inverse of the parser)', () => {
     const out = emitSpineAtlasText(atlas);
     expect(out).toContain('filter: Linear,Linear');
     expect(out).toContain('repeat: none');
+    expect(out).not.toContain('pma'); // absent ⇒ no pma line ⇒ byte-identical for a straight-alpha atlas
+  });
+
+  it('re-emits pma: true on a verbatim path (never silently dropped) + round-trips', () => {
+    const atlas: Atlas = { name: 'pm', imageRef: 'pm.png', size: { w: 64, h: 64 }, pma: true, sprites: [{ name: 'r', frame: { x: 0, y: 0, w: 10, h: 10 }, rotated: false, trimmed: false, sourceSize: { w: 10, h: 10 } }], source: { kind: 'spine' } };
+    const out = emitSpineAtlasText(atlas);
+    expect(out).toContain('pma: true');
+    expect(parseSpineAtlasText(out)[0]!.pma).toBe(true);
   });
 
   it('repackAtlases carries filter/repeat from the source through to the re-emit', () => {

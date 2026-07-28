@@ -62,6 +62,11 @@ export function emitSpineAtlasText(atlas: Atlas): string {
   // (Nearest) or tiling atlas's sampler settings — dropping them silently forced Linear/none. Absent ⇒
   // today's defaults ⇒ byte-identical for the common Linear/none atlas. Sampler hints only (no pixels).
   const lines: string[] = [atlas.imageRef, `size: ${atlas.size.w},${atlas.size.h}`, `format: ${atlas.format ?? 'RGBA8888'}`, `filter: ${atlas.filter ?? 'Linear,Linear'}`, `repeat: ${atlas.repeat ?? 'none'}`];
+  // Re-emit pma: true when the source page was premultiplied so a verbatim (non-recompose) re-emit never
+  // silently drops it — dropping it makes a loader read premultiplied bytes as straight (too-bright/haloed).
+  // The recompose paths (repack/tier) refuse pma atlases upstream, so they never reach here. Absent ⇒ no
+  // line ⇒ byte-identical for the common straight-alpha atlas.
+  if (atlas.pma) lines.push('pma: true');
   for (const s of [...atlas.sprites].sort((a, b) => a.name.localeCompare(b.name))) {
     // the page-space `size:` is the UN-rotated region extent (parser swaps w/h when rotate=90)
     const w = s.rotated ? s.frame.h : s.frame.w;

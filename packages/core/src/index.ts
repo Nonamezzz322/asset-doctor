@@ -85,6 +85,14 @@ export interface Atlas {
    *  hint — orthogonal to pixel VALUES. emitSpineAtlasText re-emits it (default 'none' when absent) so a
    *  repack no longer silently drops a tiling atlas's wrap mode. Absent ⇒ emit default ⇒ byte-identical. */
   repeat?: string;
+  /** Spine `pma: true` — the page's RGBA is PREMULTIPLIED. Set ONLY when the .atlas declares it (absent /
+   *  `pma: false` ⇒ undefined). Unlike filter/repeat this DOES interact with pixels: a canvas-2D recompose
+   *  (repack/tier) stores premultiplied internally at 8-bit precision and cannot round-trip low-alpha
+   *  premultiplied bytes byte-losslessly (measured: up to Δ8 on alpha≤16 edges, tools/verify/pma-roundtrip-
+   *  measure.mjs). So the fix REFUSES to recompose a pma atlas (surfaced skip) rather than silently degrade
+   *  its antialiased edges — and emitSpineAtlasText re-emits `pma: true` on any verbatim (non-recompose)
+   *  path so it is never silently dropped (dropping it makes a loader read premultiplied bytes as straight). */
+  pma?: boolean;
   scale?: number;
   /** TexturePacker/Pixi multipack linkage: sibling **manifest** (`.json`) filenames Pixi auto-loads
    *  from page-0 (meta.related_multi_packs). Carried VERBATIM from parse and re-emitted by
