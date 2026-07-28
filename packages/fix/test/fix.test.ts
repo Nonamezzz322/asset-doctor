@@ -1258,6 +1258,23 @@ describe('emitSpineAtlasText (inverse of the parser)', () => {
     expect(packed.repeat).toBe('xy');
     expect(emitSpineAtlasText(packed)).toContain('filter: Nearest,Nearest');
   });
+
+  it('re-emits page scale (Spine scaled-variant) + round-trips; absent ⇒ no scale line', () => {
+    const atlas: Atlas = { name: 'h', imageRef: 'h.png', size: { w: 128, h: 128 }, scale: 0.5, sprites: [{ name: 'r', frame: { x: 0, y: 0, w: 10, h: 10 }, rotated: false, trimmed: false, sourceSize: { w: 10, h: 10 } }], source: { kind: 'spine' } };
+    const out = emitSpineAtlasText(atlas);
+    expect(out).toContain('scale: 0.5');
+    expect(parseSpineAtlasText(out)[0]!.scale).toBe(0.5);
+    const noScale: Atlas = { name: 'h', imageRef: 'h.png', size: { w: 128, h: 128 }, sprites: atlas.sprites, source: { kind: 'spine' } };
+    expect(emitSpineAtlasText(noScale)).not.toContain('scale:');
+  });
+
+  it('repackAtlases carries meta.scale from the source through to the TexturePacker re-emit (0.5x variant not flattened to 1x)', () => {
+    const atlas: Atlas = { name: 'a', imageRef: 'a.png', size: { w: 256, h: 256 }, scale: 0.5, sprites: [{ name: 'r', frame: { x: 0, y: 0, w: 40, h: 40 }, rotated: false, trimmed: false, sourceSize: { w: 40, h: 40 } }], source: { kind: 'texturepacker-hash' } };
+    const packed = repackAtlases([atlas], { allowRotation: false, padding: 0, maxSize: 2048 }).atlases[0]!;
+    expect(packed.scale).toBe(0.5);
+    const json = JSON.parse(emitTexturePackerJson(packed)) as { meta: { scale?: string } };
+    expect(json.meta.scale).toBe('0.5');
+  });
 });
 
 describe('scaleAtlas', () => {

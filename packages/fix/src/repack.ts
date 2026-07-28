@@ -321,6 +321,10 @@ export function repackAtlases(
   // safe to propagate verbatim. TexturePacker JSON emit ignores them, so this is a no-op for TP atlases.
   const filter = atlases[0]?.filter;
   const repeat = atlases[0]?.repeat;
+  // meta.scale (resolution factor, e.g. 0.5 for a half-res variant export) carried verbatim: a repack
+  // repositions frames but keeps pixels 1:1, so the resolution multiplier is unchanged. Dropping it made a
+  // loader treat a 0.5x atlas as 1x ⇒ sprites rendered double-size. emitTexturePackerJson re-emits it.
+  const scale = atlases[0]?.scale;
   const atlasesOut: Atlas[] = [];
   const blits: Blit[] = [];
   let vramAfter = 0;
@@ -377,7 +381,7 @@ export function repackAtlases(
       }
     });
     sprites.sort((a, b) => a.name.localeCompare(b.name)); // deterministic, matches the emitted manifest order
-    atlasesOut.push({ name: imageRef, imageRef, size: { w: bin.w, h: bin.h }, sprites, source: { kind: 'texturepacker-hash' }, ...(format ? { format } : {}), ...(filter ? { filter } : {}), ...(repeat ? { repeat } : {}) });
+    atlasesOut.push({ name: imageRef, imageRef, size: { w: bin.w, h: bin.h }, sprites, source: { kind: 'texturepacker-hash' }, ...(format ? { format } : {}), ...(filter ? { filter } : {}), ...(repeat ? { repeat } : {}), ...(scale !== undefined ? { scale } : {}) });
   });
 
   const occupancyAfter = areaAfter > 0 ? coveredAreaPacked / areaAfter : 0;
@@ -476,6 +480,10 @@ export function repackAtlasesPolygon(
   // safe to propagate verbatim. TexturePacker JSON emit ignores them, so this is a no-op for TP atlases.
   const filter = atlases[0]?.filter;
   const repeat = atlases[0]?.repeat;
+  // meta.scale (resolution factor, e.g. 0.5 for a half-res variant export) carried verbatim: a repack
+  // repositions frames but keeps pixels 1:1, so the resolution multiplier is unchanged. Dropping it made a
+  // loader treat a 0.5x atlas as 1x ⇒ sprites rendered double-size. emitTexturePackerJson re-emits it.
+  const scale = atlases[0]?.scale;
   const atlasesOut: Atlas[] = [];
   const blits: Blit[] = [];
   let vramAfter = 0;
@@ -516,7 +524,7 @@ export function repackAtlasesPolygon(
       return out;
     });
     sprites.sort((a, b) => a.name.localeCompare(b.name)); // deterministic, matches the emitted manifest order
-    atlasesOut.push({ name: imageRef, imageRef, size: { w: bin.w, h: bin.h }, sprites, source: { kind: 'texturepacker-hash' }, ...(format ? { format } : {}), ...(filter ? { filter } : {}), ...(repeat ? { repeat } : {}) });
+    atlasesOut.push({ name: imageRef, imageRef, size: { w: bin.w, h: bin.h }, sprites, source: { kind: 'texturepacker-hash' }, ...(format ? { format } : {}), ...(filter ? { filter } : {}), ...(repeat ? { repeat } : {}), ...(scale !== undefined ? { scale } : {}) });
   });
 
   const occupancyAfter = areaAfter > 0 ? coveredArea / areaAfter : 0;
