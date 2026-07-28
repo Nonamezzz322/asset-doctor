@@ -10,6 +10,8 @@
 // --fail-on-new) is a pure predicate over the result; the CLI bin decides the exit code.
 
 import type { AnalysisReport, Finding, Rule, Severity } from '@asset-doctor/core';
+import { fmtBytes } from '@asset-doctor/analysis';
+import { biggestWins, hasWins, type WinRow } from './biggest-wins';
 import { formatValue } from './evaluate';
 import { GLOBAL_METRICS } from './metrics';
 import type { MetricUnit } from './types';
@@ -291,7 +293,7 @@ export function renderDiff(diff: AuditDiff, opts: { color?: boolean } = {}): str
 }
 
 /** PR-comment / job-summary markdown. Separate metric rows (disk & VRAM never combined). */
-export function diffToSummaryMarkdown(diff: AuditDiff, opts: { title?: string } = {}): string {
+export function diffToSummaryMarkdown(diff: AuditDiff, opts: { title?: string; after?: AuditSnapshot } = {}): string {
   const lines: string[] = [];
   const cc = diff.counts;
   lines.push(`### Asset Doctor — diff`);
@@ -317,6 +319,21 @@ export function diffToSummaryMarkdown(diff: AuditDiff, opts: { title?: string } 
     for (const f of diff.added) lines.push(`- ➕ **added** \`${escMd(f.severity)}\` ${escMd(f.title)} — \`${escMd(f.assetRef)}\``);
     for (const f of diff.resolved) lines.push(`- ✅ **resolved** \`${escMd(f.severity)}\` ${escMd(f.title)} — \`${escMd(f.assetRef)}\``);
     for (const ch of diff.changed) lines.push(`- ${ch.worsened ? '⚠️' : '🔽'} **changed** \`${escMd(ch.from)}\`→\`${escMd(ch.to)}\` ${escMd(ch.title)} — \`${escMd(ch.assetRef)}\``);
+  }
+  // Impact-first footer — the AFTER state's biggest remaining opportunities (the SAME ranking every other
+  // surface uses, biggest-wins.ts). TWO separate single-unit lists (disk / VRAM), NEVER summed (invariant 5);
+  // a finding appears only when its measured saving on that axis is > 0; no total. This turns the PR comment
+  // from a pure regression check into a "start here next" guide. Omitted when `after` is absent or carries no
+  // estimate-bearing finding ⇒ byte-identical to the prior summary.
+  if (opts.after) {
+    const w = biggestWins(opts.after);
+    if (hasWins(w)) {
+      const mdList = (rows: WinRow[]): string[] =>
+        rows.map((row) => `- ${fmtBytes(row.bytes)} — \`${escMd(row.assetRef)}\`${row.relatedCount > 0 ? ` (${row.relatedCount} files)` : ''}`);
+      lines.push('', '#### ◆ Biggest remaining wins — start here');
+      if (w.disk.length > 0) lines.push('', '**Reclaim the most disk:**', ...mdList(w.disk));
+      if (w.vram.length > 0) lines.push('', '**Reclaim the most VRAM:**', ...mdList(w.vram));
+    }
   }
   return lines.join('\n');
 }

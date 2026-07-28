@@ -77,8 +77,10 @@ function rankBy(
 
 /** Rank the report's findings into the top-`limit` disk wins and top-`limit` VRAM wins (two independent
  *  single-unit lists). Both empty ⇒ the caller renders nothing (DOM-identical to a report with no
- *  estimate-bearing finding). Default limit 3 keeps it a "start here" nudge, not an accounting table. */
-export function biggestWins(report: AnalysisReport, limit = 3): BiggestWins {
+ *  estimate-bearing finding). Default limit 3 keeps it a "start here" nudge, not an accounting table.
+ *  Reads ONLY `.findings`, so an AuditSnapshot (Pick totals/assets/findings) satisfies it too — the diff
+ *  summary ranks the AFTER state's remaining wins without reconstructing a full report. */
+export function biggestWins(report: Pick<AnalysisReport, 'findings'>, limit = 3): BiggestWins {
   const fs = report.findings ?? [];
   return {
     disk: rankBy(fs, (f) => f.estimate?.diskBytesSaved, limit),

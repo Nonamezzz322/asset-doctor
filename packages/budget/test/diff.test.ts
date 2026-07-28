@@ -241,6 +241,28 @@ describe('diff — serializers', () => {
     expect(md).toContain('added');
     expect(md).toContain('resolved');
   });
+
+  it('diffToSummaryMarkdown footers the biggest REMAINING wins from the after snapshot (impact-first, opt-in via after)', () => {
+    const after = snap({
+      disk: 1_500_000,
+      findings: [
+        finding('b:format', 'crit', { assetRef: 'hero.png', estimate: { diskBytesSaved: 900_000 } }),
+        finding('c:oversize', 'warn', { assetRef: 'bg.png', estimate: { vramBytesSaved: 4_000_000 } }),
+      ],
+    });
+    const dd = diffAudits(snap({ disk: 1_000_000 }), after);
+    const md = diffToSummaryMarkdown(dd, { title: 'base → head', after });
+    expect(md).toContain('Biggest remaining wins');
+    expect(md).toContain('**Reclaim the most disk:**');
+    expect(md).toContain('hero.png');
+    expect(md).toContain('**Reclaim the most VRAM:**'); // SEPARATE list — disk and VRAM never summed (inv 5)
+    expect(md).toContain('bg.png');
+    // Absent `after` ⇒ NO wins footer (byte-identical to the prior summary contract).
+    expect(diffToSummaryMarkdown(dd, { title: 'base → head' })).not.toContain('Biggest remaining wins');
+    // `after` with no estimate-bearing finding ⇒ omitted too (no fabricated 0-win).
+    const plain = snap({ findings: [finding('x:occupancy', 'warn')] });
+    expect(diffToSummaryMarkdown(diffAudits(snap({}), plain), { after: plain })).not.toContain('Biggest remaining wins');
+  });
 });
 
 describe('diff — identical snapshots', () => {

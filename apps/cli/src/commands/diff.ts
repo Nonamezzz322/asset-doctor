@@ -69,7 +69,9 @@ export async function diffCmd(
 
   const json = JSON.stringify(diffToJSON(diff), null, 2);
   if (flags.out) writeFileAbs(flags.out, json, io);
-  if (flags.summary) appendFileAbs(flags.summary, diffToSummaryMarkdown(diff, { title: `${beforeArg} → ${afterArg}` }), io);
+  // Pass the AFTER snapshot so the summary can footer the biggest REMAINING wins (impact-first "start here
+  // next" in the PR comment) — reuses the shared biggestWins ranking, zero drift with the other surfaces.
+  if (flags.summary) appendFileAbs(flags.summary, diffToSummaryMarkdown(diff, { title: `${beforeArg} → ${afterArg}`, after }), io);
   if (flags.json) io.out(json);
   else if (!flags.quiet) io.out(renderDiff(diff, { color: io.color }));
 
