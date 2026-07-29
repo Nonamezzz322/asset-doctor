@@ -171,8 +171,16 @@ export function shouldAtlasFinding(assets: Asset[], cfg: ThresholdConfig): Findi
   };
 }
 
+// Only TexturePacker/Pixi atlases can be MERGED: the Pro fix composes their sprites into ONE TP-JSON sheet.
+// A Spine atlas (its skeleton references frames by name in a `.atlas`) and a BMFont glyph page (its `.fnt`
+// references glyphs) cannot go into a TP-JSON merge — the fix refuses/passes them through — so recommending
+// their merge would be a diagnosis the fix never honors (a free-diagnosis user never sees the fix's skip).
+const MERGEABLE_ATLAS_KINDS: ReadonlySet<string> = new Set(['texturepacker-hash', 'texturepacker-array', 'pixi']);
+
 export function atlasMergeFinding(atlases: Atlas[], cfg: ThresholdConfig): Finding | null {
-  const underAll = atlases.filter((a) => occupancyValue(a) < cfg.atlasMerge.occupancyBelow);
+  const underAll = atlases.filter(
+    (a) => MERGEABLE_ATLAS_KINDS.has(a.source.kind) && occupancyValue(a) < cfg.atlasMerge.occupancyBelow,
+  );
   // Scale-aware: only atlases sharing the SAME meta.scale can fuse onto one page (one page carries one
   // resolution factor) — mirror the Pro fix's mixed-scale merge REFUSAL so the diagnosis never recommends a
   // merge the fix won't perform (a 0.5x variant + a 1x would render the other at the wrong size). Consider

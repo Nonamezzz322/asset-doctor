@@ -3080,6 +3080,24 @@ describe('perRef (P2 per-sprite drill-down) — the WORST-FIRST measured breakdo
     expect(atlasMergeFinding([mk('x.png', 8), mk('y.png', 2, 0.5)], DEFAULT_THRESHOLDS)).toBeNull();
   });
 
+  it('atlas-merge only counts MERGEABLE atlas kinds — Spine/BMFont pages are excluded (the fix cannot merge them)', () => {
+    const mk = (name: string, frames: number, kind: Atlas['source']['kind']): Atlas => ({
+      name, imageRef: name, size: { w: 512, h: 512 }, source: { kind },
+      sprites: Array.from({ length: frames }, (_, i) => ({ name: `${name}-${i}`, frame: { x: i * 64, y: 0, w: 64, h: 64 }, rotated: false, trimmed: false, sourceSize: { w: 64, h: 64 } })),
+    });
+    // Two under-filled TP atlases + one under-filled Spine page + one under-filled BMFont page: only the two
+    // TP atlases can be composed into one TP-JSON sheet, so the recommendation lists ONLY them (the fix would
+    // refuse the Spine sheet and pass the font through — recommending their merge would be a phantom promise).
+    const f = atlasMergeFinding(
+      [mk('a.png', 8, 'texturepacker-hash'), mk('b.png', 2, 'pixi'), mk('char.png', 2, 'spine'), mk('font.png', 2, 'bmfont')],
+      DEFAULT_THRESHOLDS,
+    )!;
+    expect(f).not.toBeNull();
+    expect(f.relatedRefs).toEqual(['a.png', 'b.png']); // spine + bmfont excluded
+    // One TP + two Spine under-filled ⇒ only ONE mergeable ⇒ below minAtlases ⇒ no merge recommended.
+    expect(atlasMergeFinding([mk('only.png', 8, 'pixi'), mk('c1.png', 2, 'spine'), mk('c2.png', 2, 'spine')], DEFAULT_THRESHOLDS)).toBeNull();
+  });
+
   it('the two aggregates: perRef = per-image MEASURED saved bytes DESC; totals untouched by construction', async () => {
     const mkImg = (name: string, byteSize: number): Asset => ({
       kind: 'image', image: { name, imageRef: name, size: { w: 256, h: 256 }, mime: 'image/png', byteSize },
