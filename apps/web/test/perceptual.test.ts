@@ -42,6 +42,20 @@ describe('blockUpscaleDepth — provable nearest-2× upscale (a proof, no thresh
     expect(blockUpscaleDepth(rgba(1, 1, () => [0, 0, 0, 255]), 1, 1)).toBe(0);
     expect(blockUpscaleDepth(new Uint8ClampedArray(4), 8, 8)).toBe(0); // buffer shorter than w·h·4
   });
+  it('the uint32 fast path and the number[] byte fallback agree (a plain Array skips the typed-view path)', () => {
+    // The typed getImageData buffer takes the one-uint32-per-pixel path; a plain number[] falls back to the
+    // per-byte loop. Both must return the identical depth on the identical pixels — verify on an upscale, a
+    // deeper upscale, and a non-upscale.
+    const cases: Array<{ buf: Uint8ClampedArray; w: number; h: number; want: number }> = [
+      { buf: nearest2x(8, 8, (x, y) => [x * 30, y * 30, (x + y) * 10, 255]), w: 8, h: 8, want: 1 },
+      { buf: rgba(16, 16, (x, y) => [(x >> 2) * 40, (y >> 2) * 40, 0, 255]), w: 16, h: 16, want: 2 },
+      { buf: rgba(8, 8, (x, y) => [x * 8, y * 8, 0, 255]), w: 8, h: 8, want: 0 },
+    ];
+    for (const { buf, w, h, want } of cases) {
+      expect(blockUpscaleDepth(buf, w, h)).toBe(want); // typed Uint8ClampedArray ⇒ uint32 fast path
+      expect(blockUpscaleDepth(Array.from(buf), w, h)).toBe(want); // number[] ⇒ byte fallback agrees
+    }
+  });
   it('a solid image descends fully (documents why analyze de-overlaps with solid-fill)', () => {
     expect(blockUpscaleDepth(rgba(8, 8, () => [100, 100, 100, 255]), 8, 8)).toBe(3); // 8→4→2→1
   });

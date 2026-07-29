@@ -202,31 +202,57 @@ export function isSolidFullRes(rgba: Uint8ClampedArray | Uint8Array | number[], 
  *  Cheap: the first (full-resolution) pass short-circuits the instant it sees a non-constant block, so a
  *  genuinely detailed image bails at block (0,0). Only a real upscale pays the O(4/3·N) full descent.
  *  Pure integer read, deterministic, resampler-independent (the full-res draw is 1:1). */
+/** A whole RGBA pixel is one uint32, so a typed 4-aligned buffer compares/copies a pixel in ONE op instead
+ *  of four byte accesses. Equality is byte-order-independent (all 4 bytes equal ⟺ uint32 equal), so this is
+ *  exact on any endianness. Returns null for a plain number[] or an unaligned sub-view ⇒ the byte fallback. */
+function pixelU32(a: Uint8ClampedArray | Uint8Array | number[]): Uint32Array | null {
+  if (Array.isArray(a)) return null;
+  const ta = a as Uint8Array | Uint8ClampedArray;
+  if ((ta.byteOffset & 3) !== 0 || (ta.byteLength & 3) !== 0) return null;
+  return new Uint32Array(ta.buffer, ta.byteOffset, ta.byteLength >> 2);
+}
+
 export function blockUpscaleDepth(rgba: Uint8ClampedArray | Uint8Array | number[], w: number, h: number): number {
   if (!Number.isInteger(w) || !Number.isInteger(h) || w < 2 || h < 2) return 0;
   if (rgba.length < w * h * 4) return 0; // not enough data — never claim on a short buffer
   // Level 0 tests the source buffer directly (no copy); deeper levels test a halved copy built from the
   // proven-constant blocks (one representative pixel per block). Copy only happens once a level PROVES.
   let cur: Uint8ClampedArray | Uint8Array | number[] = rgba;
+  let curU32 = pixelU32(rgba); // uint32 fast path (the real getImageData buffer); null ⇒ byte fallback
   let cw = w;
   let ch = h;
   let depth = 0;
   while (cw % 2 === 0 && ch % 2 === 0 && cw >= 2 && ch >= 2) {
     let allConst = true;
-    for (let y = 0; y < ch && allConst; y += 2) {
-      for (let x = 0; x < cw; x += 2) {
-        const i00 = (y * cw + x) * 4;
-        const i01 = (y * cw + x + 1) * 4;
-        const i10 = ((y + 1) * cw + x) * 4;
-        const i11 = ((y + 1) * cw + x + 1) * 4;
-        for (let c = 0; c < 4; c++) {
-          const v = cur[i00 + c];
-          if (cur[i01 + c] !== v || cur[i10 + c] !== v || cur[i11 + c] !== v) {
+    if (curU32) {
+      // One uint32 compare per pixel: a 2×2 block is constant iff its 4 pixels are byte-identical.
+      for (let y = 0; y < ch && allConst; y += 2) {
+        const r0 = y * cw;
+        const r1 = r0 + cw;
+        for (let x = 0; x < cw; x += 2) {
+          const v = curU32[r0 + x];
+          if (curU32[r0 + x + 1] !== v || curU32[r1 + x] !== v || curU32[r1 + x + 1] !== v) {
             allConst = false;
             break;
           }
         }
-        if (!allConst) break;
+      }
+    } else {
+      for (let y = 0; y < ch && allConst; y += 2) {
+        for (let x = 0; x < cw; x += 2) {
+          const i00 = (y * cw + x) * 4;
+          const i01 = (y * cw + x + 1) * 4;
+          const i10 = ((y + 1) * cw + x) * 4;
+          const i11 = ((y + 1) * cw + x + 1) * 4;
+          for (let c = 0; c < 4; c++) {
+            const v = cur[i00 + c];
+            if (cur[i01 + c] !== v || cur[i10 + c] !== v || cur[i11 + c] !== v) {
+              allConst = false;
+              break;
+            }
+          }
+          if (!allConst) break;
+        }
       }
     }
     if (!allConst) break;
@@ -234,17 +260,27 @@ export function blockUpscaleDepth(rgba: Uint8ClampedArray | Uint8Array | number[
     const nw = cw >> 1;
     const nh = ch >> 1;
     const next = new Uint8ClampedArray(nw * nh * 4);
-    for (let y = 0; y < nh; y++) {
-      for (let x = 0; x < nw; x++) {
-        const src = (2 * y * cw + 2 * x) * 4;
-        const dst = (y * nw + x) * 4;
-        next[dst] = cur[src] ?? 0;
-        next[dst + 1] = cur[src + 1] ?? 0;
-        next[dst + 2] = cur[src + 2] ?? 0;
-        next[dst + 3] = cur[src + 3] ?? 0;
+    const nextU32 = new Uint32Array(next.buffer);
+    if (curU32) {
+      for (let y = 0; y < nh; y++) {
+        const rowSrc = 2 * y * cw;
+        const rowDst = y * nw;
+        for (let x = 0; x < nw; x++) nextU32[rowDst + x] = curU32[rowSrc + 2 * x] ?? 0;
+      }
+    } else {
+      for (let y = 0; y < nh; y++) {
+        for (let x = 0; x < nw; x++) {
+          const src = (2 * y * cw + 2 * x) * 4;
+          const dst = (y * nw + x) * 4;
+          next[dst] = cur[src] ?? 0;
+          next[dst + 1] = cur[src + 1] ?? 0;
+          next[dst + 2] = cur[src + 2] ?? 0;
+          next[dst + 3] = cur[src + 3] ?? 0;
+        }
       }
     }
     cur = next;
+    curU32 = nextU32;
     cw = nw;
     ch = nh;
     depth++;
