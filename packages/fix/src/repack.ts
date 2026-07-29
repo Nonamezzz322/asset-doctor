@@ -73,6 +73,15 @@ export function scaleAtlas(atlas: Atlas, scale: number): Atlas {
   return { ...atlas, size: { w: W, h: H }, sprites };
 }
 
+/** True when every atlas shares the SAME `meta.scale` (all-undefined = all 1x = the common case ⇒ true).
+ *  A MERGE fuses multiple sheets onto ONE page with ONE meta.scale; merging atlases of DIFFERENT scale would
+ *  put mixed-resolution art on that page and render the non-first scales at the wrong size. The worker calls
+ *  this to REFUSE such a merge (honest skip) rather than silently pick the first atlas's scale. Empty/single
+ *  ⇒ true (nothing to conflict). */
+export function atlasesShareScale(atlases: Pick<Atlas, 'scale'>[]): boolean {
+  return atlases.every((a) => a.scale === atlases[0]?.scale);
+}
+
 /** The resolved trim for ONE sprite: the inset sub-region of its SOURCE frame to blit (atlas px), the tight
  *  packed size, the emitted `sourceSize` (the sprite's ORIGINAL full size) + `spriteSourceSize` (TP top-left
  *  inset OR Spine bottom-left offset per `trimAsSpineOffset`), and the MEASURED reclaimed px (frame − bbox).

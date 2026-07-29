@@ -58,6 +58,7 @@ import {
   repackAtlases,
   repackAtlasesPolygon,
   scaleAtlas,
+  atlasesShareScale,
   // Frame-redundancy aliasing (round19) — PURE byte-identical-frame clustering (mirrors the detector's
   // distinct-rect logic). The worker pre-hashes qualifying merged atlas pages, builds these per-atlas alias
   // maps, and threads them into repackAtlases so duplicate frames share ONE packed region (one Blit per
@@ -2171,6 +2172,14 @@ async function runFix(files: FixInputFile[], opts: FixOptions, mode: FixMode): P
           continue;
         }
         const merge = group.length > 1; // multi-atlas op = the non-drop-in "merge atlases" mode
+        // Mixed-resolution merge guard: atlas-merge groups purely by occupancy (folder.ts), so it can pick
+        // sheets exported at DIFFERENT meta.scale (a 0.5x variant + a 1x). Fusing them onto ONE page (one
+        // meta.scale) would render the other scales' sprites at the wrong size — refuse honestly rather than
+        // silently apply the first atlas's scale. All-1x (scale undefined) shares scale ⇒ common case unaffected.
+        if (merge && !atlasesShareScale(group)) {
+          for (const rf of refs) skipped.push({ assetRef: rf, reason: 'merge skipped: atlases have different meta.scale (mixed resolution)' });
+          continue;
+        }
         // round19 (#1): pin every source atlas this op composes from — a merge re-reads all N group sources
         // across many composePageEncode pages, and polygon extracts every sprite of every group atlas, so
         // without a pin a large group could evict a source it still needs THIS op (a re-decode storm, never a

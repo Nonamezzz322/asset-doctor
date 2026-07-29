@@ -8,7 +8,7 @@ export type { PackItem, Placement, PackBin, PackOptions } from './pack';
 // symmetric packing gutter (pack.ts OPTION A) to kill bilinear/mipmap seams. Geometry only, no canvas.
 export { effectiveExtrude, canExtrude, extrudePlan } from './extrude';
 export type { ExtrudeRect } from './extrude';
-export { repackAtlases, repackAtlasesPolygon, polygonWins, scaleAtlas } from './repack';
+export { repackAtlases, repackAtlasesPolygon, polygonWins, scaleAtlas, atlasesShareScale } from './repack';
 export type { RepackOptions, PolygonRepackOptions } from './repack';
 // Frame-redundancy aliasing (round19) — PURE byte-identical-frame clustering that mirrors the detector's
 // distinct-rect logic. The worker feeds the result into repackAtlases so duplicate frames share ONE packed

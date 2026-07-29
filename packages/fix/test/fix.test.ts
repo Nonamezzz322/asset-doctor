@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import type { AnalysisReport, Atlas, AtlasFrameTrims, Blit, DedupGroup, FixOp, PackGroup, TrimRect } from '@asset-doctor/core';
 import { parseAtlas, parseAtlasManifest, parseSpineAtlasText, parseSpinePage } from '@asset-doctor/parsers';
 import { analyze, DEFAULT_THRESHOLDS } from '@asset-doctor/analysis';
-import { ACC_CELL, alphaBBox, buildAtlasAliasMap, buildMergeAliasMap, emitSpineAtlasText, emitTexturePackerJson, pack, planFix, repackAtlases, repackAtlasesPolygon, scaleAtlas, type AtlasAliasMap, type MaskItem, type Placement, type RawMesh } from '../src/index';
+import { ACC_CELL, alphaBBox, atlasesShareScale, buildAtlasAliasMap, buildMergeAliasMap, emitSpineAtlasText, emitTexturePackerJson, pack, planFix, repackAtlases, repackAtlasesPolygon, scaleAtlas, type AtlasAliasMap, type MaskItem, type Placement, type RawMesh } from '../src/index';
 
 const fixDir = fileURLToPath(new URL('../../../fixtures/sample-projects/tp-hash-symbols/', import.meta.url));
 function loadAtlas(): Atlas {
@@ -1311,6 +1311,20 @@ describe('scaleAtlas', () => {
     const f = s.sprites[0]!.frame;
     expect(f.x + f.w).toBeLessThanOrEqual(s.size.w);
     expect(f.y + f.h).toBeLessThanOrEqual(s.size.h);
+  });
+});
+
+describe('atlasesShareScale (the worker refuses a mixed-resolution merge)', () => {
+  it('all-1x (scale undefined) share scale ⇒ the common merge is unaffected', () => {
+    expect(atlasesShareScale([{}, {}, {}])).toBe(true);
+    expect(atlasesShareScale([{ scale: 0.5 }, { scale: 0.5 }])).toBe(true);
+    expect(atlasesShareScale([])).toBe(true);
+    expect(atlasesShareScale([{ scale: 0.5 }])).toBe(true);
+  });
+  it('a 0.5x variant mixed with a 1x (or a different fraction) does NOT share scale ⇒ the merge is refused', () => {
+    expect(atlasesShareScale([{ scale: 0.5 }, {}])).toBe(false); // 0.5x + 1x
+    expect(atlasesShareScale([{}, { scale: 0.5 }])).toBe(false); // order-independent
+    expect(atlasesShareScale([{ scale: 0.5 }, { scale: 0.25 }])).toBe(false); // two different fractions
   });
 });
 
