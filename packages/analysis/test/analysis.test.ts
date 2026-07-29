@@ -3064,6 +3064,22 @@ describe('perRef (P2 per-sprite drill-down) — the WORST-FIRST measured breakdo
     expect(f.perRef![0]!.value).toBeCloseTo(occupancyValue(mkAtlas('sparse.png', 2)), 10);
   });
 
+  it('atlas-merge is scale-aware: only the largest same-meta.scale group is recommended (mirrors the fix refusal)', () => {
+    const mk = (name: string, frames: number, scale?: number): Atlas => ({
+      name, imageRef: name, size: { w: 512, h: 512 }, source: { kind: 'pixi' },
+      ...(scale !== undefined ? { scale } : {}),
+      sprites: Array.from({ length: frames }, (_, i) => ({ name: `${name}-${i}`, frame: { x: i * 64, y: 0, w: 64, h: 64 }, rotated: false, trimmed: false, sourceSize: { w: 64, h: 64 } })),
+    });
+    // Two 1x under-filled + one 0.5x under-filled: the 0.5x sheet can't fuse with the 1x pair (mixed
+    // resolution → one page can't carry both), so the finding recommends ONLY the two 1x atlases — matching
+    // what the Pro fix would actually merge (it refuses the mixed-scale group).
+    const f = atlasMergeFinding([mk('a.png', 8), mk('b.png', 2), mk('half.png', 2, 0.5)], DEFAULT_THRESHOLDS)!;
+    expect(f).not.toBeNull();
+    expect(f.relatedRefs).toEqual(['a.png', 'b.png']); // the 0.5x sheet excluded (not mergeable with 1x)
+    // No same-scale group reaches minAtlases (one 1x + one 0.5x, each alone) ⇒ no merge recommended.
+    expect(atlasMergeFinding([mk('x.png', 8), mk('y.png', 2, 0.5)], DEFAULT_THRESHOLDS)).toBeNull();
+  });
+
   it('the two aggregates: perRef = per-image MEASURED saved bytes DESC; totals untouched by construction', async () => {
     const mkImg = (name: string, byteSize: number): Asset => ({
       kind: 'image', image: { name, imageRef: name, size: { w: 256, h: 256 }, mime: 'image/png', byteSize },

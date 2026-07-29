@@ -172,7 +172,19 @@ export function shouldAtlasFinding(assets: Asset[], cfg: ThresholdConfig): Findi
 }
 
 export function atlasMergeFinding(atlases: Atlas[], cfg: ThresholdConfig): Finding | null {
-  const under = atlases.filter((a) => occupancyValue(a) < cfg.atlasMerge.occupancyBelow);
+  const underAll = atlases.filter((a) => occupancyValue(a) < cfg.atlasMerge.occupancyBelow);
+  // Scale-aware: only atlases sharing the SAME meta.scale can fuse onto one page (one page carries one
+  // resolution factor) — mirror the Pro fix's mixed-scale merge REFUSAL so the diagnosis never recommends a
+  // merge the fix won't perform (a 0.5x variant + a 1x would render the other at the wrong size). Consider
+  // the LARGEST same-scale group of the under-filled set. The common all-1x case (scale undefined) is ONE
+  // group ⇒ `under` === `underAll` ⇒ byte-identical. Ties keep the first (stable atlas order).
+  const byScale = new Map<number | undefined, Atlas[]>();
+  for (const a of underAll) {
+    const g = byScale.get(a.scale);
+    if (g) g.push(a);
+    else byScale.set(a.scale, [a]);
+  }
+  const under = [...byScale.values()].reduce((best, g) => (g.length > best.length ? g : best), [] as Atlas[]);
   if (under.length < cfg.atlasMerge.minAtlases) return null;
   const usedArea = under.reduce(
     (s, a) => s + a.sprites.reduce((t, sp) => t + sp.frame.w * sp.frame.h, 0),
