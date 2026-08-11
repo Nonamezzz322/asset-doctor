@@ -169,20 +169,26 @@ export function correlate(stat: AnalysisReport, rt: RuntimeReport): CorrelationR
     });
   }
 
-  // R3 — upload hitches
+  // R3 — upload hitches. HONESTY: cite the STATIC side only when a finding backs it (dimensions-oversize).
+  // Uploads-during-gameplay is a runtime signal on its own — mid-game uploads can be SMALL textures loaded
+  // late, so "large textures in the build" would assert a size fact nothing measured. With no oversize
+  // finding the static evidence is "—" (a runtime-only observation, exactly as R4/R5 do), never fabricated.
   const uploadHitchMs = rt.hitches.filter((h) => h.cause === 'texture upload').reduce((s, h) => s + h.ms, 0);
+  const oversize = find('dimensions-oversize');
   if (rt.uploadsDuringGameplay > 0 || uploadHitchMs > 0) {
     out.push({
       id: 'corr:upload-hitch',
       rule: 'upload-hitch',
       severity: 'warn',
       title: `${rt.uploadsDuringGameplay} texture uploads during gameplay`,
-      staticEvidence: find('dimensions-oversize') ? `the build has oversized textures` : `large textures in the build`,
+      staticEvidence: oversize ? `the build has oversized textures` : `—`,
       runtimeEvidence: `${rt.uploadsDuringGameplay} uploads mid-game${uploadHitchMs ? `, ~${uploadHitchMs}ms of hitches` : ''}`,
       diagnosis: `Uploading textures to the GPU during play stalls the frame.`,
       fix: 'Pre-upload these textures on the loading screen (GPU pre-warm).',
       ...(uploadHitchMs ? { estimate: { hitchMsSaved: uploadHitchMs } } : {}),
-      params: { uploads: rt.uploadsDuringGameplay, hitchMs: uploadHitchMs, staticVariant: find('dimensions-oversize') ? 'oversize' : 'large' },
+      // staticVariant omitted when there is no oversize finding ⇒ renderCorrelated falls back to the baked
+      // "—" (no `static_none` template needed); only the evidence-backed 'oversize' branch is localized.
+      params: { uploads: rt.uploadsDuringGameplay, hitchMs: uploadHitchMs, ...(oversize ? { staticVariant: 'oversize' } : {}) },
     });
   }
 

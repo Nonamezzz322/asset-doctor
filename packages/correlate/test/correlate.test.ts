@@ -79,6 +79,19 @@ describe('correlate — static × runtime', () => {
     expect(correlate(stat({}), r).findings.find((x) => x.rule === 'upload-hitch')?.estimate?.hitchMsSaved).toBe(40);
   });
 
+  it('R3 static evidence is honest: "—" with no size finding (never fabricates "large textures"), cites oversize when present', () => {
+    const r = rt({ uploadsDuringGameplay: 6, hitches: [{ frame: 80, ms: 40, cause: 'texture upload' }] });
+    // No dimensions-oversize finding ⇒ the static side is a runtime-only "—" (like R4/R5), NOT an
+    // unmeasured "large textures in the build" claim.
+    const bare = correlate(stat({}), r).findings.find((x) => x.rule === 'upload-hitch')!;
+    expect(bare.staticEvidence).toBe('—');
+    expect(bare.params?.staticVariant).toBeUndefined();
+    // With a real oversize finding the correlation cites it (evidence-backed).
+    const withSize = correlate(stat({ findings: [finding('dimensions-oversize')] }), r).findings.find((x) => x.rule === 'upload-hitch')!;
+    expect(withSize.staticEvidence).toMatch(/oversized/);
+    expect(withSize.params?.staticVariant).toBe('oversize');
+  });
+
   it('R4 shader hitch', () => {
     const r = rt({ shaderCompilesDuringGameplay: 4, hitches: [{ frame: 90, ms: 25, cause: 'shader compile' }] });
     expect(correlate(stat({}), r).findings.some((x) => x.rule === 'shader-hitch')).toBe(true);
